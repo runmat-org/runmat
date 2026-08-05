@@ -777,6 +777,47 @@ fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
 }
 
 #[test]
+fn test_number_theory_and_remainder_real_domain_match_documented_forms() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = gcd(int16([-12 18]), 6); out",
+        )
+        .expect("gcd integer array and scalar double execute");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_builtins::Value::Tensor(values)) = outcome.value else {
+            panic!("expected gcd tensor")
+        };
+        assert_eq!(
+            values.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::I16(vec![6, 6]))
+        );
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "[g,u,v] = gcd(30,56); out = 30*u + 56*v - g; out",
+        )
+        .expect("extended gcd outputs execute");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        assert_eq!(outcome.value, Some(runmat_builtins::Value::Num(0.0)));
+
+        let outcome =
+            runmat_core::execute_text_request_for_testing(&mut engine, "out = lcm(-6, 3);")
+                .expect("lcm domain rejection is returned in the execution outcome");
+        assert!(outcome.error.is_some());
+
+        for source in ["out = mod(complex(2), 1);", "out = rem(2, complex(1));"] {
+            let outcome = runmat_core::execute_text_request_for_testing(&mut engine, source)
+                .expect("real-domain rejection is returned in the execution outcome");
+            assert!(outcome.error.is_some());
+        }
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();

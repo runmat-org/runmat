@@ -88,14 +88,14 @@ const REM_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Dividend input (numeric/logical/char/complex).",
+        description: "Real dividend input (numeric/logical/char).",
     },
     BuiltinParamDescriptor {
         name: "B",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Divisor input (numeric/logical/char/complex).",
+        description: "Real divisor input (numeric/logical/char).",
     },
 ];
 const REM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -106,7 +106,7 @@ const REM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
 const REM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REM.INVALID_INPUT",
     identifier: Some("RunMat:rem:InvalidInput"),
-    when: "Inputs cannot be interpreted as numeric, logical, char, or complex operands.",
+    when: "Inputs are complex or cannot be interpreted as real numeric, logical, or char operands.",
     message: "rem: invalid input",
 };
 const REM_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -154,7 +154,7 @@ fn rem_error_with_message(
 #[runtime_builtin(
     name = "rem",
     category = "math/rounding",
-    summary = "MATLAB-compatible remainder a - b .* fix(a./b) with support for complex values and broadcasting.",
+    summary = "MATLAB-compatible real remainder a - b .* fix(a./b) with broadcasting.",
     keywords = "rem,remainder,truncate,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),
@@ -162,6 +162,14 @@ fn rem_error_with_message(
     builtin_path = "crate::builtins::math::rounding::rem"
 )]
 async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if matches!(&lhs, Value::Complex(_, _) | Value::ComplexTensor(_))
+        || matches!(&rhs, Value::Complex(_, _) | Value::ComplexTensor(_))
+    {
+        return Err(rem_error_with_detail(
+            &REM_ERROR_INVALID_INPUT,
+            "inputs must be real",
+        ));
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&lhs, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME)
@@ -650,18 +658,11 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn rem_complex_support() {
+    fn rem_rejects_complex_operands() {
         let lhs = ComplexTensor::new(vec![(3.0, 4.0), (-2.0, 5.0)], vec![1, 2]).unwrap();
         let rhs = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).unwrap();
-        let result =
-            rem_builtin(Value::ComplexTensor(lhs), Value::ComplexTensor(rhs)).expect("complex rem");
-        match result {
-            Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.materialize_f64(), vec![(0.0, 0.0), (0.0, 1.0)]);
-            }
-            other => panic!("expected complex tensor, got {other:?}"),
-        }
+        assert!(rem_builtin(Value::ComplexTensor(lhs), Value::ComplexTensor(rhs)).is_err());
+        assert!(rem_builtin(Value::Complex(2.0, 0.0), Value::Num(1.0)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

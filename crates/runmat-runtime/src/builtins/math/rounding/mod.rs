@@ -96,14 +96,14 @@ const MOD_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Dividend input (numeric/logical/char/complex).",
+        description: "Real dividend input (numeric/logical/char).",
     },
     BuiltinParamDescriptor {
         name: "B",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Divisor input (numeric/logical/char/complex).",
+        description: "Real divisor input (numeric/logical/char).",
     },
 ];
 const MOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -114,7 +114,7 @@ const MOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
 const MOD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MOD.INVALID_INPUT",
     identifier: Some("RunMat:mod:InvalidInput"),
-    when: "Inputs cannot be interpreted as numeric, logical, char, or complex operands.",
+    when: "Inputs are complex or cannot be interpreted as real numeric, logical, or char operands.",
     message: "mod: invalid input",
 };
 const MOD_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -162,7 +162,7 @@ fn mod_error_with_message(
 #[runtime_builtin(
     name = "mod",
     category = "math/rounding",
-    summary = "MATLAB-compatible modulus a - b .* floor(a./b) with support for complex values and broadcasting.",
+    summary = "MATLAB-compatible real modulus a - b .* floor(a./b) with broadcasting.",
     keywords = "mod,modulus,remainder,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),
@@ -170,6 +170,14 @@ fn mod_error_with_message(
     builtin_path = "crate::builtins::math::rounding"
 )]
 async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if matches!(&lhs, Value::Complex(_, _) | Value::ComplexTensor(_))
+        || matches!(&rhs, Value::Complex(_, _) | Value::ComplexTensor(_))
+    {
+        return Err(mod_error_with_detail(
+            &MOD_ERROR_INVALID_INPUT,
+            "inputs must be real",
+        ));
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&lhs, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME)
@@ -647,23 +655,12 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn mod_complex_operands() {
+    fn mod_rejects_complex_operands() {
         let complex =
             ComplexTensor::new(vec![(3.0, 4.0), (-2.0, 5.0)], vec![1, 2]).expect("complex tensor");
         let divisor = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).expect("divisor");
-        let result = mod_builtin(Value::ComplexTensor(complex), Value::ComplexTensor(divisor))
-            .expect("complex mod");
-        match result {
-            Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
-                let expected = [(0.0, 0.0), (0.0, 1.0)];
-                for ((re, im), (er, ei)) in out.materialize_f64().iter().zip(expected.iter()) {
-                    assert!((re - er).abs() < 1e-12);
-                    assert!((im - ei).abs() < 1e-12);
-                }
-            }
-            other => panic!("expected complex tensor result, got {other:?}"),
-        }
+        assert!(mod_builtin(Value::ComplexTensor(complex), Value::ComplexTensor(divisor)).is_err());
+        assert!(mod_builtin(Value::Complex(2.0, 0.0), Value::Num(1.0)).is_err());
     }
 
     #[test]

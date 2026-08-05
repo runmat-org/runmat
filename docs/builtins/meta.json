@@ -39695,6 +39695,109 @@
       ]
     },
     {
+      "name": "gcd",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "G = gcd(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real integer-valued scalar, vector, or array."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real integer-valued scalar, vector, or array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "G",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Greatest common divisors of A and B."
+            }
+          ]
+        },
+        {
+          "label": "[G, U, V] = gcd(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real integer-valued scalar, vector, or array."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real integer-valued scalar, vector, or array."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "G",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Greatest common divisors of A and B."
+            },
+            {
+              "name": "U",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "First Bézout coefficient satisfying A.*U + B.*V = G."
+            },
+            {
+              "name": "V",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second Bézout coefficient satisfying A.*U + B.*V = G."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GCD.INVALID_INPUT",
+          "identifier": "RunMat:gcd:InvalidInput",
+          "when": "Inputs are not real integer-valued numeric values, or integer class mixing is unsupported.",
+          "message": "gcd: invalid input"
+        },
+        {
+          "code": "RM.GCD.SIZE_MISMATCH",
+          "identifier": "RunMat:gcd:SizeMismatch",
+          "when": "Inputs are neither the same size nor scalar-expandable.",
+          "message": "gcd: input sizes are not compatible"
+        },
+        {
+          "code": "RM.GCD.OVERFLOW",
+          "identifier": "RunMat:gcd:Overflow",
+          "when": "The greatest common divisor or a requested Bézout coefficient cannot be represented in the output numeric class.",
+          "message": "gcd: output overflows numeric class"
+        },
+        {
+          "code": "RM.GCD.INTERNAL",
+          "identifier": "RunMat:gcd:Internal",
+          "when": "GPU gather or tensor construction fails.",
+          "message": "gcd: internal error"
+        }
+      ]
+    },
+    {
       "name": "gcf",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -64114,14 +64217,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Dividend input (numeric/logical/char/complex)."
+              "description": "Real dividend input (numeric/logical/char)."
             },
             {
               "name": "B",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Divisor input (numeric/logical/char/complex)."
+              "description": "Real divisor input (numeric/logical/char)."
             }
           ],
           "outputs": [
@@ -64139,7 +64242,7 @@
         {
           "code": "RM.MOD.INVALID_INPUT",
           "identifier": "RunMat:mod:InvalidInput",
-          "when": "Inputs cannot be interpreted as numeric, logical, char, or complex operands.",
+          "when": "Inputs are complex or cannot be interpreted as real numeric, logical, or char operands.",
           "message": "mod: invalid input"
         },
         {
@@ -87108,14 +87211,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Dividend input (numeric/logical/char/complex)."
+              "description": "Real dividend input (numeric/logical/char)."
             },
             {
               "name": "B",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Divisor input (numeric/logical/char/complex)."
+              "description": "Real divisor input (numeric/logical/char)."
             }
           ],
           "outputs": [
@@ -87133,7 +87236,7 @@
         {
           "code": "RM.REM.INVALID_INPUT",
           "identifier": "RunMat:rem:InvalidInput",
-          "when": "Inputs cannot be interpreted as numeric, logical, char, or complex operands.",
+          "when": "Inputs are complex or cannot be interpreted as real numeric, logical, or char operands.",
           "message": "rem: invalid input"
         },
         {

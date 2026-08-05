@@ -264,12 +264,14 @@ mod tests {
     }
 
     #[test]
-    fn generated_builtin_catalog_matches_sequence_and_integer_limit_descriptors() {
+    fn generated_builtin_catalog_matches_integer_epic_descriptors() {
         let catalog: serde_json::Value =
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
-        for name in ["intmax", "intmin", "linspace", "logspace"] {
+        for name in [
+            "gcd", "intmax", "intmin", "linspace", "logspace", "mod", "rem",
+        ] {
             let registered = runmat_builtins::builtin_functions()
                 .into_iter()
                 .find(|builtin| builtin.name == name)
