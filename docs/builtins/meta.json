@@ -53814,6 +53814,203 @@
           "when": "Internal conversion or allocation fails.",
           "message": "ismembertol: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ismembertol-gpu-options",
+          "mode": "RunMatOnly",
+          "description": "ismembertol ByRows or OutputAllIndices with resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsmembertolGpuOptionsExtension"
+        },
+        {
+          "id": "ismembertol-gpu-wide-integer-input",
+          "mode": "RunMatOnly",
+          "description": "ismembertol with a resident 64-bit integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsmembertolGpuWideIntegerInputExtension"
+        },
+        {
+          "id": "ismembertol-host-integer-data",
+          "mode": "RunMatOnly",
+          "description": "ismembertol with host typed-integer A or B data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsmembertolHostIntegerDataExtension"
+        },
+        {
+          "id": "ismembertol-host-logical-data",
+          "mode": "RunMatOnly",
+          "description": "ismembertol with host logical A or B data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsmembertolHostLogicalDataExtension"
+        },
+        {
+          "id": "ismembertol-logical-tolerance-control",
+          "mode": "RunMatOnly",
+          "description": "ismembertol with a logical tolerance or DataScale is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsmembertolLogicalToleranceControlExtension"
+        },
+        {
+          "id": "ismembertol-typed-tolerance-control",
+          "mode": "RunMatOnly",
+          "description": "ismembertol with a typed-integer tolerance or DataScale is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IsmembertolTypedToleranceControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[LIA, LocB] = ismembertol(host_integer_A, host_integer_B, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented host data domain is single or double; RunMat mode additionally accepts every real integer class."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented host data domain is single or double; RunMat mode additionally accepts every real integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only host integer observations retain authoritative storage until one explicit f64 tolerance/DataScale boundary; LIA is logical and first locations are double."
+        },
+        {
+          "form": "[LIA, LocB] = ismembertol(resident_integer_A, resident_integer_B, options)",
+          "inputs": [
+            {
+              "name": "resident_A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Interactive GPU arrays document signed and unsigned integer data through 32 bits."
+            },
+            {
+              "name": "resident_B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Interactive GPU arrays document signed and unsigned integer data through 32 bits."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Documented resident integer inputs through 32 bits use typed gather fallback and restore logical/double outputs to the input owner; ByRows and OutputAllIndices remain mode-gated."
+        },
+        {
+          "form": "[LIA, LocB] = ismembertol(resident_int64_or_uint64_A_or_B, options)",
+          "inputs": [
+            {
+              "name": "resident_A_or_B",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public interactive GPU support excludes 64-bit integers; RunMat mode preserves them through typed gather before the tolerance boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Resident 64-bit integer data is a RunMat-only extension and enters the same explicit floating tolerance domain after authoritative typed gather."
+        },
+        {
+          "form": "LIA = ismembertol(A, B, integer_tol_or_DataScale, options)",
+          "inputs": [
+            {
+              "name": "tol_or_DataScale",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented tolerance and DataScale classes are single and double; RunMat mode additionally accepts typed integers and converts them once into the floating tolerance domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed integer tolerance controls are RunMat-only and convert once to f64 before threshold arithmetic."
+        },
+        {
+          "form": "LIA = ismembertol(A, B, ByRows_or_OutputAllIndices=integer_zero_or_one)",
+          "inputs": [
+            {
+              "name": "ByRows_or_OutputAllIndices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric boolean controls accept only zero or one; resident ByRows and OutputAllIndices forms remain independently restricted."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "StructuralParameter",
+          "notes": "Typed integer zero/one boolean controls are documented numeric forms; interactive GPU execution excludes enabled ByRows and OutputAllIndices."
+        }
       ]
     },
     {

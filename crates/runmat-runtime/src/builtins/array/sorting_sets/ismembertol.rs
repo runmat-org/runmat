@@ -1,7 +1,11 @@
 //! MATLAB-compatible `ismembertol` builtin for real numeric arrays.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, LiteralValue, LogicalArray, NumericDType, ResolveContext, Tensor, Type, Value,
 };
@@ -12,7 +16,7 @@ use crate::builtins::common::{
     gpu_helpers,
     spec::{
         BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-        ReductionNaN, ResidencyPolicy, ShapeRequirements,
+        ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
     },
     tensor,
 };
@@ -28,16 +32,16 @@ const DEFAULT_TOL_SINGLE: f64 = 1.0e-6;
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("ismembertol"),
-    supported_precisions: &[],
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Tolerance membership is host materialised today; gpuArray inputs are gathered before comparison.",
+    notes: "Tolerance membership uses authoritative typed gather fallback and restores documented logical and double outputs to the resident input owner; RunMat-only all-indices cell output remains host materialised.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -184,6 +188,175 @@ const ERRORS: [BuiltinErrorDescriptor; 4] = [
     ERROR_INTERNAL,
 ];
 
+const HOST_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ismembertol-host-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ismembertol with host typed-integer A or B data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsmembertolHostIntegerDataExtension"),
+};
+
+const HOST_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ismembertol-host-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ismembertol with host logical A or B data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsmembertolHostLogicalDataExtension"),
+};
+
+const TYPED_TOLERANCE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ismembertol-typed-tolerance-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ismembertol with a typed-integer tolerance or DataScale is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsmembertolTypedToleranceControlExtension"),
+};
+
+const LOGICAL_TOLERANCE_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "ismembertol-logical-tolerance-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "ismembertol with a logical tolerance or DataScale is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IsmembertolLogicalToleranceControlExtension"),
+    };
+
+const GPU_WIDE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ismembertol-gpu-wide-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ismembertol with a resident 64-bit integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsmembertolGpuWideIntegerInputExtension"),
+};
+
+const GPU_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ismembertol-gpu-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ismembertol ByRows or OutputAllIndices with resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IsmembertolGpuOptionsExtension"),
+};
+
+const EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    GPU_OPTIONS_EXTENSION,
+    GPU_WIDE_INTEGER_EXTENSION,
+    HOST_INTEGER_DATA_EXTENSION,
+    HOST_LOGICAL_DATA_EXTENSION,
+    LOGICAL_TOLERANCE_CONTROL_EXTENSION,
+    TYPED_TOLERANCE_CONTROL_EXTENSION,
+];
+
+const WIDE_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
+    [BuiltinIntegerClass::Int64, BuiltinIntegerClass::Uint64];
+
+const HOST_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented host data domain is single or double; RunMat mode additionally accepts every real integer class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented host data domain is single or double; RunMat mode additionally accepts every real integer class.",
+    },
+];
+
+const GPU_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "resident_A",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Interactive GPU arrays document signed and unsigned integer data through 32 bits.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "resident_B",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Interactive GPU arrays document signed and unsigned integer data through 32 bits.",
+    },
+];
+
+const GPU_WIDE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "resident_A_or_B",
+        classes: &WIDE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public interactive GPU support excludes 64-bit integers; RunMat mode preserves them through typed gather before the tolerance boundary.",
+    }];
+
+const TYPED_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "tol_or_DataScale",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented tolerance and DataScale classes are single and double; RunMat mode additionally accepts typed integers and converts them once into the floating tolerance domain.",
+    }];
+
+const INTEGER_BOOLEAN_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ByRows_or_OutputAllIndices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented numeric boolean controls accept only zero or one; resident ByRows and OutputAllIndices forms remain independently restricted.",
+    }];
+
+const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[LIA, LocB] = ismembertol(host_integer_A, host_integer_B, options)",
+        inputs: &HOST_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only host integer observations retain authoritative storage until one explicit f64 tolerance/DataScale boundary; LIA is logical and first locations are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[LIA, LocB] = ismembertol(resident_integer_A, resident_integer_B, options)",
+        inputs: &GPU_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Documented resident integer inputs through 32 bits use typed gather fallback and restore logical/double outputs to the input owner; ByRows and OutputAllIndices remain mode-gated.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[LIA, LocB] = ismembertol(resident_int64_or_uint64_A_or_B, options)",
+        inputs: &GPU_WIDE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Resident 64-bit integer data is a RunMat-only extension and enters the same explicit floating tolerance domain after authoritative typed gather.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "LIA = ismembertol(A, B, integer_tol_or_DataScale, options)",
+        inputs: &TYPED_TOLERANCE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed integer tolerance controls are RunMat-only and convert once to f64 before threshold arithmetic.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "LIA = ismembertol(A, B, ByRows_or_OutputAllIndices=integer_zero_or_one)",
+        inputs: &INTEGER_BOOLEAN_OPTION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed integer zero/one boolean controls are documented numeric forms; interactive GPU execution excludes enabled ByRows and OutputAllIndices.",
+    },
+];
+
 pub const ISMEMBERTOL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -252,37 +425,54 @@ fn type_row_count(ty: &Type) -> Option<Option<usize>> {
     sink = true,
     type_resolver(ismembertol_output_type),
     descriptor(crate::builtins::array::sorting_sets::ismembertol::ISMEMBERTOL_DESCRIPTOR),
+    extensions(EXTENSIONS),
+    integer_capabilities(INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::sorting_sets::ismembertol"
 )]
 async fn ismembertol_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        let opts = parse_options(&rest)?;
-        if out_count == 1 {
-            let eval = evaluate_with_options(a, b, opts, LocRequest::None).await?;
-            return Ok(Value::OutputList(vec![eval.into_mask_value()]));
-        }
-        let loc_request = if opts.output_all_indices {
-            LocRequest::All
-        } else {
-            LocRequest::First
-        };
-        let eval = evaluate_with_options(a, b, opts, loc_request).await?;
-        let (mask, loc) = eval.into_pair();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![mask, loc],
+    let requested_outputs = crate::output_count::current_output_count();
+    if matches!(requested_outputs, Some(count) if count > 2) {
+        return Err(error_with(
+            &ERROR_INVALID_ARGUMENT,
+            "ismembertol: too many output arguments; maximum is 2",
         ));
     }
     let opts = parse_options(&rest)?;
-    let eval = evaluate_with_options(a, b, opts, LocRequest::None).await?;
-    Ok(eval.into_mask_value())
+    ensure_compatibility(&a, &b, &opts)?;
+    let host_cell_output = opts.output_all_indices && requested_outputs == Some(2);
+    let output_provider = (!host_cell_output)
+        .then(|| super::set_output_provider(&a, &b))
+        .flatten();
+    let loc_request = match requested_outputs {
+        Some(0) | Some(1) | None => LocRequest::None,
+        Some(2) if opts.output_all_indices => LocRequest::All,
+        Some(2) => LocRequest::First,
+        Some(_) => unreachable!("excess output count rejected"),
+    };
+    let eval = evaluate_with_options(a, b, opts, loc_request).await?;
+    let mut outputs = match loc_request {
+        LocRequest::None => vec![eval.into_mask_value()],
+        LocRequest::First | LocRequest::All => {
+            let (mask, loc) = eval.into_pair();
+            vec![mask, loc]
+        }
+    };
+    if requested_outputs == Some(0) {
+        outputs.clear();
+    } else {
+        outputs =
+            super::restore_set_outputs(output_provider, NAME, outputs, internal_error_from_string)?;
+    }
+    if requested_outputs.is_some() {
+        Ok(Value::OutputList(outputs))
+    } else {
+        Ok(outputs.pop().expect("ismembertol mask output"))
+    }
 }
 
 pub async fn evaluate(a: Value, b: Value, rest: &[Value]) -> BuiltinResult<IsMemberTolEvaluation> {
     let opts = parse_options(rest)?;
+    ensure_compatibility(&a, &b, &opts)?;
     let loc_request = if opts.output_all_indices {
         LocRequest::All
     } else {
@@ -337,6 +527,10 @@ struct IsMemberTolOptions {
     by_rows: bool,
     data_scale: Option<Vec<f64>>,
     output_all_indices: bool,
+    typed_tolerance: bool,
+    typed_data_scale: bool,
+    logical_tolerance: bool,
+    logical_data_scale: bool,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -352,11 +546,17 @@ fn parse_options(rest: &[Value]) -> BuiltinResult<IsMemberTolOptions> {
         by_rows: false,
         data_scale: None,
         output_all_indices: false,
+        typed_tolerance: false,
+        typed_data_scale: false,
+        logical_tolerance: false,
+        logical_data_scale: false,
     };
 
     let mut idx = 0usize;
     if let Some(first) = rest.first() {
         if option_name(first).is_none() {
+            opts.typed_tolerance = is_typed_integer_value(first);
+            opts.logical_tolerance = is_logical_value(first);
             opts.tol = Some(parse_positive_scalar(first, "tolerance")?);
             idx = 1;
         }
@@ -380,7 +580,11 @@ fn parse_options(rest: &[Value]) -> BuiltinResult<IsMemberTolOptions> {
         match name.as_str() {
             "byrows" => opts.by_rows = parse_bool_option(&pair[1])?,
             "outputallindices" => opts.output_all_indices = parse_bool_option(&pair[1])?,
-            "datascale" => opts.data_scale = Some(parse_data_scale(&pair[1])?),
+            "datascale" => {
+                opts.typed_data_scale = is_typed_integer_value(&pair[1]);
+                opts.logical_data_scale = is_logical_value(&pair[1]);
+                opts.data_scale = Some(parse_data_scale(&pair[1])?);
+            }
             other => {
                 return Err(error_with(
                     &ERROR_INVALID_ARGUMENT,
@@ -391,6 +595,67 @@ fn parse_options(rest: &[Value]) -> BuiltinResult<IsMemberTolOptions> {
     }
 
     Ok(opts)
+}
+
+fn ensure_compatibility(a: &Value, b: &Value, opts: &IsMemberTolOptions) -> BuiltinResult<()> {
+    for value in [a, b] {
+        match value {
+            Value::GpuTensor(handle) if super::is_unsupported_set_gpu_integer(handle) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &GPU_WIDE_INTEGER_EXTENSION,
+                    NAME,
+                )?;
+            }
+            Value::GpuTensor(_) => {}
+            _ if is_typed_integer_value(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &HOST_INTEGER_DATA_EXTENSION,
+                    NAME,
+                )?;
+            }
+            _ if is_logical_value(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &HOST_LOGICAL_DATA_EXTENSION,
+                    NAME,
+                )?;
+            }
+            _ => {}
+        }
+    }
+    if opts.typed_tolerance || opts.typed_data_scale {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TYPED_TOLERANCE_CONTROL_EXTENSION,
+            NAME,
+        )?;
+    }
+    if opts.logical_tolerance || opts.logical_data_scale {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOGICAL_TOLERANCE_CONTROL_EXTENSION,
+            NAME,
+        )?;
+    }
+    if super::set_output_provider(a, b).is_some() && (opts.by_rows || opts.output_all_indices) {
+        crate::compatibility::ensure_builtin_extension_enabled(&GPU_OPTIONS_EXTENSION, NAME)?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(
+            value,
+            Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)
+        )
 }
 
 fn option_name(value: &Value) -> Option<String> {
@@ -890,6 +1155,10 @@ fn error_with(error: &'static BuiltinErrorDescriptor, message: impl Into<String>
     builder.build()
 }
 
+fn internal_error_from_string(message: String) -> RuntimeError {
+    error_with(&ERROR_INTERNAL, message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -899,6 +1168,10 @@ mod tests {
 
     fn eval(a: Value, b: Value, rest: &[Value]) -> BuiltinResult<IsMemberTolEvaluation> {
         block_on(evaluate(a, b, rest))
+    }
+
+    fn builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(ismembertol_builtin(a, b, rest))
     }
 
     #[test]
@@ -977,6 +1250,7 @@ mod tests {
 
     #[test]
     fn typed_integer_inputs_are_compared_from_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let a = Tensor::new_integer(IntegerStorage::I16(vec![10, 20, 30]), vec![1, 3]).unwrap();
         let b = Tensor::new_integer(IntegerStorage::I16(vec![9, 31]), vec![1, 2]).unwrap();
 
@@ -992,6 +1266,7 @@ mod tests {
 
     #[test]
     fn wide_integers_enter_explicit_f64_tolerance_domain() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let a = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
             .unwrap();
         let b = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_992]), vec![1, 1])
@@ -1013,6 +1288,7 @@ mod tests {
 
     #[test]
     fn typed_integer_tolerance_and_datascale_read_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let a = Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap();
         let b = Tensor::new(vec![11.0, 24.0], vec![1, 2]).unwrap();
         let tolerance = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
@@ -1157,6 +1433,7 @@ mod tests {
 
     #[test]
     fn by_rows_typed_integer_inputs_are_compared_from_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let a = Tensor::new_integer(IntegerStorage::U16(vec![10, 20, 30, 40]), vec![2, 2]).unwrap();
         let b = Tensor::new_integer(IntegerStorage::U16(vec![11, 21, 31, 41]), vec![2, 2]).unwrap();
 
@@ -1223,6 +1500,188 @@ mod tests {
             err.identifier.as_deref(),
             Some("RunMat:ismembertol:RowsColumnMismatch")
         );
+    }
+
+    #[test]
+    fn host_integer_logical_and_typed_tolerance_forms_are_mode_gated() {
+        let integer = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = eval(
+                Value::Tensor(integer.clone()),
+                Value::Tensor(integer.clone()),
+                &[],
+            )
+            .expect_err("host integer data must be gated");
+            assert_eq!(
+                error.identifier(),
+                HOST_INTEGER_DATA_EXTENSION.error_identifier
+            );
+
+            let error = eval(Value::Bool(true), Value::Bool(true), &[])
+                .expect_err("host logical data must be gated");
+            assert_eq!(
+                error.identifier(),
+                HOST_LOGICAL_DATA_EXTENSION.error_identifier
+            );
+
+            let tolerance = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+            let error = eval(
+                Value::Num(1.0),
+                Value::Num(1.0),
+                &[Value::Tensor(tolerance)],
+            )
+            .expect_err("typed tolerance must be gated");
+            assert_eq!(
+                error.identifier(),
+                TYPED_TOLERANCE_CONTROL_EXTENSION.error_identifier
+            );
+
+            let error = eval(
+                Value::Num(1.0),
+                Value::Num(1.0),
+                &[Value::from("DataScale"), Value::Bool(true)],
+            )
+            .expect_err("logical DataScale must be gated");
+            assert_eq!(
+                error.identifier(),
+                LOGICAL_TOLERANCE_CONTROL_EXTENSION.error_identifier
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert_eq!(
+                eval(Value::Tensor(integer.clone()), Value::Tensor(integer), &[])
+                    .unwrap()
+                    .mask,
+                LogicalArray::new(vec![1, 1], vec![2, 1]).unwrap()
+            );
+            assert_eq!(
+                eval(Value::Bool(true), Value::Bool(true), &[])
+                    .unwrap()
+                    .mask_value(),
+                Value::Bool(true)
+            );
+        }
+    }
+
+    #[test]
+    fn documented_resident_integer_outputs_restore_and_excess_arity_rejects() {
+        test_support::with_test_provider(|provider| {
+            let a = Tensor::new_integer(IntegerStorage::I32(vec![1, 3]), vec![2, 1]).unwrap();
+            let b = Tensor::new_integer(IntegerStorage::I32(vec![1, 2]), vec![2, 1]).unwrap();
+            let a = Value::GpuTensor(gpu_helpers::upload_tensor(provider, &a).unwrap());
+            let b = Value::GpuTensor(gpu_helpers::upload_tensor(provider, &b).unwrap());
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let Value::OutputList(outputs) = builtin(a, b, Vec::new()).unwrap() else {
+                panic!("expected output list");
+            };
+            assert_eq!(outputs.len(), 2);
+            let Value::GpuTensor(mask) = &outputs[0] else {
+                panic!("expected resident logical mask");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(mask));
+            assert!(matches!(outputs[1], Value::GpuTensor(_)));
+            assert_eq!(
+                test_support::gather(outputs[0].clone())
+                    .unwrap()
+                    .materialize_f64(),
+                vec![1.0, 0.0]
+            );
+            assert_eq!(
+                test_support::gather(outputs[1].clone())
+                    .unwrap()
+                    .materialize_f64(),
+                vec![1.0, 0.0]
+            );
+        });
+
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let error = builtin(Value::Num(1.0), Value::Num(1.0), Vec::new())
+            .expect_err("excess outputs must reject");
+        assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn resident_wide_integer_and_restricted_options_are_mode_gated_before_gather() {
+        test_support::with_test_provider(|provider| {
+            let wide = Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![2, 1]).unwrap();
+            let wide_handle = gpu_helpers::upload_tensor(provider, &wide).unwrap();
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = eval(
+                    Value::GpuTensor(wide_handle.clone()),
+                    Value::GpuTensor(wide_handle.clone()),
+                    &[],
+                )
+                .expect_err("resident uint64 must be gated");
+                assert_eq!(
+                    error.identifier(),
+                    GPU_WIDE_INTEGER_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                assert_eq!(
+                    eval(
+                        Value::GpuTensor(wide_handle.clone()),
+                        Value::GpuTensor(wide_handle),
+                        &[]
+                    )
+                    .unwrap()
+                    .mask
+                    .data,
+                    vec![1, 1]
+                );
+            }
+
+            let data = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+            let data_handle = gpu_helpers::upload_tensor(provider, &data).unwrap();
+            let options = [
+                Value::from("ByRows"),
+                Value::Int(runmat_builtins::IntValue::I8(1)),
+            ];
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = eval(
+                    Value::GpuTensor(data_handle.clone()),
+                    Value::GpuTensor(data_handle.clone()),
+                    &options,
+                )
+                .expect_err("resident ByRows must be gated");
+                assert_eq!(error.identifier(), GPU_OPTIONS_EXTENSION.error_identifier);
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                assert_eq!(
+                    eval(
+                        Value::GpuTensor(data_handle.clone()),
+                        Value::GpuTensor(data_handle.clone()),
+                        &options,
+                    )
+                    .unwrap()
+                    .mask
+                    .data,
+                    vec![1, 1]
+                );
+
+                let _outputs = crate::output_count::push_output_count(Some(2));
+                let Value::OutputList(outputs) = builtin(
+                    Value::GpuTensor(data_handle.clone()),
+                    Value::GpuTensor(data_handle),
+                    vec![
+                        Value::from("OutputAllIndices"),
+                        Value::Int(runmat_builtins::IntValue::I8(1)),
+                    ],
+                )
+                .unwrap() else {
+                    panic!("expected output list");
+                };
+                assert!(matches!(outputs[0], Value::LogicalArray(_)));
+                assert!(matches!(outputs[1], Value::Cell(_)));
+            }
+        });
     }
 
     #[test]
