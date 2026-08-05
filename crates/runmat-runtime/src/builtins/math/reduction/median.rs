@@ -1359,7 +1359,7 @@ fn reduce_integer_tensor_median_dim(
     .map_err(|e| median_internal_error(format!("median: {e}")))
 }
 
-fn compare_same_class_integer(left: &IntValue, right: &IntValue) -> Ordering {
+pub(super) fn compare_same_class_integer(left: &IntValue, right: &IntValue) -> Ordering {
     match (left, right) {
         (IntValue::I8(a), IntValue::I8(b)) => a.cmp(b),
         (IntValue::I16(a), IntValue::I16(b)) => a.cmp(b),
@@ -1373,7 +1373,7 @@ fn compare_same_class_integer(left: &IntValue, right: &IntValue) -> Ordering {
     }
 }
 
-fn integer_median_from_sorted(values: &[IntValue]) -> IntValue {
+pub(super) fn integer_median_from_sorted(values: &[IntValue]) -> IntValue {
     let middle = values.len() / 2;
     if values.len() % 2 == 1 {
         return values[middle].clone();

@@ -7,9 +7,14 @@ use runmat_accelerate_api::{
     ProviderMovingWindowRequest, ProviderNanMode, ProviderStdNormalization,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerStorage, NumericScalar, NumericStorage, ResolveContext, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -311,10 +316,133 @@ macro_rules! moving_fusion_spec {
     };
 }
 
+macro_rules! moving_integer_metadata {
+    (
+        $form:literal,
+        $domain:ident,
+        $output:ident,
+        $backend:ident,
+        $notes:literal
+    ) => {
+        const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+            BuiltinIntegerInputCapability {
+                name: "A",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::Documented,
+                scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "Ordinary real arrays accept all eight integer classes; typed complex integers remain outside the documented real integer domain.",
+            },
+            BuiltinIntegerInputCapability {
+                name: "k_or_window",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::Documented,
+                scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+                notes: "Count windows accept exact positive typed-integer lengths or exact nonnegative backward/forward lengths.",
+            },
+            BuiltinIntegerInputCapability {
+                name: "dim",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::Documented,
+                scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+                notes: "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage.",
+            },
+            BuiltinIntegerInputCapability {
+                name: "endpoint_fill_or_sample_points",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::Documented,
+                scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+                notes: "Numeric endpoint fills and sample-point vectors accept integer classes; exact endpoint fills stay typed for native integer outputs, while sample locations intentionally enter the floating positional domain.",
+            },
+        ];
+
+        pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+            [BuiltinIntegerCapabilityDescriptor {
+                form: $form,
+                inputs: &INTEGER_INPUTS,
+                computation_domain: BuiltinIntegerComputationDomain::$domain,
+                output_class: BuiltinIntegerOutputClassRule::$output,
+                overflow: BuiltinIntegerOverflowRule::NotApplicable,
+                backend: BuiltinIntegerBackendRule::$backend,
+                overload: BuiltinIntegerOverloadKind::Multiple,
+                notes: $notes,
+            }];
+    };
+}
+
+macro_rules! moving_gpu_sample_points_extension {
+    ($id:literal, $description:literal, $identifier:literal) => {
+        pub(super) const GPU_SAMPLE_POINTS_EXTENSION: BuiltinExtensionDescriptor =
+            BuiltinExtensionDescriptor {
+                id: $id,
+                mode: BuiltinExtensionMode::RunMatOnly,
+                description: $description,
+                error_identifier: Some($identifier),
+            };
+    };
+}
+
+macro_rules! moving_stdvar_integer_metadata {
+    ($name:literal, $form:literal) => {
+        const REJECTED_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+            [BuiltinIntegerInputCapability {
+                name: "A",
+                classes: &[],
+                availability: BuiltinIntegerInputAvailability::Rejected,
+                scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "The documented moving-dispersion data domain is single, double, or logical; every typed-integer data class is rejected before host or provider dispatch.",
+            }];
+
+        const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+            [BuiltinIntegerInputCapability {
+                name: "normalization_or_dimension",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+                notes: "RunMat mode accepts exact host typed-integer normalization and dimension controls; MATLAB-compatible modes retain the documented floating control surface.",
+            }];
+
+        pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+            BuiltinIntegerCapabilityDescriptor {
+                form: $form,
+                inputs: &REJECTED_INTEGER_DATA_INPUT,
+                computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+                output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+                overflow: BuiltinIntegerOverflowRule::NotApplicable,
+                backend: BuiltinIntegerBackendRule::HostAndGpu,
+                overload: BuiltinIntegerOverloadKind::Multiple,
+                notes: "Integer data is invalid in every compatibility mode, including resident integer data, and no integer output contract exists.",
+            },
+            BuiltinIntegerCapabilityDescriptor {
+                form: concat!("M = ", $name, "(A, k, normalization_or_dimension, ...) with floating A"),
+                inputs: &INTEGER_CONTROL_INPUT,
+                computation_domain: BuiltinIntegerComputationDomain::Structural,
+                output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+                overflow: BuiltinIntegerOverflowRule::NotApplicable,
+                backend: BuiltinIntegerBackendRule::HostOnly,
+                overload: BuiltinIntegerOverloadKind::StructuralParameter,
+                notes: "Typed-integer controls are a mode-gated RunMat extension; values are decoded exactly on the host, while the floating data reduction may still execute on a provider.",
+            },
+        ];
+    };
+}
+
 pub mod movsum {
     use super::*;
     moving_descriptor!("movsum");
     moving_fusion_spec!("movsum", "crate::builtins::math::reduction::moving::movsum");
+    moving_gpu_sample_points_extension!(
+        "movsum-gpu-sample-points",
+        "movsum with SamplePoints on a GPU input is a RunMat extension",
+        "RunMat:compatibility:MovsumGpuSamplePointsExtension"
+    );
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_SAMPLE_POINTS_EXTENSION];
+    moving_integer_metadata!(
+        "M = movsum(A, k, dim, nanflag, Name, Value)",
+        FloatingPoint,
+        Double,
+        GatherFallback,
+        "Integer data is materialized once into the documented double computation and output domain; endpoint shape rules and missing-value spellings share that rule, and GPU SamplePoints is a mode-gated gather/reupload extension."
+    );
 
     #[runtime_builtin(
         name = "movsum",
@@ -324,6 +452,8 @@ pub mod movsum {
         accel = "reduction",
         type_resolver(super::moving_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::math::reduction::moving::movsum"
     )]
     pub(crate) async fn movsum_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -338,6 +468,19 @@ pub mod movmean {
         "movmean",
         "crate::builtins::math::reduction::moving::movmean"
     );
+    moving_gpu_sample_points_extension!(
+        "movmean-gpu-sample-points",
+        "movmean with SamplePoints on a GPU input is a RunMat extension",
+        "RunMat:compatibility:MovmeanGpuSamplePointsExtension"
+    );
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_SAMPLE_POINTS_EXTENSION];
+    moving_integer_metadata!(
+        "M = movmean(A, k, dim, nanflag, Name, Value)",
+        FloatingPoint,
+        Double,
+        GatherFallback,
+        "Integer data is materialized once into the documented double mean and output domain; endpoint shape rules and missing-value spellings share that rule, and GPU SamplePoints is a mode-gated gather/reupload extension."
+    );
 
     #[runtime_builtin(
         name = "movmean",
@@ -347,6 +490,8 @@ pub mod movmean {
         accel = "reduction",
         type_resolver(super::moving_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::math::reduction::moving::movmean"
     )]
     pub(crate) async fn movmean_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -361,6 +506,19 @@ pub mod movprod {
         "movprod",
         "crate::builtins::math::reduction::moving::movprod"
     );
+    moving_gpu_sample_points_extension!(
+        "movprod-gpu-sample-points",
+        "movprod with SamplePoints on a GPU input is a RunMat extension",
+        "RunMat:compatibility:MovprodGpuSamplePointsExtension"
+    );
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_SAMPLE_POINTS_EXTENSION];
+    moving_integer_metadata!(
+        "M = movprod(A, k, dim, nanflag, Name, Value)",
+        FloatingPoint,
+        Double,
+        GatherFallback,
+        "Integer data is materialized once into the documented double computation and output domain; endpoint shape rules and missing-value spellings share that rule, and GPU SamplePoints is a mode-gated gather/reupload extension."
+    );
 
     #[runtime_builtin(
         name = "movprod",
@@ -370,6 +528,8 @@ pub mod movprod {
         accel = "reduction",
         type_resolver(super::moving_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::math::reduction::moving::movprod"
     )]
     pub(crate) async fn movprod_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -381,6 +541,19 @@ pub mod movmin {
     use super::*;
     moving_descriptor!("movmin");
     moving_fusion_spec!("movmin", "crate::builtins::math::reduction::moving::movmin");
+    moving_gpu_sample_points_extension!(
+        "movmin-gpu-sample-points",
+        "movmin with SamplePoints on a GPU input is a RunMat extension",
+        "RunMat:compatibility:MovminGpuSamplePointsExtension"
+    );
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_SAMPLE_POINTS_EXTENSION];
+    moving_integer_metadata!(
+        "M = movmin(A, k, dim, nanflag, Name, Value)",
+        ExactInteger,
+        PreserveInput,
+        GatherFallback,
+        "Every window selects its minimum directly from exact same-class integer values and exact typed endpoint fills; integer overflow is inapplicable, while GPU SamplePoints is a mode-gated gather/reupload extension."
+    );
 
     #[runtime_builtin(
         name = "movmin",
@@ -390,6 +563,8 @@ pub mod movmin {
         accel = "reduction",
         type_resolver(super::moving_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::math::reduction::moving::movmin"
     )]
     pub(crate) async fn movmin_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -401,6 +576,19 @@ pub mod movmax {
     use super::*;
     moving_descriptor!("movmax");
     moving_fusion_spec!("movmax", "crate::builtins::math::reduction::moving::movmax");
+    moving_gpu_sample_points_extension!(
+        "movmax-gpu-sample-points",
+        "movmax with SamplePoints on a GPU input is a RunMat extension",
+        "RunMat:compatibility:MovmaxGpuSamplePointsExtension"
+    );
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_SAMPLE_POINTS_EXTENSION];
+    moving_integer_metadata!(
+        "M = movmax(A, k, dim, nanflag, Name, Value)",
+        ExactInteger,
+        PreserveInput,
+        GatherFallback,
+        "Every window selects its maximum directly from exact same-class integer values and exact typed endpoint fills; integer overflow is inapplicable, while GPU SamplePoints is a mode-gated gather/reupload extension."
+    );
 
     #[runtime_builtin(
         name = "movmax",
@@ -410,6 +598,8 @@ pub mod movmax {
         accel = "reduction",
         type_resolver(super::moving_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::math::reduction::moving::movmax"
     )]
     pub(crate) async fn movmax_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -424,6 +614,28 @@ pub mod movmedian {
         "movmedian",
         "crate::builtins::math::reduction::moving::movmedian"
     );
+    moving_gpu_sample_points_extension!(
+        "movmedian-gpu-sample-points",
+        "movmedian with SamplePoints on a GPU input is a RunMat extension",
+        "RunMat:compatibility:MovmedianGpuSamplePointsExtension"
+    );
+    pub(super) const GPU_LARGE_WINDOW_EXTENSION: BuiltinExtensionDescriptor =
+        BuiltinExtensionDescriptor {
+            id: "movmedian-gpu-large-window",
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description:
+                "movmedian with a window longer than 31 on a GPU input is a RunMat extension",
+            error_identifier: Some("RunMat:compatibility:MovmedianGpuLargeWindowExtension"),
+        };
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+        [GPU_SAMPLE_POINTS_EXTENSION, GPU_LARGE_WINDOW_EXTENSION];
+    moving_integer_metadata!(
+        "M = movmedian(A, k, dim, nanflag, Name, Value)",
+        ExactInteger,
+        PreserveInput,
+        GatherFallback,
+        "Every window orders exact same-class integer values and uses the native median midpoint rule; exact typed endpoint fills retain class, while GPU SamplePoints and windows longer than 31 are separately mode-gated gather/reupload extensions."
+    );
 
     #[runtime_builtin(
         name = "movmedian",
@@ -433,6 +645,8 @@ pub mod movmedian {
         accel = "reduction",
         type_resolver(super::moving_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::math::reduction::moving::movmedian"
     )]
     pub(crate) async fn movmedian_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -444,6 +658,22 @@ pub mod movstd {
     use super::*;
     moving_stdvar_descriptor!("movstd");
     moving_fusion_spec!("movstd", "crate::builtins::math::reduction::moving::movstd");
+    moving_gpu_sample_points_extension!(
+        "movstd-gpu-sample-points",
+        "movstd with SamplePoints on a GPU input is a RunMat extension",
+        "RunMat:compatibility:MovstdGpuSamplePointsExtension"
+    );
+    pub(super) const TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+        BuiltinExtensionDescriptor {
+            id: "movstd-typed-integer-control",
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description:
+                "movstd with a typed-integer normalization or dimension control is a RunMat extension",
+            error_identifier: Some("RunMat:compatibility:MovstdTypedIntegerControlExtension"),
+        };
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+        [GPU_SAMPLE_POINTS_EXTENSION, TYPED_INTEGER_CONTROL_EXTENSION];
+    moving_stdvar_integer_metadata!("movstd", "M = movstd(A, k, args...) with integer A");
 
     #[runtime_builtin(
         name = "movstd",
@@ -453,6 +683,8 @@ pub mod movstd {
         accel = "reduction",
         type_resolver(super::moving_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::math::reduction::moving::movstd"
     )]
     pub(crate) async fn movstd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -464,6 +696,22 @@ pub mod movvar {
     use super::*;
     moving_stdvar_descriptor!("movvar");
     moving_fusion_spec!("movvar", "crate::builtins::math::reduction::moving::movvar");
+    moving_gpu_sample_points_extension!(
+        "movvar-gpu-sample-points",
+        "movvar with SamplePoints on a GPU input is a RunMat extension",
+        "RunMat:compatibility:MovvarGpuSamplePointsExtension"
+    );
+    pub(super) const TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+        BuiltinExtensionDescriptor {
+            id: "movvar-typed-integer-control",
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description:
+                "movvar with a typed-integer normalization or dimension control is a RunMat extension",
+            error_identifier: Some("RunMat:compatibility:MovvarTypedIntegerControlExtension"),
+        };
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+        [GPU_SAMPLE_POINTS_EXTENSION, TYPED_INTEGER_CONTROL_EXTENSION];
+    moving_stdvar_integer_metadata!("movvar", "M = movvar(A, k, args...) with integer A");
 
     #[runtime_builtin(
         name = "movvar",
@@ -473,6 +721,8 @@ pub mod movvar {
         accel = "reduction",
         type_resolver(super::moving_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::math::reduction::moving::movvar"
     )]
     pub(crate) async fn movvar_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -503,7 +753,7 @@ enum Endpoints {
     Shrink,
     Discard,
     FillDefault,
-    Fill(f64),
+    Fill(NumericScalar),
 }
 
 #[derive(Clone, Debug)]
@@ -619,7 +869,40 @@ async fn moving_builtin(
     for argument in &rest {
         crate::builtins::common::validation::reject_typed_complex_integer(argument, name)?;
     }
+    if matches!(op, MovingOp::Std | MovingOp::Var) && is_real_typed_integer_value(&value) {
+        return Err(invalid_input(
+            name,
+            format!("{name}: integer data input is not supported"),
+        ));
+    }
+    if matches!(op, MovingOp::Std | MovingOp::Var)
+        && moving_stdvar_uses_typed_integer_control(&rest)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            stdvar_typed_integer_control_extension(op),
+            name,
+        )?;
+    }
     let parsed = parse_moving_args(name, op, &k, &rest).await?;
+    if matches!(&value, Value::GpuTensor(_)) {
+        if parsed.sample_points.is_some() {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                gpu_sample_points_extension(op),
+                name,
+            )?;
+        }
+        if op == MovingOp::Median
+            && parsed
+                .window
+                .checked_count_len(name)?
+                .is_some_and(|length| length > 31)
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &movmedian::GPU_LARGE_WINDOW_EXTENSION,
+                name,
+            )?;
+        }
+    }
     match value {
         Value::GpuTensor(handle) => moving_gpu(name, op, handle, &parsed).await,
         Value::Complex(re, im) => {
@@ -635,6 +918,54 @@ async fn moving_builtin(
                 .map_err(|err| invalid_input(name, err))?;
             moving_real(name, op, tensor, &parsed).map(tensor::tensor_into_value)
         }
+    }
+}
+
+fn is_real_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn moving_stdvar_uses_typed_integer_control(rest: &[Value]) -> bool {
+    let mut index = 0;
+    while index < rest.len() {
+        match value_as_keyword(&rest[index]).as_deref() {
+            Some("endpoints" | "samplepoints") => {
+                index = index.saturating_add(2);
+            }
+            Some("includenan" | "includemissing" | "omitnan" | "omitmissing") => {
+                index += 1;
+            }
+            _ if is_real_typed_integer_value(&rest[index]) => return true,
+            _ => index += 1,
+        }
+    }
+    false
+}
+
+fn stdvar_typed_integer_control_extension(op: MovingOp) -> &'static BuiltinExtensionDescriptor {
+    match op {
+        MovingOp::Std => &movstd::TYPED_INTEGER_CONTROL_EXTENSION,
+        MovingOp::Var => &movvar::TYPED_INTEGER_CONTROL_EXTENSION,
+        _ => unreachable!("only moving dispersion operations have typed integer controls"),
+    }
+}
+
+fn gpu_sample_points_extension(op: MovingOp) -> &'static BuiltinExtensionDescriptor {
+    match op {
+        MovingOp::Sum => &movsum::GPU_SAMPLE_POINTS_EXTENSION,
+        MovingOp::Mean => &movmean::GPU_SAMPLE_POINTS_EXTENSION,
+        MovingOp::Prod => &movprod::GPU_SAMPLE_POINTS_EXTENSION,
+        MovingOp::Min => &movmin::GPU_SAMPLE_POINTS_EXTENSION,
+        MovingOp::Max => &movmax::GPU_SAMPLE_POINTS_EXTENSION,
+        MovingOp::Median => &movmedian::GPU_SAMPLE_POINTS_EXTENSION,
+        MovingOp::Std => &movstd::GPU_SAMPLE_POINTS_EXTENSION,
+        MovingOp::Var => &movvar::GPU_SAMPLE_POINTS_EXTENSION,
     }
 }
 
@@ -716,7 +1047,7 @@ fn provider_endpoints(op: MovingOp, endpoints: Endpoints) -> ProviderMovingWindo
         Endpoints::Shrink => ProviderMovingWindowEndpoints::Shrink,
         Endpoints::Discard => ProviderMovingWindowEndpoints::Discard,
         Endpoints::FillDefault => ProviderMovingWindowEndpoints::Fill(op.default_fill()),
-        Endpoints::Fill(value) => ProviderMovingWindowEndpoints::Fill(value),
+        Endpoints::Fill(value) => ProviderMovingWindowEndpoints::Fill(value.materialize_f64()),
     }
 }
 
@@ -759,10 +1090,19 @@ fn moving_real(
     let stride_after = checked_product(name, &input_shape[dim..])?;
     let out_axis = shape[dim_index];
     let dtype = tensor.numeric_dtype();
-    let input = tensor
+    let storage = tensor
         .into_numeric_storage()
-        .map_err(|error| internal(name, error))?
-        .materialize_f64();
+        .map_err(|error| internal(name, error))?;
+    let (input, output_is_double) = match storage.into_integer_storage() {
+        Ok(integer) if matches!(op, MovingOp::Min | MovingOp::Max | MovingOp::Median) => {
+            return moving_integer_exact(name, op, integer, input_shape, shape, dim, parsed);
+        }
+        Ok(integer) => (
+            NumericStorage::from_integer_storage(integer).materialize_f64(),
+            true,
+        ),
+        Err(floating) => (floating.materialize_f64(), false),
+    };
     let mut output = vec![0.0; count];
 
     for after in 0..stride_after {
@@ -827,7 +1167,169 @@ fn moving_real(
         }
     }
 
-    Tensor::new_with_dtype(output, shape, dtype).map_err(|err| internal(name, err))
+    if output_is_double {
+        Tensor::new(output, shape).map_err(|err| internal(name, err))
+    } else {
+        Tensor::new_with_dtype(output, shape, dtype).map_err(|err| internal(name, err))
+    }
+}
+
+fn moving_integer_exact(
+    name: &'static str,
+    op: MovingOp,
+    storage: IntegerStorage,
+    input_shape: Vec<usize>,
+    shape: Vec<usize>,
+    dim: usize,
+    parsed: &ParsedMoving,
+) -> BuiltinResult<Tensor> {
+    debug_assert!(matches!(
+        op,
+        MovingOp::Min | MovingOp::Max | MovingOp::Median
+    ));
+    let count = checked_element_count(name, &shape)?;
+    let dim_index = dim - 1;
+    let axis_len = input_shape[dim_index];
+    let stride_before = checked_product(name, &input_shape[..dim_index])?;
+    let stride_after = checked_product(name, &input_shape[dim..])?;
+    let out_axis = shape[dim_index];
+    let mut output = Vec::with_capacity(count);
+
+    for after in 0..stride_after {
+        for out_pos in 0..out_axis {
+            let center = source_center(name, out_pos, parsed)?;
+            let sample_positions = sample_window_positions(name, center, axis_len, parsed)?;
+            let count_window = if sample_positions.is_none() {
+                Some(count_window(name, center, axis_len, parsed)?)
+            } else {
+                None
+            };
+            let capacity = sample_positions
+                .as_ref()
+                .map(Vec::len)
+                .or_else(|| count_window.map(|window| window.end - window.start))
+                .unwrap_or(0);
+            let fill = count_window
+                .and_then(|window| integer_fill_value(&storage, op, parsed, window.fill_count));
+            for before in 0..stride_before {
+                let mut values = Vec::with_capacity(capacity);
+                if let Some(positions) = sample_positions.as_ref() {
+                    for &pos in positions {
+                        let index = before + pos * stride_before + after * stride_before * axis_len;
+                        values.push(
+                            storage
+                                .value_at(index)
+                                .expect("validated integer moving-window index"),
+                        );
+                    }
+                } else {
+                    let window = count_window.expect("count window computed");
+                    for pos in window.start..window.end {
+                        let index = before + pos * stride_before + after * stride_before * axis_len;
+                        values.push(
+                            storage
+                                .value_at(index)
+                                .expect("validated integer moving-window index"),
+                        );
+                    }
+                }
+                output.push(reduce_integer_window(op, &values, fill.as_ref()));
+            }
+        }
+    }
+
+    Tensor::new_integer(
+        storage
+            .from_same_class_values(output)
+            .map_err(|error| internal(name, error))?,
+        shape,
+    )
+    .map_err(|error| internal(name, error))
+}
+
+fn integer_fill_value(
+    storage: &IntegerStorage,
+    op: MovingOp,
+    parsed: &ParsedMoving,
+    count: usize,
+) -> Option<(IntValue, usize)> {
+    if count == 0 {
+        return None;
+    }
+    match parsed.endpoints {
+        Endpoints::FillDefault => Some((storage.cast_f64_assignment(op.default_fill()), count)),
+        Endpoints::Fill(value) => Some((
+            match value.into_int_value() {
+                Some(integer) => storage.cast_exact_assignment(&integer),
+                None => storage.cast_f64_assignment(value.materialize_f64()),
+            },
+            count,
+        )),
+        Endpoints::Shrink | Endpoints::Discard => None,
+    }
+}
+
+fn reduce_integer_window(
+    op: MovingOp,
+    values: &[IntValue],
+    fill: Option<&(IntValue, usize)>,
+) -> IntValue {
+    match op {
+        MovingOp::Min => values
+            .iter()
+            .chain(fill.map(|(value, _)| value))
+            .min_by(|left, right| super::median::compare_same_class_integer(left, right))
+            .expect("integer moving minimum window is nonempty")
+            .clone(),
+        MovingOp::Max => values
+            .iter()
+            .chain(fill.map(|(value, _)| value))
+            .max_by(|left, right| super::median::compare_same_class_integer(left, right))
+            .expect("integer moving maximum window is nonempty")
+            .clone(),
+        MovingOp::Median => integer_median_with_fill(values, fill),
+        _ => unreachable!("exact integer moving path only serves min, max, and median"),
+    }
+}
+
+fn integer_median_with_fill(values: &[IntValue], fill: Option<&(IntValue, usize)>) -> IntValue {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(super::median::compare_same_class_integer);
+    let Some((fill, fill_count)) = fill else {
+        return super::median::integer_median_from_sorted(&sorted);
+    };
+    if *fill_count == 0 {
+        return super::median::integer_median_from_sorted(&sorted);
+    }
+    let total = sorted.len() + *fill_count;
+    let middle = total / 2;
+    if total % 2 == 1 {
+        return kth_integer_with_repeated_fill(&sorted, fill, *fill_count, middle);
+    }
+    let lower = kth_integer_with_repeated_fill(&sorted, fill, *fill_count, middle - 1);
+    let upper = kth_integer_with_repeated_fill(&sorted, fill, *fill_count, middle);
+    super::median::integer_median_from_sorted(&[lower, upper])
+}
+
+fn kth_integer_with_repeated_fill(
+    sorted: &[IntValue],
+    fill: &IntValue,
+    fill_count: usize,
+    index: usize,
+) -> IntValue {
+    let less = sorted.partition_point(|value| {
+        super::median::compare_same_class_integer(value, fill) == Ordering::Less
+    });
+    let equal = sorted[less..].partition_point(|value| {
+        super::median::compare_same_class_integer(value, fill) == Ordering::Equal
+    });
+    if index < less {
+        sorted[index].clone()
+    } else if index < less + equal + fill_count {
+        fill.clone()
+    } else {
+        sorted[index - fill_count].clone()
+    }
 }
 
 fn moving_complex(
@@ -1438,7 +1940,7 @@ fn fill_value(op: MovingOp, parsed: &ParsedMoving, fill_count: usize) -> Option<
     }
     match parsed.endpoints {
         Endpoints::FillDefault => Some((op.default_fill(), fill_count)),
-        Endpoints::Fill(value) => Some((value, fill_count)),
+        Endpoints::Fill(value) => Some((value.materialize_f64(), fill_count)),
         Endpoints::Shrink | Endpoints::Discard => None,
     }
 }
@@ -1918,7 +2420,7 @@ fn parse_endpoints(name: &'static str, value: &Value) -> BuiltinResult<Endpoints
             )),
         };
     }
-    let scalar = scalar_f64(value).ok_or_else(|| {
+    let scalar = scalar_numeric(value).ok_or_else(|| {
         invalid_argument(
             name,
             format!("{name}: Endpoints must be a keyword or scalar fill value"),
@@ -1949,13 +2451,15 @@ async fn numeric_vector(name: &'static str, value: &Value) -> BuiltinResult<Vec<
     }
 }
 
-fn scalar_f64(value: &Value) -> Option<f64> {
+fn scalar_numeric(value: &Value) -> Option<NumericScalar> {
     match value {
-        Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
-        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        Value::Num(n) => Some(NumericScalar::F64(*n)),
+        Value::Int(i) => Some(i.clone().into()),
+        Value::Bool(b) => Some(NumericScalar::F64(if *b { 1.0 } else { 0.0 })),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => t.numeric_value_at(0),
+        Value::LogicalArray(l) if l.data.len() == 1 => {
+            Some(NumericScalar::F64(if l.data[0] != 0 { 1.0 } else { 0.0 }))
+        }
         _ => None,
     }
 }
@@ -2153,6 +2657,220 @@ mod tests {
         let err = call("movmean", MovingOp::Mean, vec![input, Value::Num(1.0)])
             .expect_err("typed complex integer input must reject");
         assert!(err.message().contains("complex numbers with integer types"));
+    }
+
+    #[test]
+    fn moving_integer_data_contracts_are_operation_specific() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 3, 2]),
+            IntegerStorage::I16(vec![1, 3, 2]),
+            IntegerStorage::I32(vec![1, 3, 2]),
+            IntegerStorage::I64(vec![1, 3, 2]),
+            IntegerStorage::U8(vec![1, 3, 2]),
+            IntegerStorage::U16(vec![1, 3, 2]),
+            IntegerStorage::U32(vec![1, 3, 2]),
+            IntegerStorage::U64(vec![1, 3, 2]),
+        ];
+        for storage in storages {
+            let dtype = storage.numeric_dtype();
+            for (name, op) in [
+                ("movsum", MovingOp::Sum),
+                ("movprod", MovingOp::Prod),
+                ("movmean", MovingOp::Mean),
+            ] {
+                let input =
+                    Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer input");
+                let output = expect_tensor(
+                    call(name, op, vec![Value::Tensor(input), Value::Num(1.0)])
+                        .expect("floating moving reduction"),
+                );
+                assert_eq!(
+                    output
+                        .into_numeric_storage()
+                        .expect("numeric output")
+                        .numeric_dtype(),
+                    runmat_builtins::NumericDType::F64,
+                    "{name} with {dtype:?}"
+                );
+            }
+            for (name, op) in [
+                ("movmin", MovingOp::Min),
+                ("movmax", MovingOp::Max),
+                ("movmedian", MovingOp::Median),
+            ] {
+                let input =
+                    Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer input");
+                let output = expect_tensor(
+                    call(name, op, vec![Value::Tensor(input), Value::Num(3.0)])
+                        .expect("exact moving reduction"),
+                );
+                assert_eq!(output.numeric_dtype(), dtype, "{name} with {dtype:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn moving_integer_extrema_and_median_are_exact_above_flintmax() {
+        let base = (1_u64 << 63) + 16;
+        let input = || {
+            Value::Tensor(
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![base, base + 2, base + 1]),
+                    vec![1, 3],
+                )
+                .expect("wide input"),
+            )
+        };
+        let expected = [
+            ("movmin", MovingOp::Min, vec![base, base, base + 1]),
+            ("movmax", MovingOp::Max, vec![base + 2, base + 2, base + 2]),
+            (
+                "movmedian",
+                MovingOp::Median,
+                vec![base + 1, base + 1, base + 2],
+            ),
+        ];
+        for (name, op, expected) in expected {
+            let output = expect_tensor(
+                call(name, op, vec![input(), Value::Num(3.0)]).expect("wide moving reduction"),
+            );
+            assert_eq!(
+                output
+                    .integer_storage()
+                    .expect("integer output")
+                    .exact_values(),
+                expected.into_iter().map(IntValue::U64).collect::<Vec<_>>(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn moving_integer_endpoint_fill_stays_exact() {
+        let fill = u64::MAX;
+        let input = Tensor::new_integer(IntegerStorage::U64(vec![fill - 2, fill - 3]), vec![1, 2])
+            .expect("wide input");
+        let output = expect_tensor(
+            call(
+                "movmax",
+                MovingOp::Max,
+                vec![
+                    Value::Tensor(input),
+                    Value::Num(3.0),
+                    Value::from("Endpoints"),
+                    Value::Int(IntValue::U64(fill)),
+                ],
+            )
+            .expect("exact endpoint fill"),
+        );
+        assert_eq!(
+            output
+                .integer_storage()
+                .expect("integer output")
+                .exact_values(),
+            vec![IntValue::U64(fill), IntValue::U64(fill)]
+        );
+    }
+
+    #[test]
+    fn moving_dispersion_rejects_every_integer_data_class() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            for (name, op) in [("movstd", MovingOp::Std), ("movvar", MovingOp::Var)] {
+                let input =
+                    Tensor::new_integer(storage.clone(), vec![1, 1]).expect("integer input");
+                for extensions_enabled in [false, true] {
+                    let _compat =
+                        crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
+                    let error = call(
+                        name,
+                        op,
+                        vec![Value::Tensor(input.clone()), Value::Num(1.0)],
+                    )
+                    .expect_err("integer data must reject");
+                    assert_eq!(
+                        error.identifier(),
+                        Some(if name == "movstd" {
+                            "RunMat:movstd:InvalidInput"
+                        } else {
+                            "RunMat:movvar:InvalidInput"
+                        })
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn moving_dispersion_rejects_resident_integer_data_before_provider_dispatch() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            for (name, op) in [("movstd", MovingOp::Std), ("movvar", MovingOp::Var)] {
+                for extensions_enabled in [false, true] {
+                    let _compat =
+                        crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
+                    let error = call(
+                        name,
+                        op,
+                        vec![Value::GpuTensor(handle.clone()), Value::Num(1.0)],
+                    )
+                    .expect_err("resident integer data must reject");
+                    assert_eq!(
+                        error.identifier(),
+                        Some(if name == "movstd" {
+                            "RunMat:movstd:InvalidInput"
+                        } else {
+                            "RunMat:movvar:InvalidInput"
+                        })
+                    );
+                }
+            }
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn moving_dispersion_typed_integer_controls_follow_compatibility_mode() {
+        for (name, op, identifier) in [
+            (
+                "movstd",
+                MovingOp::Std,
+                "RunMat:compatibility:MovstdTypedIntegerControlExtension",
+            ),
+            (
+                "movvar",
+                MovingOp::Var,
+                "RunMat:compatibility:MovvarTypedIntegerControlExtension",
+            ),
+        ] {
+            let args = || {
+                vec![
+                    tensor(vec![1.0, 2.0, 3.0], vec![1, 3]),
+                    Value::Num(3.0),
+                    Value::Int(IntValue::U64(1)),
+                ]
+            };
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = call(name, op, args()).expect_err("strict mode must reject");
+                assert_eq!(error.identifier(), Some(identifier));
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                call(name, op, args()).expect("RunMat mode accepts typed integer control");
+            }
+        }
     }
 
     fn expect_tensor(value: Value) -> Tensor {
@@ -2426,6 +3144,7 @@ mod tests {
 
     #[test]
     fn movstd_normalization_reads_typed_integer_tensor_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = tensor(vec![4., 8., 6.], vec![1, 3]);
         let normalization =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("integer tensor");
@@ -2667,6 +3386,124 @@ mod tests {
         .expect("movsum samplepoints");
         let out = expect_tensor(result);
         assert_eq!(out.materialize_f64(), vec![3.0, 3.0, 3.0]);
+    }
+
+    #[test]
+    fn moving_gpu_sample_points_follow_compatibility_mode() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            for (name, op, identifier) in [
+                (
+                    "movsum",
+                    MovingOp::Sum,
+                    "RunMat:compatibility:MovsumGpuSamplePointsExtension",
+                ),
+                (
+                    "movprod",
+                    MovingOp::Prod,
+                    "RunMat:compatibility:MovprodGpuSamplePointsExtension",
+                ),
+                (
+                    "movmean",
+                    MovingOp::Mean,
+                    "RunMat:compatibility:MovmeanGpuSamplePointsExtension",
+                ),
+                (
+                    "movmedian",
+                    MovingOp::Median,
+                    "RunMat:compatibility:MovmedianGpuSamplePointsExtension",
+                ),
+                (
+                    "movmin",
+                    MovingOp::Min,
+                    "RunMat:compatibility:MovminGpuSamplePointsExtension",
+                ),
+                (
+                    "movmax",
+                    MovingOp::Max,
+                    "RunMat:compatibility:MovmaxGpuSamplePointsExtension",
+                ),
+                (
+                    "movstd",
+                    MovingOp::Std,
+                    "RunMat:compatibility:MovstdGpuSamplePointsExtension",
+                ),
+                (
+                    "movvar",
+                    MovingOp::Var,
+                    "RunMat:compatibility:MovvarGpuSamplePointsExtension",
+                ),
+            ] {
+                let input = provider
+                    .upload(&HostTensorView {
+                        data: &[1.0, 2.0, 4.0],
+                        shape: &[1, 3],
+                    })
+                    .expect("upload");
+                let args = || {
+                    vec![
+                        Value::GpuTensor(input.clone()),
+                        Value::Num(2.1),
+                        Value::from("SamplePoints"),
+                        tensor(vec![0.0, 1.0, 3.0], vec![1, 3]),
+                    ]
+                };
+                {
+                    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                    let error = call(name, op, args()).expect_err("strict mode must reject");
+                    assert_eq!(error.identifier(), Some(identifier));
+                }
+                {
+                    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                    let output =
+                        call(name, op, args()).expect("RunMat mode accepts GPU SamplePoints");
+                    let Value::GpuTensor(output) = output else {
+                        panic!("{name} must return a resident result");
+                    };
+                    provider.free(&output).ok();
+                }
+                provider.free(&input).ok();
+            }
+        });
+    }
+
+    #[test]
+    fn movmedian_gpu_large_window_follows_compatibility_mode() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let values = (0..33).map(f64::from).collect::<Vec<_>>();
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &[1, 33],
+                })
+                .expect("upload");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = call(
+                    "movmedian",
+                    MovingOp::Median,
+                    vec![Value::GpuTensor(input.clone()), Value::Num(33.0)],
+                )
+                .expect_err("strict mode must reject");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:MovmedianGpuLargeWindowExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let output = call(
+                    "movmedian",
+                    MovingOp::Median,
+                    vec![Value::GpuTensor(input.clone()), Value::Num(33.0)],
+                )
+                .expect("RunMat mode accepts large GPU window");
+                let Value::GpuTensor(output) = output else {
+                    panic!("movmedian must return resident result");
+                };
+                provider.free(&output).ok();
+            }
+            provider.free(&input).ok();
+        });
     }
 
     #[test]

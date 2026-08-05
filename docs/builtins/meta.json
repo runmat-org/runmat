@@ -66596,6 +66596,91 @@
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "movmax-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "movmax with SamplePoints on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovmaxGpuSamplePointsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movmax(A, k, dim, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer classes; typed complex integers remain outside the documented real integer domain."
+            },
+            {
+              "name": "k_or_window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Count windows accept exact positive typed-integer lengths or exact nonnegative backward/forward lengths."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage."
+            },
+            {
+              "name": "endpoint_fill_or_sample_points",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric endpoint fills and sample-point vectors accept integer classes; exact endpoint fills stay typed for native integer outputs, while sample locations intentionally enter the floating positional domain."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Every window selects its maximum directly from exact same-class integer values and exact typed endpoint fills; integer overflow is inapplicable, while GPU SamplePoints is a mode-gated gather/reupload extension."
+        }
       ]
     },
     {
@@ -66839,6 +66924,91 @@
           "identifier": "RunMat:movmean:Internal",
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "movmean-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "movmean with SamplePoints on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovmeanGpuSamplePointsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movmean(A, k, dim, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer classes; typed complex integers remain outside the documented real integer domain."
+            },
+            {
+              "name": "k_or_window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Count windows accept exact positive typed-integer lengths or exact nonnegative backward/forward lengths."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage."
+            },
+            {
+              "name": "endpoint_fill_or_sample_points",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric endpoint fills and sample-point vectors accept integer classes; exact endpoint fills stay typed for native integer outputs, while sample locations intentionally enter the floating positional domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer data is materialized once into the documented double mean and output domain; endpoint shape rules and missing-value spellings share that rule, and GPU SamplePoints is a mode-gated gather/reupload extension."
         }
       ]
     },
@@ -67084,6 +67254,97 @@
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "movmedian-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "movmedian with SamplePoints on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovmedianGpuSamplePointsExtension"
+        },
+        {
+          "id": "movmedian-gpu-large-window",
+          "mode": "RunMatOnly",
+          "description": "movmedian with a window longer than 31 on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovmedianGpuLargeWindowExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movmedian(A, k, dim, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer classes; typed complex integers remain outside the documented real integer domain."
+            },
+            {
+              "name": "k_or_window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Count windows accept exact positive typed-integer lengths or exact nonnegative backward/forward lengths."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage."
+            },
+            {
+              "name": "endpoint_fill_or_sample_points",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric endpoint fills and sample-point vectors accept integer classes; exact endpoint fills stay typed for native integer outputs, while sample locations intentionally enter the floating positional domain."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Every window orders exact same-class integer values and uses the native median midpoint rule; exact typed endpoint fills retain class, while GPU SamplePoints and windows longer than 31 are separately mode-gated gather/reupload extensions."
+        }
       ]
     },
     {
@@ -67328,6 +67589,91 @@
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "movmin-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "movmin with SamplePoints on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovminGpuSamplePointsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movmin(A, k, dim, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer classes; typed complex integers remain outside the documented real integer domain."
+            },
+            {
+              "name": "k_or_window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Count windows accept exact positive typed-integer lengths or exact nonnegative backward/forward lengths."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage."
+            },
+            {
+              "name": "endpoint_fill_or_sample_points",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric endpoint fills and sample-point vectors accept integer classes; exact endpoint fills stay typed for native integer outputs, while sample locations intentionally enter the floating positional domain."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Every window selects its minimum directly from exact same-class integer values and exact typed endpoint fills; integer overflow is inapplicable, while GPU SamplePoints is a mode-gated gather/reupload extension."
+        }
       ]
     },
     {
@@ -67571,6 +67917,91 @@
           "identifier": "RunMat:movprod:Internal",
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "movprod-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "movprod with SamplePoints on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovprodGpuSamplePointsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movprod(A, k, dim, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer classes; typed complex integers remain outside the documented real integer domain."
+            },
+            {
+              "name": "k_or_window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Count windows accept exact positive typed-integer lengths or exact nonnegative backward/forward lengths."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage."
+            },
+            {
+              "name": "endpoint_fill_or_sample_points",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric endpoint fills and sample-point vectors accept integer classes; exact endpoint fills stay typed for native integer outputs, while sample locations intentionally enter the floating positional domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer data is materialized once into the documented double computation and output domain; endpoint shape rules and missing-value spellings share that rule, and GPU SamplePoints is a mode-gated gather/reupload extension."
         }
       ]
     },
@@ -68061,6 +68492,67 @@
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "movstd-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "movstd with SamplePoints on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovstdGpuSamplePointsExtension"
+        },
+        {
+          "id": "movstd-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "movstd with a typed-integer normalization or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovstdTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movstd(A, k, args...) with integer A",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented moving-dispersion data domain is single, double, or logical; every typed-integer data class is rejected before host or provider dispatch."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Integer data is invalid in every compatibility mode, including resident integer data, and no integer output contract exists."
+        },
+        {
+          "form": "M = movstd(A, k, normalization_or_dimension, ...) with floating A",
+          "inputs": [
+            {
+              "name": "normalization_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact host typed-integer normalization and dimension controls; MATLAB-compatible modes retain the documented floating control surface."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are a mode-gated RunMat extension; values are decoded exactly on the host, while the floating data reduction may still execute on a provider."
+        }
       ]
     },
     {
@@ -68304,6 +68796,91 @@
           "identifier": "RunMat:movsum:Internal",
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "movsum-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "movsum with SamplePoints on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovsumGpuSamplePointsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movsum(A, k, dim, nanflag, Name, Value)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer classes; typed complex integers remain outside the documented real integer domain."
+            },
+            {
+              "name": "k_or_window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Count windows accept exact positive typed-integer lengths or exact nonnegative backward/forward lengths."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage."
+            },
+            {
+              "name": "endpoint_fill_or_sample_points",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric endpoint fills and sample-point vectors accept integer classes; exact endpoint fills stay typed for native integer outputs, while sample locations intentionally enter the floating positional domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer data is materialized once into the documented double computation and output domain; endpoint shape rules and missing-value spellings share that rule, and GPU SamplePoints is a mode-gated gather/reupload extension."
         }
       ]
     },
@@ -68793,6 +69370,67 @@
           "identifier": "RunMat:movvar:Internal",
           "when": "Moving-window execution fails due to allocation, provider, or shape operations.",
           "message": "moving window: internal failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "movvar-gpu-sample-points",
+          "mode": "RunMatOnly",
+          "description": "movvar with SamplePoints on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovvarGpuSamplePointsExtension"
+        },
+        {
+          "id": "movvar-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "movvar with a typed-integer normalization or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovvarTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movvar(A, k, args...) with integer A",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented moving-dispersion data domain is single, double, or logical; every typed-integer data class is rejected before host or provider dispatch."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Integer data is invalid in every compatibility mode, including resident integer data, and no integer output contract exists."
+        },
+        {
+          "form": "M = movvar(A, k, normalization_or_dimension, ...) with floating A",
+          "inputs": [
+            {
+              "name": "normalization_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact host typed-integer normalization and dimension controls; MATLAB-compatible modes retain the documented floating control surface."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are a mode-gated RunMat extension; values are decoded exactly on the host, while the floating data reduction may still execute on a provider."
         }
       ]
     },
