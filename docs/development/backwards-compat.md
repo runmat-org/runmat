@@ -120,6 +120,8 @@ The adjacent descriptive functions likewise retain their individually documented
 
 `corrcoef` documents real or complex single/double observation data, equal-size paired inputs that are vectorized into two variables, `Rows` and floating `Alpha` name-value controls, and one, two, or four public outputs. RunMat independently mode-gates typed-integer and logical observation data before provider dispatch or gather, centers real and complex integer components through exact differences before floating correlation, rejects typed-integer `Alpha` because no integer satisfies its documented open interval, preserves complex one-output correlation, and keeps supported real single-output GPU calls resident with the same vector and paired geometry.
 
+`corrcov` and `cov2corr` are distinct public APIs rather than aliases. `corrcov` documents single/double symmetric positive-semidefinite covariance input, correlation-first output with a column standard-deviation vector, and full GPU support; RunMat independently gates integer and logical covariance input. Finance Toolbox `cov2corr` documents double covariance input and returns a row standard-deviation vector before the correlation matrix; RunMat independently gates single, integer, logical, and resident-GPU inputs. Integer extensions validate symmetry from exact storage before entering double square-root and normalization arithmetic, and supported resident integer inputs use explicit gather fallback.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

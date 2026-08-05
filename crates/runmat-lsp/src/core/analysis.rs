@@ -1964,6 +1964,11 @@ mod tests {
                 "___ = corrcoef(A, Name, Value)",
             ),
             ("corrcoef([1 2; 3 4], [5 6; 7 8]);", "R = corrcoef(A, B)"),
+            ("corrcov([1 0.2; 0.2 1]);", "R = corrcov(C)"),
+            (
+                "cov2corr([1 0.2; 0.2 1]);",
+                "[ExpSigma, ExpCorrC] = cov2corr(ExpCovariance)",
+            ),
         ];
 
         for (text, expected_label) in cases {

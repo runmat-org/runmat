@@ -15994,7 +15994,7 @@
         {
           "code": "RM.corrcov.INVALID_ARGUMENT",
           "identifier": "RunMat:corrcov:InvalidArgument",
-          "when": "Input is nonnumeric, complex, not single/double precision, non-square, has negative variances, violates covariance bounds, or too many arguments/outputs are supplied.",
+          "when": "Input is nonnumeric, complex, outside the documented single/double domain or declared RunMat extensions, non-square, non-finite, asymmetric, not positive semidefinite, or too many arguments/outputs are supplied.",
           "message": "covariance conversion: invalid argument"
         },
         {
@@ -16002,6 +16002,49 @@
           "identifier": "RunMat:corrcov:Internal",
           "when": "Internal tensor allocation fails.",
           "message": "covariance conversion: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "corrcov-integer-data",
+          "mode": "RunMatOnly",
+          "description": "corrcov with typed-integer covariance data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CorrcovIntegerDataExtension"
+        },
+        {
+          "id": "corrcov-logical-data",
+          "mode": "RunMatOnly",
+          "description": "corrcov with logical covariance data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CorrcovLogicalDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[R, sigma] = corrcov(integer_C)",
+          "inputs": [
+            {
+              "name": "C",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented covariance-matrix domain is floating; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat validates exact integer symmetry before converting covariance values into double square-root and normalization arithmetic."
         }
       ]
     },
@@ -16795,10 +16838,10 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "R = cov2corr(C)",
+          "label": "[ExpSigma, ExpCorrC] = cov2corr(ExpCovariance)",
           "inputs": [
             {
-              "name": "C",
+              "name": "ExpCovariance",
               "ty": "Any",
               "arity": "Required",
               "default": null,
@@ -16807,39 +16850,18 @@
           ],
           "outputs": [
             {
-              "name": "R",
+              "name": "ExpSigma",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Correlation matrix corresponding to the covariance matrix."
-            }
-          ]
-        },
-        {
-          "label": "[R, sigma] = cov2corr(C)",
-          "inputs": [
-            {
-              "name": "C",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Square covariance matrix."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "R",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Correlation matrix corresponding to the covariance matrix."
+              "description": "Row vector of standard deviations computed from diag(ExpCovariance)."
             },
             {
-              "name": "sigma",
+              "name": "ExpCorrC",
               "ty": "NumericArray",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
-              "description": "Column vector of standard deviations computed from diag(C)."
+              "description": "Correlation matrix corresponding to ExpCovariance."
             }
           ]
         }
@@ -16848,7 +16870,7 @@
         {
           "code": "RM.cov2corr.INVALID_ARGUMENT",
           "identifier": "RunMat:cov2corr:InvalidArgument",
-          "when": "Input is nonnumeric, complex, not single/double precision, non-square, has negative variances, violates covariance bounds, or too many arguments/outputs are supplied.",
+          "when": "Input is nonnumeric, complex, outside the documented double domain or declared RunMat extensions, non-square, non-finite, asymmetric, not positive semidefinite, or too many arguments/outputs are supplied.",
           "message": "covariance conversion: invalid argument"
         },
         {
@@ -16856,6 +16878,61 @@
           "identifier": "RunMat:cov2corr:Internal",
           "when": "Internal tensor allocation fails.",
           "message": "covariance conversion: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cov2corr-integer-data",
+          "mode": "RunMatOnly",
+          "description": "cov2corr with typed-integer covariance data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Cov2corrIntegerDataExtension"
+        },
+        {
+          "id": "cov2corr-logical-data",
+          "mode": "RunMatOnly",
+          "description": "cov2corr with logical covariance data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Cov2corrLogicalDataExtension"
+        },
+        {
+          "id": "cov2corr-single-data",
+          "mode": "RunMatOnly",
+          "description": "cov2corr with single covariance data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Cov2corrSingleDataExtension"
+        },
+        {
+          "id": "cov2corr-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "cov2corr with a resident GPU covariance matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Cov2corrGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[ExpSigma, ExpCorrC] = cov2corr(integer_ExpCovariance)",
+          "inputs": [
+            {
+              "name": "ExpCovariance",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented Finance Toolbox covariance-matrix domain is double; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat validates exact integer symmetry before returning double standard deviations and correlation coefficients in the documented Finance Toolbox order and shapes."
         }
       ]
     },
