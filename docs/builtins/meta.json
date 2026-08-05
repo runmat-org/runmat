@@ -51834,6 +51834,51 @@
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "intersect: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[C, ia, ib] = intersect(integer_A, integer_B, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "B accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "C preserves the common nondouble integer class, including when paired with double; ia and ib are one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback."
+        }
       ]
     },
     {
@@ -53531,6 +53576,51 @@
           "identifier": "RunMat:ismember:Internal",
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "ismember: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[Lia, Locb] = ismember(integer_A, integer_B, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "B accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Lia is logical and optional Locb is one-based double. Host supports all eight integer classes exactly; GPU supports integer classes through 32 bits, gathers typed fallback when needed, and restores both outputs to the owning provider."
         }
       ]
     },
@@ -97485,6 +97575,51 @@
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "setdiff: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[C, ia] = setdiff(integer_A, integer_B, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "B accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "C preserves A's integer class, including when B is double; ia is one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback."
+        }
       ]
     },
     {
@@ -98045,6 +98180,51 @@
           "identifier": "RunMat:setxor:Internal",
           "when": "Internal conversion, allocation, or provider decode fails.",
           "message": "setxor: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[C, ia, ib] = setxor(integer_A, integer_B, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "B accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "C preserves the common nondouble integer class, including when paired with double; ia and ib are one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback."
         }
       ]
     },
@@ -114470,6 +114650,51 @@
           "identifier": "RunMat:union:Internal",
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "union: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[C, ia, ib] = union(integer_A, integer_B, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "B accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "C preserves the common nondouble integer class, including when paired with double; ia and ib are one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback."
         }
       ]
     },

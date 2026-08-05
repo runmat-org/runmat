@@ -6,10 +6,12 @@ use runmat_accelerate_api::{
     GpuTensorHandle, HostLogicalOwned, IsMemberOptions as ProviderIsMemberOptions, IsMemberResult,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericDType, NumericStorage,
-    StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray,
+    NumericDType, NumericStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -31,12 +33,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("ismember")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may supply dedicated membership kernels; until then RunMat gathers GPU tensors to host memory.",
+    notes: "Providers may supply dedicated membership kernels; exact typed fallback gathers when needed and restores logical membership plus double locations to the input owner.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -202,6 +204,18 @@ const ISMEMBER_ERRORS: [BuiltinErrorDescriptor; 7] = [
     ISMEMBER_ERROR_INTERNAL,
 ];
 
+const ISMEMBER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[Lia, Locb] = ismember(integer_A, integer_B, options)",
+        inputs: &super::BINARY_SET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Lia is logical and optional Locb is one-based double. Host supports all eight integer classes exactly; GPU supports integer classes through 32 bits, gathers typed fallback when needed, and restores both outputs to the owning provider.",
+    }];
+
 pub const ISMEMBER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISMEMBER_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -237,24 +251,47 @@ fn ismember_internal_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(logical_output_type),
     descriptor(crate::builtins::array::sorting_sets::ismember::ISMEMBER_DESCRIPTOR),
+    integer_capabilities(ISMEMBER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::sorting_sets::ismember"
 )]
 async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
+        return Err(ismember_error_with(
+            &ISMEMBER_ERROR_INVALID_ARGUMENT,
+            "ismember: too many output arguments; maximum is 2",
+        ));
+    }
+    let provider = super::set_output_provider(&a, &b);
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_mask_value()]));
+            let outputs = super::restore_set_outputs(
+                provider,
+                BUILTIN_NAME,
+                vec![eval.into_mask_value()],
+                ismember_internal_error,
+            )?;
+            return Ok(Value::OutputList(outputs));
         }
         let (mask, loc) = eval.into_pair();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
+        let outputs = super::restore_set_outputs(
+            provider,
+            BUILTIN_NAME,
             vec![mask, loc],
-        ));
+            ismember_internal_error,
+        )?;
+        return Ok(Value::OutputList(outputs));
     }
-    Ok(eval.into_mask_value())
+    let mut outputs = super::restore_set_outputs(
+        provider,
+        BUILTIN_NAME,
+        vec![eval.into_mask_value()],
+        ismember_internal_error,
+    )?;
+    Ok(outputs.pop().expect("ismember output"))
 }
 
 /// Evaluate the `ismember` builtin once and expose all outputs.
@@ -328,7 +365,9 @@ async fn ismember_gpu_pair(
     handle_b: GpuTensorHandle,
     opts: &IsMemberOptions,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle_a)
+        .or_else(runmat_accelerate_api::provider)
+    {
         let provider_opts = opts.into_provider_options();
         match provider
             .ismember(&handle_a, &handle_b, &provider_opts)
@@ -1092,7 +1131,7 @@ fn logical_array_into_value(logical: LogicalArray) -> Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Tensor, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -1103,6 +1142,55 @@ pub(crate) mod tests {
         rest: &[Value],
     ) -> crate::BuiltinResult<IsMemberEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
+    }
+
+    fn builtin_sync(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        futures::executor::block_on(ismember_builtin(a, b, rest))
+    }
+
+    #[test]
+    fn registered_builtin_restores_resident_outputs_and_rejects_excess_arity() {
+        test_support::with_test_provider(|provider| {
+            let left = Tensor::new_integer(IntegerStorage::I32(vec![7, 2, 9]), vec![3, 1]).unwrap();
+            let right = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
+            let left =
+                Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
+            let right = Value::GpuTensor(
+                gpu_helpers::upload_tensor(provider, &right).expect("upload right"),
+            );
+
+            {
+                let _guard = crate::output_count::push_output_count(Some(2));
+                let Value::OutputList(outputs) =
+                    builtin_sync(left, right, Vec::new()).expect("resident ismember")
+                else {
+                    panic!("expected output list");
+                };
+                assert_eq!(outputs.len(), 2);
+                let Value::GpuTensor(mask) = &outputs[0] else {
+                    panic!("expected resident membership mask");
+                };
+                assert!(runmat_accelerate_api::handle_is_logical(mask));
+                assert!(matches!(outputs[1], Value::GpuTensor(_)));
+                assert_eq!(
+                    test_support::gather(outputs[0].clone())
+                        .expect("gather mask")
+                        .materialize_f64(),
+                    vec![1.0, 1.0, 0.0]
+                );
+                assert_eq!(
+                    test_support::gather(outputs[1].clone())
+                        .expect("gather locations")
+                        .materialize_f64(),
+                    vec![2.0, 1.0, 0.0]
+                );
+            }
+
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let err = builtin_sync(Value::Num(1.0), Value::Num(1.0), Vec::new())
+                .expect_err("excess outputs must fail");
+            assert_eq!(err.identifier(), ISMEMBER_ERROR_INVALID_ARGUMENT.identifier);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

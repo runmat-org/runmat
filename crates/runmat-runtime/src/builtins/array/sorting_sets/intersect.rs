@@ -1,19 +1,21 @@
 //! MATLAB-compatible `intersect` builtin with GPU-aware semantics for RunMat.
 //!
 //! Supports element-wise and row-wise intersections with optional stable ordering,
-//! and index outputs that mirror MathWorks MATLAB semantics. GPU tensors are
-//! gathered to host memory unless a provider supplies a dedicated `intersect`
-//! kernel hook.
+//! and index outputs that mirror MathWorks MATLAB semantics. GPU tensors use
+//! typed host fallback and their public outputs are restored to the owning
+//! provider.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericStorage, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
+    NumericDType, NumericStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -24,7 +26,7 @@ use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
@@ -37,15 +39,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("intersect"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("intersect")],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes:
-        "Providers may expose a dedicated intersect hook; otherwise tensors are gathered and processed on the host.",
+    notes: "Exact typed fallback gathers when needed and restores intersection values plus double indices to the input owner.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -253,6 +254,18 @@ const INTERSECT_ERRORS: [BuiltinErrorDescriptor; 8] = [
     INTERSECT_ERROR_INTERNAL,
 ];
 
+const INTERSECT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[C, ia, ib] = intersect(integer_A, integer_B, options)",
+        inputs: &super::BINARY_SET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "C preserves the common nondouble integer class, including when paired with double; ia and ib are one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback.",
+    }];
+
 pub const INTERSECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &INTERSECT_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -288,28 +301,57 @@ fn intersect_internal_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(set_values_output_type),
     descriptor(crate::builtins::array::sorting_sets::intersect::INTERSECT_DESCRIPTOR),
+    integer_capabilities(INTERSECT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
+        return Err(intersect_error_with(
+            &INTERSECT_ERROR_INVALID_ARGUMENT,
+            "intersect: too many output arguments; maximum is 3",
+        ));
+    }
+    let provider = super::set_output_provider(&a, &b);
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_values_value()]));
+            let outputs = super::restore_set_outputs(
+                provider,
+                BUILTIN_NAME,
+                vec![eval.into_values_value()],
+                intersect_internal_error,
+            )?;
+            return Ok(Value::OutputList(outputs));
         }
         if out_count == 2 {
             let (values, ia) = eval.into_pair();
-            return Ok(Value::OutputList(vec![values, ia]));
+            let outputs = super::restore_set_outputs(
+                provider,
+                BUILTIN_NAME,
+                vec![values, ia],
+                intersect_internal_error,
+            )?;
+            return Ok(Value::OutputList(outputs));
         }
         let (values, ia, ib) = eval.into_triple();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
+        let outputs = super::restore_set_outputs(
+            provider,
+            BUILTIN_NAME,
             vec![values, ia, ib],
-        ));
+            intersect_internal_error,
+        )?;
+        return Ok(Value::OutputList(outputs));
     }
-    Ok(eval.into_values_value())
+    let mut outputs = super::restore_set_outputs(
+        provider,
+        BUILTIN_NAME,
+        vec![eval.into_values_value()],
+        intersect_internal_error,
+    )?;
+    Ok(outputs.pop().expect("intersect output"))
 }
 
 /// Evaluate the `intersect` builtin once and expose all outputs.
@@ -1843,6 +1885,50 @@ pub(crate) mod tests {
         rest: &[Value],
     ) -> crate::BuiltinResult<IntersectEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
+    }
+
+    fn builtin_sync(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        futures::executor::block_on(intersect_builtin(a, b, rest))
+    }
+
+    #[test]
+    fn registered_builtin_restores_resident_outputs_and_rejects_excess_arity() {
+        test_support::with_test_provider(|provider| {
+            let left = Tensor::new_integer(IntegerStorage::I32(vec![7, 2, 9]), vec![3, 1]).unwrap();
+            let right = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
+            let left =
+                Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
+            let right = Value::GpuTensor(
+                gpu_helpers::upload_tensor(provider, &right).expect("upload right"),
+            );
+
+            {
+                let _guard = crate::output_count::push_output_count(Some(3));
+                let Value::OutputList(outputs) =
+                    builtin_sync(left, right, Vec::new()).expect("resident intersect")
+                else {
+                    panic!("expected output list");
+                };
+                assert_eq!(outputs.len(), 3);
+                assert!(outputs
+                    .iter()
+                    .all(|output| matches!(output, Value::GpuTensor(_))));
+                assert_eq!(
+                    test_support::gather(outputs[0].clone())
+                        .expect("gather values")
+                        .integer_storage(),
+                    Some(&IntegerStorage::I32(vec![2, 7]))
+                );
+            }
+
+            let _guard = crate::output_count::push_output_count(Some(4));
+            let err = builtin_sync(Value::Num(1.0), Value::Num(1.0), Vec::new())
+                .expect_err("excess outputs must fail");
+            assert_eq!(
+                err.identifier(),
+                INTERSECT_ERROR_INVALID_ARGUMENT.identifier
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

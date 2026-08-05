@@ -1,18 +1,20 @@
 //! MATLAB-compatible `setxor` builtin with host-authoritative set semantics.
 //!
 //! Supports element-wise and row-wise symmetric differences with sorted or stable
-//! ordering and index outputs. GPU tensors are gathered to host memory today,
-//! matching the other set-operation builtins when no provider hook exists.
+//! ordering and index outputs. GPU tensors use typed host fallback and their
+//! public outputs are restored to the owning provider.
 
 use std::cmp::Ordering;
 use std::collections::{hash_map::Entry, HashMap};
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericScalar, NumericStorage, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
+    NumericDType, NumericScalar, NumericStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -36,12 +38,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes: "`setxor` currently gathers GPU tensors and evaluates on the host.",
+    notes: "`setxor` gathers through exact typed fallback and restores symmetric-difference values plus double indices to the input owner.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -230,6 +232,18 @@ const SETXOR_ERRORS: [BuiltinErrorDescriptor; 9] = [
     SETXOR_ERROR_INTERNAL,
 ];
 
+const SETXOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[C, ia, ib] = setxor(integer_A, integer_B, options)",
+        inputs: &super::BINARY_SET_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "C preserves the common nondouble integer class, including when paired with double; ia and ib are one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback.",
+    }];
+
 pub const SETXOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SETXOR_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -327,6 +341,7 @@ fn setxor_internal_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(set_values_output_type),
     descriptor(crate::builtins::array::sorting_sets::setxor::SETXOR_DESCRIPTOR),
+    integer_capabilities(SETXOR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::sorting_sets::setxor"
 )]
 async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -336,21 +351,39 @@ async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinR
             "setxor: too many output arguments; maximum is 3",
         ));
     }
+    let provider = super::set_output_provider(&a, &b);
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_values_value()]));
+            let outputs = super::restore_set_outputs(
+                provider,
+                BUILTIN_NAME,
+                vec![eval.into_values_value()],
+                setxor_internal_error,
+            )?;
+            return Ok(Value::OutputList(outputs));
         }
         let (values, ia, ib) = eval.into_triple();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![values, ia, ib],
-        ));
+        let mut host_outputs = vec![values, ia, ib];
+        host_outputs.truncate(out_count);
+        let outputs = super::restore_set_outputs(
+            provider,
+            BUILTIN_NAME,
+            host_outputs,
+            setxor_internal_error,
+        )?;
+        return Ok(Value::OutputList(outputs));
     }
-    Ok(eval.into_values_value())
+    let mut outputs = super::restore_set_outputs(
+        provider,
+        BUILTIN_NAME,
+        vec![eval.into_values_value()],
+        setxor_internal_error,
+    )?;
+    Ok(outputs.pop().expect("setxor output"))
 }
 
 pub async fn evaluate(
@@ -1826,6 +1859,35 @@ mod tests {
 
     fn assert_double(tensor: &Tensor, expected: &[f64]) {
         assert_eq!(tensor.as_f64_slice().expect("double tensor"), expected);
+    }
+
+    #[test]
+    fn registered_builtin_restores_resident_outputs() {
+        test_support::with_test_provider(|provider| {
+            let left = Tensor::new_integer(IntegerStorage::I32(vec![7, 2, 9]), vec![3, 1]).unwrap();
+            let right = Tensor::new_integer(IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
+            let left =
+                Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
+            let right = Value::GpuTensor(
+                gpu_helpers::upload_tensor(provider, &right).expect("upload right"),
+            );
+            let _guard = crate::output_count::push_output_count(Some(3));
+            let Value::OutputList(outputs) =
+                builtin_sync(left, right, Vec::new()).expect("resident setxor")
+            else {
+                panic!("expected output list");
+            };
+            assert_eq!(outputs.len(), 3);
+            assert!(outputs
+                .iter()
+                .all(|output| matches!(output, Value::GpuTensor(_))));
+            assert_eq!(
+                test_support::gather(outputs[0].clone())
+                    .expect("gather values")
+                    .integer_storage(),
+                Some(&IntegerStorage::I32(vec![9]))
+            );
+        });
     }
 
     #[test]
