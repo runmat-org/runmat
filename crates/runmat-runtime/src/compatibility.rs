@@ -314,6 +314,7 @@ mod tests {
             "imshow",
             "isprime",
             "lcm",
+            "mean",
             "mod",
             "mpower",
             "nearestNeighbor",

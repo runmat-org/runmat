@@ -2,10 +2,13 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar,
-    NumericStorage, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
+    NumericDType, NumericScalar, NumericStorage, Tensor, Type, Value,
 };
 const NAME: &str = "mean";
 
@@ -271,6 +274,90 @@ pub const MEAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &MEAN_ERRORS,
 };
+
+const INTEGER_DATA_AND_DIM_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Ordinary real arrays accept all eight integer storage classes.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Optional dimensions accept exact positive integer scalars or vectors in every integer class; integer-valued double selectors remain allowed.",
+    },
+];
+
+const WEIGHTED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Weighted reduction retains the ordinary all-class integer data contract.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional weighted-reduction dimension accepts every integer class and integer-valued double; weights cannot be combined with vecdim or all.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "W",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Weights are restricted to nonnegative single or double arrays; integer and logical weights are rejected before reduction.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = mean(A, dim_or_vecdim, missingflag, \"default\"|\"double\")",
+        inputs: &INTEGER_DATA_AND_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Default and explicit-double integer means enter the floating reduction domain and return double; all and omitted dimensions share this rule, and supported resident inputs remain resident.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = mean(A, dim_or_vecdim, missingflag, \"native\")",
+        inputs: &INTEGER_DATA_AND_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native integer mean widens the full accumulation and performs one nearest/ties-away division; the mean remains within the input class range without intermediate saturation, and CPU/provider paths preserve all eight classes.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = mean(A, dim, missingflag, Weights=W, \"default\"|\"double\")",
+        inputs: &WEIGHTED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer data with floating weights returns double by default; integer weights are rejected, and resident fallback output is re-uploaded.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "M = mean(A, dim, missingflag, Weights=W, \"native\")",
+        inputs: &WEIGHTED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native weighted integer mean anchors exact wide integer values, applies nonnegative floating weights, rounds once with ties away from zero, remains within the input class range, and re-uploads gathered resident results.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::mean")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -562,6 +649,7 @@ enum MeanAxes {
     accel = "reduction",
     type_resolver(mean_type),
     descriptor(crate::builtins::math::reduction::mean::MEAN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::reduction::mean::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
 pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

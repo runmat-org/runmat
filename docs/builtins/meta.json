@@ -61830,6 +61830,194 @@
           "when": "Reduction execution fails due to conversion, provider, allocation, or coercion operations.",
           "message": "mean: internal reduction failure"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = mean(A, dim_or_vecdim, missingflag, \"default\"|\"double\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer storage classes."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Optional dimensions accept exact positive integer scalars or vectors in every integer class; integer-valued double selectors remain allowed."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Default and explicit-double integer means enter the floating reduction domain and return double; all and omitted dimensions share this rule, and supported resident inputs remain resident."
+        },
+        {
+          "form": "M = mean(A, dim_or_vecdim, missingflag, \"native\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Ordinary real arrays accept all eight integer storage classes."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Optional dimensions accept exact positive integer scalars or vectors in every integer class; integer-valued double selectors remain allowed."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Native integer mean widens the full accumulation and performs one nearest/ties-away division; the mean remains within the input class range without intermediate saturation, and CPU/provider paths preserve all eight classes."
+        },
+        {
+          "form": "M = mean(A, dim, missingflag, Weights=W, \"default\"|\"double\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Weighted reduction retains the ordinary all-class integer data contract."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional weighted-reduction dimension accepts every integer class and integer-valued double; weights cannot be combined with vecdim or all."
+            },
+            {
+              "name": "W",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Weights are restricted to nonnegative single or double arrays; integer and logical weights are rejected before reduction."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Integer data with floating weights returns double by default; integer weights are rejected, and resident fallback output is re-uploaded."
+        },
+        {
+          "form": "M = mean(A, dim, missingflag, Weights=W, \"native\")",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Weighted reduction retains the ordinary all-class integer data contract."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional weighted-reduction dimension accepts every integer class and integer-valued double; weights cannot be combined with vecdim or all."
+            },
+            {
+              "name": "W",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Weights are restricted to nonnegative single or double arrays; integer and logical weights are rejected before reduction."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Native weighted integer mean anchors exact wide integer values, applies nonnegative floating weights, rounds once with ties away from zero, remains within the input class range, and re-uploads gathered resident results."
+        }
       ]
     },
     {
