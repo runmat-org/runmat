@@ -7,7 +7,11 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, Tensor, Value,
 };
@@ -39,7 +43,7 @@ const ATAN_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Input scalar, array, char array, complex value, or gpuArray.",
+    description: "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions.",
 }];
 
 const ATAN_INPUTS_X_LIKE_P: [BuiltinParamDescriptor; 3] = [
@@ -48,21 +52,21 @@ const ATAN_INPUTS_X_LIKE_P: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Input scalar, array, char array, complex value, or gpuArray.",
+        description: "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions.",
     },
     BuiltinParamDescriptor {
         name: "like",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: Some("\"like\""),
-        description: "Output template selector keyword.",
+        description: "RunMat-only output template selector keyword.",
     },
     BuiltinParamDescriptor {
         name: "P",
         ty: BuiltinParamType::LikePrototype,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Prototype determining host/gpu residency and real/complex output class.",
+        description: "RunMat-only prototype determining host/gpu residency and real/complex output class.",
     },
 ];
 
@@ -121,14 +125,72 @@ const ATAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "atan: internal error",
 };
 
-const ATAN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const ATAN_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ATAN.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:atan:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "atan: too many output arguments",
+};
+
+const ATAN_ERRORS: [BuiltinErrorDescriptor; 7] = [
     ATAN_ERROR_INVALID_INPUT,
     ATAN_ERROR_INVALID_OPTION,
     ATAN_ERROR_ARG_COUNT,
     ATAN_ERROR_LIKE_PROTOTYPE,
     ATAN_ERROR_GPU_UNAVAILABLE,
     ATAN_ERROR_INTERNAL,
+    ATAN_ERROR_TOO_MANY_OUTPUTS,
 ];
+
+const ATAN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "atan-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "atan with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AtanIntegerInputExtension"),
+};
+const ATAN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "atan-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "atan with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AtanLogicalInputExtension"),
+};
+const ATAN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "atan-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "atan with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AtanCharacterInputExtension"),
+};
+const ATAN_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "atan-like-output-template",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "atan output templating with the \"like\" syntax is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AtanLikeOutputTemplateExtension"),
+};
+const ATAN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    ATAN_INTEGER_INPUT_EXTENSION,
+    ATAN_LOGICAL_INPUT_EXTENSION,
+    ATAN_CHARACTER_INPUT_EXTENSION,
+    ATAN_LIKE_EXTENSION,
+];
+const ATAN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data domain is single/double; RunMat mode additionally accepts every real integer class.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = atan(integer_X)",
+        inputs: &ATAN_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Authoritative integer values enter an explicit binary64 inverse-tangent boundary. Resident integer input gathers exactly and the double result returns to the owning provider before any independently gated RunMat-only output template is applied.",
+    }];
 
 pub const ATAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ATAN_SIGNATURES,
@@ -198,9 +260,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::atan::ATAN_DESCRIPTOR),
+    extensions(ATAN_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::trigonometry::atan::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::atan"
 )]
 async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
+    super::inverse_helpers::ensure_input_extensions(
+        &value,
+        BUILTIN_NAME,
+        &ATAN_INTEGER_INPUT_EXTENSION,
+        &ATAN_LOGICAL_INPUT_EXTENSION,
+        &ATAN_CHARACTER_INPUT_EXTENSION,
+    )?;
+    if !rest.is_empty() {
+        crate::compatibility::ensure_builtin_extension_enabled(&ATAN_LIKE_EXTENSION, BUILTIN_NAME)?;
+    }
     let template = parse_output_template(&rest)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "atan")?;
     let base = match value {
@@ -223,13 +298,23 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
+    {
+        return super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
+            atan_tensor(tensor).map(tensor::tensor_into_value)
+        })
+        .await;
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_atan(&handle).await {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    atan_tensor(tensor).map(tensor::tensor_into_value)
+    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
+        atan_tensor(tensor).map(tensor::tensor_into_value)
+    })
+    .await
 }
 
 fn atan_real(value: Value) -> BuiltinResult<Value> {
@@ -239,22 +324,19 @@ fn atan_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn atan_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor::tensor_values_f64_cow(&tensor)
-        .iter()
-        .map(|&v| v.atan())
-        .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| atan_error_with_detail(&ATAN_ERROR_INTERNAL, e))
+    super::inverse_helpers::map_real_tensor(tensor, BUILTIN_NAME, f64::atan, f32::atan)
 }
 
 fn atan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mapped = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| atan_complex_components(re, im))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| atan_error_with_detail(&ATAN_ERROR_INTERNAL, e))?;
+    let tensor = super::inverse_helpers::map_complex_tensor(
+        ct,
+        BUILTIN_NAME,
+        |(real, imag)| atan_complex_components(real, imag),
+        |(real, imag)| {
+            let result = num_complex::Complex32::new(real, imag).atan();
+            (result.re, result.im)
+        },
+    )?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -532,7 +614,69 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
     fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::atan_builtin(value, rest))
+    }
+
+    #[test]
+    fn atan_extensions_like_and_output_arity_are_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = block_on(super::atan_builtin(
+            Value::Int(runmat_builtins::IntValue::I8(1)),
+            Vec::new(),
+        ))
+        .expect_err("integer input must be gated");
+        assert_eq!(
+            integer.identifier(),
+            ATAN_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let logical = block_on(super::atan_builtin(Value::Bool(true), Vec::new()))
+            .expect_err("logical input must be gated");
+        assert_eq!(
+            logical.identifier(),
+            ATAN_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
+        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let character = block_on(super::atan_builtin(Value::CharArray(chars), Vec::new()))
+            .expect_err("character input must be gated");
+        assert_eq!(
+            character.identifier(),
+            ATAN_CHARACTER_INPUT_EXTENSION.error_identifier
+        );
+        let like = block_on(super::atan_builtin(
+            Value::Num(1.0),
+            vec![Value::from("like"), Value::Num(0.0)],
+        ))
+        .expect_err("like form must be gated");
+        assert_eq!(like.identifier(), ATAN_LIKE_EXTENSION.error_identifier);
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let arity = block_on(super::atan_builtin(Value::Num(0.0), Vec::new()))
+            .expect_err("excess outputs must reject");
+        assert_eq!(arity.identifier(), ATAN_ERROR_TOO_MANY_OUTPUTS.identifier);
+    }
+
+    #[test]
+    fn atan_preserves_native_single_real_and_complex_storage() {
+        let real = Tensor::from_f32(vec![0.5, 2.0], vec![2, 1]).unwrap();
+        let Value::Tensor(real_output) =
+            atan_builtin(Value::Tensor(real), Vec::new()).expect("single atan")
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            real_output.numeric_dtype(),
+            runmat_builtins::NumericDType::F32
+        );
+        let complex = ComplexTensor::from_f32(vec![(0.5, 0.25), (2.0, -1.0)], vec![2, 1]).unwrap();
+        let Value::ComplexTensor(complex_output) =
+            atan_builtin(Value::ComplexTensor(complex), Vec::new()).expect("complex-single atan")
+        else {
+            panic!("expected complex-single tensor");
+        };
+        assert_eq!(
+            complex_output.numeric_dtype(),
+            runmat_builtins::NumericDType::F32
+        );
     }
 
     #[test]

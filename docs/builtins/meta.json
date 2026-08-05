@@ -2650,7 +2650,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar, array, char array, complex value, or gpuArray."
+              "description": "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -2676,6 +2676,67 @@
           "identifier": "RunMat:acos:Internal",
           "when": "Internal gather/reduction/conversion/allocation flow failed.",
           "message": "acos: internal error"
+        },
+        {
+          "code": "RM.ACOS.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:acos:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "acos: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "acos-integer-input",
+          "mode": "RunMatOnly",
+          "description": "acos with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AcosIntegerInputExtension"
+        },
+        {
+          "id": "acos-logical-input",
+          "mode": "RunMatOnly",
+          "description": "acos with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AcosLogicalInputExtension"
+        },
+        {
+          "id": "acos-character-input",
+          "mode": "RunMatOnly",
+          "description": "acos with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AcosCharacterInputExtension"
+        },
+        {
+          "id": "acos-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "acos resident real input that requires complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AcosGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = acos(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single/double; RunMat mode additionally accepts every real integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer values enter an explicit binary64 inverse-cosine boundary. Resident integer input gathers exactly and the double or complex-double result returns to the owning provider."
         }
       ]
     },
@@ -2692,7 +2753,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar, array, char array, complex value, or gpuArray."
+              "description": "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -2718,6 +2779,67 @@
           "identifier": "RunMat:acosh:Internal",
           "when": "Internal gather/reduction/conversion/allocation/provider flow failed.",
           "message": "acosh: internal error"
+        },
+        {
+          "code": "RM.ACOSH.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:acosh:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "acosh: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "acosh-integer-input",
+          "mode": "RunMatOnly",
+          "description": "acosh with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AcoshIntegerInputExtension"
+        },
+        {
+          "id": "acosh-logical-input",
+          "mode": "RunMatOnly",
+          "description": "acosh with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AcoshLogicalInputExtension"
+        },
+        {
+          "id": "acosh-character-input",
+          "mode": "RunMatOnly",
+          "description": "acosh with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AcoshCharacterInputExtension"
+        },
+        {
+          "id": "acosh-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "acosh resident real input that requires complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AcoshGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = acosh(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single/double; RunMat mode additionally accepts every real integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer values enter an explicit binary64 inverse-hyperbolic-cosine boundary. Resident integer input gathers exactly and the double or complex-double result returns to the owning provider."
         }
       ]
     },
@@ -5290,7 +5412,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar, array, char array, complex value, or gpuArray."
+              "description": "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -5316,6 +5438,67 @@
           "identifier": "RunMat:asin:Internal",
           "when": "Internal gather/reduction/conversion/allocation flow failed.",
           "message": "asin: internal error"
+        },
+        {
+          "code": "RM.ASIN.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:asin:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "asin: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "asin-integer-input",
+          "mode": "RunMatOnly",
+          "description": "asin with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AsinIntegerInputExtension"
+        },
+        {
+          "id": "asin-logical-input",
+          "mode": "RunMatOnly",
+          "description": "asin with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AsinLogicalInputExtension"
+        },
+        {
+          "id": "asin-character-input",
+          "mode": "RunMatOnly",
+          "description": "asin with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AsinCharacterInputExtension"
+        },
+        {
+          "id": "asin-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "asin resident real input that requires complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AsinGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = asin(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single/double; RunMat mode additionally accepts every real integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer values enter an explicit binary64 inverse-sine boundary. Resident integer input gathers exactly and the double or complex-double result returns to the owning provider."
         }
       ]
     },
@@ -5332,7 +5515,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar, array, char array, complex value, or gpuArray."
+              "description": "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -5358,6 +5541,61 @@
           "identifier": "RunMat:asinh:Internal",
           "when": "Internal gather/conversion/allocation/provider flow failed.",
           "message": "asinh: internal error"
+        },
+        {
+          "code": "RM.ASINH.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:asinh:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "asinh: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "asinh-integer-input",
+          "mode": "RunMatOnly",
+          "description": "asinh with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AsinhIntegerInputExtension"
+        },
+        {
+          "id": "asinh-logical-input",
+          "mode": "RunMatOnly",
+          "description": "asinh with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AsinhLogicalInputExtension"
+        },
+        {
+          "id": "asinh-character-input",
+          "mode": "RunMatOnly",
+          "description": "asinh with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AsinhCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = asinh(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single/double; RunMat mode additionally accepts every real integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer values enter an explicit binary64 inverse-hyperbolic-sine boundary. Resident integer input gathers exactly and the double result returns to the owning provider."
         }
       ]
     },
@@ -5610,7 +5848,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar, array, char array, complex value, or gpuArray."
+              "description": "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -5631,21 +5869,21 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar, array, char array, complex value, or gpuArray."
+              "description": "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions."
             },
             {
               "name": "like",
               "ty": "StringScalar",
               "arity": "Required",
               "default": "\"like\"",
-              "description": "Output template selector keyword."
+              "description": "RunMat-only output template selector keyword."
             },
             {
               "name": "P",
               "ty": "LikePrototype",
               "arity": "Required",
               "default": null,
-              "description": "Prototype determining host/gpu residency and real/complex output class."
+              "description": "RunMat-only prototype determining host/gpu residency and real/complex output class."
             }
           ],
           "outputs": [
@@ -5695,6 +5933,67 @@
           "identifier": "RunMat:atan:Internal",
           "when": "Internal gather/conversion/allocation/provider flow failed.",
           "message": "atan: internal error"
+        },
+        {
+          "code": "RM.ATAN.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:atan:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "atan: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "atan-integer-input",
+          "mode": "RunMatOnly",
+          "description": "atan with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AtanIntegerInputExtension"
+        },
+        {
+          "id": "atan-logical-input",
+          "mode": "RunMatOnly",
+          "description": "atan with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AtanLogicalInputExtension"
+        },
+        {
+          "id": "atan-character-input",
+          "mode": "RunMatOnly",
+          "description": "atan with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AtanCharacterInputExtension"
+        },
+        {
+          "id": "atan-like-output-template",
+          "mode": "RunMatOnly",
+          "description": "atan output templating with the \"like\" syntax is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AtanLikeOutputTemplateExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = atan(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single/double; RunMat mode additionally accepts every real integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer values enter an explicit binary64 inverse-tangent boundary. Resident integer input gathers exactly and the double result returns to the owning provider before any independently gated RunMat-only output template is applied."
         }
       ]
     },
@@ -5772,7 +6071,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input scalar, array, char array, complex value, or gpuArray."
+              "description": "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -5798,6 +6097,67 @@
           "identifier": "RunMat:atanh:Internal",
           "when": "Internal gather/reduction/conversion/allocation/provider flow failed.",
           "message": "atanh: internal error"
+        },
+        {
+          "code": "RM.ATANH.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:atanh:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "atanh: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "atanh-integer-input",
+          "mode": "RunMatOnly",
+          "description": "atanh with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AtanhIntegerInputExtension"
+        },
+        {
+          "id": "atanh-logical-input",
+          "mode": "RunMatOnly",
+          "description": "atanh with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AtanhLogicalInputExtension"
+        },
+        {
+          "id": "atanh-character-input",
+          "mode": "RunMatOnly",
+          "description": "atanh with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AtanhCharacterInputExtension"
+        },
+        {
+          "id": "atanh-gpu-real-complex-promotion",
+          "mode": "RunMatOnly",
+          "description": "atanh resident real input that requires complex output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AtanhGpuRealComplexPromotionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = atanh(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single/double; RunMat mode additionally accepts every real integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer values enter an explicit binary64 inverse-hyperbolic-tangent boundary. Resident integer input gathers exactly and the double or complex-double result returns to the owning provider."
         }
       ]
     },

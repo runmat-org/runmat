@@ -6,7 +6,11 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, Tensor, Value,
 };
@@ -37,7 +41,7 @@ const ACOSH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Input scalar, array, char array, complex value, or gpuArray.",
+    description: "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions.",
 }];
 
 const ACOSH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -60,7 +64,67 @@ const ACOSH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "acosh: internal error",
 };
 
-const ACOSH_ERRORS: [BuiltinErrorDescriptor; 2] = [ACOSH_ERROR_INVALID_INPUT, ACOSH_ERROR_INTERNAL];
+const ACOSH_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACOSH.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:acosh:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "acosh: too many output arguments",
+};
+const ACOSH_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ACOSH_ERROR_INVALID_INPUT,
+    ACOSH_ERROR_INTERNAL,
+    ACOSH_ERROR_TOO_MANY_OUTPUTS,
+];
+
+const ACOSH_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "acosh-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "acosh with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AcoshIntegerInputExtension"),
+};
+const ACOSH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "acosh-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "acosh with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AcoshLogicalInputExtension"),
+};
+const ACOSH_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "acosh-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "acosh with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AcoshCharacterInputExtension"),
+};
+const ACOSH_GPU_REAL_COMPLEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "acosh-gpu-real-complex-promotion",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "acosh resident real input that requires complex output is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AcoshGpuRealComplexPromotionExtension"),
+};
+const ACOSH_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    ACOSH_INTEGER_INPUT_EXTENSION,
+    ACOSH_LOGICAL_INPUT_EXTENSION,
+    ACOSH_CHARACTER_INPUT_EXTENSION,
+    ACOSH_GPU_REAL_COMPLEX_EXTENSION,
+];
+const ACOSH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data domain is single/double; RunMat mode additionally accepts every real integer class.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = acosh(integer_X)",
+        inputs: &ACOSH_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Authoritative integer values enter an explicit binary64 inverse-hyperbolic-cosine boundary. Resident integer input gathers exactly and the double or complex-double result returns to the owning provider.",
+    }];
 
 pub const ACOSH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ACOSH_SIGNATURES,
@@ -130,9 +194,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::acosh::ACOSH_DESCRIPTOR),
+    extensions(ACOSH_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::trigonometry::acosh::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::acosh"
 )]
 async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
+    super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
+    super::inverse_helpers::ensure_input_extensions(
+        &value,
+        BUILTIN_NAME,
+        &ACOSH_INTEGER_INPUT_EXTENSION,
+        &ACOSH_LOGICAL_INPUT_EXTENSION,
+        &ACOSH_CHARACTER_INPUT_EXTENSION,
+    )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "acosh")?;
     match value {
         Value::GpuTensor(handle) => acosh_gpu(handle).await,
@@ -145,6 +219,16 @@ async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
+    {
+        return super::inverse_helpers::gather_compute_restore(
+            handle,
+            BUILTIN_NAME,
+            acosh_tensor_real,
+        )
+        .await;
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
@@ -153,16 +237,23 @@ async fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             }
             Ok(true) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-                return acosh_tensor_real(tensor);
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ACOSH_GPU_REAL_COMPLEX_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+                return super::inverse_helpers::gather_compute_restore(
+                    handle,
+                    BUILTIN_NAME,
+                    acosh_tensor_real,
+                )
+                .await;
             }
             Err(_) => {
                 // Fall back to host path below.
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    acosh_tensor_real(tensor)
+    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, acosh_tensor_real).await
 }
 
 async fn detect_gpu_requires_complex(
@@ -197,80 +288,62 @@ fn acosh_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn acosh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    if values.is_empty() {
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-
-    let mut requires_complex = false;
-    let mut real_data = Vec::with_capacity(values.len());
-    let mut complex_data = Vec::with_capacity(values.len());
-
-    for &x in values.iter() {
-        if x.is_nan() {
-            real_data.push(f64::NAN);
-            complex_data.push((f64::NAN, 0.0));
-            continue;
-        }
-        if x.is_infinite() && x.is_sign_positive() {
-            real_data.push(f64::INFINITY);
-            complex_data.push((f64::INFINITY, 0.0));
-            continue;
-        }
-        if x.is_infinite() && x.is_sign_negative() {
-            requires_complex = true;
-            real_data.push(f64::INFINITY);
-            complex_data.push((f64::INFINITY, std::f64::consts::PI));
-            continue;
-        }
-        if x >= 1.0 {
-            let val = x.acosh();
-            real_data.push(val);
-            complex_data.push((val, 0.0));
-            continue;
-        }
-
-        let result = Complex64::new(x, 0.0).acosh();
-        let re = zero_small(result.re);
-        let im = zero_small(result.im);
-        requires_complex = true;
-        real_data.push(re);
-        complex_data.push((re, im));
-    }
-
-    if requires_complex {
-        if complex_data.len() == 1 {
-            let (re, im) = complex_data[0];
-            Ok(Value::Complex(re, im))
-        } else {
-            let tensor = ComplexTensor::new(complex_data, tensor.shape.clone())
-                .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
-            Ok(Value::ComplexTensor(tensor))
-        }
-    } else {
-        let tensor = Tensor::new(real_data, tensor.shape.clone())
-            .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
-        Ok(tensor::tensor_into_value(tensor))
-    }
+    super::inverse_helpers::map_real_tensor_promoting(
+        tensor,
+        BUILTIN_NAME,
+        acosh_real_parts,
+        acosh_real_parts_f32,
+    )
 }
 
 fn acosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    if ct.materialize_f64().is_empty() {
-        return Ok(Value::ComplexTensor(ct));
+    let tensor = super::inverse_helpers::map_complex_tensor(
+        ct,
+        BUILTIN_NAME,
+        |(real, imag)| {
+            let result = Complex64::new(real, imag).acosh();
+            (zero_small(result.re), zero_small(result.im))
+        },
+        |(real, imag)| {
+            let result = num_complex::Complex32::new(real, imag).acosh();
+            (zero_small_f32(result.re), zero_small_f32(result.im))
+        },
+    )?;
+    Ok(crate::builtins::common::random_args::complex_tensor_into_value(tensor))
+}
+
+fn acosh_real_parts(value: f64) -> (f64, f64) {
+    if value.is_nan() {
+        return (f64::NAN, 0.0);
     }
-    let mut mapped = Vec::with_capacity(ct.materialize_f64().len());
-    for &(re, im) in &ct.materialize_f64() {
-        let result = Complex64::new(re, im).acosh();
-        mapped.push((zero_small(result.re), zero_small(result.im)));
+    if value.is_infinite() && value.is_sign_positive() {
+        return (f64::INFINITY, 0.0);
     }
-    if mapped.len() == 1 {
-        let (re, im) = mapped[0];
-        Ok(Value::Complex(re, im))
-    } else {
-        let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-            .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
-        Ok(Value::ComplexTensor(tensor))
+    if value.is_infinite() && value.is_sign_negative() {
+        return (f64::INFINITY, std::f64::consts::PI);
     }
+    if value >= 1.0 {
+        return (value.acosh(), 0.0);
+    }
+    let result = Complex64::new(value, 0.0).acosh();
+    (zero_small(result.re), zero_small(result.im))
+}
+
+fn acosh_real_parts_f32(value: f32) -> (f32, f32) {
+    if value.is_nan() {
+        return (f32::NAN, 0.0);
+    }
+    if value.is_infinite() && value.is_sign_positive() {
+        return (f32::INFINITY, 0.0);
+    }
+    if value.is_infinite() && value.is_sign_negative() {
+        return (f32::INFINITY, std::f32::consts::PI);
+    }
+    if value >= 1.0 {
+        return (value.acosh(), 0.0);
+    }
+    let result = num_complex::Complex32::new(value, 0.0).acosh();
+    (zero_small_f32(result.re), zero_small_f32(result.im))
 }
 
 fn acosh_complex_scalar(re: f64, im: f64) -> Value {
@@ -298,6 +371,14 @@ fn zero_small(value: f64) -> f64 {
     }
 }
 
+fn zero_small_f32(value: f32) -> f32 {
+    if value.abs() < ZERO_EPS as f32 {
+        0.0
+    } else {
+        value
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -307,7 +388,47 @@ pub(crate) mod tests {
     use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
 
     fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::acosh_builtin(value))
+    }
+
+    #[test]
+    fn acosh_extensions_and_output_arity_are_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = block_on(super::acosh_builtin(Value::Int(IntValue::I8(1))))
+            .expect_err("integer input must be gated");
+        assert_eq!(
+            integer.identifier(),
+            ACOSH_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let logical = block_on(super::acosh_builtin(Value::Bool(true)))
+            .expect_err("logical input must be gated");
+        assert_eq!(
+            logical.identifier(),
+            ACOSH_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
+        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let character = block_on(super::acosh_builtin(Value::CharArray(chars)))
+            .expect_err("character input must be gated");
+        assert_eq!(
+            character.identifier(),
+            ACOSH_CHARACTER_INPUT_EXTENSION.error_identifier
+        );
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let arity = block_on(super::acosh_builtin(Value::Num(1.0)))
+            .expect_err("excess outputs must reject");
+        assert_eq!(arity.identifier(), ACOSH_ERROR_TOO_MANY_OUTPUTS.identifier);
+    }
+
+    #[test]
+    fn acosh_preserves_native_single_through_complex_promotion() {
+        let input = Tensor::from_f32(vec![0.5, 2.0], vec![2, 1]).unwrap();
+        let Value::ComplexTensor(output) =
+            acosh_builtin(Value::Tensor(input)).expect("single acosh")
+        else {
+            panic!("expected complex-single tensor");
+        };
+        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
     }
 
     fn error_message(err: &RuntimeError) -> String {
@@ -631,7 +752,10 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let result = acosh_builtin(Value::GpuTensor(handle)).expect("acosh");
-            match result {
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = block_on(crate::dispatcher::gather_if_needed_async(&result))
+                .expect("gather complex result");
+            match gathered {
                 Value::ComplexTensor(t) => {
                     assert_eq!(t.shape, vec![2, 1]);
                     let expected = [
