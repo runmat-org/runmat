@@ -3050,7 +3050,11 @@
           "when": "Target is not an object or handle object.",
           "message": "addlistener: target must be handle or object"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "addlistener accepts an object or handle target, event text, and a callback; numeric values are not listener data or controls and invalid numeric targets are rejected."
+      }
     },
     {
       "name": "addpath",
@@ -9565,7 +9569,11 @@
           "when": "The cleanup object target cannot be allocated, rooted, or mutated.",
           "message": "onCleanup: internal object storage failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "cancel accepts only an onCleanup handle and returns a fixed double status; it has no integer data, control, or class-preserving form."
+      }
     },
     {
       "name": "cat",
@@ -74245,7 +74253,11 @@
           "when": "The cleanup object target cannot be allocated, rooted, or mutated.",
           "message": "onCleanup: internal object storage failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "onCleanup accepts only a function handle or closure and returns a handle object; numeric values are rejected as callbacks."
+      }
     },
     {
       "name": "onehotdecode",

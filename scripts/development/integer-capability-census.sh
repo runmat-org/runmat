@@ -7,6 +7,10 @@ catalog="${repo_root}/docs/builtins/meta.json"
 jq -r '
   def has_capabilities:
     ((.integer_capabilities // []) | length) > 0;
+  def has_audit:
+    .integer_audit != null;
+  def is_settled:
+    has_capabilities or has_audit;
   def is_screen_candidate:
     [.signatures[].inputs[].ty]
     | any(
@@ -41,6 +45,24 @@ jq -r '
         "Settled call-form records across capability-bearing builtin names."
       ],
       [
+        "integer_alias_builtin_names",
+        (
+          $builtins
+          | map(select(.integer_audit.kind == "AliasOf"))
+          | length
+        ),
+        "Builtin names whose integer contract is explicitly inherited from a capability-bearing canonical builtin."
+      ],
+      [
+        "integer_inapplicable_builtin_names",
+        (
+          $builtins
+          | map(select(.integer_audit.kind == "NotApplicable"))
+          | length
+        ),
+        "Audited builtin names with no integer data, control, class-preserving output, or backend surface."
+      ],
+      [
         "signature_screen_candidates",
         ($builtins | map(select(is_screen_candidate)) | length),
         "Conservative triage population selected by numeric, Any, size, or prototype input descriptors."
@@ -49,16 +71,16 @@ jq -r '
         "signature_screen_settled",
         (
           $builtins
-          | map(select(is_screen_candidate and has_capabilities))
+          | map(select(is_screen_candidate and is_settled))
           | length
         ),
-        "Screen-positive builtin names already carrying capability records."
+        "Screen-positive builtin names carrying capability records or an explicit alias/inapplicable audit disposition."
       ],
       [
         "signature_screen_untriaged",
         (
           $builtins
-          | map(select(is_screen_candidate and (has_capabilities | not)))
+          | map(select(is_screen_candidate and (is_settled | not)))
           | length
         ),
         "Screen-positive audit queue; this is an upper bound, not a count of missing integer overloads or defects."

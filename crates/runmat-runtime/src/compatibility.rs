@@ -298,6 +298,13 @@ mod tests {
     #[test]
     fn integer_capability_metadata_is_complete_and_well_formed_for_settled_apis() {
         let registered = runmat_builtins::builtin_functions();
+        for builtin in &registered {
+            assert!(
+                builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_none(),
+                "{} cannot carry both integer capabilities and an audit disposition",
+                builtin.name
+            );
+        }
         for name in [
             "DelaunayTri",
             "DelaunayTri.freeBoundary",
@@ -389,25 +396,81 @@ mod tests {
     }
 
     #[test]
-    fn generated_builtin_catalog_matches_integer_capabilities() {
+    fn integer_audit_dispositions_are_complete_and_well_formed() {
+        let registered = runmat_builtins::builtin_functions();
+        let mut audited = std::collections::BTreeMap::new();
+        for builtin in &registered {
+            let Some(audit) = builtin.integer_audit else {
+                continue;
+            };
+            if let Some(previous) = audited.insert(builtin.name, audit) {
+                assert_eq!(previous, audit, "{} duplicate integer audit", builtin.name);
+            }
+        }
+        assert_eq!(
+            audited.keys().copied().collect::<Vec<_>>(),
+            ["addlistener", "cancel", "onCleanup"]
+        );
+        for (name, audit) in audited {
+            assert!(!audit.notes.is_empty(), "{name} integer audit notes");
+            match audit.kind {
+                runmat_builtins::BuiltinIntegerAuditKind::AliasOf => {
+                    let canonical = audit
+                        .canonical_builtin
+                        .unwrap_or_else(|| panic!("{name} alias target"));
+                    assert_ne!(canonical, name, "{name} cannot alias itself");
+                    let target = registered
+                        .iter()
+                        .find(|builtin| builtin.name == canonical)
+                        .unwrap_or_else(|| panic!("{name} registered alias target {canonical}"));
+                    assert!(
+                        !target.integer_capabilities.is_empty(),
+                        "{name} alias target {canonical} must carry integer capabilities"
+                    );
+                }
+                runmat_builtins::BuiltinIntegerAuditKind::NotApplicable => {
+                    assert_eq!(
+                        audit.canonical_builtin, None,
+                        "{name} inapplicable audit cannot name a canonical builtin"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn generated_builtin_catalog_matches_integer_metadata() {
         let catalog: serde_json::Value =
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
         for registered in runmat_builtins::builtin_functions()
             .into_iter()
-            .filter(|builtin| !builtin.integer_capabilities.is_empty())
+            .filter(|builtin| {
+                !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some()
+            })
         {
             let name = registered.name;
             let exported = builtins
                 .iter()
                 .find(|entry| entry["name"] == name)
                 .unwrap_or_else(|| panic!("exported {name} metadata"));
-            assert_eq!(
-                exported["integer_capabilities"],
+            let expected_capabilities = (!registered.integer_capabilities.is_empty()).then(|| {
                 serde_json::to_value(registered.integer_capabilities)
-                    .expect("serialize integer capabilities"),
+                    .expect("serialize integer capabilities")
+            });
+            assert_eq!(
+                exported.get("integer_capabilities"),
+                expected_capabilities.as_ref(),
                 "{name}"
+            );
+            let expected_audit = registered
+                .integer_audit
+                .map(|audit| serde_json::to_value(audit).expect("serialize integer audit"));
+            assert_eq!(
+                exported.get("integer_audit"),
+                expected_audit.as_ref(),
+                "{name} integer audit"
             );
         }
     }

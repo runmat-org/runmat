@@ -5209,6 +5209,20 @@ pub struct BuiltinIntegerCapabilityDescriptor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerAuditKind {
+    AliasOf,
+    NotApplicable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BuiltinIntegerAuditDescriptor {
+    pub kind: BuiltinIntegerAuditKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_builtin: Option<&'static str>,
+    pub notes: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinExtensionMode {
     RunMatOnly,
 }
@@ -5239,6 +5253,7 @@ pub struct BuiltinFunction {
     pub descriptor: Option<&'static BuiltinDescriptor>,
     pub extensions: &'static [BuiltinExtensionDescriptor],
     pub integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
+    pub integer_audit: Option<&'static BuiltinIntegerAuditDescriptor>,
 }
 
 impl BuiltinFunction {
@@ -5273,6 +5288,7 @@ impl BuiltinFunction {
             descriptor: None,
             extensions: &[],
             integer_capabilities: &[],
+            integer_audit: None,
         }
     }
 
@@ -5299,6 +5315,14 @@ impl BuiltinFunction {
         capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
     ) -> Self {
         self.integer_capabilities = capabilities;
+        self
+    }
+
+    pub fn with_integer_audit(
+        mut self,
+        audit: Option<&'static BuiltinIntegerAuditDescriptor>,
+    ) -> Self {
+        self.integer_audit = audit;
         self
     }
 

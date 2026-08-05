@@ -47,6 +47,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut descriptor_path: Option<syn::Path> = None;
     let mut extensions_path: Option<syn::Path> = None;
     let mut integer_capabilities_path: Option<syn::Path> = None;
+    let mut integer_audit_path: Option<syn::Path> = None;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     for arg in args {
@@ -165,6 +166,17 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     integer_capabilities_path = Some(path.clone());
                 } else {
                     panic!("integer_capabilities expects a path argument");
+                }
+            }
+            NestedMeta::Meta(Meta::List(list)) if list.path.is_ident("integer_audit") => {
+                if list.nested.len() != 1 {
+                    panic!("integer_audit expects exactly one path argument");
+                }
+                let nested = list.nested.first().unwrap();
+                if let NestedMeta::Meta(Meta::Path(path)) = nested {
+                    integer_audit_path = Some(path.clone());
+                } else {
+                    panic!("integer_audit expects a path argument");
                 }
             }
             _ => {}
@@ -387,6 +399,11 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! { &[] }
     };
+    let integer_audit_expr = if let Some(path) = integer_audit_path.as_ref() {
+        quote! { Some(&#path) }
+    } else {
+        quote! { None }
+    };
 
     let builtin_expr = quote! {
         runmat_builtins::BuiltinFunction::new(
@@ -406,6 +423,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         .with_descriptor_option(#descriptor_expr)
         .with_extensions(#extensions_expr)
         .with_integer_capabilities(#integer_capabilities_expr)
+        .with_integer_audit(#integer_audit_expr)
     };
 
     let doc_expr = quote! {

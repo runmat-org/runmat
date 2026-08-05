@@ -3120,13 +3120,18 @@ mod tests {
 
     #[test]
     fn addlistener_rejects_non_object_target_with_identifier() {
-        let err = block_on(addlistener_builtin(
+        for target in [
             Value::Num(1.0),
-            "Changed".to_string(),
-            Value::FunctionHandle("sin".to_string()),
-        ))
-        .expect_err("addlistener should reject non-object target");
-        assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
+            Value::Int(runmat_builtins::IntValue::U64(1)),
+        ] {
+            let err = block_on(addlistener_builtin(
+                target,
+                "Changed".to_string(),
+                Value::FunctionHandle("sin".to_string()),
+            ))
+            .expect_err("addlistener should reject non-object target");
+            assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
+        }
     }
 
     #[test]
