@@ -299,10 +299,15 @@ mod tests {
     fn integer_capability_metadata_is_complete_and_well_formed_for_settled_apis() {
         let registered = runmat_builtins::builtin_functions();
         for name in [
+            "DelaunayTri",
+            "DelaunayTri.freeBoundary",
+            "DelaunayTri.nearestNeighbor",
+            "DelaunayTri.pointLocation",
             "circshift",
             "db",
             "factor",
             "factorial",
+            "freeBoundary",
             "gcd",
             "histcounts",
             "idivide",
@@ -311,10 +316,12 @@ mod tests {
             "lcm",
             "mod",
             "mpower",
+            "nearestNeighbor",
             "nchoosek",
             "num2cell",
             "pskmod",
             "polyint",
+            "pointLocation",
             "primes",
             "qammod",
             "rem",

@@ -5,9 +5,13 @@ use std::sync::OnceLock;
 
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ClassDef, IntegerStorage,
-    MethodDef, NumericScalar, ObjectInstance, PropertyDef, Tensor, Value,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ClassDef, IntegerStorage, MethodDef, NumericScalar, ObjectInstance,
+    PropertyDef, Tensor, Value,
 };
 use runmat_geometry_ops::{boundary_edges, delaunay_2d, nearest_neighbor_indices, point_locations};
 use runmat_macros::runtime_builtin;
@@ -179,6 +183,106 @@ pub const POINT_LOCATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const CONSTRUCTOR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "coordinates",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer point matrices or coordinate vectors are gated by delaunaytri-integer-coordinates before entering the documented double geometry domain.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "constraints",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer constraint/connectivity identifiers are gated by delaunaytri-integer-topology and parsed exactly through platform bounds.",
+    },
+];
+
+pub const CONSTRUCTOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "dt = DelaunayTri(X, C)",
+        inputs: &CONSTRUCTOR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed coordinates/topology are RunMat-only; geometry and public object properties use documented double arrays.",
+    }];
+
+const TOPOLOGY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dt.ConnectivityList",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly.",
+    }];
+
+pub const FREE_BOUNDARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "E = freeBoundary(dt)",
+        inputs: &TOPOLOGY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed topology is a RunMat-only object state; returned boundary vertex indices are documented double.",
+    }];
+
+const COORDINATE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "coordinates",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer object/query coordinates are gated by delaunaytri-integer-coordinates before conversion to the double geometry domain.",
+    }];
+
+pub const NEAREST_NEIGHBOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "vi = nearestNeighbor(dt, q)",
+        inputs: &COORDINATE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed coordinates are RunMat-only; nearest-vertex indices are documented double.",
+    }];
+
+const POINT_LOCATION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "coordinates",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer object/query coordinates are gated by delaunaytri-integer-coordinates.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dt.ConnectivityList",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly.",
+    },
+];
+
+pub const POINT_LOCATION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[ti, bc] = pointLocation(dt, q)",
+        inputs: &POINT_LOCATION_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed coordinates/topology are RunMat-only; triangle indices and barycentric coordinates are documented double.",
+    }];
+
 #[runtime_builtin(
     name = "DelaunayTri",
     category = "geometry/triangulation",
@@ -187,6 +291,9 @@ pub const POINT_LOCATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::DELAUNAY_TRI_DESCRIPTOR),
     extensions(crate::builtins::geometry::triangulation::CONSTRUCTOR_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::CONSTRUCTOR_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -206,6 +313,9 @@ pub async fn delaunay_tri_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::HELPER_DESCRIPTOR),
     extensions(crate::builtins::geometry::triangulation::TOPOLOGY_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::FREE_BOUNDARY_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
@@ -220,6 +330,9 @@ pub async fn free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::HELPER_DESCRIPTOR),
     extensions(crate::builtins::geometry::triangulation::TOPOLOGY_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::FREE_BOUNDARY_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
@@ -234,6 +347,9 @@ pub async fn delaunay_tri_free_boundary_builtin(dt: Value) -> BuiltinResult<Valu
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::HELPER_DESCRIPTOR),
     extensions(crate::builtins::geometry::triangulation::COORDINATE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::NEAREST_NEIGHBOR_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn nearest_neighbor_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -248,6 +364,9 @@ pub async fn nearest_neighbor_builtin(dt: Value, rest: Vec<Value>) -> BuiltinRes
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::HELPER_DESCRIPTOR),
     extensions(crate::builtins::geometry::triangulation::COORDINATE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::NEAREST_NEIGHBOR_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_nearest_neighbor_builtin(
@@ -265,6 +384,9 @@ pub async fn delaunay_tri_nearest_neighbor_builtin(
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::POINT_LOCATION_DESCRIPTOR),
     extensions(crate::builtins::geometry::triangulation::POINT_LOCATION_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::POINT_LOCATION_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn point_location_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -279,6 +401,9 @@ pub async fn point_location_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResul
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::POINT_LOCATION_DESCRIPTOR),
     extensions(crate::builtins::geometry::triangulation::POINT_LOCATION_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::POINT_LOCATION_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_point_location_builtin(

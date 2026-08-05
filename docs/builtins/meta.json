@@ -2008,6 +2008,51 @@
           "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
           "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dt = DelaunayTri(X, C)",
+          "inputs": [
+            {
+              "name": "coordinates",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer point matrices or coordinate vectors are gated by delaunaytri-integer-coordinates before entering the documented double geometry domain."
+            },
+            {
+              "name": "constraints",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer constraint/connectivity identifiers are gated by delaunaytri-integer-topology and parsed exactly through platform bounds."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Typed coordinates/topology are RunMat-only; geometry and public object properties use documented double arrays."
+        }
       ]
     },
     {
@@ -2065,6 +2110,35 @@
           "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
           "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "E = freeBoundary(dt)",
+          "inputs": [
+            {
+              "name": "dt.ConnectivityList",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed topology is a RunMat-only object state; returned boundary vertex indices are documented double."
+        }
       ]
     },
     {
@@ -2121,6 +2195,35 @@
           "mode": "RunMatOnly",
           "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
           "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "vi = nearestNeighbor(dt, q)",
+          "inputs": [
+            {
+              "name": "coordinates",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer object/query coordinates are gated by delaunaytri-integer-coordinates before conversion to the double geometry domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Typed coordinates are RunMat-only; nearest-vertex indices are documented double."
         }
       ]
     },
@@ -2191,6 +2294,51 @@
           "mode": "RunMatOnly",
           "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
           "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[ti, bc] = pointLocation(dt, q)",
+          "inputs": [
+            {
+              "name": "coordinates",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer object/query coordinates are gated by delaunaytri-integer-coordinates."
+            },
+            {
+              "name": "dt.ConnectivityList",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Typed coordinates/topology are RunMat-only; triangle indices and barycentric coordinates are documented double."
         }
       ]
     },
@@ -37814,6 +37962,35 @@
           "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
           "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "E = freeBoundary(dt)",
+          "inputs": [
+            {
+              "name": "dt.ConnectivityList",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed topology is a RunMat-only object state; returned boundary vertex indices are documented double."
+        }
       ]
     },
     {
@@ -71398,6 +71575,35 @@
           "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
           "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "vi = nearestNeighbor(dt, q)",
+          "inputs": [
+            {
+              "name": "coordinates",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer object/query coordinates are gated by delaunaytri-integer-coordinates before conversion to the double geometry domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Typed coordinates are RunMat-only; nearest-vertex indices are documented double."
+        }
       ]
     },
     {
@@ -79435,6 +79641,51 @@
           "mode": "RunMatOnly",
           "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
           "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[ti, bc] = pointLocation(dt, q)",
+          "inputs": [
+            {
+              "name": "coordinates",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer object/query coordinates are gated by delaunaytri-integer-coordinates."
+            },
+            {
+              "name": "dt.ConnectivityList",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Typed coordinates/topology are RunMat-only; triangle indices and barycentric coordinates are documented double."
         }
       ]
     },
