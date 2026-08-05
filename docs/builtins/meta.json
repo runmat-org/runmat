@@ -4757,10 +4757,16 @@
           "message": "sort: unsupported ComparisonMethod"
         },
         {
-          "code": "RM.ARGSORT.MISSINGPLACEMENT_UNSUPPORTED",
-          "identifier": "RunMat:sort:MissingPlacementUnsupported",
-          "when": "MissingPlacement option is provided but unsupported.",
-          "message": "sort: the 'MissingPlacement' option is not supported yet"
+          "code": "RM.ARGSORT.MISSINGPLACEMENT_REQUIRES_STRING",
+          "identifier": "RunMat:sort:MissingPlacementRequiresString",
+          "when": "MissingPlacement option value is not string-like.",
+          "message": "sort: 'MissingPlacement' requires a string value"
+        },
+        {
+          "code": "RM.ARGSORT.MISSINGPLACEMENT_UNKNOWN",
+          "identifier": "RunMat:sort:MissingPlacementUnknown",
+          "when": "MissingPlacement option value is not one of 'auto'/'first'/'last'.",
+          "message": "sort: unsupported MissingPlacement"
         },
         {
           "code": "RM.ARGSORT.INVALID_ARGUMENT",
@@ -54544,6 +54550,65 @@
           "when": "Internal conversion/allocation paths fail.",
           "message": "issorted: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "issorted-gpu-nonvector",
+          "mode": "RunMatOnly",
+          "description": "issorted with a nonvector resident GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IssortedGpuNonvectorExtension"
+        },
+        {
+          "id": "issorted-gpu-missing-placement",
+          "mode": "RunMatOnly",
+          "description": "issorted with a non-auto MissingPlacement value on GPU is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IssortedGpuMissingPlacementExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = issorted(integer_A, integer_dim, direction, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented sortable input domain includes all eight real integer classes."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive integer-scalar dimension accepts every integer class and integer-valued scalar double."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Integer values are compared exactly and tf is scalar logical. GPU input is documented only for vectors and only with MissingPlacement auto; supported resident forms gather exactly."
+        }
       ]
     },
     {
@@ -99081,7 +99146,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": "\"auto\"",
-              "description": "Requested NaN placement option (currently unsupported)."
+              "description": "Missing-value placement: 'auto', 'first', or 'last'."
             }
           ],
           "outputs": [
@@ -99277,7 +99342,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": "\"auto\"",
-              "description": "Requested NaN placement option (currently unsupported)."
+              "description": "Missing-value placement: 'auto', 'first', or 'last'."
             }
           ],
           "outputs": [
@@ -99318,10 +99383,16 @@
           "message": "sort: unsupported ComparisonMethod"
         },
         {
-          "code": "RM.SORT.MISSINGPLACEMENT_UNSUPPORTED",
-          "identifier": "RunMat:sort:MissingPlacementUnsupported",
-          "when": "MissingPlacement option is provided but unsupported.",
-          "message": "sort: the 'MissingPlacement' option is not supported yet"
+          "code": "RM.SORT.MISSINGPLACEMENT_REQUIRES_STRING",
+          "identifier": "RunMat:sort:MissingPlacementRequiresString",
+          "when": "MissingPlacement option value is not string-like.",
+          "message": "sort: 'MissingPlacement' requires a string value"
+        },
+        {
+          "code": "RM.SORT.MISSINGPLACEMENT_UNKNOWN",
+          "identifier": "RunMat:sort:MissingPlacementUnknown",
+          "when": "MissingPlacement option value is not one of 'auto'/'first'/'last'.",
+          "message": "sort: unsupported MissingPlacement"
         },
         {
           "code": "RM.SORT.INVALID_ARGUMENT",
@@ -99334,6 +99405,51 @@
           "identifier": "RunMat:sort:Internal",
           "when": "Internal conversion, allocation, or provider result construction fails.",
           "message": "sort: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[B, I] = sort(integer_A, integer_dim, direction, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented sortable input domain includes all eight real integer classes."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive integer-scalar dimension accepts every integer class and integer-valued scalar double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "B preserves A's exact integer class and stable equal-value order; optional I is one-based double. Resident integer input uses exact typed gather fallback and restores both outputs to the owning provider."
         }
       ]
     },

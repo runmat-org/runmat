@@ -3,7 +3,11 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, StringArray, Tensor, Value,
 };
@@ -248,6 +252,55 @@ const ISSORTED_ERRORS: [BuiltinErrorDescriptor; 6] = [
     ISSORTED_ERROR_INTERNAL,
 ];
 
+const ISSORTED_GPU_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "issorted-gpu-nonvector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "issorted with a nonvector resident GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:IssortedGpuNonvectorExtension"),
+};
+
+const ISSORTED_GPU_MISSING_PLACEMENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "issorted-gpu-missing-placement",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "issorted with a non-auto MissingPlacement value on GPU is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IssortedGpuMissingPlacementExtension"),
+    };
+
+const ISSORTED_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    ISSORTED_GPU_NONVECTOR_EXTENSION,
+    ISSORTED_GPU_MISSING_PLACEMENT_EXTENSION,
+];
+
+const ISSORTED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented sortable input domain includes all eight real integer classes.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented positive integer-scalar dimension accepts every integer class and integer-valued scalar double.",
+    },
+];
+
+const ISSORTED_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = issorted(integer_A, integer_dim, direction, options)",
+        inputs: &ISSORTED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer values are compared exactly and tf is scalar logical. GPU input is documented only for vectors and only with MissingPlacement auto; supported resident forms gather exactly.",
+    }];
+
 pub const ISSORTED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISSORTED_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -287,13 +340,36 @@ fn issorted_internal(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(bool_output_type),
     descriptor(crate::builtins::array::sorting_sets::issorted::ISSORTED_DESCRIPTOR),
+    extensions(ISSORTED_EXTENSIONS),
+    integer_capabilities(ISSORTED_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
 async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
-    let input = normalize_input(value).await?;
-    let shape = input.shape();
-    let args = IssortedArgs::parse(&rest, &shape)?;
+    let (input, args) = match value {
+        Value::GpuTensor(handle) => {
+            let args = IssortedArgs::parse(&rest, &handle.shape)?;
+            if !gpu_shape_is_vector(&handle.shape) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ISSORTED_GPU_NONVECTOR_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            if !matches!(args.missing, MissingPlacement::Auto) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ISSORTED_GPU_MISSING_PLACEMENT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+            (normalize_host_input(gathered)?, args)
+        }
+        other => {
+            let input = normalize_host_input(other)?;
+            let args = IssortedArgs::parse(&rest, &input.shape())?;
+            (input, args)
+        }
+    };
 
     let result = match input {
         InputArray::Real(tensor) => issorted_real(&tensor, &args)?,
@@ -547,7 +623,7 @@ fn ensure_unique_direction(direction: &Option<Direction>) -> crate::BuiltinResul
     }
 }
 
-async fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
+fn normalize_host_input(value: Value) -> crate::BuiltinResult<InputArray> {
     match value {
         Value::Tensor(tensor) => Ok(InputArray::Real(tensor)),
         Value::LogicalArray(logical) => {
@@ -577,15 +653,20 @@ async fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
                     .map_err(|e| issorted_internal(format!("issorted: {e}")))?;
             Ok(InputArray::String(array))
         }
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            Ok(InputArray::Real(tensor))
-        }
+        Value::GpuTensor(_) => Err(issorted_internal(
+            "issorted: resident input reached the host normalization boundary",
+        )),
         other => Err(issorted_invalid_input(format!(
             "issorted: unsupported input type {:?}; expected numeric, logical, complex, char, or string arrays",
             other
         ))),
     }
+}
+
+fn gpu_shape_is_vector(shape: &[usize]) -> bool {
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
+    shape.iter().skip(2).all(|extent| *extent == 1) && (rows == 1 || cols == 1)
 }
 
 fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
@@ -1274,9 +1355,14 @@ fn compare_real_finite_scalars<T: SetFloat>(
             };
         }
     }
+    let ordering = if matches!(comparison, ComparisonMethod::Abs) {
+        b.compare(a)
+    } else {
+        a.compare(b)
+    };
     match direction {
-        SortDirection::Ascend => a.compare(b),
-        SortDirection::Descend => b.compare(a),
+        SortDirection::Ascend => ordering,
+        SortDirection::Descend => ordering.reverse(),
     }
 }
 
@@ -1317,9 +1403,26 @@ fn compare_complex_finite_scalars<T: SetFloat>(
                     SortDirection::Descend => abs_cmp.reverse(),
                 };
             }
-            compare_complex_real_first(a, b, direction)
+            compare_complex_phase(a, b, direction)
         }
     }
+}
+
+fn compare_complex_phase<T: SetFloat>(a: (T, T), b: (T, T), direction: SortDirection) -> Ordering {
+    let ordering = complex_phase(a).compare(complex_phase(b));
+    match direction {
+        SortDirection::Ascend => ordering,
+        SortDirection::Descend => ordering.reverse(),
+    }
+}
+
+fn complex_phase<T: SetFloat>((real, imaginary): (T, T)) -> T {
+    let imaginary = if imaginary == T::default() {
+        T::default()
+    } else {
+        imaginary
+    };
+    imaginary.atan2(real)
 }
 
 fn compare_complex_real_first<T: SetFloat>(
@@ -1654,6 +1757,55 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[test]
+    fn issorted_dimension_accepts_every_integer_class() {
+        for dimension in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("input");
+            let dim = Value::Tensor(Tensor::new_integer(dimension, vec![1, 1]).expect("dimension"));
+            assert_eq!(
+                issorted_builtin(Value::Tensor(tensor), vec![dim]).expect("issorted"),
+                Value::Bool(true)
+            );
+        }
+    }
+
+    #[test]
+    fn issorted_abs_ties_follow_phase_for_real_integer_and_complex_values() {
+        let comparison = vec![Value::from("ComparisonMethod"), Value::from("abs")];
+        let real = Tensor::new(vec![3.0, -3.0], vec![2, 1]).expect("real");
+        assert_eq!(
+            issorted_builtin(Value::Tensor(real), comparison.clone()).expect("real"),
+            Value::Bool(true)
+        );
+        let integer =
+            Tensor::new_integer(IntegerStorage::I64(vec![3, -3]), vec![2, 1]).expect("integer");
+        assert_eq!(
+            issorted_builtin(Value::Tensor(integer), comparison).expect("integer"),
+            Value::Bool(true)
+        );
+        let complex = ComplexTensor::new(vec![(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0)], vec![3, 1])
+            .expect("complex");
+        assert_eq!(
+            issorted_builtin(Value::ComplexTensor(complex), Vec::new()).expect("complex"),
+            Value::Bool(true)
+        );
+        let phase_boundary =
+            ComplexTensor::new(vec![(-1.0, 0.0), (-1.0, -0.0)], vec![2, 1]).expect("boundary");
+        assert_eq!(
+            issorted_builtin(Value::ComplexTensor(phase_boundary), Vec::new()).expect("boundary"),
+            Value::Bool(true)
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_strictascend_rejects_duplicates() {
@@ -1872,6 +2024,77 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let result = issorted_builtin(Value::GpuTensor(handle), vec![]).expect("issorted gpu");
             assert_eq!(result, Value::Bool(true));
+        });
+    }
+
+    #[test]
+    fn issorted_gpu_enforces_documented_limits_before_typed_gather() {
+        test_support::with_test_provider(|provider| {
+            let matrix = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0, 2.0, 3.0, 4.0],
+                    shape: &[2, 2],
+                })
+                .expect("matrix upload");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = issorted_builtin(Value::GpuTensor(matrix.clone()), Vec::new())
+                    .expect_err("strict nonvector gate");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:IssortedGpuNonvectorExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                assert_eq!(
+                    issorted_builtin(Value::GpuTensor(matrix), Vec::new())
+                        .expect("RunMat nonvector extension"),
+                    Value::Bool(true)
+                );
+            }
+
+            let vector = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[f64::NAN, 1.0, 2.0],
+                    shape: &[3, 1],
+                })
+                .expect("vector upload");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = issorted_builtin(
+                Value::GpuTensor(vector),
+                vec![Value::from("MissingPlacement"), Value::from("first")],
+            )
+            .expect_err("strict missing-placement gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:IssortedGpuMissingPlacementExtension")
+            );
+        });
+    }
+
+    #[test]
+    fn issorted_gpu_preserves_complex_input_through_typed_gather() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0)], vec![3, 1])
+                .expect("complex");
+            let handle =
+                gpu_helpers::upload_complex_tensor(provider, &input).expect("complex upload");
+            assert_eq!(
+                issorted_builtin(Value::GpuTensor(handle), Vec::new()).expect("resident complex"),
+                Value::Bool(true)
+            );
+
+            let integer = Tensor::new_integer(
+                IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+                vec![3, 1],
+            )
+            .expect("integer");
+            let handle = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
+            assert_eq!(
+                issorted_builtin(Value::GpuTensor(handle), Vec::new()).expect("resident integer"),
+                Value::Bool(true)
+            );
         });
     }
 

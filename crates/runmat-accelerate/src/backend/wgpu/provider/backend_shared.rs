@@ -824,9 +824,14 @@ pub(super) fn compare_finite_for_sort(
     if primary != Ordering::Equal {
         return primary;
     }
+    let ordering = if matches!(comparison, SortComparison::Abs) {
+        b.partial_cmp(&a).unwrap_or(Ordering::Equal)
+    } else {
+        a.partial_cmp(&b).unwrap_or(Ordering::Equal)
+    };
     match order {
-        SortOrder::Ascend => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
-        SortOrder::Descend => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
+        SortOrder::Ascend => ordering,
+        SortOrder::Descend => ordering.reverse(),
     }
 }
 

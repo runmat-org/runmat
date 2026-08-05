@@ -21,12 +21,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("sort_dim")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes: "Shares provider hooks with `sort`; when unavailable tensors are gathered to host memory before computing indices.",
+    notes: "Shares provider hooks with `sort`; host fallback gathers when needed and restores permutation indices to a new resident handle.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -211,11 +211,19 @@ const ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinE
     message: "sort: unsupported ComparisonMethod",
 };
 
-const ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ARGSORT.MISSINGPLACEMENT_UNSUPPORTED",
-    identifier: Some("RunMat:sort:MissingPlacementUnsupported"),
-    when: "MissingPlacement option is provided but unsupported.",
-    message: "sort: the 'MissingPlacement' option is not supported yet",
+const ARGSORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING: BuiltinErrorDescriptor =
+    BuiltinErrorDescriptor {
+        code: "RM.ARGSORT.MISSINGPLACEMENT_REQUIRES_STRING",
+        identifier: Some("RunMat:sort:MissingPlacementRequiresString"),
+        when: "MissingPlacement option value is not string-like.",
+        message: "sort: 'MissingPlacement' requires a string value",
+    };
+
+const ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARGSORT.MISSINGPLACEMENT_UNKNOWN",
+    identifier: Some("RunMat:sort:MissingPlacementUnknown"),
+    when: "MissingPlacement option value is not one of 'auto'/'first'/'last'.",
+    message: "sort: unsupported MissingPlacement",
 };
 
 const ARGSORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -225,11 +233,12 @@ const ARGSORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescr
     message: "sort: invalid argument sequence",
 };
 
-const ARGSORT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const ARGSORT_ERRORS: [BuiltinErrorDescriptor; 6] = [
     ARGSORT_ERROR_INVALID_DIMENSION,
     ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
     ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN,
-    ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
+    ARGSORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
+    ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN,
     ARGSORT_ERROR_INVALID_ARGUMENT,
 ];
 
@@ -263,7 +272,7 @@ pub(crate) mod tests {
     use super::ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING;
     use super::ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN;
     use super::ARGSORT_ERROR_INVALID_DIMENSION;
-    use super::ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED;
+    use super::ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN;
     use futures::executor::block_on;
 
     fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -405,16 +414,26 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn argsort_invalid_argument_errors() {
+    fn argsort_supports_missing_placement_and_rejects_unknown_values() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let indices = argsort_builtin(
+            Value::Tensor(tensor.clone()),
+            vec![Value::from("MissingPlacement"), Value::from("first")],
+        )
+        .expect("missing placement");
+        let Value::Tensor(indices) = indices else {
+            panic!("expected indices");
+        };
+        assert_eq!(indices.materialize_f64(), vec![1.0, 2.0]);
+
         let err = argsort_builtin(
             Value::Tensor(tensor),
-            vec![Value::from("MissingPlacement"), Value::from("auto")],
+            vec![Value::from("MissingPlacement"), Value::from("middle")],
         )
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.identifier
+            ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN.identifier
         );
     }
 
@@ -489,10 +508,9 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let indices = argsort_builtin(Value::GpuTensor(handle), Vec::new()).expect("argsort");
-            match indices {
-                Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]),
-                other => panic!("expected tensor result, got {other:?}"),
-            }
+            assert!(matches!(indices, Value::GpuTensor(_)));
+            let indices = test_support::gather(indices).expect("gather indices");
+            assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 1.0]);
         });
     }
 
@@ -519,10 +537,8 @@ pub(crate) mod tests {
             Value::Tensor(t) => t,
             other => panic!("expected tensor, got {other:?}"),
         };
-        let gpu_tensor = match gpu_indices {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        assert!(matches!(gpu_indices, Value::GpuTensor(_)));
+        let gpu_tensor = test_support::gather(gpu_indices).expect("gather GPU indices");
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
         assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }

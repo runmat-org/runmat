@@ -16,7 +16,11 @@ pub(super) fn compare(
         Ordering::Equal
     };
     let ordering = if primary == Ordering::Equal {
-        compare_raw(a, b)
+        if comparison_by_abs {
+            compare_raw(a, b).reverse()
+        } else {
+            compare_raw(a, b)
+        }
     } else {
         primary
     };
