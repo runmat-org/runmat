@@ -5,7 +5,11 @@ use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexStorage, ComplexTensor, NumericDType, NumericStorage, ResolveContext, Tensor, Type,
     Value,
@@ -15,6 +19,36 @@ use runmat_macros::runtime_builtin;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "max";
+
+const NANMAX_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "nanmax-typed-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "nanmax with a typed-integer data or control input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:NanmaxTypedIntegerInputExtension"),
+};
+
+pub const NANMAX_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [NANMAX_INTEGER_EXTENSION];
+
+const NANMAX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A_B_or_dimension",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer data, pairwise operands, and dimension controls are accepted only with the nanmax typed-integer-input extension; documented single- and double-valued forms remain available in MATLAB-compatible mode.",
+    }];
+
+pub const NANMAX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "M = nanmax(A, args...) or nanmax(A, B)",
+        inputs: &NANMAX_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat extends legacy nanmax with exact typed-integer reductions and compatible pairwise forms while preserving all eight integer classes; omit-NaN resident reductions gather because the max provider path does not expose NaN-mode selection.",
+    }];
 
 fn max_type(args: &[Type], ctx: &ResolveContext) -> Type {
     min_max_type(args, ctx)
@@ -527,13 +561,31 @@ async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "nanmax,max,maximum,omitnan,statistics",
     type_resolver(nanmax_type),
     descriptor(crate::builtins::math::reduction::max::NANMAX_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::max::NANMAX_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::reduction::max::NANMAX_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::max"
 )]
 async fn nanmax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if is_real_typed_integer_value(&value) || rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &NANMAX_INTEGER_EXTENSION,
+            "nanmax",
+        )?;
+    }
     let adjusted = nanmax_rest(rest);
     reject_pairwise_multiple_outputs(&adjusted)?;
     let eval = evaluate(value, &adjusted).await?;
     evaluation_to_value(eval)
+}
+
+fn is_real_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
 }
 
 fn reject_pairwise_multiple_outputs(rest: &[Value]) -> BuiltinResult<()> {
@@ -2831,6 +2883,34 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn nanmax_typed_integer_data_follows_compatibility_mode() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = nanmax_builtin(Value::Int(IntValue::U64(u64::MAX)), Vec::new())
+                .expect_err("strict nanmax typed-integer input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:NanmaxTypedIntegerInputExtension")
+            );
+            let error = nanmax_builtin(
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("floating input")),
+                vec![placeholder(), Value::Int(IntValue::U8(2))],
+            )
+            .expect_err("strict nanmax typed-integer dimension");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:NanmaxTypedIntegerInputExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result = nanmax_builtin(Value::Int(IntValue::U64(u64::MAX)), Vec::new())
+                .expect("RunMat nanmax typed-integer input");
+            assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nanmax_reduction_accepts_empty_placeholder_and_dim() {
@@ -3228,6 +3308,30 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected host tensor fallback, got {other:?}"),
             }
+        });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn nanmax_integer_gpu_extension_gathers_exact_host_result() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let data = [u64::MAX - 1, u64::MAX, 7, 9];
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&data),
+                    shape: &[2, 2],
+                })
+                .expect("integer upload");
+            let result =
+                nanmax_builtin(Value::GpuTensor(handle), Vec::new()).expect("integer nanmax");
+            let Value::Tensor(tensor) = result else {
+                panic!("expected gathered integer tensor");
+            };
+            assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, 9]))
+            );
         });
     }
 

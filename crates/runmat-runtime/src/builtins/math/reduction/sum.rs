@@ -1240,23 +1240,24 @@ async fn apply_output_template(
 }
 
 async fn apply_double_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
-    if !matches!(meta.class, InputClass::Integer(_)) {
-        return Ok(value);
-    }
-    match value {
-        Value::Int(value) => Ok(Value::Num(value.to_f64())),
-        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(Value::Tensor(
-            tensor::coerce_tensor_dtype(tensor, NumericDType::F64),
-        )),
-        Value::GpuTensor(handle)
-            if runmat_accelerate_api::handle_integer_type(&handle).is_some() =>
-        {
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            let tensor = tensor::coerce_tensor_dtype(tensor, NumericDType::F64);
-            ensure_device(Value::Tensor(tensor), meta.device).await
+    let value = if !matches!(meta.class, InputClass::Integer(_)) {
+        value
+    } else {
+        match value {
+            Value::Int(value) => Value::Num(value.to_f64()),
+            Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+                Value::Tensor(tensor::coerce_tensor_dtype(tensor, NumericDType::F64))
+            }
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(&handle).is_some() =>
+            {
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+                Value::Tensor(tensor::coerce_tensor_dtype(tensor, NumericDType::F64))
+            }
+            other => other,
         }
-        other => Ok(other),
-    }
+    };
+    ensure_device(value, meta.device).await
 }
 
 async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
@@ -1856,6 +1857,27 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
             assert_eq!(values(&gathered), vec![9_007_199_254_740_992.0, 5.0]);
+        });
+    }
+
+    #[test]
+    fn sum_integer_gpu_omitnan_fallback_restores_resident_double() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[1, 3, 5, 7]),
+                    shape: &[2, 2],
+                })
+                .expect("upload integer gpuArray");
+            let result = sum_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")])
+                .expect("sum omitnan");
+            let Value::GpuTensor(output) = &result else {
+                panic!("expected resident double output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(output), None);
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
+            assert_eq!(values(&gathered), vec![4.0, 12.0]);
         });
     }
 

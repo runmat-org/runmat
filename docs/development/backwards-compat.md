@@ -104,6 +104,8 @@ Each mode-gated builtin signature or option must register a stable extension ide
 
 Typed sparse integer storage is one mode-gated extension. MATLAB-compatible modes accept only documented `double`, `single`, and `logical` sparse payloads and reject construction, conversion, restoration, indexed access or assignment, and operation results that would expose sparse integer storage; `runmat` mode may preserve exact signed or unsigned sparse integer payloads. Sparse values remain host-resident in every mode because the current acceleration interface exposes dense tensor handles rather than native sparse device storage.
 
+The legacy NaN-aware Statistics and Machine Learning Toolbox reductions (`nanmean`, `nansum`, `nanmin`, `nanmax`, `nanmedian`, `nanstd`, and `nanvar`) are not unconditional aliases for their modern replacements because their documented call forms and accepted classes differ. MATLAB-compatible modes retain the documented floating-input surface; typed-integer data or controls accepted through modern RunMat reduction machinery are individually registered and mode-gated extensions, while typed-integer data remains rejected for `nanstd` and `nanvar`. Compatibility checks inspect resident integer handle metadata before provider dispatch and do not gather device data merely to classify the call.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

@@ -1,7 +1,11 @@
 //! MATLAB-compatible missing-value construction, predicates, cleanup, and NaN-aware aliases.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, IntValue, LogicalArray, NumericDType, ObjectInstance, ResolveContext,
     StringArray, StructValue, Tensor, Type, Value,
@@ -193,6 +197,181 @@ descriptor!(
     BuiltinOutputMode::Fixed
 );
 
+macro_rules! integer_extension {
+    ($descriptor:ident, $extensions:ident, $id:literal, $description:literal, $error:literal) => {
+        const $descriptor: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: $description,
+            error_identifier: Some($error),
+        };
+        pub const $extensions: [BuiltinExtensionDescriptor; 1] = [$descriptor];
+    };
+}
+
+integer_extension!(
+    NANMEAN_INTEGER_EXTENSION,
+    NANMEAN_EXTENSIONS,
+    "nanmean-typed-integer-input",
+    "nanmean with a typed-integer data or control input is a RunMat extension",
+    "RunMat:compatibility:NanmeanTypedIntegerInputExtension"
+);
+integer_extension!(
+    NANSUM_INTEGER_EXTENSION,
+    NANSUM_EXTENSIONS,
+    "nansum-typed-integer-input",
+    "nansum with a typed-integer data or control input is a RunMat extension",
+    "RunMat:compatibility:NansumTypedIntegerInputExtension"
+);
+integer_extension!(
+    NANMIN_INTEGER_EXTENSION,
+    NANMIN_EXTENSIONS,
+    "nanmin-typed-integer-input",
+    "nanmin with a typed-integer data or control input is a RunMat extension",
+    "RunMat:compatibility:NanminTypedIntegerInputExtension"
+);
+integer_extension!(
+    NANMEDIAN_INTEGER_EXTENSION,
+    NANMEDIAN_EXTENSIONS,
+    "nanmedian-typed-integer-input",
+    "nanmedian with a typed-integer data or control input is a RunMat extension",
+    "RunMat:compatibility:NanmedianTypedIntegerInputExtension"
+);
+integer_extension!(
+    NANSTD_INTEGER_CONTROL_EXTENSION,
+    NANSTD_EXTENSIONS,
+    "nanstd-typed-integer-control",
+    "nanstd with a typed-integer normalization or dimension input is a RunMat extension",
+    "RunMat:compatibility:NanstdTypedIntegerControlExtension"
+);
+integer_extension!(
+    NANVAR_INTEGER_CONTROL_EXTENSION,
+    NANVAR_EXTENSIONS,
+    "nanvar-typed-integer-control",
+    "nanvar with a typed-integer normalization or dimension input is a RunMat extension",
+    "RunMat:compatibility:NanvarTypedIntegerControlExtension"
+);
+
+const RUNMAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A_or_control",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer data, pairwise operands, and dimension controls are accepted only with the builtin's declared RunMat extension; documented single- and double-valued forms remain available in MATLAB-compatible mode.",
+    }];
+
+const REJECTED_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Typed-integer data is rejected before host or provider reduction.",
+}];
+
+const RUNMAT_INTEGER_CONTROLS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "normalization_or_dimension",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer normalization or dimension controls are accepted only with the builtin's declared RunMat extension; integer-valued double controls remain documented-compatible.",
+    }];
+
+pub const NANMEAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "y = nanmean(A, args...)",
+        inputs: &RUNMAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat extends legacy nanmean by routing typed-integer forms through mean(...,\"omitnan\"); default/double output is double, native output preserves the input class, and modern mean-only options remain extension syntax.",
+    }];
+
+pub const NANSUM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "y = nansum(A, args...)",
+        inputs: &RUNMAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat extends legacy nansum by routing typed-integer forms through sum(...,\"omitnan\"); default/double output is double, native output preserves the input class with saturating accumulation, and modern sum-only options remain extension syntax.",
+    }];
+
+pub const NANMIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "y = nanmin(A, args...) or nanmin(A, B)",
+        inputs: &RUNMAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat extends legacy nanmin with exact typed-integer reduction and compatible pairwise forms; omit-NaN resident reductions use host fallback, while pairwise execution follows min's same-class-or-scalar-double rules.",
+    }];
+
+pub const NANMEDIAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "y = nanmedian(A, args...)",
+        inputs: &RUNMAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat extends legacy nanmedian by routing typed-integer forms through median(...,\"omitnan\"); exact host reduction preserves all eight classes and resident fallback output is re-uploaded.",
+    }];
+
+pub const NANSTD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = nanstd(A, args...) with typed-integer A",
+        inputs: &REJECTED_INTEGER_DATA,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed-integer data is unsupported in both compatibility modes and is rejected before provider dispatch.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = nanstd(A, flag_or_dimension)",
+        inputs: &RUNMAT_INTEGER_CONTROLS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "With floating data, RunMat accepts exact typed-integer normalization and dimension controls only when the nanstd typed-integer-control extension is enabled.",
+    },
+];
+
+pub const NANVAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = nanvar(A, args...) with typed-integer A",
+        inputs: &REJECTED_INTEGER_DATA,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed-integer data is unsupported in both compatibility modes and is rejected before provider dispatch.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = nanvar(A, normalization_or_dimension)",
+        inputs: &RUNMAT_INTEGER_CONTROLS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "With floating data, RunMat accepts exact typed-integer normalization and dimension controls only when the nanvar typed-integer-control extension is enabled; non-scalar weighted variance remains separately unsupported.",
+    },
+];
+
 fn logical_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Logical { shape: None }
 }
@@ -365,9 +544,12 @@ async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Va
     accel = "reduction",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
+    extensions(crate::builtins::missing::NANMEAN_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::NANMEAN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_nan_integer_extension(&NANMEAN_INTEGER_EXTENSION, "nanmean", &value, &rest)?;
     mean::mean_builtin(value, rest_with_omitnan(rest)).await
 }
 
@@ -379,9 +561,12 @@ async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     accel = "reduction",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
+    extensions(crate::builtins::missing::NANSUM_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::NANSUM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn nansum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_nan_integer_extension(&NANSUM_INTEGER_EXTENSION, "nansum", &value, &rest)?;
     sum::sum_builtin(value, rest_with_omitnan(rest)).await
 }
 
@@ -393,9 +578,12 @@ async fn nansum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     accel = "reduction",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
+    extensions(crate::builtins::missing::NANMIN_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::NANMIN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_nan_integer_extension(&NANMIN_INTEGER_EXTENSION, "nanmin", &value, &rest)?;
     if let Some(first) = rest.first() {
         if is_numeric_data_like(first) {
             if rest.len() != 1 {
@@ -406,7 +594,7 @@ async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             return pairwise_nan_min(value, first.clone());
         }
     }
-    min::min_builtin(value, rest_with_omitnan(rest)).await
+    min::min_builtin(value, nanmin_rest_with_omitnan(rest)).await
 }
 
 #[runtime_builtin(
@@ -417,9 +605,12 @@ async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     accel = "reduction",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
+    extensions(crate::builtins::missing::NANMEDIAN_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::NANMEDIAN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn nanmedian_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_nan_integer_extension(&NANMEDIAN_INTEGER_EXTENSION, "nanmedian", &value, &rest)?;
     median::median_builtin(value, rest_with_omitnan(rest)).await
 }
 
@@ -431,9 +622,17 @@ async fn nanmedian_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     accel = "reduction",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
+    extensions(crate::builtins::missing::NANSTD_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::NANSTD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn nanstd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_nan_integer_control_extension(
+        &NANSTD_INTEGER_CONTROL_EXTENSION,
+        "nanstd",
+        &value,
+        &rest,
+    )?;
     std_reduction::std_builtin(value, rest_with_omitnan(rest)).await
 }
 
@@ -445,9 +644,17 @@ async fn nanstd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     accel = "reduction",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
+    extensions(crate::builtins::missing::NANVAR_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::NANVAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn nanvar_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_nan_integer_control_extension(
+        &NANVAR_INTEGER_CONTROL_EXTENSION,
+        "nanvar",
+        &value,
+        &rest,
+    )?;
     var::var_builtin(value, rest_with_omitnan(rest)).await
 }
 
@@ -471,12 +678,56 @@ async fn movmad_builtin(value: Value, window: Value, rest: Vec<Value>) -> Builti
     moving_mad(tensor, window, options)
 }
 
+fn is_real_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn ensure_nan_integer_extension(
+    extension: &BuiltinExtensionDescriptor,
+    builtin: &str,
+    value: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    if is_real_typed_integer_value(value) || rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
+    }
+    Ok(())
+}
+
+fn ensure_nan_integer_control_extension(
+    extension: &BuiltinExtensionDescriptor,
+    builtin: &str,
+    value: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    if !is_real_typed_integer_value(value) && rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
+    }
+    Ok(())
+}
+
 fn rest_with_omitnan(mut rest: Vec<Value>) -> Vec<Value> {
     let insert_at = rest
         .iter()
         .position(|arg| scalar_text(arg).is_some_and(|text| text.eq_ignore_ascii_case("like")))
         .unwrap_or(rest.len());
     rest.insert(insert_at, Value::from("omitnan"));
+    rest
+}
+
+fn nanmin_rest_with_omitnan(mut rest: Vec<Value>) -> Vec<Value> {
+    if rest.is_empty() {
+        rest.push(Value::Tensor(
+            Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty placeholder shape"),
+        ));
+    }
+    rest.push(Value::from("omitnan"));
     rest
 }
 
@@ -2265,7 +2516,11 @@ fn is_missing_text(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
@@ -2591,6 +2846,222 @@ mod tests {
     }
 
     #[test]
+    fn legacy_nan_reductions_gate_typed_integer_data_by_compatibility_mode() {
+        let cases: [(fn(Value, Vec<Value>) -> BuiltinResult<Value>, &str, &str); 4] = [
+            (
+                |value, rest| block_on(nanmean_builtin(value, rest)),
+                "nanmean",
+                "RunMat:compatibility:NanmeanTypedIntegerInputExtension",
+            ),
+            (
+                |value, rest| block_on(nansum_builtin(value, rest)),
+                "nansum",
+                "RunMat:compatibility:NansumTypedIntegerInputExtension",
+            ),
+            (
+                |value, rest| block_on(nanmin_builtin(value, rest)),
+                "nanmin",
+                "RunMat:compatibility:NanminTypedIntegerInputExtension",
+            ),
+            (
+                |value, rest| block_on(nanmedian_builtin(value, rest)),
+                "nanmedian",
+                "RunMat:compatibility:NanmedianTypedIntegerInputExtension",
+            ),
+        ];
+
+        for (invoke, name, identifier) in cases {
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = invoke(Value::Int(IntValue::U16(7)), Vec::new()).unwrap_err();
+                assert_eq!(error.identifier(), Some(identifier), "{name}");
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                invoke(Value::Int(IntValue::U16(7)), Vec::new())
+                    .unwrap_or_else(|error| panic!("{name} RunMat typed-integer input: {error}"));
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_nan_reductions_gate_typed_integer_dimensions() {
+        let floating = || tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let dimension = || Value::Int(IntValue::U8(2));
+        let placeholder = || {
+            Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty placeholder"))
+        };
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(nanmean_builtin(floating(), vec![dimension()]))
+            .expect_err("strict nanmean typed-integer dimension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:NanmeanTypedIntegerInputExtension")
+        );
+        let error = block_on(nansum_builtin(floating(), vec![dimension()]))
+            .expect_err("strict nansum typed-integer dimension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:NansumTypedIntegerInputExtension")
+        );
+        let error = block_on(nanmedian_builtin(floating(), vec![dimension()]))
+            .expect_err("strict nanmedian typed-integer dimension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:NanmedianTypedIntegerInputExtension")
+        );
+        let error = block_on(nanmin_builtin(floating(), vec![placeholder(), dimension()]))
+            .expect_err("strict nanmin typed-integer dimension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:NanminTypedIntegerInputExtension")
+        );
+    }
+
+    #[test]
+    fn legacy_nan_std_var_reject_integer_data_and_gate_integer_controls() {
+        for enabled in [false, true] {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(enabled);
+            let error = block_on(nanstd_builtin(
+                Value::Int(IntValue::I16(7)),
+                vec![Value::Int(IntValue::U8(1))],
+            ))
+            .expect_err("nanstd integer data");
+            assert!(error.message().contains("integer data inputs"));
+            let error = block_on(nanvar_builtin(
+                Value::Int(IntValue::I16(7)),
+                vec![Value::Int(IntValue::U8(1))],
+            ))
+            .expect_err("nanvar integer data");
+            assert!(error.message().contains("integer data inputs"));
+        }
+
+        let floating = || tensor(vec![1.0, 2.0, 3.0], vec![3, 1]);
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(nanstd_builtin(
+                floating(),
+                vec![Value::Int(IntValue::U8(1))],
+            ))
+            .expect_err("nanstd strict typed-integer control");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:NanstdTypedIntegerControlExtension")
+            );
+            let error = block_on(nanvar_builtin(
+                floating(),
+                vec![Value::Int(IntValue::U8(1))],
+            ))
+            .expect_err("nanvar strict typed-integer control");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:NanvarTypedIntegerControlExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            block_on(nanstd_builtin(
+                floating(),
+                vec![Value::Int(IntValue::U8(1))],
+            ))
+            .expect("nanstd RunMat typed-integer control");
+            block_on(nanvar_builtin(
+                floating(),
+                vec![Value::Int(IntValue::U8(1))],
+            ))
+            .expect("nanvar RunMat typed-integer control");
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn legacy_nan_integer_policy_inspects_resident_dtype_before_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[1, u64::MAX]),
+                    shape: &[2, 1],
+                })
+                .expect("integer upload");
+
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(nanmean_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Vec::new(),
+                ))
+                .expect_err("strict resident nanmean");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:NanmeanTypedIntegerInputExtension")
+                );
+
+                let error = block_on(nanstd_builtin(Value::GpuTensor(handle.clone()), Vec::new()))
+                    .expect_err("resident nanstd integer data");
+                assert!(error.message().contains("integer data inputs"));
+            }
+
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn legacy_nan_integer_extensions_preserve_declared_residency() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let cases: [(
+                &str,
+                fn(Value, Vec<Value>) -> BuiltinResult<Value>,
+                Vec<f64>,
+            ); 2] = [
+                (
+                    "nanmean",
+                    |value, rest| block_on(nanmean_builtin(value, rest)),
+                    vec![2.0, 6.0],
+                ),
+                (
+                    "nansum",
+                    |value, rest| block_on(nansum_builtin(value, rest)),
+                    vec![4.0, 12.0],
+                ),
+            ];
+            for (name, invoke, expected) in cases {
+                let handle = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::U64(&[1, 3, 5, 7]),
+                        shape: &[2, 2],
+                    })
+                    .expect("integer upload");
+                let result = invoke(Value::GpuTensor(handle), Vec::new())
+                    .expect("resident integer extension");
+                assert!(
+                    matches!(result, Value::GpuTensor(_)),
+                    "{name} returned {result:?}"
+                );
+                let gathered = test_support::gather(result).expect("gather result");
+                assert_eq!(gathered.materialize_f64(), expected);
+            }
+
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[1, 3, 5, 7]),
+                    shape: &[2, 2],
+                })
+                .expect("integer upload");
+            let result = block_on(nanmedian_builtin(Value::GpuTensor(handle), Vec::new()))
+                .expect("resident integer nanmedian");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("gather median");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![2, 6]))
+            );
+        });
+    }
+
+    #[test]
     fn nanmin_supports_pairwise_form() {
         let result = block_on(nanmin_builtin(
             tensor(vec![f64::NAN, 4.0, 3.0], vec![1, 3]),
@@ -2602,6 +3073,7 @@ mod tests {
 
     #[test]
     fn nanmin_pairwise_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let left = Tensor::new_integer(IntegerStorage::U16(vec![9, 4, 3]), vec![1, 3]).unwrap();
         let right = tensor(vec![2.0, f64::NAN, 5.0], vec![1, 3]);
 
@@ -2623,6 +3095,7 @@ mod tests {
 
     #[test]
     fn nanmin_pairwise_preserves_exact_wide_same_class_integers() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let left = Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
             vec![1, 2],
