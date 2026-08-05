@@ -127,6 +127,8 @@ DataTransaction.set_attr(tx, "lastBatch", 3);
 commit(tx);
 ```
 
+Transaction writes, fills, resizes, and array creation accept the same eight integer classes for values, slices, shapes, and chunk shapes as their direct dataset counterparts. Native integer payloads and exact structural controls remain queued without an `f64` mirror and are converted, validated, and serialized only when the transaction commits. `DataTransaction.set_attr` and integer scalar fields passed to `DataTransaction.set_attrs` are persisted as exact JSON integers, including `int64` and `uint64` values outside the exactly representable `f64` range.
+
 At commit time, RunMat checks that the dataset has not changed since the transaction began. If another writer committed first, the commit fails with a manifest conflict instead of overwriting newer state.
 
 For explicit concurrency control, commit with the version token the code expects:
@@ -199,6 +201,12 @@ Path-level operations manage whole datasets.
 | `DataArray.write(arr, sliceSpec, values)` | Write a full array or slice. |
 | `DataArray.resize(arr, newShape)` | Replace the array with zero-filled storage of the declared dtype and new shape. |
 | `DataArray.fill(arr, value)` | Fill the complete array with one scalar converted to the declared dtype. |
+| `DataTransaction.create_array(tx, arrayName, meta)` | Stage creation of an array whose metadata can use typed integer shape and chunk dimensions. |
+| `DataTransaction.write(tx, arrayName, sliceSpec, values)` | Stage a full or sliced write. |
+| `DataTransaction.resize(tx, arrayName, newShape)` | Stage a resize using exact typed integer dimensions. |
+| `DataTransaction.fill(tx, arrayName, value, sliceSpec)` | Stage a full or sliced scalar fill. |
+| `DataTransaction.set_attr(tx, key, value)` | Stage one dataset attribute update. |
+| `DataTransaction.set_attrs(tx, attrs)` | Stage multiple dataset attribute updates. |
 | `DataTransaction.commit(tx)` | Apply staged transaction changes. |
 | `DataTransaction.abort(tx)` | Discard staged transaction changes. |
 

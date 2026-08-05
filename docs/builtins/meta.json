@@ -776,7 +776,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataTransaction id, status, commit, abort, and delete-array operations accept a transaction receiver plus, where applicable, string metadata or an array name; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "DataTransaction.commit",
@@ -831,7 +835,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataTransaction id, status, commit, abort, and delete-array operations accept a transaction receiver plus, where applicable, string metadata or an array name; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "DataTransaction.create_array",
@@ -893,6 +901,51 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataTransaction.create_array(tx, arrayName, struct('shape', integer_shape, 'chunk', integer_chunk))",
+          "inputs": [
+            {
+              "name": "meta.shape",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The schema shape accepts all eight integer classes or exactly integral floating values within nonnegative platform bounds."
+            },
+            {
+              "name": "meta.chunk",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional chunk shape accepts all eight integer classes or exactly integral floating values within nonnegative platform bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Exact shape and chunk dimensions are validated when queued, retained as platform-sized metadata, and used at commit to create storage in the schema's declared dtype."
+        }
       ]
     },
     {
@@ -948,7 +1001,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataTransaction id, status, commit, abort, and delete-array operations accept a transaction receiver plus, where applicable, string metadata or an array name; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "DataTransaction.fill",
@@ -1017,6 +1074,51 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataTransaction.fill(tx, arrayName, integer_value, integer_sliceSpec)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The queued scalar fill value accepts every integer class and is exact at commit when its class matches the declared array dtype."
+            },
+            {
+              "name": "sliceSpec",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Optional queued scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The transaction retains the native scalar and exact optional slice until commit; commit casts once to the declared dtype and repeats the result without floating mirroring."
+        }
       ]
     },
     {
@@ -1065,7 +1167,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataTransaction id, status, commit, abort, and delete-array operations accept a transaction receiver plus, where applicable, string metadata or an array name; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "DataTransaction.resize",
@@ -1134,6 +1240,35 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataTransaction.resize(tx, arrayName, integer_newShape)",
+          "inputs": [
+            {
+              "name": "newShape",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Queued shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact shape is validated when queued, retained as platform-sized metadata, and applied at commit by recreating zero-filled storage in the array's declared dtype."
+        }
       ]
     },
     {
@@ -1196,6 +1331,35 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataTransaction.set_attr(tx, key, integer_value)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A scalar attribute value accepts every integer class and is serialized as an exact JSON integer, including full-width int64 and uint64 values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The queued scalar retains its native integer class through the transaction and is emitted as an exact manifest JSON number at commit without an f64 intermediary."
+        }
       ]
     },
     {
@@ -1251,6 +1415,35 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataTransaction.set_attrs(tx, struct_with_integer_values)",
+          "inputs": [
+            {
+              "name": "attribute_values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Scalar values in the attribute struct accept every integer class and are serialized as exact JSON integers, including full-width int64 and uint64 values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Each queued scalar integer field retains its native class and is emitted as an exact manifest JSON number at commit without an f64 intermediary."
+        }
       ]
     },
     {
@@ -1299,7 +1492,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataTransaction id, status, commit, abort, and delete-array operations accept a transaction receiver plus, where applicable, string metadata or an array name; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "DataTransaction.write",
@@ -1374,6 +1571,51 @@
           "identifier": "RunMat:data:Internal",
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = DataTransaction.write(tx, arrayName, integer_sliceSpec, integer_values)",
+          "inputs": [
+            {
+              "name": "values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Queued scalar or tensor values accept every integer class and are stored exactly at commit when their class matches the declared array dtype."
+            },
+            {
+              "name": "sliceSpec",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Queued scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The transaction retains native integer values and exact slice controls until commit; commit applies the same declared-dtype cast, shape validation, and chunk serialization contract as DataArray.write."
         }
       ]
     },

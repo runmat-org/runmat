@@ -1031,6 +1031,157 @@ pub const DATAARRAY_FILL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescript
         notes: "A scalar is cast once to the declared dtype and repeated without floating mirroring; nonscalar fills reject.",
     }];
 
+const DATATX_LIFECYCLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "DataTransaction id, status, commit, abort, and delete-array operations accept a transaction receiver plus, where applicable, string metadata or an array name; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface.",
+    };
+
+const DATATX_WRITE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Queued scalar or tensor values accept every integer class and are stored exactly at commit when their class matches the declared array dtype.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sliceSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Queued scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values.",
+    },
+];
+pub const DATATX_WRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.write(tx, arrayName, integer_sliceSpec, integer_values)",
+        inputs: &DATATX_WRITE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The transaction retains native integer values and exact slice controls until commit; commit applies the same declared-dtype cast, shape validation, and chunk serialization contract as DataArray.write.",
+    }];
+
+const DATATX_SET_ATTR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A scalar attribute value accepts every integer class and is serialized as an exact JSON integer, including full-width int64 and uint64 values.",
+    }];
+pub const DATATX_SET_ATTR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.set_attr(tx, key, integer_value)",
+        inputs: &DATATX_SET_ATTR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The queued scalar retains its native integer class through the transaction and is emitted as an exact manifest JSON number at commit without an f64 intermediary.",
+    }];
+
+const DATATX_SET_ATTRS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "attribute_values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar values in the attribute struct accept every integer class and are serialized as exact JSON integers, including full-width int64 and uint64 values.",
+    }];
+pub const DATATX_SET_ATTRS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.set_attrs(tx, struct_with_integer_values)",
+        inputs: &DATATX_SET_ATTRS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Each queued scalar integer field retains its native class and is emitted as an exact manifest JSON number at commit without an f64 intermediary.",
+    }];
+
+const DATATX_RESIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "newShape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Queued shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform bounds.",
+    }];
+pub const DATATX_RESIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.resize(tx, arrayName, integer_newShape)",
+        inputs: &DATATX_RESIZE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact shape is validated when queued, retained as platform-sized metadata, and applied at commit by recreating zero-filled storage in the array's declared dtype.",
+    }];
+
+const DATATX_FILL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The queued scalar fill value accepts every integer class and is exact at commit when its class matches the declared array dtype.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "sliceSpec",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Optional queued scalar indices and two-element inclusive ranges accept all eight integer classes or exactly integral floating values.",
+    },
+];
+pub const DATATX_FILL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.fill(tx, arrayName, integer_value, integer_sliceSpec)",
+        inputs: &DATATX_FILL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The transaction retains the native scalar and exact optional slice until commit; commit casts once to the declared dtype and repeats the result without floating mirroring.",
+    }];
+
+const DATATX_CREATE_ARRAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "meta.shape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The schema shape accepts all eight integer classes or exactly integral floating values within nonnegative platform bounds.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "meta.chunk",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional chunk shape accepts all eight integer classes or exactly integral floating values within nonnegative platform bounds.",
+    },
+];
+pub const DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = DataTransaction.create_array(tx, arrayName, struct('shape', integer_shape, 'chunk', integer_chunk))",
+        inputs: &DATATX_CREATE_ARRAY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Exact shape and chunk dimensions are validated when queued, retained as platform-sized metadata, and used at commit to create storage in the schema's declared dtype.",
+    }];
+
 one_sig_descriptor!(
     DATATX_ID_DESCRIPTOR,
     DATATX_ID_SIGS,
@@ -1858,6 +2009,7 @@ async fn data_array_fill_builtin(
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATATX_ID_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1871,6 +2023,7 @@ async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_WRITE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_WRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_write_builtin(
@@ -1902,6 +2055,7 @@ async fn data_tx_write_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_SET_ATTR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_SET_ATTR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
@@ -1925,6 +2079,7 @@ async fn data_tx_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_SET_ATTRS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_SET_ATTRS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
@@ -1954,6 +2109,7 @@ async fn data_tx_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_RESIZE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_RESIZE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_resize_builtin(
@@ -1986,6 +2142,7 @@ async fn data_tx_resize_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_FILL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_FILL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_fill_builtin(
@@ -2017,6 +2174,7 @@ async fn data_tx_fill_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_DELETE_ARRAY_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_delete_array_builtin(base: Value, array_name: Value) -> BuiltinResult<Value> {
@@ -2040,6 +2198,7 @@ async fn data_tx_delete_array_builtin(base: Value, array_name: Value) -> Builtin
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_CREATE_ARRAY_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_create_array_builtin(
@@ -2071,6 +2230,7 @@ async fn data_tx_create_array_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_COMMIT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -2206,6 +2366,7 @@ async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinR
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATATX_ABORT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
@@ -2228,6 +2389,7 @@ async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
     descriptor(crate::builtins::io::data::DATATX_STATUS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_status_builtin(base: Value) -> BuiltinResult<Value> {
@@ -3426,14 +3588,49 @@ mod tests {
         assert_eq!(DATAARRAY_WRITE_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATAARRAY_RESIZE_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATAARRAY_FILL_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_WRITE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_SET_ATTR_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_SET_ATTRS_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_RESIZE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_FILL_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES.len(), 1);
         for capability in [
             &DATAARRAY_READ_INTEGER_CAPABILITIES[0],
             &DATAARRAY_WRITE_INTEGER_CAPABILITIES[0],
             &DATAARRAY_RESIZE_INTEGER_CAPABILITIES[0],
             &DATAARRAY_FILL_INTEGER_CAPABILITIES[0],
+            &DATATX_WRITE_INTEGER_CAPABILITIES[0],
+            &DATATX_SET_ATTR_INTEGER_CAPABILITIES[0],
+            &DATATX_SET_ATTRS_INTEGER_CAPABILITIES[0],
+            &DATATX_RESIZE_INTEGER_CAPABILITIES[0],
+            &DATATX_FILL_INTEGER_CAPABILITIES[0],
+            &DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES[0],
         ] {
             assert!(capability.inputs.iter().all(|input| input.classes
                 == crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES));
+        }
+    }
+
+    #[test]
+    fn data_transaction_lifecycle_methods_reject_integer_receivers() {
+        for (name, extra) in [
+            ("DataTransaction.abort", None),
+            ("DataTransaction.commit", None),
+            (
+                "DataTransaction.delete_array",
+                Some(Value::String("samples".to_string())),
+            ),
+            ("DataTransaction.id", None),
+            ("DataTransaction.status", None),
+        ] {
+            let mut args = vec![Value::Int(IntValue::U64(u64::MAX))];
+            args.extend(extra);
+            let error = call_builtin(name, &args)
+                .expect_err("lifecycle method requires a DataTransaction receiver");
+            assert!(
+                error.message().contains("expected object"),
+                "{name}: {error}"
+            );
         }
     }
 
@@ -4379,6 +4576,209 @@ mod tests {
         };
         assert_eq!(t.shape, vec![3, 1]);
         assert_eq!(tensor_values(&t), vec![7.0, 7.0, 7.0]);
+    }
+
+    #[test]
+    fn data_transactions_preserve_every_integer_class_and_typed_controls() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let cases = vec![
+            (
+                "int8",
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                IntegerStorage::I8(vec![2, 1]),
+                IntegerStorage::I8(vec![1, 1]),
+                IntegerStorage::I8(vec![1, 2]),
+                IntValue::I8(1),
+                IntValue::I8(i8::MIN),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                IntegerStorage::I16(vec![2, 1]),
+                IntegerStorage::I16(vec![1, 1]),
+                IntegerStorage::I16(vec![1, 2]),
+                IntValue::I16(1),
+                IntValue::I16(i16::MIN),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                IntegerStorage::I32(vec![2, 1]),
+                IntegerStorage::I32(vec![1, 1]),
+                IntegerStorage::I32(vec![1, 2]),
+                IntValue::I32(1),
+                IntValue::I32(i32::MIN),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntegerStorage::I64(vec![2, 1]),
+                IntegerStorage::I64(vec![1, 1]),
+                IntegerStorage::I64(vec![1, 2]),
+                IntValue::I64(1),
+                IntValue::I64(i64::MIN),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![0, u8::MAX]),
+                IntegerStorage::U8(vec![2, 1]),
+                IntegerStorage::U8(vec![1, 1]),
+                IntegerStorage::U8(vec![1, 2]),
+                IntValue::U8(1),
+                IntValue::U8(u8::MAX),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![0, u16::MAX]),
+                IntegerStorage::U16(vec![2, 1]),
+                IntegerStorage::U16(vec![1, 1]),
+                IntegerStorage::U16(vec![1, 2]),
+                IntValue::U16(1),
+                IntValue::U16(u16::MAX),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![0, u32::MAX]),
+                IntegerStorage::U32(vec![2, 1]),
+                IntegerStorage::U32(vec![1, 1]),
+                IntegerStorage::U32(vec![1, 2]),
+                IntValue::U32(1),
+                IntValue::U32(u32::MAX),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![0, u64::MAX]),
+                IntegerStorage::U64(vec![2, 1]),
+                IntegerStorage::U64(vec![1, 1]),
+                IntegerStorage::U64(vec![1, 2]),
+                IntValue::U64(1),
+                IntValue::U64(u64::MAX),
+            ),
+        ];
+
+        for (dtype, values, shape, chunk, range, one, attribute) in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir
+                .path()
+                .join(format!("tx-{dtype}.data"))
+                .to_string_lossy()
+                .to_string();
+            let mut base_meta = StructValue::new();
+            base_meta
+                .fields
+                .insert("dtype".to_string(), Value::String("f64".to_string()));
+            base_meta.fields.insert(
+                "shape".to_string(),
+                Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("base shape")),
+            );
+            let mut arrays = StructValue::new();
+            arrays
+                .fields
+                .insert("base".to_string(), Value::Struct(base_meta));
+            let mut schema = StructValue::new();
+            schema
+                .fields
+                .insert("arrays".to_string(), Value::Struct(arrays));
+            let ds = call_builtin(
+                "data.create",
+                &[
+                    Value::String(path),
+                    Value::Struct(schema),
+                    Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
+                ],
+            )
+            .expect("create dataset");
+            let tx = call_builtin("Dataset.begin", &[ds.clone()]).expect("begin transaction");
+
+            let mut meta = StructValue::new();
+            meta.fields
+                .insert("dtype".to_string(), Value::String(dtype.to_string()));
+            meta.fields.insert(
+                "shape".to_string(),
+                Value::Tensor(Tensor::new_integer(shape.clone(), vec![1, 2]).expect("shape")),
+            );
+            meta.fields.insert(
+                "chunk".to_string(),
+                Value::Tensor(Tensor::new_integer(chunk, vec![1, 2]).expect("chunk")),
+            );
+            call_builtin(
+                "DataTransaction.create_array",
+                &[
+                    tx.clone(),
+                    Value::String("typed".to_string()),
+                    Value::Struct(meta),
+                ],
+            )
+            .expect("queue create");
+            call_builtin(
+                "DataTransaction.resize",
+                &[
+                    tx.clone(),
+                    Value::String("typed".to_string()),
+                    Value::Tensor(Tensor::new_integer(shape, vec![1, 2]).expect("resize shape")),
+                ],
+            )
+            .expect("queue resize");
+            call_builtin(
+                "DataTransaction.fill",
+                &[
+                    tx.clone(),
+                    Value::String("typed".to_string()),
+                    Value::Int(attribute.clone()),
+                ],
+            )
+            .expect("queue fill");
+            let slice = Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::Tensor(Tensor::new_integer(range, vec![1, 2]).expect("row range")),
+                        Value::Int(one),
+                    ],
+                    1,
+                    2,
+                )
+                .expect("slice"),
+            );
+            call_builtin(
+                "DataTransaction.write",
+                &[
+                    tx.clone(),
+                    Value::String("typed".to_string()),
+                    slice,
+                    Value::Tensor(Tensor::new_integer(values.clone(), vec![2, 1]).expect("values")),
+                ],
+            )
+            .expect("queue write");
+            call_builtin(
+                "DataTransaction.set_attr",
+                &[
+                    tx.clone(),
+                    Value::String(format!("{dtype}_one")),
+                    Value::Int(attribute.clone()),
+                ],
+            )
+            .expect("queue attribute");
+            let mut attrs = StructValue::new();
+            attrs
+                .fields
+                .insert(format!("{dtype}_many"), Value::Int(attribute));
+            call_builtin(
+                "DataTransaction.set_attrs",
+                &[tx.clone(), Value::Struct(attrs)],
+            )
+            .expect("queue attributes");
+            call_builtin("DataTransaction.commit", &[tx]).expect("commit transaction");
+
+            let arr = call_builtin("Dataset.array", &[ds, Value::String("typed".to_string())])
+                .expect("open typed array");
+            let Value::Tensor(read_back) =
+                call_builtin("DataArray.read", &[arr]).expect("read typed array")
+            else {
+                panic!("expected tensor");
+            };
+            assert_eq!(read_back.integer_storage(), Some(&values), "{dtype}");
+        }
     }
 
     #[test]
