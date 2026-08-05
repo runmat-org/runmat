@@ -952,9 +952,14 @@ fn compare_real_finite_scalars<T: SetFloat>(
             };
         }
     }
+    let ordering = if matches!(comparison, ComparisonMethod::Abs) {
+        b.compare(a)
+    } else {
+        a.compare(b)
+    };
     match direction {
-        SortDirection::Ascend => a.compare(b),
-        SortDirection::Descend => b.compare(a),
+        SortDirection::Ascend => ordering,
+        SortDirection::Descend => ordering.reverse(),
     }
 }
 
@@ -995,9 +1000,26 @@ fn compare_complex_finite_scalars<T: SetFloat>(
                     SortDirection::Descend => abs_cmp.reverse(),
                 };
             }
-            compare_complex_real_first(a, b, direction)
+            compare_complex_phase(a, b, direction)
         }
     }
+}
+
+fn compare_complex_phase<T: SetFloat>(a: (T, T), b: (T, T), direction: SortDirection) -> Ordering {
+    let ordering = complex_phase(a).compare(complex_phase(b));
+    match direction {
+        SortDirection::Ascend => ordering,
+        SortDirection::Descend => ordering.reverse(),
+    }
+}
+
+fn complex_phase<T: SetFloat>((real, imaginary): (T, T)) -> T {
+    let imaginary = if imaginary == T::default() {
+        T::default()
+    } else {
+        imaginary
+    };
+    imaginary.atan2(real)
 }
 
 fn compare_complex_real_first<T: SetFloat>(
@@ -1122,7 +1144,7 @@ struct SortRowsArgs {
 impl SortRowsArgs {
     fn parse(rest: &[Value], num_cols: usize) -> crate::BuiltinResult<Self> {
         let mut columns: Option<Vec<ColumnSpec>> = None;
-        let mut override_direction: Option<SortDirection> = None;
+        let mut override_directions: Option<Vec<SortDirection>> = None;
         let mut comparison = ComparisonMethod::Auto;
         let mut missing = MissingPlacement::Auto;
         let mut i = 0usize;
@@ -1135,8 +1157,14 @@ impl SortRowsArgs {
                     continue;
                 }
             }
-            if let Some(direction) = parse_direction(&rest[i]) {
-                override_direction = Some(direction);
+            if let Some(directions) = parse_directions(&rest[i])? {
+                if override_directions.is_some() {
+                    return Err(sortrows_error_with(
+                        &SORTROWS_ERROR_INVALID_ARGUMENT,
+                        "sortrows: sorting direction specified more than once",
+                    ));
+                }
+                override_directions = Some(directions);
                 i += 1;
                 continue;
             }
@@ -1217,9 +1245,24 @@ impl SortRowsArgs {
         }
 
         let mut columns = columns.unwrap_or_else(|| default_columns(num_cols));
-        if let Some(dir) = override_direction {
-            for spec in &mut columns {
-                spec.direction = dir;
+        if let Some(directions) = override_directions {
+            if directions.len() == 1 {
+                for spec in &mut columns {
+                    spec.direction = directions[0];
+                }
+            } else if directions.len() == columns.len() {
+                for (spec, direction) in columns.iter_mut().zip(directions) {
+                    spec.direction = direction;
+                }
+            } else {
+                return Err(sortrows_error_with(
+                    &SORTROWS_ERROR_INVALID_ARGUMENT,
+                    format!(
+                        "sortrows: direction list length {} must be 1 or match {} selected columns",
+                        directions.len(),
+                        columns.len()
+                    ),
+                ));
             }
         }
         validate_columns(&columns, num_cols)?;
@@ -1360,8 +1403,41 @@ fn parse_single_column_i64(value: i64, num_cols: usize) -> crate::BuiltinResult<
     })
 }
 
-fn parse_direction(value: &Value) -> Option<SortDirection> {
-    tensor::value_to_string(value).and_then(|s| SortDirection::from_str(&s))
+fn parse_directions(value: &Value) -> crate::BuiltinResult<Option<Vec<SortDirection>>> {
+    let strings = match value {
+        Value::StringArray(array) => Some(array.data.clone()),
+        Value::Cell(cell) => {
+            let mut strings = Vec::with_capacity(cell.data.len());
+            for value in &cell.data {
+                let Some(direction) = tensor::value_to_string(value) else {
+                    return Err(sortrows_error_with(
+                        &SORTROWS_ERROR_INVALID_ARGUMENT,
+                        "sortrows: direction cell arrays must contain character vectors or strings",
+                    ));
+                };
+                strings.push(direction);
+            }
+            Some(strings)
+        }
+        _ => tensor::value_to_string(value).map(|value| vec![value]),
+    };
+    let Some(strings) = strings else {
+        return Ok(None);
+    };
+    if strings.is_empty() {
+        return Err(sortrows_error_with(
+            &SORTROWS_ERROR_INVALID_ARGUMENT,
+            "sortrows: direction list must not be empty",
+        ));
+    }
+    let mut directions = Vec::with_capacity(strings.len());
+    for value in strings {
+        let Some(direction) = SortDirection::from_str(&value) else {
+            return Ok(None);
+        };
+        directions.push(direction);
+    }
+    Ok(Some(directions))
 }
 
 fn default_columns(num_cols: usize) -> Vec<ColumnSpec> {
@@ -1436,7 +1512,9 @@ impl SortRowsEvaluation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type, Value};
+    use runmat_builtins::{
+        CellArray, IntValue, IntegerStorage, ResolveContext, StringArray, Type, Value,
+    };
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
         futures::executor::block_on(super::evaluate(value, rest))
@@ -1755,6 +1833,61 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn sortrows_accepts_per_column_cell_and_string_directions() {
+        let tensor = Tensor::new(vec![3.0, 2.0, 1.0, 1.0, 1.0, 2.0], vec![3, 2]).unwrap();
+        let columns = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let cell = Value::Cell(
+            CellArray::new(vec![Value::from("descend"), Value::from("ascend")], 1, 2).unwrap(),
+        );
+        let (cell_sorted, _) = evaluate(
+            Value::Tensor(tensor.clone()),
+            &[Value::Tensor(columns.clone()), cell],
+        )
+        .expect("cell directions")
+        .into_values();
+        let strings = Value::StringArray(
+            StringArray::new(
+                vec!["descend".to_string(), "ascend".to_string()],
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        let (string_sorted, _) =
+            evaluate(Value::Tensor(tensor), &[Value::Tensor(columns), strings])
+                .expect("string directions")
+                .into_values();
+        assert_eq!(cell_sorted, string_sorted);
+    }
+
+    #[test]
+    fn sortrows_absolute_ties_follow_phase() {
+        let real = Tensor::new(vec![-1.0, 1.0], vec![2, 1]).unwrap();
+        let (sorted, _) = evaluate(
+            Value::Tensor(real),
+            &[Value::from("ComparisonMethod"), Value::from("abs")],
+        )
+        .expect("real phase order")
+        .into_values();
+        let Value::Tensor(sorted) = sorted else {
+            panic!("expected tensor");
+        };
+        assert_double_values(&sorted, &[1.0, -1.0]);
+
+        let complex =
+            ComplexTensor::new(vec![(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)], vec![3, 1]).unwrap();
+        let (sorted, _) = evaluate(Value::ComplexTensor(complex), &[])
+            .expect("complex phase order")
+            .into_values();
+        let Value::ComplexTensor(sorted) = sorted else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            sorted.materialize_f64(),
+            vec![(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)]
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sortrows_returns_indices() {
@@ -1815,7 +1948,7 @@ pub(crate) mod tests {
         let (sorted, _) = eval.into_values();
         match sorted {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.materialize_f64(), vec![(-2.0, 1.0), (1.0, 2.0)]);
+                assert_eq!(ct.materialize_f64(), vec![(1.0, 2.0), (-2.0, 1.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }

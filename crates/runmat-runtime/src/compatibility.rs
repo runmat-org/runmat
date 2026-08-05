@@ -234,6 +234,7 @@ mod tests {
                 ("imshow", "imshow-four-channel-image"),
                 ("issorted", "issorted-gpu-missing-placement"),
                 ("issorted", "issorted-gpu-nonvector"),
+                ("issortedrows", "issortedrows-gpu-input"),
                 ("harmmean", "harmmean-integer-data"),
                 ("harmmean", "harmmean-typed-integer-control"),
                 ("kurtosis", "kurtosis-gpu-all-or-vecdim"),

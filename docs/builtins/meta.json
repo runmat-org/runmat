@@ -54719,14 +54719,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input matrix, character matrix, complex matrix, or table."
+              "description": "Input column vector, matrix, or table."
             },
             {
               "name": "args",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Column, direction, comparison, and missing-placement options."
+              "description": "Column selectors, direction modes, ComparisonMethod, and MissingPlacement."
             }
           ],
           "outputs": [
@@ -54740,21 +54740,21 @@
           ]
         },
         {
-          "label": "tf = issortedrows(A, args...)",
+          "label": "tf = issortedrows(A, column, direction, options)",
           "inputs": [
             {
               "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input matrix, character matrix, complex matrix, or table."
+              "description": "Input column vector, matrix, or table."
             },
             {
               "name": "args",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Column, direction, comparison, and missing-placement options."
+              "description": "Column selectors, direction modes, ComparisonMethod, and MissingPlacement."
             }
           ],
           "outputs": [
@@ -54774,6 +54774,65 @@
           "identifier": "RunMat:issortedrows:InvalidInput",
           "when": "Input or row-sorting arguments are invalid.",
           "message": "issortedrows: invalid input"
+        },
+        {
+          "code": "RM.ISSORTEDROWS.INVALID_ARGUMENT",
+          "identifier": "RunMat:issortedrows:InvalidArgument",
+          "when": "A column, direction, comparison, missing-placement, or output argument is invalid.",
+          "message": "issortedrows: invalid argument"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "issortedrows-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "issortedrows with an interactive resident GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IssortedrowsGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = issortedrows(integer_A, integer_columns, direction, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented matrix domain includes all eight real integer classes."
+            },
+            {
+              "name": "column",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonzero integer column scalar or vector accepts every integer class and integer-valued double."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer rows and column selectors are compared exactly across ascending, descending, monotonic, strict, and per-column direction forms. tf is scalar logical. Interactive GPU input is a mode-gated RunMat extension that gathers exact typed storage."
         }
       ]
     },
