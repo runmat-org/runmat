@@ -1149,6 +1149,9 @@ pub struct UniqueOptions {
     pub rows: bool,
     pub order: UniqueOrder,
     pub occurrence: UniqueOccurrence,
+    pub treat_missing_as_distinct: bool,
+    pub explicit_order: bool,
+    pub explicit_occurrence: bool,
 }
 
 /// Host-resident outputs returned by provider-backed `unique` operations.

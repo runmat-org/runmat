@@ -49,12 +49,14 @@ pub(super) fn is_unsupported_set_gpu_integer(handle: &GpuTensorHandle) -> bool {
 }
 
 pub(super) fn set_output_provider(a: &Value, b: &Value) -> Option<&'static dyn AccelProvider> {
-    [a, b].into_iter().find_map(|value| {
-        let Value::GpuTensor(handle) = value else {
-            return None;
-        };
-        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
-    })
+    output_provider(a).or_else(|| output_provider(b))
+}
+
+pub(super) fn output_provider(value: &Value) -> Option<&'static dyn AccelProvider> {
+    let Value::GpuTensor(handle) = value else {
+        return None;
+    };
+    runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
 }
 
 pub(super) fn restore_set_outputs(

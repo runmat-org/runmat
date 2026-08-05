@@ -4774,7 +4774,12 @@
           "when": "Parser encounters invalid or unrecognized option/value arguments.",
           "message": "sort: invalid argument sequence"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "AliasOf",
+        "canonical_builtin": "sort",
+        "notes": "argsort delegates to sort and returns its one-based permutation-index output, so sort's documented exact integer input, dimension, and resident-provider contract is canonical."
+      }
     },
     {
       "name": "array2table",
@@ -114941,6 +114946,35 @@
           "identifier": "RunMat:unique:Internal",
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "unique: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[C, ia, ic] = unique(integer_A, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A accepts every real integer class and retains exact typed storage throughout host evaluation."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "C preserves A's exact integer class; ia and ic are one-based double. GPU supports integer classes through 32 bits and restores all requested outputs after typed fallback."
         }
       ]
     },

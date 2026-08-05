@@ -1,8 +1,9 @@
 //! MATLAB-compatible `argsort` builtin returning permutation indices.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -249,6 +250,12 @@ pub const ARGSORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ARGSORT_ERRORS,
 };
 
+const ARGSORT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::AliasOf,
+    canonical_builtin: Some("sort"),
+    notes: "argsort delegates to sort and returns its one-based permutation-index output, so sort's documented exact integer input, dimension, and resident-provider contract is canonical.",
+};
+
 #[runtime_builtin(
     name = "argsort",
     category = "array/sorting_sets",
@@ -258,6 +265,7 @@ pub const ARGSORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     sink = true,
     type_resolver(index_output_type),
     descriptor(crate::builtins::array::sorting_sets::argsort::ARGSORT_DESCRIPTOR),
+    integer_audit(crate::builtins::array::sorting_sets::argsort::ARGSORT_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::sorting_sets::argsort"
 )]
 async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

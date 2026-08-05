@@ -518,7 +518,7 @@ mod tests {
         }
         assert_eq!(
             audited.keys().copied().collect::<Vec<_>>(),
-            ["addlistener", "cancel", "onCleanup"]
+            ["addlistener", "argsort", "cancel", "onCleanup"]
         );
         for (name, audit) in audited {
             assert!(!audit.notes.is_empty(), "{name} integer audit notes");

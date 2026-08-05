@@ -2,8 +2,8 @@
 //!
 //! The implementation mirrors MathWorks MATLAB behavioural details for sorted
 //! and stable orderings, row-wise uniqueness, and index outputs. GPU tensors
-//! are gathered to host memory today, but the builtin is registered as a sink
-//! so future providers can add device-side kernels without impacting callers.
+//! use a provider hook or typed host fallback, then public outputs are restored
+//! to the owning provider.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -12,10 +12,13 @@ use runmat_accelerate_api::{
     GpuTensorHandle, UniqueOccurrence, UniqueOptions, UniqueOrder, UniqueResult,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
-    StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
+    LogicalArray, NumericStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -38,12 +41,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("unique")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes: "Providers may implement the `unique` hook; default providers download tensors and reuse the CPU implementation.",
+    notes: "Providers may implement the `unique` hook; typed host fallback preserves exact supported integer storage and public outputs are restored to the input handle's owner.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -56,7 +59,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: true,
-    notes: "`unique` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
+    notes: "`unique` terminates fusion chains and acts as a residency sink; upstream tensors are gathered when a provider hook is unavailable.",
 };
 
 const BUILTIN_NAME: &str = "unique";
@@ -128,10 +131,10 @@ const UNIQUE_INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [
     },
     BuiltinParamDescriptor {
         name: "option",
-        ty: BuiltinParamType::StringScalar,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Option tokens: 'sorted'|'stable'|'rows'|'first'|'last'.",
+        description: "Option tokens plus the 'TreatMissingAsDistinct', logical name-value pair.",
     },
 ];
 
@@ -214,8 +217,15 @@ const UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinError
 const UNIQUE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.UNIQUE.INVALID_ARGUMENT",
     identifier: Some("RunMat:unique:InvalidArgument"),
-    when: "Option arguments are not string-like where required.",
-    message: "unique: expected string option arguments",
+    when: "Option arguments or name-value pairs are malformed.",
+    message: "unique: invalid option arguments",
+};
+
+const UNIQUE_ERROR_GPU_OPTION_COMBINATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNIQUE.GPU_OPTION_COMBINATION",
+    identifier: Some("RunMat:unique:GpuOptionCombination"),
+    when: "A resident input specifies both set-order and occurrence options.",
+    message: "unique: GPU inputs cannot combine a set-order option with 'first' or 'last'",
 };
 
 const UNIQUE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -225,7 +235,7 @@ const UNIQUE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "unique: internal operation failed",
 };
 
-const UNIQUE_ERRORS: [BuiltinErrorDescriptor; 8] = [
+const UNIQUE_ERRORS: [BuiltinErrorDescriptor; 9] = [
     UNIQUE_ERROR_LEGACY_OPTION_UNSUPPORTED,
     UNIQUE_ERROR_CONFLICTING_ORDER_OPTIONS,
     UNIQUE_ERROR_CONFLICTING_OCCURRENCE_OPTIONS,
@@ -233,8 +243,30 @@ const UNIQUE_ERRORS: [BuiltinErrorDescriptor; 8] = [
     UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX,
     UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE,
     UNIQUE_ERROR_INVALID_ARGUMENT,
+    UNIQUE_ERROR_GPU_OPTION_COMBINATION,
     UNIQUE_ERROR_INTERNAL,
 ];
+
+const UNIQUE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A accepts every real integer class and retains exact typed storage throughout host evaluation.",
+    }];
+
+const UNIQUE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[C, ia, ic] = unique(integer_A, options)",
+        inputs: &UNIQUE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "C preserves A's exact integer class; ia and ic are one-based double. GPU supports integer classes through 32 bits and restores all requested outputs after typed fallback.",
+    }];
 
 pub const UNIQUE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &UNIQUE_SIGNATURES,
@@ -271,28 +303,59 @@ fn unique_internal_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(unique_values_output_type),
     descriptor(crate::builtins::array::sorting_sets::unique::UNIQUE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::array::sorting_sets::unique::UNIQUE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
 async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
+        return Err(unique_error_with(
+            &UNIQUE_ERROR_INVALID_ARGUMENT,
+            "unique: too many output arguments; maximum is 3",
+        ));
+    }
+    let provider = super::output_provider(&value);
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_values_value()]));
+            let outputs = super::restore_set_outputs(
+                provider,
+                BUILTIN_NAME,
+                vec![eval.into_values_value()],
+                unique_internal_error,
+            )?;
+            return Ok(Value::OutputList(outputs));
         }
         if out_count == 2 {
             let (values, ia) = eval.into_pair();
-            return Ok(Value::OutputList(vec![values, ia]));
+            let outputs = super::restore_set_outputs(
+                provider,
+                BUILTIN_NAME,
+                vec![values, ia],
+                unique_internal_error,
+            )?;
+            return Ok(Value::OutputList(outputs));
         }
         let (values, ia, ic) = eval.into_triple();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
+        let outputs = super::restore_set_outputs(
+            provider,
+            BUILTIN_NAME,
             vec![values, ia, ic],
-        ));
+            unique_internal_error,
+        )?;
+        return Ok(Value::OutputList(outputs));
     }
-    Ok(eval.into_values_value())
+    let mut outputs = super::restore_set_outputs(
+        provider,
+        BUILTIN_NAME,
+        vec![eval.into_values_value()],
+        unique_internal_error,
+    )?;
+    Ok(outputs.pop().expect("unique output"))
 }
 
 /// Evaluate `unique` once and expose all outputs to the caller.
@@ -310,26 +373,102 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UniqueOptions> {
         rows: false,
         order: UniqueOrder::Sorted,
         occurrence: UniqueOccurrence::First,
+        treat_missing_as_distinct: true,
+        explicit_order: false,
+        explicit_occurrence: false,
     };
     let mut seen_order: Option<UniqueOrder> = None;
     let mut seen_occurrence: Option<UniqueOccurrence> = None;
 
     let tokens = tokens_from_values(rest);
-    for (arg, token) in rest.iter().zip(tokens.iter()) {
+    let mut index = 0;
+    while index < rest.len() {
+        let arg = &rest[index];
+        let token = &tokens[index];
         let text = match token {
             crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
             _ => {
                 let text = tensor::value_to_string(arg)
                     .ok_or_else(|| unique_error(&UNIQUE_ERROR_INVALID_ARGUMENT))?;
                 let lowered = text.trim().to_ascii_lowercase();
-                parse_unique_option(&mut opts, &mut seen_order, &mut seen_occurrence, &lowered)?;
+                if lowered == "treatmissingasdistinct" {
+                    index += 1;
+                    let value = rest.get(index).ok_or_else(|| {
+                        unique_error_with(
+                            &UNIQUE_ERROR_INVALID_ARGUMENT,
+                            "unique: 'TreatMissingAsDistinct' requires a logical scalar value",
+                        )
+                    })?;
+                    opts.treat_missing_as_distinct = parse_logical_option(value)?;
+                } else {
+                    parse_unique_option(
+                        &mut opts,
+                        &mut seen_order,
+                        &mut seen_occurrence,
+                        &lowered,
+                    )?;
+                }
+                index += 1;
                 continue;
             }
         };
-        parse_unique_option(&mut opts, &mut seen_order, &mut seen_occurrence, text)?;
+        if text.eq_ignore_ascii_case("TreatMissingAsDistinct") {
+            index += 1;
+            let value = rest.get(index).ok_or_else(|| {
+                unique_error_with(
+                    &UNIQUE_ERROR_INVALID_ARGUMENT,
+                    "unique: 'TreatMissingAsDistinct' requires a logical scalar value",
+                )
+            })?;
+            opts.treat_missing_as_distinct = parse_logical_option(value)?;
+        } else {
+            let lowered = text.trim().to_ascii_lowercase();
+            parse_unique_option(&mut opts, &mut seen_order, &mut seen_occurrence, &lowered)?;
+        }
+        index += 1;
     }
 
     Ok(opts)
+}
+
+fn parse_logical_option(value: &Value) -> crate::BuiltinResult<bool> {
+    if let Value::Bool(flag) = value {
+        return Ok(*flag);
+    }
+    if let Value::LogicalArray(logical) = value {
+        return match logical.data.as_slice() {
+            [flag] => Ok(*flag != 0),
+            _ => Err(unique_error_with(
+                &UNIQUE_ERROR_INVALID_ARGUMENT,
+                "unique: 'TreatMissingAsDistinct' must be a logical scalar",
+            )),
+        };
+    }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_i64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(unique_error_with(
+                &UNIQUE_ERROR_INVALID_ARGUMENT,
+                "unique: 'TreatMissingAsDistinct' must be logical true or false",
+            )),
+        };
+    }
+    let number = match value {
+        Value::Num(number) => Some(*number),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
+        _ => None,
+    };
+    match number {
+        Some(0.0) => Ok(false),
+        Some(1.0) => Ok(true),
+        _ => Err(unique_error_with(
+            &UNIQUE_ERROR_INVALID_ARGUMENT,
+            "unique: 'TreatMissingAsDistinct' must be logical true or false",
+        )),
+    }
 }
 
 fn parse_unique_option(
@@ -350,6 +489,7 @@ fn parse_unique_option(
             }
             *seen_order = Some(UniqueOrder::Sorted);
             opts.order = UniqueOrder::Sorted;
+            opts.explicit_order = true;
         }
         "stable" => {
             if let Some(prev) = seen_order {
@@ -362,6 +502,7 @@ fn parse_unique_option(
             }
             *seen_order = Some(UniqueOrder::Stable);
             opts.order = UniqueOrder::Stable;
+            opts.explicit_order = true;
         }
         "rows" => {
             opts.rows = true;
@@ -377,6 +518,7 @@ fn parse_unique_option(
             }
             *seen_occurrence = Some(UniqueOccurrence::First);
             opts.occurrence = UniqueOccurrence::First;
+            opts.explicit_occurrence = true;
         }
         "last" => {
             if let Some(prev) = seen_occurrence {
@@ -389,6 +531,7 @@ fn parse_unique_option(
             }
             *seen_occurrence = Some(UniqueOccurrence::Last);
             opts.occurrence = UniqueOccurrence::Last;
+            opts.explicit_occurrence = true;
         }
         "legacy" | "r2012a" => {
             return Err(unique_error(&UNIQUE_ERROR_LEGACY_OPTION_UNSUPPORTED));
@@ -407,15 +550,37 @@ async fn unique_gpu(
     handle: GpuTensorHandle,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
+    if super::is_unsupported_set_gpu_integer(&handle) {
+        return Err(unique_error_with(
+            &UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE,
+            "unique: resident 64-bit integer inputs are not supported",
+        ));
+    }
+    if opts.explicit_order && opts.explicit_occurrence {
+        return Err(unique_error(&UNIQUE_ERROR_GPU_OPTION_COMBINATION));
+    }
+    let logical = runmat_accelerate_api::handle_is_logical(&handle);
     if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
+            .or_else(runmat_accelerate_api::provider)
+        {
             if let Ok(result) = provider.unique(&handle, opts).await {
-                return UniqueEvaluation::from_unique_result(result);
+                let evaluation = UniqueEvaluation::from_unique_result(result)?;
+                return if logical {
+                    evaluation.into_logical_values()
+                } else {
+                    Ok(evaluation)
+                };
             }
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    unique_numeric_from_tensor(tensor, opts)
+    let evaluation = unique_numeric_from_tensor(tensor, opts)?;
+    if logical {
+        evaluation.into_logical_values()
+    } else {
+        Ok(evaluation)
+    }
 }
 
 fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -433,12 +598,12 @@ fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<Uniqu
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                 .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
-            unique_numeric_from_tensor(tensor, opts)
+            unique_numeric_from_tensor(tensor, opts)?.into_logical_values()
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|e| unique_internal_error(e))?;
-            unique_numeric_from_tensor(tensor, opts)
+            unique_numeric_from_tensor(tensor, opts)?.into_logical_values()
         }
         Value::ComplexTensor(tensor) => unique_complex_from_tensor(tensor, opts),
         Value::Complex(re, im) => {
@@ -722,6 +887,16 @@ fn unique_floating_elements<T: SetFloat>(
     let mut element_entry_index = Vec::with_capacity(len);
 
     for (idx, &value) in input.iter().enumerate() {
+        if opts.treat_missing_as_distinct && value.is_nan() {
+            let entry_idx = entries.len();
+            entries.push(FloatingElementEntry {
+                value,
+                first: idx,
+                last: idx,
+            });
+            element_entry_index.push(entry_idx);
+            continue;
+        }
         let key = value.canonical_key();
         match map.get(&key) {
             Some(&entry_idx) => {
@@ -823,6 +998,16 @@ fn unique_floating_rows<T: SetFloat>(
         for c in 0..cols {
             let idx = r + c * rows;
             row_values.push(input[idx]);
+        }
+        if opts.treat_missing_as_distinct && row_values.iter().any(|value| value.is_nan()) {
+            let entry_idx = entries.len();
+            entries.push(FloatingRowEntry {
+                row_data: row_values,
+                first: r,
+                last: r,
+            });
+            row_entry_index.push(entry_idx);
+            continue;
         }
         let key = FloatingRowKey::from_slice(&row_values);
         match map.get(&key) {
@@ -949,6 +1134,16 @@ fn unique_complex_elements<T: SetFloat>(
     let mut element_entry_index = Vec::with_capacity(len);
 
     for (idx, &value) in input.iter().enumerate() {
+        if opts.treat_missing_as_distinct && (value.0.is_nan() || value.1.is_nan()) {
+            let entry_idx = entries.len();
+            entries.push(ComplexElementEntry {
+                value,
+                first: idx,
+                last: idx,
+            });
+            element_entry_index.push(entry_idx);
+            continue;
+        }
         let key = ComplexKey::new(value);
         match map.get(&key) {
             Some(&entry_idx) => {
@@ -1054,6 +1249,20 @@ fn unique_complex_rows<T: SetFloat>(
             let value = input[idx];
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
+        }
+        if opts.treat_missing_as_distinct
+            && row_values
+                .iter()
+                .any(|value| value.0.is_nan() || value.1.is_nan())
+        {
+            let entry_idx = entries.len();
+            entries.push(ComplexRowEntry {
+                row_data: row_values,
+                first: r,
+                last: r,
+            });
+            row_entry_index.push(entry_idx);
+            continue;
         }
         match map.get(&key_row) {
             Some(&entry_idx) => {
@@ -1714,6 +1923,30 @@ impl UniqueEvaluation {
         self.values
     }
 
+    fn into_logical_values(mut self) -> crate::BuiltinResult<Self> {
+        self.values = match self.values {
+            Value::Num(value) => Value::Bool(value != 0.0),
+            Value::Tensor(tensor) => {
+                let shape = tensor.shape.clone();
+                let data = tensor
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|value| u8::from(value != 0.0))
+                    .collect();
+                Value::LogicalArray(
+                    LogicalArray::new(data, shape)
+                        .map_err(|error| unique_internal_error(format!("unique: {error}")))?,
+                )
+            }
+            other => {
+                return Err(unique_internal_error(format!(
+                    "unique: cannot restore logical values from {other:?}"
+                )));
+            }
+        };
+        Ok(self)
+    }
+
     pub fn into_pair(self) -> (Value, Value) {
         let ia = tensor::tensor_into_value(self.ia);
         (self.values, ia)
@@ -1771,6 +2004,10 @@ pub(crate) mod tests {
 
     fn evaluate_sync(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
         futures::executor::block_on(evaluate(value, rest))
+    }
+
+    fn builtin_sync(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        futures::executor::block_on(unique_builtin(value, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1859,10 +2096,11 @@ pub(crate) mod tests {
         let (values, ..) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.materialize_f64().len(), 3);
+                assert_eq!(t.materialize_f64().len(), 4);
                 assert_eq!(t.materialize_f64()[0], 1.0);
                 assert_eq!(t.materialize_f64()[1], 2.0);
                 assert!(t.materialize_f64()[2].is_nan());
+                assert!(t.materialize_f64()[3].is_nan());
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -1878,10 +2116,45 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert!(t.materialize_f64()[0].is_nan());
                 assert_eq!(t.materialize_f64()[1], 2.0);
-                assert_eq!(t.materialize_f64()[2], 1.0);
+                assert!(t.materialize_f64()[2].is_nan());
+                assert_eq!(t.materialize_f64()[3], 1.0);
             }
             other => panic!("unexpected values {other:?}"),
         }
+    }
+
+    #[test]
+    fn unique_treat_missing_as_distinct_name_value_controls_nan_grouping() {
+        let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN], vec![3, 1]).unwrap();
+        let collapsed = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            &[Value::from("TreatMissingAsDistinct"), Value::Bool(false)],
+        )
+        .expect("collapsed missing values")
+        .into_values_value();
+        let Value::Tensor(collapsed) = collapsed else {
+            panic!("expected tensor");
+        };
+        assert_eq!(collapsed.materialize_f64().len(), 2);
+        assert!(collapsed.materialize_f64()[1].is_nan());
+
+        let distinct = evaluate_sync(
+            Value::Tensor(tensor),
+            &[
+                Value::from("TreatMissingAsDistinct"),
+                Value::Int(IntValue::U8(1)),
+            ],
+        )
+        .expect("distinct missing values")
+        .into_values_value();
+        let Value::Tensor(distinct) = distinct else {
+            panic!("expected tensor");
+        };
+        assert_eq!(distinct.materialize_f64().len(), 3);
+
+        let err = parse_options(&[Value::from("TreatMissingAsDistinct"), Value::Num(2.0)])
+            .expect_err("non-logical flag must fail");
+        assert_eq!(err.identifier(), UNIQUE_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2194,9 +2467,9 @@ pub(crate) mod tests {
         let eval = evaluate_sync(Value::LogicalArray(logical), &[]).expect("unique");
         let values = eval.into_values_value();
         match values {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.materialize_f64(), vec![0.0, 1.0]);
+            Value::LogicalArray(values) => {
+                assert_eq!(values.shape, vec![1, 2]);
+                assert_eq!(values.data, vec![0, 1]);
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2628,32 +2901,117 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn unique_exact_integer_provider_fallback_preserves_row_orientation() {
+    fn unique_registered_builtin_restores_resident_integer_and_logical_outputs() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(IntegerStorage::I32(vec![7, 0, 7]), vec![1, 3])
+                .expect("integer row");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("typed upload");
+            {
+                let _guard = crate::output_count::push_output_count(Some(3));
+                let Value::OutputList(outputs) = builtin_sync(Value::GpuTensor(handle), Vec::new())
+                    .expect("resident integer unique")
+                else {
+                    panic!("expected output list");
+                };
+                assert_eq!(outputs.len(), 3);
+                assert!(outputs
+                    .iter()
+                    .all(|output| matches!(output, Value::GpuTensor(_))));
+                assert_eq!(
+                    test_support::gather(outputs[0].clone())
+                        .expect("gather values")
+                        .integer_storage(),
+                    Some(&IntegerStorage::I32(vec![0, 7]))
+                );
+            };
+
+            let logical = Tensor::new(vec![1.0, 0.0, 1.0], vec![1, 3]).unwrap();
+            let logical_handle =
+                gpu_helpers::upload_tensor(provider, &logical).expect("logical upload");
+            let logical_input = gpu_helpers::logical_gpu_value(logical_handle);
+            let Value::GpuTensor(output) =
+                builtin_sync(logical_input, Vec::new()).expect("resident logical unique")
+            else {
+                panic!("expected resident logical result");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(&output));
+        });
+    }
+
+    #[test]
+    fn unique_resident_restrictions_and_excess_output_arity_are_enforced() {
         test_support::with_test_provider(|provider| {
             let input =
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 0, u64::MAX]), vec![1, 3])
                     .expect("integer row");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("typed upload");
-            let (values, ia, ic) = evaluate_sync(Value::GpuTensor(handle.clone()), &[])
-                .expect("unique resident integer row")
-                .into_triple();
-            let Value::Tensor(values) = values else {
-                panic!("expected gathered exact values");
-            };
-            assert_eq!(values.shape, vec![1, 2]);
+            let err = evaluate_sync(Value::GpuTensor(handle), &[])
+                .expect_err("resident uint64 must fail");
             assert_eq!(
-                values.integer_storage(),
-                Some(&IntegerStorage::U64(vec![0, u64::MAX]))
+                err.identifier(),
+                UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE.identifier
             );
-            let Value::Tensor(ia) = ia else {
-                panic!("expected ia");
-            };
-            let Value::Tensor(ic) = ic else {
-                panic!("expected ic");
-            };
-            assert_eq!(ia.shape, vec![2, 1]);
-            assert_eq!(ic.shape, vec![3, 1]);
-            let _ = provider.free(&handle);
+
+            let input = Tensor::new(vec![2.0, 1.0], vec![2, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            let err = evaluate_sync(
+                Value::GpuTensor(handle),
+                &[Value::from("stable"), Value::from("last")],
+            )
+            .expect_err("GPU set-order plus occurrence must fail");
+            assert_eq!(
+                err.identifier(),
+                UNIQUE_ERROR_GPU_OPTION_COMBINATION.identifier
+            );
         });
+
+        let _guard = crate::output_count::push_output_count(Some(4));
+        let err = builtin_sync(Value::Num(1.0), Vec::new()).expect_err("excess outputs must fail");
+        assert_eq!(err.identifier(), UNIQUE_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn unique_rows_and_complex_values_honor_missing_distinctness() {
+        let rows = Tensor::new(vec![f64::NAN, f64::NAN, 1.0, 1.0], vec![2, 2]).unwrap();
+        let distinct = evaluate_sync(Value::Tensor(rows.clone()), &[Value::from("rows")])
+            .expect("distinct rows")
+            .into_values_value();
+        let Value::Tensor(distinct) = distinct else {
+            panic!("expected rows");
+        };
+        assert_eq!(distinct.shape, vec![2, 2]);
+        let collapsed = evaluate_sync(
+            Value::Tensor(rows),
+            &[
+                Value::from("rows"),
+                Value::from("TreatMissingAsDistinct"),
+                Value::Bool(false),
+            ],
+        )
+        .expect("collapsed rows")
+        .into_values_value();
+        let Value::Tensor(collapsed) = collapsed else {
+            panic!("expected rows");
+        };
+        assert_eq!(collapsed.shape, vec![1, 2]);
+
+        let complex =
+            ComplexTensor::new(vec![(f64::NAN, 1.0), (f64::NAN, 1.0)], vec![2, 1]).unwrap();
+        let distinct = evaluate_sync(Value::ComplexTensor(complex.clone()), &[])
+            .expect("distinct complex")
+            .into_values_value();
+        let Value::ComplexTensor(distinct) = distinct else {
+            panic!("expected complex values");
+        };
+        assert_eq!(distinct.len(), 2);
+        let collapsed = evaluate_sync(
+            Value::ComplexTensor(complex),
+            &[Value::from("TreatMissingAsDistinct"), Value::Bool(false)],
+        )
+        .expect("collapsed complex")
+        .into_values_value();
+        assert!(
+            matches!(collapsed, Value::Complex(real, imaginary) if real.is_nan() && imaginary == 1.0)
+        );
     }
 }
