@@ -11343,6 +11343,64 @@
           "when": "Internal conversion/allocation/provider operations fail.",
           "message": "circshift: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = circshift(A, K, dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "Array elements are permuted without changing or materializing their native integer class."
+            },
+            {
+              "name": "K",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "Shift scalars/vectors are parsed exactly for integer storage and must be finite integer-valued when floating."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "Dimension scalars/vectors are parsed exactly, must be positive, and cannot contain duplicates."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "All eight integer array classes preserve exact storage and shape; provider execution or exact gather/re-upload preserves residency where supported."
+        }
       ]
     },
     {
@@ -43922,6 +43980,49 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "histcounts: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[N, edges] = histcounts(X, bins/name-value controls)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "Host data accepts all eight integer classes; interactive GPU data accepts integer classes through 32 bits and rejects int64/uint64 before gather."
+            },
+            {
+              "name": "bins_and_numeric_controls",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "Typed integer bin counts, explicit edges, widths, and limits are parsed according to each control's scalar/vector contract."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Integer observations enter the documented double histogram domain and counts/edges are double; integer NumBins parsing remains exact and 64-bit integer gpuArray data is unsupported."
+        }
       ]
     },
     {
@@ -67699,6 +67800,49 @@
           "when": "Runtime cannot materialize matrix-power outputs.",
           "message": "mpower: internal runtime failure"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = mpower(A, p)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "Integer scalar or square-matrix bases retain their native class."
+            },
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "The exponent must be a real nonnegative integer-valued scalar."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer scalar and matrix powers use same-class saturating multiplication; resident integer matrices gather and re-upload exact storage instead of using floating provider matmul."
+        }
       ]
     },
     {
@@ -72553,6 +72697,49 @@
           "identifier": "RunMat:num2cell:Internal",
           "when": "Internal cell or slice allocation failed.",
           "message": "num2cell: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = num2cell(A, dims)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer element or grouped block retains A's native integer class."
+            },
+            {
+              "name": "dims",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "Dimension selectors are exact positive integer scalars/vectors; duplicate and out-of-range dimensions reject."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Scalar cells and grouped numeric blocks preserve exact native storage; resident inputs gather before cell construction."
         }
       ]
     },
@@ -80231,6 +80418,31 @@
           "identifier": "RunMat:polyint:Internal",
           "when": "Runtime fails while building output tensors or provider fallback paths.",
           "message": "polyint: internal runtime failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "q = polyint(p, k)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [],
+              "scalar_double": "NotApplicable",
+              "notes": "Integer and logical coefficient vectors are rejected before floating host/provider dispatch."
+            },
+            {
+              "name": "k",
+              "classes": [],
+              "scalar_double": "NotApplicable",
+              "notes": "Integer and logical integration constants are rejected; only single/double real or complex values are supported."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "This builtin has no integer overload; the empty accepted-class masks are intentional and prevent generic numeric coercion from admitting integers."
         }
       ]
     },

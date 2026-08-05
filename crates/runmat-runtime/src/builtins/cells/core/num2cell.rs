@@ -3,7 +3,10 @@
 use std::collections::HashSet;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
     NumericScalar, NumericStorage, StringArray, Tensor, Value,
@@ -83,6 +86,33 @@ pub const NUM2CELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer element or grouped block retains A's native integer class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dims",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Dimension selectors are exact positive integer scalars/vectors; duplicate and out-of-range dimensions reject.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "C = num2cell(A, dims)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Scalar cells and grouped numeric blocks preserve exact native storage; resident inputs gather before cell construction.",
+    }];
+
 #[runtime_builtin(
     name = "num2cell",
     category = "cells/core",
@@ -90,6 +120,7 @@ pub const NUM2CELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "num2cell,cell,conversion,array,dimensions",
     accel = "gather",
     descriptor(crate::builtins::cells::core::num2cell::NUM2CELL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::cells::core::num2cell::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::cells::core::num2cell"
 )]
 async fn num2cell_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

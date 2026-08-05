@@ -4,7 +4,10 @@ use std::cmp::Ordering;
 
 use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Value,
 };
@@ -199,6 +202,33 @@ pub const HISTCOUNTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &HISTCOUNTS_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Host data accepts all eight integer classes; interactive GPU data accepts integer classes through 32 bits and rejects int64/uint64 before gather.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "bins_and_numeric_controls",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed integer bin counts, explicit edges, widths, and limits are parsed according to each control's scalar/vector contract.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[N, edges] = histcounts(X, bins/name-value controls)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer observations enter the documented double histogram domain and counts/edges are double; integer NumBins parsing remains exact and 64-bit integer gpuArray data is unsupported.",
+    }];
+
 fn builtin_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -256,6 +286,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(histcounts_type),
     descriptor(crate::builtins::stats::hist::histcounts::HISTCOUNTS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::stats::hist::histcounts::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
 async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -16,7 +16,10 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericStorage,
     ResolveContext, StringArray, Tensor, Type, Value,
@@ -194,6 +197,39 @@ pub const CIRCSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CIRCSHIFT_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Array elements are permuted without changing or materializing their native integer class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "K",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Shift scalars/vectors are parsed exactly for integer storage and must be finite integer-valued when floating.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Dimension scalars/vectors are parsed exactly, must be positive, and cannot contain duplicates.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = circshift(A, K, dim)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "All eight integer array classes preserve exact storage and shape; provider execution or exact gather/re-upload preserves residency where supported.",
+    }];
+
 fn circshift_error(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -233,6 +269,7 @@ fn circshift_internal(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     type_resolver(preserve_array_type),
     descriptor(crate::builtins::array::shape::circshift::CIRCSHIFT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::circshift::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::circshift"
 )]
 async fn circshift_builtin(

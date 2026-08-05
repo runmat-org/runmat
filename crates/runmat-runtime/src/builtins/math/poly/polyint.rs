@@ -3,7 +3,10 @@
 use log::{trace, warn};
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, NumericDType, NumericStorage, Tensor, Value,
 };
@@ -102,6 +105,33 @@ pub const POLYINT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &POLYINT_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "p",
+        classes: &[],
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer and logical coefficient vectors are rejected before floating host/provider dispatch.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &[],
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer and logical integration constants are rejected; only single/double real or complex values are supported.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "q = polyint(p, k)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "This builtin has no integer overload; the empty accepted-class masks are intentional and prevent generic numeric coercion from admitting integers.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyint")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "polyint",
@@ -155,6 +185,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "polyint,polynomial,integral,antiderivative",
     type_resolver(polyint_type),
     descriptor(crate::builtins::math::poly::polyint::POLYINT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::poly::polyint::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::poly::polyint"
 )]
 async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

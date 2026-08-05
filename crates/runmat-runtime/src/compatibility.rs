@@ -299,14 +299,19 @@ mod tests {
     fn integer_capability_metadata_is_complete_and_well_formed_for_settled_apis() {
         let registered = runmat_builtins::builtin_functions();
         for name in [
+            "circshift",
             "factor",
             "factorial",
             "gcd",
+            "histcounts",
             "idivide",
             "isprime",
             "lcm",
             "mod",
+            "mpower",
             "nchoosek",
+            "num2cell",
+            "polyint",
             "primes",
             "rem",
         ] {
@@ -323,8 +328,15 @@ mod tests {
                 assert!(!capability.inputs.is_empty(), "{name} inputs");
                 assert!(!capability.notes.is_empty(), "{name} notes");
                 for input in capability.inputs {
-                    assert!(!input.classes.is_empty(), "{name}:{} classes", input.name);
                     assert!(!input.notes.is_empty(), "{name}:{} notes", input.name);
+                    if input.classes.is_empty() {
+                        assert_eq!(
+                            input.scalar_double,
+                            runmat_builtins::BuiltinIntegerScalarDoubleRule::NotApplicable,
+                            "{name}:{} empty accepted-class mask",
+                            input.name
+                        );
+                    }
                     for (index, class) in input.classes.iter().enumerate() {
                         assert!(
                             !input.classes[..index].contains(class),

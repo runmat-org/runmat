@@ -5155,6 +5155,7 @@ pub enum BuiltinIntegerOutputClassRule {
     Double,
     Logical,
     OptionDependent,
+    NotApplicable,
     FunctionSpecific,
 }
 
