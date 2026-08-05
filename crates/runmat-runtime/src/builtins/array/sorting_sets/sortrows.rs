@@ -7,9 +7,13 @@ use runmat_accelerate_api::{
     SortResult as ProviderSortResult, SortRowsColumnSpec as ProviderSortRowsColumnSpec,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericScalar, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntegerStorage,
+    LogicalArray, NumericScalar, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -30,13 +34,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("sortrows")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes:
-        "Providers may implement a row-sort kernel; explicit MissingPlacement overrides fall back to host memory until native support exists.",
+    notes: "Providers may implement a plain-real row-sort kernel; typed fallback preserves supported integer/logical storage and registered outputs return to the input handle's owner.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -49,7 +52,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: true,
-    notes: "`sortrows` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
+    notes: "`sortrows` terminates fusion chains and acts as a residency sink; unsupported provider forms use typed host fallback.",
 };
 
 const BUILTIN_NAME: &str = "sortrows";
@@ -329,6 +332,35 @@ const SORTROWS_ERRORS: [BuiltinErrorDescriptor; 7] = [
     SORTROWS_ERROR_INTERNAL,
 ];
 
+const SORTROWS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented sortable matrix domain includes all eight real integer classes.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "column",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented nonzero integer column scalar or vector accepts every integer class and integer-valued double.",
+    },
+];
+
+const SORTROWS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[B, I] = sortrows(integer_A, integer_columns, direction, options)",
+        inputs: &SORTROWS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "B preserves A's exact integer class and stable equal-row order; optional I is one-based double. Resident integer input uses exact typed gather fallback and restores both outputs to the owning provider.",
+    }];
+
 pub const SORTROWS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SORTROWS_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -364,24 +396,44 @@ fn sortrows_internal_error(message: impl Into<String>) -> crate::RuntimeError {
     sink = true,
     type_resolver(tensor_output_type),
     descriptor(crate::builtins::array::sorting_sets::sortrows::SORTROWS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::array::sorting_sets::sortrows::SORTROWS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::array::sorting_sets::sortrows"
 )]
 async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
+        return Err(sortrows_error_with(
+            &SORTROWS_ERROR_INVALID_ARGUMENT,
+            "sortrows: too many output arguments; maximum is 2",
+        ));
+    }
+    let provider = super::output_provider(&value);
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
         let (sorted, indices) = eval.into_values();
-        let mut outputs = vec![sorted];
-        if out_count >= 2 {
-            outputs.push(indices);
-        }
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count, outputs,
-        ));
+        let outputs = if out_count == 1 {
+            vec![sorted]
+        } else {
+            vec![sorted, indices]
+        };
+        return Ok(Value::OutputList(super::restore_set_outputs(
+            provider,
+            BUILTIN_NAME,
+            outputs,
+            sortrows_internal_error,
+        )?));
     }
-    Ok(eval.into_sorted_value())
+    let mut outputs = super::restore_set_outputs(
+        provider,
+        BUILTIN_NAME,
+        vec![eval.into_sorted_value()],
+        sortrows_internal_error,
+    )?;
+    Ok(outputs.pop().expect("sortrows output"))
 }
 
 /// Evaluate the `sortrows` builtin once and expose both outputs.
@@ -401,8 +453,14 @@ async fn sortrows_gpu(
     let (_, cols) = rows_cols_from_shape(&handle.shape);
     let args = SortRowsArgs::parse(rest, cols)?;
 
-    if args.missing_is_auto() {
-        if let Some(provider) = runmat_accelerate_api::provider() {
+    let plain_real = runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
+        && runmat_accelerate_api::handle_storage(&handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real;
+    if plain_real && args.missing_is_auto() {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
+            .or_else(runmat_accelerate_api::provider)
+        {
             let provider_columns = args.to_provider_columns();
             let provider_comparison = args.provider_comparison();
             match provider
@@ -417,8 +475,8 @@ async fn sortrows_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    sortrows_real_tensor_with_args(tensor, &args)
+    let value = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    sortrows_host_with_args(value, &args)
 }
 
 fn sortrows_from_provider_result(
@@ -435,30 +493,41 @@ fn sortrows_from_provider_result(
 }
 
 fn sortrows_host(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
+    if matches!(&value, Value::Object(obj) if obj.is_class(crate::builtins::table::TABLE_CLASS)) {
+        let (sorted, indices) = crate::builtins::table::sortrows_table(value, rest)?;
+        return Ok(SortRowsEvaluation::from_parts(sorted, indices));
+    }
+    let shape = value_shape(&value);
+    ensure_matrix_shape(&shape)?;
+    let (_, cols) = rows_cols_from_shape(&shape);
+    let args = SortRowsArgs::parse(rest, cols)?;
+    sortrows_host_with_args(value, &args)
+}
+
+fn sortrows_host_with_args(
+    value: Value,
+    args: &SortRowsArgs,
+) -> crate::BuiltinResult<SortRowsEvaluation> {
     match value {
-        Value::Tensor(tensor) => sortrows_real_tensor(tensor, rest),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|e| sortrows_internal_error(e))?;
-            sortrows_real_tensor(tensor, rest)
+        Value::Tensor(tensor) => sortrows_real_tensor_with_args(tensor, args),
+        Value::LogicalArray(logical) => sortrows_logical_with_args(logical, args),
+        Value::Bool(value) => {
+            let logical = LogicalArray::new(vec![u8::from(value)], vec![1, 1])
+                .map_err(|error| sortrows_internal_error(format!("sortrows: {error}")))?;
+            sortrows_logical_with_args(logical, args)
         }
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
+        Value::Num(_) | Value::Int(_) => {
             let tensor = tensor::value_into_tensor_for("sortrows", value)
                 .map_err(|e| sortrows_internal_error(e))?;
-            sortrows_real_tensor(tensor, rest)
+            sortrows_real_tensor_with_args(tensor, args)
         }
-        Value::ComplexTensor(ct) => sortrows_complex_tensor(ct, rest),
+        Value::ComplexTensor(ct) => sortrows_complex_tensor_with_args(ct, args),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
-            sortrows_complex_tensor(tensor, rest)
+            sortrows_complex_tensor_with_args(tensor, args)
         }
-        Value::CharArray(ca) => sortrows_char_array(ca, rest),
-        Value::Object(obj) if obj.is_class(crate::builtins::table::TABLE_CLASS) => {
-            let (sorted, indices) =
-                crate::builtins::table::sortrows_table(Value::Object(obj), rest)?;
-            Ok(SortRowsEvaluation::from_parts(sorted, indices))
-        }
+        Value::CharArray(ca) => sortrows_char_array_with_args(ca, args),
         other => Err(sortrows_error_with(
             &SORTROWS_ERROR_UNSUPPORTED_INPUT_TYPE,
             format!(
@@ -470,14 +539,54 @@ fn sortrows_host(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsE
     }
 }
 
-fn sortrows_real_tensor(
-    tensor: Tensor,
-    rest: &[Value],
+fn value_shape(value: &Value) -> Vec<usize> {
+    match value {
+        Value::Tensor(tensor) => tensor.shape.clone(),
+        Value::LogicalArray(logical) => logical.shape.clone(),
+        Value::ComplexTensor(tensor) => tensor.shape.clone(),
+        Value::CharArray(array) => array.shape.clone(),
+        Value::GpuTensor(handle) => handle.shape.clone(),
+        _ => vec![1, 1],
+    }
+}
+
+fn sortrows_logical_with_args(
+    logical: LogicalArray,
+    args: &SortRowsArgs,
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
-    ensure_matrix_shape(&tensor.shape)?;
-    let cols = tensor.cols();
-    let args = SortRowsArgs::parse(rest, cols)?;
-    sortrows_real_tensor_with_args(tensor, &args)
+    let shape = logical.shape.clone();
+    let tensor = Tensor::new_integer(IntegerStorage::U8(logical.data), shape)
+        .map_err(|error| sortrows_internal_error(format!("sortrows: {error}")))?;
+    let evaluation = sortrows_real_tensor_with_args(tensor, args)?;
+    let sorted = match evaluation.sorted {
+        Value::Int(integer) => Value::Bool(integer.to_i64() != 0),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let storage = tensor
+                .into_numeric_storage()
+                .map_err(|error| sortrows_internal_error(format!("sortrows: {error}")))?
+                .into_integer_storage()
+                .map_err(|_| sortrows_internal_error("sortrows: logical output lost storage"))?;
+            let IntegerStorage::U8(values) = storage else {
+                return Err(sortrows_internal_error(
+                    "sortrows: logical output changed storage class",
+                ));
+            };
+            Value::LogicalArray(
+                LogicalArray::new(values, shape)
+                    .map_err(|error| sortrows_internal_error(format!("sortrows: {error}")))?,
+            )
+        }
+        other => {
+            return Err(sortrows_internal_error(format!(
+                "sortrows: unexpected logical output {other:?}"
+            )))
+        }
+    };
+    Ok(SortRowsEvaluation {
+        sorted,
+        indices: evaluation.indices,
+    })
 }
 
 fn sortrows_real_tensor_with_args(
@@ -510,16 +619,6 @@ fn sortrows_real_tensor_with_args(
         sorted: tensor::tensor_into_value(sorted_tensor),
         indices,
     })
-}
-
-fn sortrows_complex_tensor(
-    tensor: ComplexTensor,
-    rest: &[Value],
-) -> crate::BuiltinResult<SortRowsEvaluation> {
-    ensure_matrix_shape(&tensor.shape)?;
-    let cols = tensor.cols;
-    let args = SortRowsArgs::parse(rest, cols)?;
-    sortrows_complex_tensor_with_args(tensor, &args)
 }
 
 fn sortrows_complex_tensor_with_args(
@@ -571,12 +670,6 @@ fn sortrows_promoted_complex_integer_order(
 ) {
     let values = storage.materialize_f64();
     order.sort_by(|&a, &b| compare_complex_rows(&values, rows, cols, args, a, b));
-}
-
-fn sortrows_char_array(ca: CharArray, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
-    let cols = ca.cols;
-    let args = SortRowsArgs::parse(rest, cols)?;
-    sortrows_char_array_with_args(ca, &args)
 }
 
 fn sortrows_char_array_with_args(
@@ -1349,6 +1442,10 @@ pub(crate) mod tests {
         futures::executor::block_on(super::evaluate(value, rest))
     }
 
+    fn builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        futures::executor::block_on(sortrows_builtin(value, rest))
+    }
+
     fn assert_double_values(tensor: &Tensor, expected: &[f64]) {
         assert_eq!(
             tensor.as_f64_slice().expect("expected double tensor"),
@@ -1517,6 +1614,73 @@ pub(crate) mod tests {
             };
             assert_double_values(&indices, &[2.0, 1.0]);
         }
+    }
+
+    #[test]
+    fn sortrows_preserves_logical_class() {
+        let logical = LogicalArray::new(vec![1, 0, 1, 0, 1, 0], vec![3, 2]).unwrap();
+        let (sorted, indices) = evaluate(Value::LogicalArray(logical), &[])
+            .expect("logical sortrows")
+            .into_values();
+        let Value::LogicalArray(sorted) = sorted else {
+            panic!("expected logical output");
+        };
+        assert_eq!(sorted.shape, vec![3, 2]);
+        assert_eq!(sorted.data, vec![0, 1, 1, 1, 0, 0]);
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_double_values(&indices, &[2.0, 1.0, 3.0]);
+    }
+
+    #[test]
+    fn registered_sortrows_restores_wide_integer_and_logical_outputs_and_rejects_excess_arity() {
+        test_support::with_test_provider(|provider| {
+            let integer = Tensor::new_integer(
+                IntegerStorage::U64(vec![u64::MAX, 0, 1, 9_007_199_254_740_993]),
+                vec![2, 2],
+            )
+            .expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &integer).expect("typed upload");
+            {
+                let _guard = crate::output_count::push_output_count(Some(2));
+                let Value::OutputList(outputs) =
+                    builtin(Value::GpuTensor(handle), Vec::new()).expect("resident sortrows")
+                else {
+                    panic!("expected output list");
+                };
+                assert_eq!(outputs.len(), 2);
+                assert!(outputs
+                    .iter()
+                    .all(|output| matches!(output, Value::GpuTensor(_))));
+                assert_eq!(
+                    test_support::gather(outputs[0].clone())
+                        .expect("gather sorted")
+                        .integer_storage(),
+                    Some(&IntegerStorage::U64(vec![
+                        0,
+                        u64::MAX,
+                        9_007_199_254_740_993,
+                        1,
+                    ]))
+                );
+            }
+
+            let logical =
+                Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0], vec![3, 2]).expect("logical input");
+            let handle = gpu_helpers::upload_tensor(provider, &logical).expect("logical upload");
+            let logical = gpu_helpers::logical_gpu_value(handle);
+            let Value::GpuTensor(output) =
+                builtin(logical, Vec::new()).expect("resident logical sortrows")
+            else {
+                panic!("expected resident logical output");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(&output));
+        });
+
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let err = builtin(Value::Num(1.0), Vec::new()).expect_err("excess outputs must reject");
+        assert_eq!(err.identifier(), SORTROWS_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

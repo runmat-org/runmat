@@ -100121,6 +100121,51 @@
           "when": "Internal conversion/allocation/provider decode fails.",
           "message": "sortrows: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[B, I] = sortrows(integer_A, integer_columns, direction, options)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented sortable matrix domain includes all eight real integer classes."
+            },
+            {
+              "name": "column",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonzero integer column scalar or vector accepts every integer class and integer-valued double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "B preserves A's exact integer class and stable equal-row order; optional I is one-based double. Resident integer input uses exact typed gather fallback and restores both outputs to the owning provider."
+        }
       ]
     },
     {
