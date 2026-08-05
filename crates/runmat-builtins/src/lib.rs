@@ -5112,6 +5112,94 @@ pub struct BuiltinDescriptor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerClass {
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Uint8,
+    Uint16,
+    Uint32,
+    Uint64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerScalarDoubleRule {
+    NotApplicable,
+    Allowed,
+    AllowedExceptWith64BitInteger,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinIntegerInputCapability {
+    pub name: &'static str,
+    pub classes: &'static [BuiltinIntegerClass],
+    pub scalar_double: BuiltinIntegerScalarDoubleRule,
+    pub notes: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerComputationDomain {
+    ExactInteger,
+    FloatingPoint,
+    Predicate,
+    Structural,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerOutputClassRule {
+    PreserveInput,
+    PreserveNondoubleInput,
+    Double,
+    Logical,
+    OptionDependent,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerOverflowRule {
+    Saturate,
+    Error,
+    NotApplicable,
+    EvidenceOpen,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerBackendRule {
+    HostOnly,
+    HostAndGpu,
+    GatherFallback,
+    GpuRestricted,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerOverloadKind {
+    ScalarOnly,
+    ElementwiseShapePreserving,
+    SameSizeOrScalar,
+    BroadcastCompatible,
+    StructuralParameter,
+    Multiple,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinIntegerCapabilityDescriptor {
+    pub form: &'static str,
+    pub inputs: &'static [BuiltinIntegerInputCapability],
+    pub computation_domain: BuiltinIntegerComputationDomain,
+    pub output_class: BuiltinIntegerOutputClassRule,
+    pub overflow: BuiltinIntegerOverflowRule,
+    pub backend: BuiltinIntegerBackendRule,
+    pub overload: BuiltinIntegerOverloadKind,
+    pub notes: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinExtensionMode {
     RunMatOnly,
 }
@@ -5141,6 +5229,7 @@ pub struct BuiltinFunction {
     pub suppress_auto_output: bool,
     pub descriptor: Option<&'static BuiltinDescriptor>,
     pub extensions: &'static [BuiltinExtensionDescriptor],
+    pub integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
 }
 
 impl BuiltinFunction {
@@ -5174,6 +5263,7 @@ impl BuiltinFunction {
             suppress_auto_output,
             descriptor: None,
             extensions: &[],
+            integer_capabilities: &[],
         }
     }
 
@@ -5192,6 +5282,14 @@ impl BuiltinFunction {
 
     pub fn with_extensions(mut self, extensions: &'static [BuiltinExtensionDescriptor]) -> Self {
         self.extensions = extensions;
+        self
+    }
+
+    pub fn with_integer_capabilities(
+        mut self,
+        capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
+    ) -> Self {
+        self.integer_capabilities = capabilities;
         self
     }
 

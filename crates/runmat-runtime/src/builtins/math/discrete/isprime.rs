@@ -1,7 +1,10 @@
 //! MATLAB-compatible `isprime` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, LogicalArray, NumericStorage, Type, Value,
 };
@@ -52,6 +55,25 @@ pub const ISPRIME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Every element must be a real nonnegative integer value.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = isprime(A)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Logical output preserves input shape including empties; interactive GPU input is unsupported.",
+    }];
+
 fn isprime_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::logical()
 }
@@ -63,6 +85,7 @@ fn isprime_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type 
     keywords = "isprime,prime test,integer,number theory,discrete",
     type_resolver(isprime_type),
     descriptor(crate::builtins::math::discrete::isprime::ISPRIME_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::discrete::isprime::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::discrete::isprime"
 )]
 async fn isprime_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

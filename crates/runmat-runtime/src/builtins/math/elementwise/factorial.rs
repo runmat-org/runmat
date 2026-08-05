@@ -7,7 +7,10 @@
 use once_cell::sync::Lazy;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     NumericStorage, Tensor, Value,
 };
@@ -162,6 +165,25 @@ pub const FACTORIAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &FACTORIAL_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Every element must be a real nonnegative integer value.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = factorial(X)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Ordinary output preserves input class and saturates at its documented threshold; interactive GPU input excludes int64 and uint64, while an explicit prototype can select output class/residency.",
+    }];
+
 fn factorial_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl std::fmt::Display,
@@ -182,6 +204,7 @@ fn factorial_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::factorial::FACTORIAL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::factorial::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::factorial"
 )]
 async fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

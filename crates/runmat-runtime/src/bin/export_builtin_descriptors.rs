@@ -3,8 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinOutputMode,
-    BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinIntegerCapabilityDescriptor, BuiltinOutputMode, BuiltinSignatureDescriptor,
 };
 use serde::Serialize;
 
@@ -17,6 +17,8 @@ struct BuiltinDescriptorExport<'a> {
     errors: &'a [BuiltinErrorDescriptor],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     extensions: &'a [BuiltinExtensionDescriptor],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    integer_capabilities: &'a [BuiltinIntegerCapabilityDescriptor],
 }
 
 #[derive(Serialize)]
@@ -59,6 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 signatures: descriptor.signatures,
                 errors: descriptor.errors,
                 extensions: builtin.extensions,
+                integer_capabilities: builtin.integer_capabilities,
             })
         })
         .collect::<Vec<_>>();

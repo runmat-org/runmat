@@ -29529,6 +29529,76 @@
       ]
     },
     {
+      "name": "factor",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "F = factor(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Real nonnegative integer scalar."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "F",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of prime factors in ascending order."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FACTOR.INVALID_INPUT",
+          "identifier": "RunMat:factor:InvalidInput",
+          "when": "Input is not a real nonnegative integer scalar in a supported host numeric class.",
+          "message": "factor: input must be a real nonnegative integer scalar"
+        },
+        {
+          "code": "RM.FACTOR.INTERNAL",
+          "identifier": "RunMat:factor:Internal",
+          "when": "The result tensor cannot be constructed.",
+          "message": "factor: result construction failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "F = factor(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "Input must be a real nonnegative integer-valued scalar."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Returns a same-class row of prime factors; interactive GPU input is unsupported."
+        }
+      ]
+    },
+    {
       "name": "factorial",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -29614,6 +29684,34 @@
           "identifier": "RunMat:factorial:Internal",
           "when": "Internal gather/provider/tensor construction failed.",
           "message": "factorial: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = factorial(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "Every element must be a real nonnegative integer value."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "GpuRestricted",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Ordinary output preserves input class and saturates at its documented threshold; interactive GPU input excludes int64 and uint64, while an explicit prototype can select output class/residency."
         }
       ]
     },
@@ -39795,6 +39893,82 @@
           "when": "GPU gather or tensor construction fails.",
           "message": "gcd: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "G = gcd(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "If A is integer, B must use the same integer class or be a scalar double."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "If B is integer, A must use the same integer class or be a scalar double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "Signed and zero values are accepted; G is always nonnegative."
+        },
+        {
+          "form": "[G, U, V] = gcd(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "Extended outputs support signed integer, single, and double inputs."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "Extended outputs support signed integer, single, and double inputs."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "Unsigned integer inputs are rejected because requested Bézout coefficients require a signed result class."
+        }
       ]
     },
     {
@@ -45829,6 +46003,49 @@
           "identifier": "RunMat:idivide:Overflow",
           "when": "A rounded quotient cannot be represented in the dividend integer class.",
           "message": "idivide: quotient overflows output class"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = idivide(A, B, roundingMode)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "A is an integer array or a compatible integer-valued scalar double."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "B is an integer array or a compatible integer-valued scalar double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "EvidenceOpen",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Supports fix, floor, ceil, and round modes; exact division is retained through host fallback, while division-by-zero and signed minimum divided by -1 remain named evidence questions."
         }
       ]
     },
@@ -52750,6 +52967,76 @@
       "errors": []
     },
     {
+      "name": "isprime",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "tf = isprime(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Real array of nonnegative integer values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tf",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical array indicating which input elements are prime."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.ISPRIME.INVALID_INPUT",
+          "identifier": "RunMat:isprime:InvalidInput",
+          "when": "Input is not a real host numeric array of nonnegative integer values.",
+          "message": "isprime: input values must be real nonnegative integers"
+        },
+        {
+          "code": "RM.ISPRIME.INTERNAL",
+          "identifier": "RunMat:isprime:Internal",
+          "when": "The logical result array cannot be constructed.",
+          "message": "isprime: result construction failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = isprime(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "Every element must be a real nonnegative integer value."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Logical output preserves input shape including empties; interactive GPU input is unsupported."
+        }
+      ]
+    },
+    {
       "name": "isreal",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -55287,6 +55574,49 @@
           "identifier": "RunMat:lcm:Internal",
           "when": "GPU gather or tensor construction fails.",
           "message": "lcm: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "L = lcm(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "If A is integer, B must use the same integer class or be a scalar double."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "If B is integer, A must use the same integer class or be a scalar double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "EvidenceOpen",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "Inputs must be positive integer-valued real data; the exact overflow outcome remains evidence-gated."
         }
       ]
     },
@@ -64257,6 +64587,49 @@
           "when": "Internal tensor conversion, allocation, or provider composition failed.",
           "message": "mod: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = mod(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "A is an integer array or a compatible real scalar double."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "B is an integer array or a compatible real scalar double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "BroadcastCompatible",
+          "notes": "Native integer storage uses exact floor-remainder semantics; providers may execute exact integer mod directly or gather for a semantically complete fallback."
+        }
       ]
     },
     {
@@ -70382,6 +70755,90 @@
           "identifier": "RunMat:nchoosek:Internal",
           "when": "Output allocation, GPU gather, or container construction failed.",
           "message": "nchoosek: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = nchoosek(n, k)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "n must be a real nonnegative integer-valued scalar."
+            },
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "k must be a real nonnegative integer-valued scalar no greater than n."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The coefficient is computed exactly in the selected nondouble integer class; representability and floating-class limits are form-specific."
+        },
+        {
+          "form": "C = nchoosek(v, k)",
+          "inputs": [
+            {
+              "name": "v",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "v is a real vector whose integer storage class is preserved in the combinations."
+            },
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "Allowed",
+              "notes": "k is a real nonnegative integer-valued scalar structural parameter."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Rows enumerate combinations without converting integer elements through floating point; materialisation limits can reject oversized results."
         }
       ]
     },
@@ -77258,76 +77715,6 @@
       ]
     },
     {
-      "name": "pointLocation",
-      "output_mode": "ByRequestedOutputCount",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "[ti, bc] = pointLocation(dt, q)",
-          "inputs": [
-            {
-              "name": "dt",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "DelaunayTri object."
-            },
-            {
-              "name": "varargin",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Query point matrix or coordinate vectors."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "ti",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Containing triangle indices, or NaN outside the triangulation."
-            },
-            {
-              "name": "bc",
-              "ty": "NumericArray",
-              "arity": "Optional",
-              "default": null,
-              "description": "Barycentric coordinates for each query point."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
-          "identifier": "RunMat:DelaunayTri:InvalidArgument",
-          "when": "Constructor, object, constraint, or query inputs are malformed.",
-          "message": "DelaunayTri: invalid argument"
-        },
-        {
-          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
-          "identifier": "RunMat:DelaunayTri:Unsupported",
-          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
-          "message": "DelaunayTri: unsupported form"
-        }
-      ],
-      "extensions": [
-        {
-          "id": "delaunaytri-integer-coordinates",
-          "mode": "RunMatOnly",
-          "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
-          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
-        },
-        {
-          "id": "delaunaytri-integer-topology",
-          "mode": "RunMatOnly",
-          "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
-          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
-        }
-      ]
-    },
-    {
       "name": "plot",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -78627,6 +79014,76 @@
           "identifier": "RunMat:plus:SparseInternal",
           "when": "Sparse arithmetic storage construction or conversion failed unexpectedly.",
           "message": "plus: sparse arithmetic internal error"
+        }
+      ]
+    },
+    {
+      "name": "pointLocation",
+      "output_mode": "ByRequestedOutputCount",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "[ti, bc] = pointLocation(dt, q)",
+          "inputs": [
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "DelaunayTri object."
+            },
+            {
+              "name": "varargin",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Query point matrix or coordinate vectors."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ti",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Containing triangle indices, or NaN outside the triangulation."
+            },
+            {
+              "name": "bc",
+              "ty": "NumericArray",
+              "arity": "Optional",
+              "default": null,
+              "description": "Barycentric coordinates for each query point."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.DELAUNAY_TRI.INVALID_ARGUMENT",
+          "identifier": "RunMat:DelaunayTri:InvalidArgument",
+          "when": "Constructor, object, constraint, or query inputs are malformed.",
+          "message": "DelaunayTri: invalid argument"
+        },
+        {
+          "code": "RM.DELAUNAY_TRI.UNSUPPORTED",
+          "identifier": "RunMat:DelaunayTri:Unsupported",
+          "when": "The legacy class is used with constrained or 3-D triangulation forms that RunMat does not implement yet.",
+          "message": "DelaunayTri: unsupported form"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "delaunaytri-integer-coordinates",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"
+        },
+        {
+          "id": "delaunaytri-integer-topology",
+          "mode": "RunMatOnly",
+          "description": "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DelaunayTriIntegerTopologyExtension"
         }
       ]
     },
@@ -80691,6 +81148,34 @@
           "identifier": "RunMat:primes:Internal",
           "when": "Internal tensor construction or GPU gather failed.",
           "message": "primes: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = primes(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "NotApplicable",
+              "notes": "Input must be a real integer-valued scalar upper bound."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Returns a same-class row; values below two produce an empty row and interactive GPU input is unsupported."
         }
       ]
     },
@@ -87250,6 +87735,49 @@
           "identifier": "RunMat:rem:Internal",
           "when": "Internal tensor conversion, allocation, or provider composition failed.",
           "message": "rem: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = rem(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "A is an integer array or a compatible real scalar double."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "B is an integer array or a compatible real scalar double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Native integer storage uses exact truncating-remainder semantics; integer GPU inputs gather when no semantically complete provider path is available."
         }
       ]
     },

@@ -1,7 +1,10 @@
 //! MATLAB-compatible `lcm` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor, Type, Value,
 };
@@ -191,6 +194,86 @@ pub const GCD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &GCD_ERRORS,
 };
 
+const LCM_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "If A is integer, B must use the same integer class or be a scalar double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "If B is integer, A must use the same integer class or be a scalar double.",
+    },
+];
+
+pub const LCM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "L = lcm(A, B)",
+        inputs: &LCM_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Inputs must be positive integer-valued real data; the exact overflow outcome remains evidence-gated.",
+    }];
+
+const GCD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "If A is integer, B must use the same integer class or be a scalar double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "If B is integer, A must use the same integer class or be a scalar double.",
+    },
+];
+
+const GCD_EXTENDED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::SIGNED_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Extended outputs support signed integer, single, and double inputs.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::SIGNED_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Extended outputs support signed integer, single, and double inputs.",
+    },
+];
+
+pub const GCD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "G = gcd(A, B)",
+        inputs: &GCD_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Signed and zero values are accepted; G is always nonnegative.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[G, U, V] = gcd(A, B)",
+        inputs: &GCD_EXTENDED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Unsigned integer inputs are rejected because requested Bézout coefficients require a signed result class.",
+    },
+];
+
 fn lcm_type(args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     if args.iter().all(|ty| matches!(ty, Type::Int)) {
         Type::Int
@@ -209,6 +292,7 @@ fn lcm_type(args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     accel = "gather",
     type_resolver(lcm_type),
     descriptor(crate::builtins::math::discrete::lcm::LCM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::discrete::lcm::LCM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::discrete::lcm"
 )]
 async fn lcm_builtin(left: Value, right: Value) -> BuiltinResult<Value> {
@@ -223,6 +307,7 @@ async fn lcm_builtin(left: Value, right: Value) -> BuiltinResult<Value> {
     accel = "gather",
     type_resolver(lcm_type),
     descriptor(crate::builtins::math::discrete::lcm::GCD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::discrete::lcm::GCD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::discrete::lcm"
 )]
 async fn gcd_builtin(left: Value, right: Value) -> BuiltinResult<Value> {

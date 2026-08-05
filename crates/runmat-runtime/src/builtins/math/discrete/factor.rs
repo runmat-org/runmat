@@ -1,7 +1,10 @@
 //! MATLAB-compatible `factor` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, NumericDType, NumericScalar, NumericStorage, Tensor, Type, Value,
 };
@@ -52,6 +55,25 @@ pub const FACTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "n",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Input must be a real nonnegative integer-valued scalar.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "F = factor(n)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Returns a same-class row of prime factors; interactive GPU input is unsupported.",
+    }];
+
 fn factor_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::tensor()
 }
@@ -63,6 +85,7 @@ fn factor_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     keywords = "factor,prime factors,integer,number theory,discrete",
     type_resolver(factor_type),
     descriptor(crate::builtins::math::discrete::factor::FACTOR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::discrete::factor::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::discrete::factor"
 )]
 async fn factor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

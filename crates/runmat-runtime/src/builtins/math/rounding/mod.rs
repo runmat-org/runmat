@@ -8,7 +8,10 @@ pub(crate) mod round;
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, NumericDType, Tensor, Value,
 };
@@ -141,6 +144,33 @@ pub const MOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &MOD_ERRORS,
 };
 
+const MOD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "A is an integer array or a compatible real scalar double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "B is an integer array or a compatible real scalar double.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "R = mod(A, B)",
+        inputs: &MOD_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Native integer storage uses exact floor-remainder semantics; providers may execute exact integer mod directly or gather for a semantically complete fallback.",
+    }];
+
 fn mod_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -167,6 +197,7 @@ fn mod_error_with_message(
     accel = "binary",
     type_resolver(numeric_binary_type),
     descriptor(crate::builtins::math::rounding::MOD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::rounding::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::rounding"
 )]
 async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

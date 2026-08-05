@@ -2,7 +2,10 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, NumericDType, Tensor, Value,
 };
@@ -133,6 +136,33 @@ pub const REM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &REM_ERRORS,
 };
 
+const REM_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "A is an integer array or a compatible real scalar double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "B is an integer array or a compatible real scalar double.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "R = rem(A, B)",
+        inputs: &REM_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Native integer storage uses exact truncating-remainder semantics; integer GPU inputs gather when no semantically complete provider path is available.",
+    }];
+
 fn rem_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -159,6 +189,7 @@ fn rem_error_with_message(
     accel = "binary",
     type_resolver(numeric_binary_type),
     descriptor(crate::builtins::math::rounding::rem::REM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::rounding::rem::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::rounding::rem"
 )]
 async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

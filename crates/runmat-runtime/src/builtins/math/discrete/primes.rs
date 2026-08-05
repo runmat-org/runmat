@@ -2,7 +2,10 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, IntegerStorage, NumericDType, Tensor, Type, Value,
 };
@@ -66,6 +69,25 @@ pub const PRIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "n",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Input must be a real integer-valued scalar upper bound.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "p = primes(n)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Returns a same-class row; values below two produce an empty row and interactive GPU input is unsupported.",
+    }];
+
 fn primes_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::tensor()
 }
@@ -97,6 +119,7 @@ struct PrimeRequest {
     keywords = "primes,prime,numbers,discrete,number theory",
     type_resolver(primes_type),
     descriptor(crate::builtins::math::discrete::primes::PRIMES_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::discrete::primes::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::discrete::primes"
 )]
 async fn primes_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

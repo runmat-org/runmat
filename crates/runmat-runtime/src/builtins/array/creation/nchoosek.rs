@@ -1,7 +1,10 @@
 //! MATLAB-compatible `nchoosek` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
     NumericDType, NumericStorage, ResolveContext, Tensor, Type, Value,
@@ -125,6 +128,59 @@ pub const NCHOOSEK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const COEFFICIENT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "n must be a real nonnegative integer-valued scalar.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "k must be a real nonnegative integer-valued scalar no greater than n.",
+    },
+];
+
+const COMBINATIONS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "v",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "v is a real vector whose integer storage class is preserved in the combinations.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "k is a real nonnegative integer-valued scalar structural parameter.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = nchoosek(n, k)",
+        inputs: &COEFFICIENT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The coefficient is computed exactly in the selected nondouble integer class; representability and floating-class limits are form-specific.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = nchoosek(v, k)",
+        inputs: &COMBINATIONS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Rows enumerate combinations without converting integer elements through floating point; materialisation limits can reject oversized results.",
+    },
+];
+
 #[runtime_builtin(
     name = "nchoosek",
     category = "array/creation",
@@ -133,6 +189,7 @@ pub const NCHOOSEK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "array_construct",
     type_resolver(nchoosek_type),
     descriptor(crate::builtins::array::creation::nchoosek::NCHOOSEK_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::creation::nchoosek::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::nchoosek"
 )]
 async fn nchoosek_builtin(first: Value, k: Value) -> BuiltinResult<Value> {

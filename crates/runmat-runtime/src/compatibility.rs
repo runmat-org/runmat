@@ -287,7 +287,77 @@ mod tests {
                 .as_object_mut()
                 .expect("catalog entry object")
                 .remove("name");
+            exported
+                .as_object_mut()
+                .expect("catalog entry object")
+                .remove("integer_capabilities");
             assert_eq!(exported, expected, "{name} descriptor");
+        }
+    }
+
+    #[test]
+    fn integer_capability_metadata_is_complete_and_well_formed_for_settled_apis() {
+        let registered = runmat_builtins::builtin_functions();
+        for name in [
+            "factor",
+            "factorial",
+            "gcd",
+            "idivide",
+            "isprime",
+            "lcm",
+            "mod",
+            "nchoosek",
+            "primes",
+            "rem",
+        ] {
+            let builtin = registered
+                .iter()
+                .find(|builtin| builtin.name == name)
+                .unwrap_or_else(|| panic!("registered {name} builtin"));
+            assert!(
+                !builtin.integer_capabilities.is_empty(),
+                "{name} integer capabilities"
+            );
+            for capability in builtin.integer_capabilities {
+                assert!(!capability.form.is_empty(), "{name} form");
+                assert!(!capability.inputs.is_empty(), "{name} inputs");
+                assert!(!capability.notes.is_empty(), "{name} notes");
+                for input in capability.inputs {
+                    assert!(!input.classes.is_empty(), "{name}:{} classes", input.name);
+                    assert!(!input.notes.is_empty(), "{name}:{} notes", input.name);
+                    for (index, class) in input.classes.iter().enumerate() {
+                        assert!(
+                            !input.classes[..index].contains(class),
+                            "{name}:{} duplicate {class:?}",
+                            input.name
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn generated_builtin_catalog_matches_integer_capabilities() {
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
+                .expect("builtin metadata catalog");
+        let builtins = catalog["builtins"].as_array().expect("builtin entries");
+        for registered in runmat_builtins::builtin_functions()
+            .into_iter()
+            .filter(|builtin| !builtin.integer_capabilities.is_empty())
+        {
+            let name = registered.name;
+            let exported = builtins
+                .iter()
+                .find(|entry| entry["name"] == name)
+                .unwrap_or_else(|| panic!("exported {name} metadata"));
+            assert_eq!(
+                exported["integer_capabilities"],
+                serde_json::to_value(registered.integer_capabilities)
+                    .expect("serialize integer capabilities"),
+                "{name}"
+            );
         }
     }
 }

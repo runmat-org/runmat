@@ -1,7 +1,10 @@
 //! MATLAB-compatible integer bitwise function builtins.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, IntegerStorage, NumericDType, Tensor, Value,
 };
@@ -24,6 +27,33 @@ const BITXOR_NAME: &str = "bitxor";
 const BITSHIFT_NAME: &str = "bitshift";
 const IDIVIDE_NAME: &str = "idivide";
 const SWAPBYTES_NAME: &str = "swapbytes";
+
+const IDIVIDE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "A is an integer array or a compatible integer-valued scalar double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "B is an integer array or a compatible integer-valued scalar double.",
+    },
+];
+
+pub const IDIVIDE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "C = idivide(A, B, roundingMode)",
+        inputs: &IDIVIDE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Supports fix, floor, ceil, and round modes; exact division is retained through host fallback, while division-by-zero and signed minimum divided by -1 remain named evidence questions.",
+    }];
 
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -935,6 +965,7 @@ async fn sparse_bitshift(
     keywords = "idivide,integer,division,rounding",
     accel = "gather",
     descriptor(crate::builtins::logical::bit::integer::IDIVIDE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::bit::integer::IDIVIDE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn idivide_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
