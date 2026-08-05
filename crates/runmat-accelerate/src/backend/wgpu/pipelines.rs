@@ -9,8 +9,6 @@ const BINARY_BROADCAST_SHADER_F64: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F64;
 const BINARY_BROADCAST_SHADER_F32: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F32;
-const UNARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::UNARY_SHADER_F64;
-const UNARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::UNARY_SHADER_F32;
 const SCALAR_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F64;
 const SCALAR_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F32;
 const TRANSPOSE_SHADER_F64: &str = crate::backend::wgpu::shaders::transpose::TRANSPOSE_SHADER_F64;
@@ -358,6 +356,12 @@ impl WgpuPipelines {
             },
         );
 
+        // `round(..., digits)` shares this three-binding layout. Real unary execution itself uses
+        // operation-specific fused shaders so Metal never compiles the oversized legacy template.
+        let unary_layout_shader = crate::backend::wgpu::shaders::elementwise::real_unary_shader(
+            crate::backend::wgpu::types::UnaryOpCode::Real,
+            precision,
+        );
         let unary = create_pipeline(
             device,
             "runmat-unary-layout",
@@ -368,10 +372,7 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
-                NumericPrecision::F64 => UNARY_SHADER_F64,
-                NumericPrecision::F32 => UNARY_SHADER_F32,
-            },
+            &unary_layout_shader,
         );
 
         let scalar = create_pipeline(

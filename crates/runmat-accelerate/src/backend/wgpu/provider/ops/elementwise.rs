@@ -12,8 +12,8 @@ use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::shaders::elementwise::{
     complex_binary_broadcast_shader, complex_binary_shader, complex_from_real_imag_shader,
-    complex_from_real_shader, complex_unary_shader, round_digits_shader, ComplexBinaryOp,
-    ComplexUnaryOp,
+    complex_from_real_shader, complex_unary_shader, real_unary_shader, round_digits_shader,
+    ComplexBinaryOp, ComplexUnaryOp,
 };
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
@@ -1035,94 +1035,13 @@ impl WgpuProvider {
         }
         let entry_a = self.get_entry(a)?;
         let len = entry_a.len;
-        let out_buffer = self.create_storage_buffer_checked(len, "runmat-unary-out")?;
-        if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
-        }
-        if len > (u32::MAX as usize) {
-            return Err(gpu_dispatch_length_limit_error("unary_op", len));
-        }
-        let start = Instant::now();
-        {
-            let mut enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-unary-noop"),
-                    });
-            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-unary-noop-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.unary.pipeline);
-            drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-unary-flush-gap"),
-                });
-            self.submit(enc);
-        }
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < len {
-            let remaining = len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::LenOpParams {
-                len: chunk_len as u32,
-                op: op as u32,
-                offset: offset as u32,
-                total: len as u32,
-            };
-            let params_buffer = self.kernel_resources.uniform_buffer(
-                self.device_ref(),
-                UniformBufferKey::LenOpParams,
-                std::mem::size_of::<crate::backend::wgpu::params::LenOpParams>() as u64,
-                "runmat-unary-params",
-            );
-            self.queue
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-unary-bind"),
-                    layout: &self.pipelines.unary.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry_a.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.unary.pipeline,
-                &bind_group,
-                groups,
-            );
-            offset += chunk_len;
-        }
-        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
-        self.telemetry
-            .record_fused_elementwise_duration(start.elapsed());
-        Ok(handle)
+        let shader = real_unary_shader(op, self.precision);
+        self.fused_elementwise_with_telemetry_exec(
+            &shader,
+            std::slice::from_ref(a),
+            &entry_a.shape,
+            len,
+        )
     }
     pub(crate) fn scalar_op_exec(
         &self,
@@ -2299,6 +2218,17 @@ mod tests {
         }
     }
 
+    fn assert_close_scaled(actual: &[f64], expected: &[f64], tol: f64) {
+        assert_eq!(actual.len(), expected.len());
+        for (idx, (&actual, &expected)) in actual.iter().zip(expected.iter()).enumerate() {
+            let scale = expected.abs().max(1.0);
+            assert!(
+                (actual - expected).abs() <= tol * scale,
+                "lane {idx}: expected {expected}, got {actual}"
+            );
+        }
+    }
+
     fn register_wgpu_provider_for_test(
     ) -> Option<&'static crate::backend::wgpu::provider::WgpuProvider> {
         match crate::backend::wgpu::provider::register_wgpu_provider(
@@ -3319,18 +3249,20 @@ mod tests {
             })
             .expect("upload unary");
         let erf = provider.unary_erf(&unary_input).await.expect("erf");
+        let erf_host = provider.download(&erf).await.expect("download erf");
+        let gamma = provider.unary_gamma(&unary_input).await.expect("gamma");
+        let gamma_host = provider.download(&gamma).await.expect("download gamma");
         let gammaln = provider.unary_gammaln(&unary_input).await.expect("gammaln");
+        let gammaln_host = provider.download(&gammaln).await.expect("download gammaln");
         let realsqrt = provider
             .unary_sqrt(&unary_input)
             .await
             .expect("realsqrt provider sqrt");
-        let erf_host = provider.download(&erf).await.expect("download erf");
-        let gammaln_host = provider.download(&gammaln).await.expect("download gammaln");
         let realsqrt_host = provider
             .download(&realsqrt)
             .await
             .expect("download realsqrt");
-        for host in [&erf_host, &gammaln_host, &realsqrt_host] {
+        for host in [&erf_host, &gamma_host, &gammaln_host, &realsqrt_host] {
             assert_eq!(host.shape, vec![4, 1]);
             assert_eq!(host.storage, GpuTensorStorage::Real);
         }
@@ -3341,6 +3273,16 @@ mod tests {
                 libm::erf(0.5),
                 libm::erf(1.0),
                 libm::erf(1.5),
+            ],
+            tol,
+        );
+        assert_close(
+            &gamma_host.data,
+            &[
+                libm::tgamma(0.25),
+                libm::tgamma(0.5),
+                libm::tgamma(1.0),
+                libm::tgamma(1.5),
             ],
             tol,
         );
@@ -3394,7 +3336,7 @@ mod tests {
         );
         assert_close(&mul_host.data, &[10.0, 20.0, 60.0, 80.0, 150.0, 180.0], tol);
         assert_close(&div_host.data, &[0.1, 0.2, 0.15, 0.2, 5.0 / 30.0, 0.2], tol);
-        assert_close(
+        assert_close_scaled(
             &pow_host.data,
             &[
                 1.0_f64.powf(10.0),
@@ -3404,7 +3346,7 @@ mod tests {
                 5.0_f64.powf(30.0),
                 6.0_f64.powf(30.0),
             ],
-            tol * 1.0e6,
+            tol,
         );
     }
 
@@ -3511,17 +3453,11 @@ mod tests {
             vec![-0.0, -0.0, 0.0, 0.0, 100.0, 98800.0]
         );
         let expected = [-2.5, -0.2, 0.5, 1.23, 150.0, 98800.0];
-        for (idx, (actual, expected)) in significant_host
-            .data
-            .iter()
-            .zip(expected.iter())
-            .enumerate()
-        {
-            assert!(
-                (actual - expected).abs() < 1e-8,
-                "significant lane {idx}: expected {expected}, got {actual}"
-            );
-        }
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
+            runmat_accelerate_api::ProviderPrecision::F32 => 2e-6,
+        };
+        assert_close_scaled(&significant_host.data, &expected, tol);
     }
 
     #[tokio::test]

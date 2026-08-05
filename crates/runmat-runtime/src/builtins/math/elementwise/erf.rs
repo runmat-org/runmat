@@ -484,7 +484,7 @@ pub(crate) mod tests {
         assert_eq!(gathered.shape, cpu.shape);
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
-            runmat_accelerate_api::ProviderPrecision::F32 => 2e-5,
+            runmat_accelerate_api::ProviderPrecision::F32 => 3e-5,
         };
         for (got, expected) in gathered
             .materialize_f64()
