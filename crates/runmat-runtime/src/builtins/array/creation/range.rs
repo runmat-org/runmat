@@ -4,9 +4,13 @@ use std::collections::HashSet;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    IntValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -247,6 +251,82 @@ pub const RANGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RANGE_ERRORS,
 };
 
+const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "range-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "range with typed-integer input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RangeIntegerDataExtension"),
+};
+
+const TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "range-typed-integer-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "range with a typed-integer dimension control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RangeTypedIntegerControlExtension"),
+};
+
+const EXPLICIT_NANFLAG_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "range-explicit-nanflag",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "range with an explicit NaN handling flag is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RangeExplicitNanflagExtension"),
+};
+
+const GPU_MULTI_AXIS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "range-gpu-all-or-vecdim",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "range with all or vecdim on a GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RangeGpuMultiAxisExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    INTEGER_DATA_EXTENSION,
+    TYPED_INTEGER_CONTROL_EXTENSION,
+    EXPLICIT_NANFLAG_EXTENSION,
+    GPU_MULTI_AXIS_EXTENSION,
+];
+
+const INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data domain is single, double, logical, datetime, or duration; RunMat mode additionally accepts all eight real integer classes.",
+    }];
+
+const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented dimension domain is single or double; exact typed-integer dimensions are a mode-gated RunMat extension.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = range(X, dim_or_vecdim_or_all) with integer X",
+        inputs: &INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat's integer-data extension selects exact same-class extrema and subtracts them in a widened signed or unsigned domain before producing double output; resident integer input gathers rather than using floating provider hooks.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = range(X, integer_dim_or_vecdim) with noninteger X",
+        inputs: &INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer dimensions are decoded exactly and independently gated; range otherwise omits NaN by definition without an explicit flag.",
+    },
+];
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "range",
@@ -266,10 +346,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "reduction",
     type_resolver(range_type),
     descriptor(crate::builtins::array::creation::range::RANGE_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::range::EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::range::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::range"
 )]
 async fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    ensure_compatibility(&value, &rest)?;
     let (dim_selection, nan_mode) = parse_arguments(&rest)?;
+    if matches!(value, Value::GpuTensor(_))
+        && matches!(dim_selection, DimSelection::All | DimSelection::Vec(_))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&GPU_MULTI_AXIS_EXTENSION, "range")?;
+    }
     match value {
         Value::GpuTensor(handle) => range_gpu(handle, dim_selection, nan_mode).await,
         other => range_host(other, dim_selection, nan_mode),
@@ -280,6 +368,42 @@ async fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
 enum NanMode {
     Include,
     Omit,
+}
+
+fn is_real_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn ensure_compatibility(value: &Value, rest: &[Value]) -> crate::BuiltinResult<()> {
+    if is_real_typed_integer_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DATA_EXTENSION, "range")?;
+    }
+    if rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TYPED_INTEGER_CONTROL_EXTENSION,
+            "range",
+        )?;
+    }
+    if rest.iter().any(|value| {
+        crate::builtins::common::random_args::keyword_of(value).is_some_and(|keyword| {
+            matches!(
+                keyword.to_ascii_lowercase().as_str(),
+                "omitnan" | "includenan"
+            )
+        })
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &EXPLICIT_NANFLAG_EXTENSION,
+            "range",
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -299,7 +423,7 @@ struct ResolvedDims {
 
 fn parse_arguments(args: &[Value]) -> crate::BuiltinResult<(DimSelection, NanMode)> {
     let mut selection = DimSelection::Auto;
-    let mut nan_mode = NanMode::Include;
+    let mut nan_mode = NanMode::Omit;
     let mut selection_set = false;
 
     let tokens = tokens_from_values(args);
@@ -706,6 +830,9 @@ fn compute_range_tensor(
     dims: &ResolvedDims,
     nan_mode: NanMode,
 ) -> crate::BuiltinResult<Tensor> {
+    if let Some(storage) = tensor.integer_storage() {
+        return compute_integer_range_tensor(tensor, storage.exact_values(), dims);
+    }
     let mut shape = tensor.shape.clone();
     if shape.is_empty() {
         shape = vec![tensor.rows, tensor.cols];
@@ -792,6 +919,118 @@ fn compute_range_tensor(
     Tensor::new(output, output_shape).map_err(|e| builtin_error(format!("range: {e}")))
 }
 
+fn compute_integer_range_tensor(
+    tensor: &Tensor,
+    values: Vec<IntValue>,
+    dims: &ResolvedDims,
+) -> crate::BuiltinResult<Tensor> {
+    let mut shape = tensor.shape.clone();
+    if shape.is_empty() {
+        shape = vec![tensor.rows, tensor.cols];
+    }
+    if dims.dims_in_bounds.is_empty() {
+        return Tensor::new(vec![0.0; values.len()], shape)
+            .map_err(|e| builtin_error(format!("range: {e}")));
+    }
+    let mut output_shape = shape.clone();
+    for &dim in &dims.dims_in_bounds {
+        if dim < output_shape.len() {
+            output_shape[dim] = 1;
+        }
+    }
+    let out_len = tensor::element_count(&output_shape);
+    if out_len == 0 {
+        return Tensor::new(Vec::<f64>::new(), output_shape)
+            .map_err(|e| builtin_error(format!("range: {e}")));
+    }
+    let mut minima: Vec<Option<IntValue>> = vec![None; out_len];
+    let mut maxima: Vec<Option<IntValue>> = vec![None; out_len];
+    let mut coords = vec![0usize; shape.len()];
+    let mut out_coords = vec![0usize; shape.len()];
+    let mut reduce_mask = vec![false; shape.len()];
+    for &dim in &dims.dims_in_bounds {
+        if dim < reduce_mask.len() {
+            reduce_mask[dim] = true;
+        }
+    }
+    for (linear, value) in values.into_iter().enumerate() {
+        linear_to_multi(linear, &shape, &mut coords);
+        for (idx, coord) in coords.iter().enumerate() {
+            out_coords[idx] = if reduce_mask[idx] { 0 } else { *coord };
+        }
+        let out_idx = multi_to_linear(&out_coords, &output_shape);
+        match &minima[out_idx] {
+            None => {
+                minima[out_idx] = Some(value.clone());
+                maxima[out_idx] = Some(value);
+            }
+            Some(current) => {
+                if compare_integer(&value, current).is_lt() {
+                    minima[out_idx] = Some(value.clone());
+                }
+                if compare_integer(&value, maxima[out_idx].as_ref().expect("paired maximum"))
+                    .is_gt()
+                {
+                    maxima[out_idx] = Some(value);
+                }
+            }
+        }
+    }
+    let output = minima
+        .into_iter()
+        .zip(maxima)
+        .map(|(minimum, maximum)| match (minimum, maximum) {
+            (Some(minimum), Some(maximum)) => widened_integer_difference(&maximum, &minimum),
+            _ => f64::NAN,
+        })
+        .collect::<Vec<_>>();
+    Tensor::new(output, output_shape).map_err(|e| builtin_error(format!("range: {e}")))
+}
+
+fn compare_integer(left: &IntValue, right: &IntValue) -> std::cmp::Ordering {
+    match (left, right) {
+        (IntValue::I8(left), IntValue::I8(right)) => left.cmp(right),
+        (IntValue::I16(left), IntValue::I16(right)) => left.cmp(right),
+        (IntValue::I32(left), IntValue::I32(right)) => left.cmp(right),
+        (IntValue::I64(left), IntValue::I64(right)) => left.cmp(right),
+        (IntValue::U8(left), IntValue::U8(right)) => left.cmp(right),
+        (IntValue::U16(left), IntValue::U16(right)) => left.cmp(right),
+        (IntValue::U32(left), IntValue::U32(right)) => left.cmp(right),
+        (IntValue::U64(left), IntValue::U64(right)) => left.cmp(right),
+        _ => unreachable!("integer tensor storage is homogeneous"),
+    }
+}
+
+fn widened_integer_difference(maximum: &IntValue, minimum: &IntValue) -> f64 {
+    match (maximum, minimum) {
+        (IntValue::I8(maximum), IntValue::I8(minimum)) => {
+            (*maximum as i128 - *minimum as i128) as f64
+        }
+        (IntValue::I16(maximum), IntValue::I16(minimum)) => {
+            (*maximum as i128 - *minimum as i128) as f64
+        }
+        (IntValue::I32(maximum), IntValue::I32(minimum)) => {
+            (*maximum as i128 - *minimum as i128) as f64
+        }
+        (IntValue::I64(maximum), IntValue::I64(minimum)) => {
+            (*maximum as i128 - *minimum as i128) as f64
+        }
+        (IntValue::U8(maximum), IntValue::U8(minimum)) => {
+            (*maximum as u128 - *minimum as u128) as f64
+        }
+        (IntValue::U16(maximum), IntValue::U16(minimum)) => {
+            (*maximum as u128 - *minimum as u128) as f64
+        }
+        (IntValue::U32(maximum), IntValue::U32(minimum)) => {
+            (*maximum as u128 - *minimum as u128) as f64
+        }
+        (IntValue::U64(maximum), IntValue::U64(minimum)) => {
+            (*maximum as u128 - *minimum as u128) as f64
+        }
+        _ => unreachable!("integer tensor storage is homogeneous"),
+    }
+}
+
 fn linear_to_multi(index: usize, shape: &[usize], out: &mut [usize]) {
     let mut remainder = index;
     for (dim, &size) in shape.iter().enumerate() {
@@ -835,6 +1074,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::range_builtin(value, rest))
     }
     use runmat_accelerate_api::HostTensorView;
@@ -848,6 +1088,80 @@ pub(crate) mod tests {
             Value::Num(n) => assert_eq!(n, 0.0),
             other => panic!("expected scalar zero, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn range_defaults_to_omitting_nan() {
+        let tensor = Tensor::new(vec![1.0, f64::NAN, 4.0], vec![3, 1]).unwrap();
+        let result = range_builtin(Value::Tensor(tensor), Vec::new()).expect("range");
+        assert!(matches!(result, Value::Num(value) if value == 3.0));
+    }
+
+    #[test]
+    fn range_integer_extensions_follow_compatibility_mode() {
+        let integer_data = || {
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![1, 9]), vec![2, 1]).unwrap())
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(super::range_builtin(integer_data(), Vec::new())).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RangeIntegerDataExtension")
+            );
+            let floating = Value::Tensor(Tensor::new(vec![1.0, 9.0], vec![2, 1]).unwrap());
+            let error = block_on(super::range_builtin(
+                floating,
+                vec![Value::Int(IntValue::U8(1))],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RangeTypedIntegerControlExtension")
+            );
+        }
+        let result = range_builtin(integer_data(), Vec::new()).unwrap();
+        assert!(matches!(result, Value::Num(value) if value == 8.0));
+    }
+
+    #[test]
+    fn range_nanflag_and_gpu_multi_axis_extensions_follow_compatibility_mode() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let floating = Value::Tensor(Tensor::new(vec![1.0, 9.0], vec![2, 1]).unwrap());
+            let error =
+                block_on(super::range_builtin(floating, vec![Value::from("omitnan")])).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RangeExplicitNanflagExtension")
+            );
+        }
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 4.0, 2.0, 6.0], vec![2, 2]).unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &input).unwrap();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(super::range_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::from("all")],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:RangeGpuMultiAxisExtension")
+            );
+            let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn range_wide_uint64_subtracts_before_double_materialization() {
+        let base = (1_u64 << 53) + 1;
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1]), vec![2, 1]).unwrap(),
+        );
+        let result = range_builtin(input, Vec::new()).unwrap();
+        assert!(matches!(result, Value::Num(value) if value == 1.0));
     }
 
     #[test]

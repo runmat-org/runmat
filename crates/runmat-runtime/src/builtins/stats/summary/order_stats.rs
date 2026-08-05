@@ -3,7 +3,11 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, ResolveContext, Tensor, Type, Value,
 };
@@ -132,6 +136,91 @@ const TIEDRANK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &OUTPUT_R_TIEADJ,
     },
 ];
+
+macro_rules! quantile_integer_metadata {
+    ($data_id:literal, $control_id:literal, $data_description:literal, $control_description:literal, $data_identifier:literal, $control_identifier:literal) => {
+        pub(super) const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor =
+            BuiltinExtensionDescriptor {
+                id: $data_id,
+                mode: BuiltinExtensionMode::RunMatOnly,
+                description: $data_description,
+                error_identifier: Some($data_identifier),
+            };
+        pub(super) const INTEGER_PROBABILITY_EXTENSION: BuiltinExtensionDescriptor =
+            BuiltinExtensionDescriptor {
+                id: $control_id,
+                mode: BuiltinExtensionMode::RunMatOnly,
+                description: $control_description,
+                error_identifier: Some($control_identifier),
+            };
+        pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+            [INTEGER_DATA_EXTENSION, INTEGER_PROBABILITY_EXTENSION];
+        const INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+            [BuiltinIntegerInputCapability {
+                name: "A",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+                notes: "The documented R2026a data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes.",
+            }];
+        const INTEGER_PROBABILITY_INPUT: [BuiltinIntegerInputCapability; 1] =
+            [BuiltinIntegerInputCapability {
+                name: "p_or_pct",
+                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+                availability: BuiltinIntegerInputAvailability::RunMatOnly,
+                scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+                notes: "The documented probability/percentage domain is single or double; RunMat mode additionally accepts exact typed-integer request values.",
+            }];
+        pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+            BuiltinIntegerCapabilityDescriptor {
+                form: "Q = quantile_or_prctile(A, p, dim_or_vecdim_or_all, Method=method) with integer A",
+                inputs: &INTEGER_DATA_INPUT,
+                computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+                output_class: BuiltinIntegerOutputClassRule::Double,
+                overflow: BuiltinIntegerOverflowRule::NotApplicable,
+                backend: BuiltinIntegerBackendRule::GatherFallback,
+                overload: BuiltinIntegerOverloadKind::Multiple,
+                notes: "RunMat's integer-data extension orders same-class integers exactly before the selected interpolation method materializes the double result; wide ordering does not pass through binary64.",
+            },
+            BuiltinIntegerCapabilityDescriptor {
+                form: "Q = quantile_or_prctile(A, integer_p_or_pct, ...) with floating A",
+                inputs: &INTEGER_PROBABILITY_INPUT,
+                computation_domain: BuiltinIntegerComputationDomain::Structural,
+                output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+                overflow: BuiltinIntegerOverflowRule::NotApplicable,
+                backend: BuiltinIntegerBackendRule::HostOnly,
+                overload: BuiltinIntegerOverloadKind::StructuralParameter,
+                notes: "Typed-integer probability or percentage controls are decoded exactly and independently gated; typed integer dimension controls remain documented.",
+            },
+        ];
+    };
+}
+
+fn is_real_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn ensure_quantile_integer_extensions(
+    name: &str,
+    input: &Value,
+    rest: &[Value],
+    data_extension: &BuiltinExtensionDescriptor,
+    probability_extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if is_real_typed_integer_value(input) {
+        crate::compatibility::ensure_builtin_extension_enabled(data_extension, name)?;
+    }
+    if rest.first().is_some_and(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(probability_extension, name)?;
+    }
+    Ok(())
+}
 
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ORDER_STATS.INVALID_ARGUMENT",
@@ -333,6 +422,14 @@ struct QuantileArgs {
     probabilities: Vec<f64>,
     dim: usize,
     nanflag: NanFlag,
+    method: QuantileMethod,
+}
+
+#[derive(Clone, Copy)]
+enum QuantileMethod {
+    Midpoint,
+    Inclusive,
+    Exclusive,
 }
 
 async fn parse_quantile_args(
@@ -355,6 +452,7 @@ async fn parse_quantile_args(
     let shape = tensor::default_shape_for(&input.shape, tensor::tensor_element_len(&input));
     let mut dim = first_non_singleton(&shape);
     let mut nanflag = NanFlag::Omit;
+    let mut method = QuantileMethod::Midpoint;
     let mut idx = 1usize;
     while idx < rest.len() {
         let arg = &rest[idx];
@@ -365,9 +463,9 @@ async fn parse_quantile_args(
                 }
                 "includenan" => nanflag = NanFlag::Include,
                 "omitnan" => nanflag = NanFlag::Omit,
-                "linear" | "exact" => {
-                    // Both map to MATLAB's in-memory linear interpolation behavior here.
-                }
+                "midpoint" | "exact" => method = QuantileMethod::Midpoint,
+                "inclusive" | "linear" => method = QuantileMethod::Inclusive,
+                "exclusive" => method = QuantileMethod::Exclusive,
                 "approximate" => {
                     return Err(order_error(
                         name,
@@ -384,14 +482,16 @@ async fn parse_quantile_args(
                             format!("{name}: Method option requires a value"),
                         ));
                     }
-                    let method = keyword_of(&rest[idx]).ok_or_else(|| {
+                    let method_name = keyword_of(&rest[idx]).ok_or_else(|| {
                         order_error(
                             name,
                             format!("{name}: Method value must be a string scalar"),
                         )
                     })?;
-                    match method.to_ascii_lowercase().as_str() {
-                        "linear" | "exact" => {}
+                    match method_name.to_ascii_lowercase().as_str() {
+                        "midpoint" | "exact" => method = QuantileMethod::Midpoint,
+                        "inclusive" | "linear" => method = QuantileMethod::Inclusive,
+                        "exclusive" => method = QuantileMethod::Exclusive,
                         "approximate" => {
                             return Err(order_error(
                                 name,
@@ -423,6 +523,7 @@ async fn parse_quantile_args(
         probabilities,
         dim,
         nanflag,
+        method,
     })
 }
 
@@ -441,14 +542,20 @@ fn sorted_slice(mut values: Vec<OrderedValue>, nanflag: NanFlag) -> Vec<OrderedV
     values
 }
 
-fn quantile_from_sorted(values: &[OrderedValue], p: f64) -> f64 {
+fn quantile_from_sorted(values: &[OrderedValue], p: f64, method: QuantileMethod) -> f64 {
     if values.is_empty() || values.iter().any(OrderedValue::is_nan) {
         return f64::NAN;
     }
     if values.len() == 1 {
         return values[0].as_f64();
     }
-    let position = p * (values.len() - 1) as f64;
+    let n = values.len() as f64;
+    let position = match method {
+        QuantileMethod::Midpoint => p * n - 0.5,
+        QuantileMethod::Inclusive => p * (n - 1.0),
+        QuantileMethod::Exclusive => p * (n + 1.0) - 1.0,
+    }
+    .clamp(0.0, n - 1.0);
     let lo = position.floor() as usize;
     let hi = position.ceil() as usize;
     if lo == hi {
@@ -467,7 +574,7 @@ fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
         let data = args
             .probabilities
             .iter()
-            .map(|p| quantile_from_sorted(&values, *p))
+            .map(|p| quantile_from_sorted(&values, *p, args.method))
             .collect::<Vec<_>>();
         let out_shape = if args.probabilities.len() == 1 {
             vec![1, 1]
@@ -500,7 +607,7 @@ fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
             let slice = sorted_slice(slice, args.nanflag);
             for (p_idx, p) in args.probabilities.iter().enumerate() {
                 let dst = prefix + p_idx * pre + suffix * pre * p_len;
-                out[dst] = quantile_from_sorted(&slice, *p);
+                out[dst] = quantile_from_sorted(&slice, *p, args.method);
             }
         }
     }
@@ -593,6 +700,14 @@ fn tiedrank_tensor(input: Tensor) -> BuiltinResult<(Value, Value)> {
 pub mod quantile {
     use super::*;
     order_descriptor!("quantile", QUANTILE_SIGNATURES);
+    quantile_integer_metadata!(
+        "quantile-integer-data",
+        "quantile-typed-integer-probability",
+        "quantile with typed-integer input data is a RunMat extension",
+        "quantile with typed-integer probabilities is a RunMat extension",
+        "RunMat:compatibility:QuantileIntegerDataExtension",
+        "RunMat:compatibility:QuantileTypedIntegerProbabilityExtension"
+    );
 
     #[runtime_builtin(
         name = "quantile",
@@ -601,9 +716,18 @@ pub mod quantile {
         keywords = "quantile,percentile,statistics,order",
         type_resolver(super::reduced_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::order_stats::quantile"
     )]
     pub(crate) async fn quantile_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::ensure_quantile_integer_extensions(
+            "quantile",
+            &value,
+            &rest,
+            &INTEGER_DATA_EXTENSION,
+            &INTEGER_PROBABILITY_EXTENSION,
+        )?;
         let args = super::parse_quantile_args("quantile", value, rest, 1.0).await?;
         super::quantile_tensor(args, "quantile")
     }
@@ -612,6 +736,14 @@ pub mod quantile {
 pub mod prctile {
     use super::*;
     order_descriptor!("prctile", PRCTILE_SIGNATURES);
+    quantile_integer_metadata!(
+        "prctile-integer-data",
+        "prctile-typed-integer-percentage",
+        "prctile with typed-integer input data is a RunMat extension",
+        "prctile with typed-integer percentages is a RunMat extension",
+        "RunMat:compatibility:PrctileIntegerDataExtension",
+        "RunMat:compatibility:PrctileTypedIntegerPercentageExtension"
+    );
 
     #[runtime_builtin(
         name = "prctile",
@@ -620,9 +752,18 @@ pub mod prctile {
         keywords = "prctile,percentile,quantile,statistics,order",
         type_resolver(super::reduced_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::order_stats::prctile"
     )]
     pub(crate) async fn prctile_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::ensure_quantile_integer_extensions(
+            "prctile",
+            &value,
+            &rest,
+            &INTEGER_DATA_EXTENSION,
+            &INTEGER_PROBABILITY_EXTENSION,
+        )?;
         let args = super::parse_quantile_args("prctile", value, rest, 100.0).await?;
         super::quantile_tensor(args, "prctile")
     }
@@ -663,7 +804,7 @@ mod tests {
     use runmat_builtins::IntegerStorage;
 
     #[test]
-    fn quantile_vector_uses_linear_interpolation() {
+    fn quantile_vector_uses_midpoint_interpolation() {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap());
         let out = block_on(quantile::quantile_builtin(
             x,
@@ -675,9 +816,76 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 1]);
-                assert_eq!(tensor.materialize_f64(), vec![1.75, 3.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.5, 3.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quantile_supports_r2026a_midpoint_inclusive_and_exclusive_methods() {
+        let input =
+            || Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 6.0, 10.0], vec![5, 1]).unwrap());
+        let midpoint =
+            block_on(quantile::quantile_builtin(input(), vec![Value::Num(0.4)])).unwrap();
+        let inclusive = block_on(quantile::quantile_builtin(
+            input(),
+            vec![
+                Value::Num(0.4),
+                Value::from("Method"),
+                Value::from("inclusive"),
+            ],
+        ))
+        .unwrap();
+        let exclusive = block_on(quantile::quantile_builtin(
+            input(),
+            vec![
+                Value::Num(0.4),
+                Value::from("Method"),
+                Value::from("exclusive"),
+            ],
+        ))
+        .unwrap();
+        assert!(matches!(midpoint, Value::Num(value) if value == 2.5));
+        assert!(matches!(inclusive, Value::Num(value) if (value - 2.6).abs() < 1.0e-12));
+        assert!(matches!(exclusive, Value::Num(value) if (value - 2.4).abs() < 1.0e-12));
+    }
+
+    #[test]
+    fn quantile_and_prctile_integer_extensions_follow_compatibility_mode() {
+        let integer_data = || {
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I16(vec![1, 3]), vec![2, 1]).unwrap())
+        };
+        let floating = || Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap());
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(quantile::quantile_builtin(
+                integer_data(),
+                vec![Value::Num(0.5)],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:QuantileIntegerDataExtension")
+            );
+            let error = block_on(prctile::prctile_builtin(
+                floating(),
+                vec![Value::Int(IntValue::U8(50))],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:PrctileTypedIntegerPercentageExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let out = block_on(quantile::quantile_builtin(
+                integer_data(),
+                vec![Value::Num(0.5)],
+            ))
+            .unwrap();
+            assert!(matches!(out, Value::Num(value) if value == 2.0));
         }
     }
 
@@ -769,6 +977,7 @@ mod tests {
 
     #[test]
     fn quantile_typed_integer_input_and_probability_read_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 9, 27]), vec![4, 1]).unwrap();
         let p = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
 
@@ -788,6 +997,7 @@ mod tests {
 
     #[test]
     fn prctile_typed_integer_input_and_percentiles_read_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = Tensor::new_integer(
             IntegerStorage::I16(vec![10, 30, 50, 70, 20, 40, 60, 80]),
             vec![4, 2],
@@ -803,7 +1013,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 2]);
-                let expected = [25.0, 40.0, 55.0, 35.0, 50.0, 65.0];
+                let expected = [20.0, 40.0, 60.0, 30.0, 50.0, 70.0];
                 for (actual, expect) in tensor.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expect).abs() < 1.0e-12, "{actual} vs {expect}");
                 }

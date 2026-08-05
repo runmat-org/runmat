@@ -60237,6 +60237,76 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "descriptive statistics: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "mad-integer-data",
+          "mode": "RunMatOnly",
+          "description": "mad with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MadIntegerDataExtension"
+        },
+        {
+          "id": "mad-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "mad with a typed-integer flag or dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MadTypedIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = mad(X, flag, dim_or_vecdim_or_all) with integer X",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single or double; RunMat mode additionally materializes all eight real integer classes into the double deviation domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension enters one explicit double computation/output boundary; flag 0/default computes mean absolute deviation and flag 1 computes median absolute deviation."
+        },
+        {
+          "form": "Y = mad(X, flag_or_dimension, ...) with floating X",
+          "inputs": [
+            {
+              "name": "flag_or_dimension",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are a mode-gated RunMat extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer controls are decoded exactly on the host and are independently gated from the integer-data extension."
+        }
       ]
     },
     {
@@ -65809,7 +65879,7 @@
           ]
         },
         {
-          "label": "M = mode(X, dim_or_all)",
+          "label": "M = mode(X, dim_or_vecdim_or_all)",
           "inputs": [
             {
               "name": "X",
@@ -65819,11 +65889,11 @@
               "description": "Input data array."
             },
             {
-              "name": "dim_or_all",
+              "name": "dim_or_vecdim_or_all",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Reduction axis (positive integer) or 'all'."
+              "description": "Reduction axis, vector of axes, or 'all'."
             }
           ],
           "outputs": [
@@ -65865,7 +65935,7 @@
           ]
         },
         {
-          "label": "[M, F] = mode(X, dim_or_all)",
+          "label": "[M, F] = mode(X, dim_or_vecdim_or_all)",
           "inputs": [
             {
               "name": "X",
@@ -65875,11 +65945,11 @@
               "description": "Input data array."
             },
             {
-              "name": "dim_or_all",
+              "name": "dim_or_vecdim_or_all",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Reduction axis (positive integer) or 'all'."
+              "description": "Reduction axis, vector of axes, or 'all'."
             }
           ],
           "outputs": [
@@ -65935,7 +66005,7 @@
           ]
         },
         {
-          "label": "[M, F, C] = mode(X, dim_or_all)",
+          "label": "[M, F, C] = mode(X, dim_or_vecdim_or_all)",
           "inputs": [
             {
               "name": "X",
@@ -65945,11 +66015,11 @@
               "description": "Input data array."
             },
             {
-              "name": "dim_or_all",
+              "name": "dim_or_vecdim_or_all",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Reduction axis (positive integer) or 'all'."
+              "description": "Reduction axis, vector of axes, or 'all'."
             }
           ],
           "outputs": [
@@ -65991,12 +66061,6 @@
           "message": "mode: dimension must be >= 1"
         },
         {
-          "code": "RM.MODE.GPU_UNSUPPORTED",
-          "identifier": "RunMat:mode:GpuUnsupported",
-          "when": "Input is GPU-resident and mode requires host data.",
-          "message": "mode: GPU tensors must be gathered to the host before mode can be computed"
-        },
-        {
           "code": "RM.MODE.COMPLEX_UNSUPPORTED",
           "identifier": "RunMat:mode:ComplexUnsupported",
           "when": "Input data is complex-valued.",
@@ -66007,6 +66071,51 @@
           "identifier": "RunMat:mode:Internal",
           "when": "Internal conversion/allocation/shape handling fails.",
           "message": "mode: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[M, F, C] = mode(A, dim_or_vecdim_or_all)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Numeric arrays accept every real integer class; modal values and every tied-value cell preserve the exact input class."
+            },
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive integer dimensions are parsed exactly from typed integer or integer-valued floating controls."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "M and the sorted tied vectors in C preserve exact same-class integer storage, F is always double, first/smallest tie rules are exact above flintmax, and resident integer inputs gather then re-upload typed value outputs."
         }
       ]
     },
@@ -66351,6 +66460,75 @@
           "identifier": "RunMat:missing:InternalError",
           "when": "Internal shape or table materialization fails.",
           "message": "missing-value builtin: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "movmad-gpu-large-window",
+          "mode": "RunMatOnly",
+          "description": "movmad with a window longer than 31 on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MovmadGpuLargeWindowExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = movmad(A, k, dim, nanflag)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Moving median absolute deviation accepts every real integer input class and returns double deviation values."
+            },
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Count windows accept exact positive typed-integer lengths or integer-valued floating lengths."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional positive scalar dimension accepts exact typed integers or integer-valued floating values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "On the currently supported scalar-window surface, integer observations materialize once into the double median-absolute-deviation domain; supported resident inputs gather and re-upload double output, while GPU windows longer than 31 are separately mode-gated."
         }
       ]
     },
@@ -83138,6 +83316,76 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "order statistics: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "prctile-integer-data",
+          "mode": "RunMatOnly",
+          "description": "prctile with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PrctileIntegerDataExtension"
+        },
+        {
+          "id": "prctile-typed-integer-percentage",
+          "mode": "RunMatOnly",
+          "description": "prctile with typed-integer percentages is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:PrctileTypedIntegerPercentageExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Q = quantile_or_prctile(A, p, dim_or_vecdim_or_all, Method=method) with integer A",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented R2026a data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension orders same-class integers exactly before the selected interpolation method materializes the double result; wide ordering does not pass through binary64."
+        },
+        {
+          "form": "Q = quantile_or_prctile(A, integer_p_or_pct, ...) with floating A",
+          "inputs": [
+            {
+              "name": "p_or_pct",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented probability/percentage domain is single or double; RunMat mode additionally accepts exact typed-integer request values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer probability or percentage controls are decoded exactly and independently gated; typed integer dimension controls remain documented."
+        }
       ]
     },
     {
@@ -85558,6 +85806,76 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "order statistics: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "quantile-integer-data",
+          "mode": "RunMatOnly",
+          "description": "quantile with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QuantileIntegerDataExtension"
+        },
+        {
+          "id": "quantile-typed-integer-probability",
+          "mode": "RunMatOnly",
+          "description": "quantile with typed-integer probabilities is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:QuantileTypedIntegerProbabilityExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Q = quantile_or_prctile(A, p, dim_or_vecdim_or_all, Method=method) with integer A",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented R2026a data domain is double, single, duration, or datetime; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension orders same-class integers exactly before the selected interpolation method materializes the double result; wide ordering does not pass through binary64."
+        },
+        {
+          "form": "Q = quantile_or_prctile(A, integer_p_or_pct, ...) with floating A",
+          "inputs": [
+            {
+              "name": "p_or_pct",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented probability/percentage domain is single or double; RunMat mode additionally accepts exact typed-integer request values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer probability or percentage controls are decoded exactly and independently gated; typed integer dimension controls remain documented."
+        }
       ]
     },
     {
@@ -87907,6 +88225,88 @@
           "identifier": null,
           "when": "Dimension selector has unsupported value type or shape.",
           "message": "range: unsupported dimension argument type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "range-integer-data",
+          "mode": "RunMatOnly",
+          "description": "range with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RangeIntegerDataExtension"
+        },
+        {
+          "id": "range-typed-integer-control",
+          "mode": "RunMatOnly",
+          "description": "range with a typed-integer dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RangeTypedIntegerControlExtension"
+        },
+        {
+          "id": "range-explicit-nanflag",
+          "mode": "RunMatOnly",
+          "description": "range with an explicit NaN handling flag is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RangeExplicitNanflagExtension"
+        },
+        {
+          "id": "range-gpu-all-or-vecdim",
+          "mode": "RunMatOnly",
+          "description": "range with all or vecdim on a GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RangeGpuMultiAxisExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "y = range(X, dim_or_vecdim_or_all) with integer X",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented data domain is single, double, logical, datetime, or duration; RunMat mode additionally accepts all eight real integer classes."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat's integer-data extension selects exact same-class extrema and subtracts them in a widened signed or unsigned domain before producing double output; resident integer input gathers rather than using floating provider hooks."
+        },
+        {
+          "form": "y = range(X, integer_dim_or_vecdim) with noninteger X",
+          "inputs": [
+            {
+              "name": "dim_or_vecdim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented dimension domain is single or double; exact typed-integer dimensions are a mode-gated RunMat extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer dimensions are decoded exactly and independently gated; range otherwise omits NaN by definition without an explicit flag."
         }
       ]
     },

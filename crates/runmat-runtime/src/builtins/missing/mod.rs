@@ -252,6 +252,51 @@ integer_extension!(
     "RunMat:compatibility:NanvarTypedIntegerControlExtension"
 );
 
+const MOVMAD_GPU_LARGE_WINDOW_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "movmad-gpu-large-window",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "movmad with a window longer than 31 on a GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MovmadGpuLargeWindowExtension"),
+};
+
+pub const MOVMAD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MOVMAD_GPU_LARGE_WINDOW_EXTENSION];
+
+const MOVMAD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Moving median absolute deviation accepts every real integer input class and returns double deviation values.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Count windows accept exact positive typed-integer lengths or integer-valued floating lengths.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional positive scalar dimension accepts exact typed integers or integer-valued floating values.",
+    },
+];
+
+pub const MOVMAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "M = movmad(A, k, dim, nanflag)",
+        inputs: &MOVMAD_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "On the currently supported scalar-window surface, integer observations materialize once into the double median-absolute-deviation domain; supported resident inputs gather and re-upload double output, while GPU windows longer than 31 are separately mode-gated.",
+    }];
+
 const RUNMAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "A_or_control",
@@ -666,16 +711,37 @@ async fn nanvar_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     accel = "cpu",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
+    extensions(crate::builtins::missing::MOVMAD_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::MOVMAD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn movmad_builtin(value: Value, window: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let window = scalar_usize(&window, "movmad window")?;
+    let provider = match &value {
+        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
+            .or_else(runmat_accelerate_api::provider),
+        _ => None,
+    };
+    if provider.is_some() && window > 31 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MOVMAD_GPU_LARGE_WINDOW_EXTENSION,
+            "movmad",
+        )?;
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid_argument(format!("movmad: failed to gather input: {err}")))?;
     let tensor = numeric_tensor(value, "movmad")?;
-    let window = scalar_usize(&window, "movmad window")?;
     let options = MovingOptions::parse(&rest)?;
-    moving_mad(tensor, window, options)
+    let result = moving_mad(tensor, window, options)?;
+    match (provider, result) {
+        (Some(provider), Value::Tensor(tensor)) => {
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .map_err(|err| internal_error(format!("movmad: failed to upload result: {err}")))?;
+            Ok(Value::GpuTensor(handle))
+        }
+        (_, result) => Ok(result),
+    }
 }
 
 fn is_real_typed_integer_value(value: &Value) -> bool {
@@ -3151,5 +3217,65 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn movmad_accepts_all_integer_classes_into_double_output() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2, 5]),
+            IntegerStorage::I16(vec![1, 2, 5]),
+            IntegerStorage::I32(vec![1, 2, 5]),
+            IntegerStorage::I64(vec![1, 2, 5]),
+            IntegerStorage::U8(vec![1, 2, 5]),
+            IntegerStorage::U16(vec![1, 2, 5]),
+            IntegerStorage::U32(vec![1, 2, 5]),
+            IntegerStorage::U64(vec![1, 2, 5]),
+        ];
+        for storage in storages {
+            let input = Tensor::new_integer(storage, vec![3, 1]).unwrap();
+            let result = block_on(movmad_builtin(
+                Value::Tensor(input),
+                Value::Num(3.0),
+                Vec::new(),
+            ))
+            .unwrap();
+            assert!(
+                matches!(result, Value::Tensor(tensor) if tensor.integer_storage().is_none() && tensor.materialize_f64() == vec![0.5, 1.0, 1.5])
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn movmad_gpu_large_window_follows_compatibility_mode() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new((1..=32).map(f64::from).collect(), vec![32, 1]).unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &input).unwrap();
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(movmad_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Value::Num(32.0),
+                    Vec::new(),
+                ))
+                .unwrap_err();
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:MovmadGpuLargeWindowExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let result = block_on(movmad_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Value::Num(32.0),
+                    Vec::new(),
+                ))
+                .unwrap();
+                assert!(matches!(result, Value::GpuTensor(_)));
+            }
+            let _ = provider.free(&handle);
+        });
     }
 }

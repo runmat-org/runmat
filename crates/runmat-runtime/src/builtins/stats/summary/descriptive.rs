@@ -4,7 +4,11 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
@@ -158,6 +162,67 @@ reduction_signatures!(RMS_SIGNATURES, "rms");
 flagged_signatures!(MAD_SIGNATURES, "mad");
 flagged_signatures!(SKEWNESS_SIGNATURES, "skewness");
 flagged_signatures!(KURTOSIS_SIGNATURES, "kurtosis");
+
+const MAD_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mad-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mad with typed-integer input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MadIntegerDataExtension"),
+};
+
+const MAD_TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "mad-typed-integer-control",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "mad with a typed-integer flag or dimension control is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:MadTypedIntegerControlExtension"),
+    };
+
+const MAD_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    MAD_INTEGER_DATA_EXTENSION,
+    MAD_TYPED_INTEGER_CONTROL_EXTENSION,
+];
+
+const MAD_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data domain is single or double; RunMat mode additionally materializes all eight real integer classes into the double deviation domain.",
+    }];
+
+const MAD_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "flag_or_dimension",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented flag accepts single, double, or logical and documented dimensions accept single or double; exact typed-integer controls are a mode-gated RunMat extension.",
+    }];
+
+const MAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = mad(X, flag, dim_or_vecdim_or_all) with integer X",
+        inputs: &MAD_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat's integer-data extension enters one explicit double computation/output boundary; flag 0/default computes mean absolute deviation and flag 1 computes median absolute deviation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = mad(X, flag_or_dimension, ...) with floating X",
+        inputs: &MAD_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer controls are decoded exactly on the host and are independently gated from the integer-data extension.",
+    },
+];
 
 const RMSE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
@@ -741,14 +806,6 @@ fn mad_slice(values: &[f64], flag: usize) -> f64 {
         return f64::NAN;
     }
     if flag == 0 {
-        let center = median(values.to_vec());
-        median(
-            values
-                .iter()
-                .map(|value| (value - center).abs())
-                .collect::<Vec<_>>(),
-        )
-    } else {
         let center = arithmetic_mean(values);
         arithmetic_mean(
             &values
@@ -756,7 +813,38 @@ fn mad_slice(values: &[f64], flag: usize) -> f64 {
                 .map(|value| (value - center).abs())
                 .collect::<Vec<_>>(),
         )
+    } else {
+        let center = median(values.to_vec());
+        median(
+            values
+                .iter()
+                .map(|value| (value - center).abs())
+                .collect::<Vec<_>>(),
+        )
     }
+}
+
+fn is_real_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn ensure_mad_integer_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_real_typed_integer_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&MAD_INTEGER_DATA_EXTENSION, "mad")?;
+    }
+    if rest.iter().any(is_real_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MAD_TYPED_INTEGER_CONTROL_EXTENSION,
+            "mad",
+        )?;
+    }
+    Ok(())
 }
 
 fn skewness_slice(values: &[f64], flag: usize) -> f64 {
@@ -1082,9 +1170,12 @@ pub mod mad {
         keywords = "mad,mean absolute deviation,median absolute deviation,statistics",
         type_resolver(super::descriptive_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::MAD_EXTENSIONS),
+        integer_capabilities(super::MAD_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::descriptive::mad"
     )]
     pub(crate) async fn mad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::ensure_mad_integer_extensions(&value, &rest)?;
         super::flagged_reduce_builtin(
             "mad",
             value,
@@ -1203,7 +1294,7 @@ pub mod tabulate {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     #[test]
     fn tabulate_labels_preserve_exact_uint64_text() {
@@ -1294,6 +1385,7 @@ mod tests {
 
     #[test]
     fn descriptive_reductions_read_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = int_tensor(IntegerStorage::U16(vec![1, 4, 9]), vec![1, 3]);
         let all = vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))];
 
@@ -1310,7 +1402,7 @@ mod tests {
         );
 
         let mad = block_on(mad::mad_builtin(x.clone(), all.clone())).unwrap();
-        assert_close(tensor_values(mad).0[0], 3.0);
+        assert_close(tensor_values(mad).0[0], 26.0 / 9.0);
 
         let skew = block_on(skewness::skewness_builtin(x.clone(), all.clone())).unwrap();
         assert_close(tensor_values(skew).0[0], 0.294_799_620_144_828_63);
@@ -1331,16 +1423,16 @@ mod tests {
     }
 
     #[test]
-    fn mad_supports_median_default_and_mean_flag_modes() {
+    fn mad_supports_mean_default_and_median_flag_modes() {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 10.0], vec![1, 3]).unwrap());
         let default_mad = block_on(mad::mad_builtin(
             x.clone(),
             vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
         ))
         .unwrap();
-        assert_close(tensor_values(default_mad).0[0], 1.0);
+        assert_close(tensor_values(default_mad).0[0], 34.0 / 9.0);
 
-        let median_mad = block_on(mad::mad_builtin(
+        let mean_mad = block_on(mad::mad_builtin(
             x.clone(),
             vec![
                 Value::Num(0.0),
@@ -1348,9 +1440,9 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert_close(tensor_values(median_mad).0[0], 1.0);
+        assert_close(tensor_values(mean_mad).0[0], 34.0 / 9.0);
 
-        let mean_mad = block_on(mad::mad_builtin(
+        let median_mad = block_on(mad::mad_builtin(
             x,
             vec![
                 Value::Num(1.0),
@@ -1358,7 +1450,39 @@ mod tests {
             ],
         ))
         .unwrap();
-        assert_close(tensor_values(mean_mad).0[0], 34.0 / 9.0);
+        assert_close(tensor_values(median_mad).0[0], 1.0);
+    }
+
+    #[test]
+    fn mad_integer_data_and_controls_follow_compatibility_mode() {
+        let integer_data = || int_tensor(IntegerStorage::I16(vec![1, 4, 9]), vec![1, 3]);
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(mad::mad_builtin(integer_data(), Vec::new())).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:MadIntegerDataExtension")
+            );
+            let floating = Value::Tensor(Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap());
+            let error = block_on(mad::mad_builtin(
+                floating,
+                vec![Value::Int(IntValue::U8(1))],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:MadTypedIntegerControlExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let out = block_on(mad::mad_builtin(
+                integer_data(),
+                vec![Value::Num(1.0), Value::from("all")],
+            ))
+            .unwrap();
+            assert_close(tensor_values(out).0[0], 3.0);
+        }
     }
 
     #[test]

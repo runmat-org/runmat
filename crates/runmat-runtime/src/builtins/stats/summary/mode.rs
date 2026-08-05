@@ -10,9 +10,13 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, NumericDType, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, IntegerStorage, LogicalArray, NumericDType,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -171,6 +175,35 @@ pub const MODE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &MODE_ERRORS,
 };
 
+const MODE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Numeric arrays accept every real integer class; modal values and every tied-value cell preserve the exact input class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Positive integer dimensions are parsed exactly from typed integer or integer-valued floating controls.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[M, F, C] = mode(A, dim_or_vecdim_or_all)",
+        inputs: &MODE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "M and the sorted tied vectors in C preserve exact same-class integer storage, F is always double, first/smallest tie rules are exact above flintmax, and resident integer inputs gather then re-upload typed value outputs.",
+    }];
+
 fn mode_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -201,6 +234,7 @@ fn mode_type_resolver(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "mode,frequency,statistics,reduction,ties",
     type_resolver(mode_type_resolver),
     descriptor(crate::builtins::stats::summary::mode::MODE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::stats::summary::mode::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::mode"
 )]
 async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

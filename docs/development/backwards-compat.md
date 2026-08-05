@@ -110,6 +110,8 @@ Canonical reductions retain their documented per-form integer contracts rather t
 
 The cumulative reducers preserve integer class and shape: `cumsum` and `cumprod` apply per-step saturating native arithmetic, while `cummin` and `cummax` select exact values and expose one public output in the current semantic target. Interactive GPU input is documented for all four names, but explicit missing-value flags are not supported on GPU for `cumprod`, `cummin`, or `cummax`; RunMat's supported GPU flag forms are therefore registered mode-gated extensions.
 
+The descriptive and order-statistic builtins retain their documented per-form numeric domains. `mode` accepts every integer class and preserves the class of its modal values and ties while returning double frequencies; `movmad` accepts integer observations and controls on its currently supported scalar-window surface and computes double deviations. `mad`, `range`, `quantile`, and `prctile` document floating or logical data domains rather than typed-integer observations, so RunMat's exact integer ordering or extrema followed by double deviation, interpolation, or range output is mode-gated. Typed-integer controls outside each documented form, explicit `range` missing-value flags, GPU `range` all-or-vector-dimension forms, and GPU `movmad` windows longer than 31 are separately registered extensions, allowing each restriction to be enforced before gathering resident data.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:
