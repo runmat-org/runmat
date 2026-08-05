@@ -3,9 +3,14 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, NumericScalar, ResolveContext, Tensor, Type, Value,
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar, ResolveContext, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -240,6 +245,71 @@ const MINK_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
     },
 ];
 
+const MAXK_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "maxk-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "maxk with a resident GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MaxkGpuInputExtension"),
+};
+
+const MINK_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "mink-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "mink with a resident GPU input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:MinkGpuInputExtension"),
+};
+
+const MAXK_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MAXK_GPU_INPUT_EXTENSION];
+const MINK_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MINK_GPU_INPUT_EXTENSION];
+
+const TOPK_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented input-array domain includes all eight real integer classes.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented nonnegative integer-scalar selector is parsed exactly from every integer class; integer-valued scalar double is also accepted.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional documented positive integer-scalar dimension is parsed exactly from every integer class; integer-valued scalar double is also accepted.",
+    },
+];
+
+const MAXK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[B, I] = maxk(integer_A, integer_k, integer_dim)",
+        inputs: &TOPK_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "B preserves A's exact integer class and stable equal-value order; optional I is one-based double. Resident execution is a separately gated RunMat extension.",
+    }];
+
+const MINK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[B, I] = mink(integer_A, integer_k, integer_dim)",
+        inputs: &TOPK_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "B preserves A's exact integer class and stable equal-value order; optional I is one-based double. Resident execution is a separately gated RunMat extension.",
+    }];
+
 const TOPK_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TOPK.INVALID_ARGUMENT",
     identifier: Some("RunMat:topk:InvalidArgument"),
@@ -286,14 +356,18 @@ pub const MINK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     category = "math/reduction",
     summary = "Return the k largest elements along a dimension.",
     keywords = "maxk,top-k,maximum,reduction,indices",
+    accel = "sink",
+    sink = true,
     type_resolver(topk_type),
     descriptor(crate::builtins::math::reduction::topk::MAXK_DESCRIPTOR),
+    extensions(MAXK_EXTENSIONS),
+    integer_capabilities(MAXK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::topk"
 )]
 async fn maxk_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     evaluate_topk(TopKKind::Max, value, &rest)
         .await?
-        .into_value()
+        .into_value(TopKKind::Max)
 }
 
 #[runtime_builtin(
@@ -301,14 +375,18 @@ async fn maxk_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     category = "math/reduction",
     summary = "Return the k smallest elements along a dimension.",
     keywords = "mink,top-k,minimum,reduction,indices",
+    accel = "sink",
+    sink = true,
     type_resolver(topk_type),
     descriptor(crate::builtins::math::reduction::topk::MINK_DESCRIPTOR),
+    extensions(MINK_EXTENSIONS),
+    integer_capabilities(MINK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::topk"
 )]
 async fn mink_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     evaluate_topk(TopKKind::Min, value, &rest)
         .await?
-        .into_value()
+        .into_value(TopKKind::Min)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -322,6 +400,13 @@ impl TopKKind {
         match self {
             TopKKind::Max => "maxk",
             TopKKind::Min => "mink",
+        }
+    }
+
+    fn gpu_extension(self) -> &'static BuiltinExtensionDescriptor {
+        match self {
+            TopKKind::Max => &MAXK_GPU_INPUT_EXTENSION,
+            TopKKind::Min => &MINK_GPU_INPUT_EXTENSION,
         }
     }
 }
@@ -340,7 +425,7 @@ pub struct TopKEvaluation {
 }
 
 impl TopKEvaluation {
-    fn into_value(self) -> BuiltinResult<Value> {
+    fn into_value(self, kind: TopKKind) -> BuiltinResult<Value> {
         if let Some(out_count) = crate::output_count::current_output_count() {
             if out_count == 0 {
                 return Ok(Value::OutputList(Vec::new()));
@@ -348,9 +433,12 @@ impl TopKEvaluation {
             if out_count == 1 {
                 return Ok(Value::OutputList(vec![self.values]));
             }
-            return Ok(crate::output_count::output_list_with_padding(
-                out_count,
-                vec![self.values, self.indices],
+            if out_count == 2 {
+                return Ok(Value::OutputList(vec![self.values, self.indices]));
+            }
+            return Err(topk_invalid_argument(
+                kind,
+                "too many output arguments; maximum is 2",
             ));
         }
         Ok(self.values)
@@ -373,11 +461,27 @@ async fn evaluate_topk(
     for argument in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(argument, kind.name())?;
     }
+    let gpu_provider = match &value {
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                kind.gpu_extension(),
+                kind.name(),
+            )?;
+            runmat_accelerate_api::provider_for_handle(handle)
+                .or_else(runmat_accelerate_api::provider)
+        }
+        _ => None,
+    };
     let args = parse_topk_args(kind, rest).await?;
     let input = gather_topk_input(kind, value).await?;
-    match input {
+    let evaluation = match input {
         TopKInput::Real(tensor) => evaluate_real(kind, tensor, &args),
         TopKInput::Complex(tensor) => evaluate_complex(kind, tensor, &args),
+        TopKInput::Logical(logical) => evaluate_logical(kind, logical, &args),
+    }?;
+    match gpu_provider {
+        Some(provider) => upload_topk_evaluation(kind, provider, evaluation),
+        None => Ok(evaluation),
     }
 }
 
@@ -477,22 +581,16 @@ fn parse_comparison(kind: TopKKind, value: &Value) -> BuiltinResult<ComparisonMe
 enum TopKInput {
     Real(Tensor),
     Complex(ComplexTensor),
+    Logical(LogicalArray),
 }
 
 async fn gather_topk_input(kind: TopKKind, value: Value) -> BuiltinResult<TopKInput> {
-    let host = match value {
-        Value::GpuTensor(handle) => Value::Tensor(
-            gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|err| topk_internal(kind, err.message()))?,
-        ),
-        other => other,
-    };
+    let host = gpu_helpers::gather_value_async(&value)
+        .await
+        .map_err(|err| topk_internal(kind, err.message()))?;
     match host {
         Value::Tensor(tensor) => Ok(TopKInput::Real(tensor)),
-        Value::LogicalArray(logical) => Ok(TopKInput::Real(
-            tensor::logical_to_tensor(&logical).map_err(|message| topk_internal(kind, message))?,
-        )),
+        Value::LogicalArray(logical) => Ok(TopKInput::Logical(logical)),
         Value::Num(value) => Ok(TopKInput::Real(
             Tensor::new(vec![value], vec![1, 1]).map_err(|message| topk_internal(kind, message))?,
         )),
@@ -500,8 +598,8 @@ async fn gather_topk_input(kind: TopKKind, value: Value) -> BuiltinResult<TopKIn
             Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
                 .map_err(|message| topk_internal(kind, message))?,
         )),
-        Value::Bool(value) => Ok(TopKInput::Real(
-            Tensor::new(vec![if value { 1.0 } else { 0.0 }], vec![1, 1])
+        Value::Bool(value) => Ok(TopKInput::Logical(
+            LogicalArray::new(vec![u8::from(value)], vec![1, 1])
                 .map_err(|message| topk_internal(kind, message))?,
         )),
         Value::Complex(re, im) => Ok(TopKInput::Complex(
@@ -512,6 +610,112 @@ async fn gather_topk_input(kind: TopKKind, value: Value) -> BuiltinResult<TopKIn
         _ => Err(topk_invalid_input(
             kind,
             "expected numeric, logical, or complex input",
+        )),
+    }
+}
+
+fn evaluate_logical(
+    kind: TopKKind,
+    logical: LogicalArray,
+    args: &TopKArgs,
+) -> BuiltinResult<TopKEvaluation> {
+    let shape = logical.shape.clone();
+    let tensor = Tensor::new_integer(IntegerStorage::U8(logical.data), shape)
+        .map_err(|message| topk_internal(kind, message))?;
+    let evaluation = evaluate_real(kind, tensor, args)?;
+    let values = match evaluation.values {
+        Value::Int(IntValue::U8(value)) => Value::Bool(value != 0),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let IntegerStorage::U8(values) = tensor
+                .into_numeric_storage()
+                .map_err(|error| topk_internal(kind, error))?
+                .into_integer_storage()
+                .map_err(|_| topk_internal(kind, "logical selection lost integer storage"))?
+            else {
+                return Err(topk_internal(
+                    kind,
+                    "logical selection changed its storage class",
+                ));
+            };
+            Value::LogicalArray(
+                LogicalArray::new(values, shape).map_err(|message| topk_internal(kind, message))?,
+            )
+        }
+        other => {
+            return Err(topk_internal(
+                kind,
+                format!("logical selection produced unexpected value {other:?}"),
+            ))
+        }
+    };
+    Ok(TopKEvaluation {
+        values,
+        indices: evaluation.indices,
+    })
+}
+
+fn upload_topk_evaluation(
+    kind: TopKKind,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    evaluation: TopKEvaluation,
+) -> BuiltinResult<TopKEvaluation> {
+    Ok(TopKEvaluation {
+        values: upload_topk_value(kind, provider, evaluation.values)?,
+        indices: upload_topk_value(kind, provider, evaluation.indices)?,
+    })
+}
+
+fn upload_topk_value(
+    kind: TopKKind,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let upload_tensor = |tensor: Tensor, logical: bool| -> BuiltinResult<Value> {
+        let handle = gpu_helpers::upload_tensor(provider, &tensor)
+            .map_err(|error| topk_internal(kind, format!("GPU upload failed: {error}")))?;
+        Ok(if logical {
+            gpu_helpers::logical_gpu_value(handle)
+        } else {
+            gpu_helpers::resident_gpu_value(handle)
+        })
+    };
+    match value {
+        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Num(number) => upload_tensor(
+            Tensor::new(vec![number], vec![1, 1]).map_err(|error| topk_internal(kind, error))?,
+            false,
+        ),
+        Value::Int(integer) => upload_tensor(
+            Tensor::new_integer(IntegerStorage::from_scalar(integer), vec![1, 1])
+                .map_err(|error| topk_internal(kind, error))?,
+            false,
+        ),
+        Value::Bool(logical) => upload_tensor(
+            Tensor::new(vec![if logical { 1.0 } else { 0.0 }], vec![1, 1])
+                .map_err(|error| topk_internal(kind, error))?,
+            true,
+        ),
+        Value::LogicalArray(logical) => {
+            let tensor =
+                tensor::logical_to_tensor(&logical).map_err(|error| topk_internal(kind, error))?;
+            upload_tensor(tensor, true)
+        }
+        Value::Complex(real, imag) => {
+            let tensor = ComplexTensor::new(vec![(real, imag)], vec![1, 1])
+                .map_err(|error| topk_internal(kind, error))?;
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
+                .map_err(|error| topk_internal(kind, error.message()))?;
+            Ok(gpu_helpers::complex_gpu_value(handle))
+        }
+        Value::ComplexTensor(tensor) => {
+            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
+                .map_err(|error| topk_internal(kind, error.message()))?;
+            Ok(gpu_helpers::complex_gpu_value(handle))
+        }
+        other => Err(topk_internal(
+            kind,
+            format!("cannot upload unexpected output {other:?}"),
         )),
     }
 }
@@ -602,21 +806,27 @@ fn evaluate_complex(
     args: &TopKArgs,
 ) -> BuiltinResult<TopKEvaluation> {
     let shape = normalize_shape(tensor.shape.clone());
+    let storage = tensor.into_complex_storage();
+    let comparison_values = storage.materialize_f64();
     let dim = selected_dim(&shape, args.dim);
     let axis = dim.saturating_sub(1);
     let axis_len = shape.get(axis).copied().unwrap_or(1);
     let take = args.k.min(axis_len);
     if axis >= shape.len() {
-        let indices = Tensor::new(vec![1.0; tensor.materialize_f64().len()], shape)
+        let indices = Tensor::new(vec![1.0; storage.len()], shape.clone())
+            .map_err(|message| topk_internal(kind, message))?;
+        let values = ComplexTensor::from_complex_storage(storage, shape)
             .map_err(|message| topk_internal(kind, message))?;
         return Ok(TopKEvaluation {
-            values: complex_tensor_into_value(tensor),
+            values: complex_tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
         });
     }
     let output_shape = output_shape_for_topk(&shape, axis, take);
-    if tensor.materialize_f64().is_empty() || take == 0 {
-        let values = ComplexTensor::new(Vec::new(), output_shape.clone())
+    if storage.is_empty() || take == 0 {
+        let values = storage
+            .gather(&[])
+            .and_then(|storage| ComplexTensor::from_complex_storage(storage, output_shape.clone()))
             .map_err(|message| topk_internal(kind, message))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|message| topk_internal(kind, message))?;
@@ -629,7 +839,7 @@ fn evaluate_complex(
     let input_strides = compute_strides(&shape);
     let output_strides = compute_strides(&output_shape);
     let output_len = checked_element_count(kind, &output_shape)?;
-    let mut values = vec![(0.0, 0.0); output_len];
+    let mut selected = vec![0usize; output_len];
     let mut indices = vec![0.0; output_len];
     let mut coords = vec![0usize; output_shape.len()];
     for out_base in 0..output_len {
@@ -646,8 +856,9 @@ fn evaluate_complex(
             input_coords[axis] = reduce_idx;
             let input_index = map_linear_index(&input_coords, &input_strides);
             entries.push(ComplexEntry {
-                value: tensor.materialize_f64()[input_index],
+                value: comparison_values[input_index],
                 index: reduce_idx,
+                source_index: input_index,
             });
         }
         entries.sort_by(|a, b| compare_complex_entries(kind, args.comparison, a, b));
@@ -655,14 +866,16 @@ fn evaluate_complex(
             let mut out_coords = coords.clone();
             out_coords[axis] = rank;
             let out_idx = map_linear_index(&out_coords, &output_strides);
-            values[out_idx] = entry.value;
+            selected[out_idx] = entry.source_index;
             indices[out_idx] = (entry.index + 1) as f64;
         }
         let _ = out_base;
         increment_coords(&mut coords, &output_shape);
     }
 
-    let values = ComplexTensor::new(values, output_shape.clone())
+    let values = storage
+        .gather(&selected)
+        .and_then(|storage| ComplexTensor::from_complex_storage(storage, output_shape.clone()))
         .map_err(|message| topk_internal(kind, message))?;
     let indices =
         Tensor::new(indices, output_shape).map_err(|message| topk_internal(kind, message))?;
@@ -683,6 +896,7 @@ struct RealEntry {
 struct ComplexEntry {
     value: (f64, f64),
     index: usize,
+    source_index: usize,
 }
 
 fn compare_real_entries(
@@ -710,7 +924,7 @@ fn compare_numeric_scalars(
                 ComparisonMethod::Auto | ComparisonMethod::Real => $left.cmp(&$right),
                 ComparisonMethod::Abs => u128::from($left.unsigned_abs())
                     .cmp(&u128::from($right.unsigned_abs()))
-                    .then_with(|| $left.cmp(&$right)),
+                    .then_with(|| $left.cmp(&$right).reverse()),
             }
         }};
     }
@@ -757,7 +971,7 @@ fn compare_f64_values(method: ComparisonMethod, a: f64, b: f64) -> Ordering {
                 .abs()
                 .partial_cmp(&b.abs())
                 .unwrap_or(Ordering::Equal)
-                .then_with(|| a.partial_cmp(&b).unwrap_or(Ordering::Equal)),
+                .then_with(|| a.partial_cmp(&b).unwrap_or(Ordering::Equal).reverse()),
         },
     }
 }
@@ -775,7 +989,7 @@ fn compare_f32_values(method: ComparisonMethod, a: f32, b: f32) -> Ordering {
                 .abs()
                 .partial_cmp(&b.abs())
                 .unwrap_or(Ordering::Equal)
-                .then_with(|| a.partial_cmp(&b).unwrap_or(Ordering::Equal)),
+                .then_with(|| a.partial_cmp(&b).unwrap_or(Ordering::Equal).reverse()),
         },
     }
 }
@@ -1058,6 +1272,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn topk_dimension_uses_exact_storage_for_every_integer_class() {
+        let storages = vec![
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ];
+        for storage in storages {
+            let dim = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).expect("dim"));
+            let input = tensor(vec![3.0, 4.0, 1.0, 2.0], vec![2, 2]);
+            let evaluation = evaluate_topk(TopKKind::Min, input, &[Value::Num(1.0), dim])
+                .await
+                .expect("typed dimension");
+            let Value::Tensor(values) = evaluation.values else {
+                panic!("expected tensor");
+            };
+            assert_eq!(values.shape, vec![2, 1]);
+            assert_eq!(self::values(&values), vec![1.0, 2.0]);
+        }
+    }
+
+    #[tokio::test]
     async fn topk_allows_zero_k() {
         let input = tensor(vec![1.0, 2.0], vec![2, 1]);
         let eval = evaluate_topk(TopKKind::Max, input, &[Value::Num(0.0)])
@@ -1158,6 +1398,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn topk_preserves_native_complex_single_and_logical_storage() {
+        let complex = Value::ComplexTensor(
+            ComplexTensor::from_f32(vec![(1.0, 1.0), (3.0, -1.0), (2.0, 0.0)], vec![3, 1])
+                .expect("complex single"),
+        );
+        let evaluation = evaluate_topk(
+            TopKKind::Max,
+            complex,
+            &[
+                Value::Num(2.0),
+                Value::from("ComparisonMethod"),
+                Value::from("real"),
+            ],
+        )
+        .await
+        .expect("complex topk");
+        let Value::ComplexTensor(values) = evaluation.values else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            values.into_complex_storage(),
+            runmat_builtins::ComplexStorage::F32(vec![(3.0, -1.0), (2.0, 0.0)])
+        );
+
+        let logical = Value::LogicalArray(
+            LogicalArray::new(vec![0, 1, 0], vec![3, 1]).expect("logical input"),
+        );
+        let evaluation = evaluate_topk(TopKKind::Max, logical, &[Value::Num(2.0)])
+            .await
+            .expect("logical topk");
+        let Value::LogicalArray(values) = evaluation.values else {
+            panic!("expected logical output");
+        };
+        assert_eq!(values.shape, vec![2, 1]);
+        assert_eq!(values.data, vec![1, 0]);
+        let Value::Tensor(indices) = evaluation.indices else {
+            panic!("expected indices");
+        };
+        assert_eq!(self::values(&indices), vec![2.0, 1.0]);
+    }
+
+    #[tokio::test]
     async fn topk_preserves_wide_integer_scalar_exactly() {
         let evaluation = evaluate_topk(
             TopKKind::Max,
@@ -1189,6 +1471,34 @@ mod tests {
         .expect("topk");
         assert_eq!(evaluation.values, Value::Int(IntValue::I64(i64::MIN)));
         assert_eq!(evaluation.indices, Value::Num(2.0));
+    }
+
+    #[tokio::test]
+    async fn topk_abs_comparison_uses_phase_for_equal_real_magnitudes() {
+        for (kind, expected_values, expected_indices) in [
+            (TopKKind::Max, vec![-3.0, 3.0], vec![1.0, 2.0]),
+            (TopKKind::Min, vec![3.0, -3.0], vec![2.0, 1.0]),
+        ] {
+            let evaluation = evaluate_topk(
+                kind,
+                tensor(vec![-3.0, 3.0], vec![2, 1]),
+                &[
+                    Value::Num(2.0),
+                    Value::from("ComparisonMethod"),
+                    Value::from("abs"),
+                ],
+            )
+            .await
+            .expect("absolute topk");
+            let Value::Tensor(values) = evaluation.values else {
+                panic!("expected values");
+            };
+            assert_eq!(self::values(&values), expected_values);
+            let Value::Tensor(indices) = evaluation.indices else {
+                panic!("expected indices");
+            };
+            assert_eq!(self::values(&indices), expected_indices);
+        }
     }
 
     #[tokio::test]
@@ -1246,5 +1556,81 @@ mod tests {
             panic!("expected indices");
         };
         assert_eq!(self::values(indices), vec![2.0, 3.0]);
+    }
+
+    #[tokio::test]
+    async fn topk_rejects_more_than_two_outputs() {
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let err = maxk_builtin(
+            tensor(vec![1.0, 3.0, 2.0], vec![1, 3]),
+            vec![Value::Num(2.0)],
+        )
+        .await
+        .expect_err("too many outputs");
+        assert!(err.message().contains("maximum is 2"));
+    }
+
+    #[test]
+    fn topk_gpu_extension_gates_before_gather_and_preserves_residency() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let input = Tensor::new_integer(
+                IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 0]),
+                vec![3, 1],
+            )
+            .expect("integer input");
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = futures::executor::block_on(maxk_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::Num(2.0)],
+                ))
+                .expect_err("strict GPU gate");
+                assert_eq!(
+                    err.identifier(),
+                    Some("RunMat:compatibility:MaxkGpuInputExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let _outputs = crate::output_count::push_output_count(Some(2));
+                let Value::OutputList(outputs) = futures::executor::block_on(maxk_builtin(
+                    Value::GpuTensor(handle),
+                    vec![Value::Num(2.0)],
+                ))
+                .expect("GPU extension") else {
+                    panic!("expected outputs");
+                };
+                assert!(matches!(outputs[0], Value::GpuTensor(_)));
+                assert!(matches!(outputs[1], Value::GpuTensor(_)));
+                let values = crate::builtins::common::test_support::gather(outputs[0].clone())
+                    .expect("gather values");
+                assert_eq!(
+                    values.into_numeric_storage().unwrap(),
+                    NumericStorage::U64(vec![u64::MAX, u64::MAX - 1])
+                );
+                let indices = crate::builtins::common::test_support::gather(outputs[1].clone())
+                    .expect("gather indices");
+                assert_eq!(self::values(&indices), vec![2.0, 1.0]);
+            }
+
+            let logical = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[0.0, 1.0, 0.0],
+                    shape: &[3, 1],
+                })
+                .expect("logical upload");
+            runmat_accelerate_api::set_handle_logical(&logical, true);
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = futures::executor::block_on(mink_builtin(
+                Value::GpuTensor(logical),
+                vec![Value::Num(1.0)],
+            ))
+            .expect_err("strict logical GPU gate");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:MinkGpuInputExtension")
+            );
+        });
     }
 }

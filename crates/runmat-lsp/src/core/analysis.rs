@@ -2684,6 +2684,12 @@ mod tests {
                 "sortrows([3 1;2 4], 'MissingPlacement', 'first');",
                 "B = sortrows(A, ..., \"MissingPlacement\", placement)",
             ),
+            ("maxk([3 1 2], 2);", "B = maxk(A, k)"),
+            (
+                "maxk([3 1 2], 2, 'ComparisonMethod', 'abs');",
+                "B = maxk(A, k, \"ComparisonMethod\", method)",
+            ),
+            ("mink([3 1 2], 2, 1);", "B = mink(A, k, dim)"),
         ];
 
         for (text, expected_label) in cases {

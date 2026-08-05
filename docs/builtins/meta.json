@@ -62544,6 +62544,75 @@
           "when": "Top-k selection fails due to gather or allocation internals.",
           "message": "topk: internal failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "maxk-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "maxk with a resident GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MaxkGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[B, I] = maxk(integer_A, integer_k, integer_dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented input-array domain includes all eight real integer classes."
+            },
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonnegative integer-scalar selector is parsed exactly from every integer class; integer-valued scalar double is also accepted."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional documented positive integer-scalar dimension is parsed exactly from every integer class; integer-valued scalar double is also accepted."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "B preserves A's exact integer class and stable equal-value order; optional I is one-based double. Resident execution is a separately gated RunMat extension."
+        }
       ]
     },
     {
@@ -65569,6 +65638,75 @@
           "identifier": "RunMat:topk:Internal",
           "when": "Top-k selection fails due to gather or allocation internals.",
           "message": "topk: internal failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "mink-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "mink with a resident GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:MinkGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[B, I] = mink(integer_A, integer_k, integer_dim)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented input-array domain includes all eight real integer classes."
+            },
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonnegative integer-scalar selector is parsed exactly from every integer class; integer-valued scalar double is also accepted."
+            },
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional documented positive integer-scalar dimension is parsed exactly from every integer class; integer-valued scalar double is also accepted."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "B preserves A's exact integer class and stable equal-value order; optional I is one-based double. Resident execution is a separately gated RunMat extension."
         }
       ]
     },
