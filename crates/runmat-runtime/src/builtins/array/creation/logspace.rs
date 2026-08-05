@@ -4,7 +4,7 @@ use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, Tensor, Type, Value,
+    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -105,7 +105,7 @@ const LOGSPACE_SIG_3_INPUTS: [BuiltinParamDescriptor; 3] = [
     },
     BuiltinParamDescriptor {
         name: "n",
-        ty: BuiltinParamType::IntegerScalar,
+        ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("50"),
         description: "Number of points.",
@@ -139,16 +139,16 @@ const LOGSPACE_ERRORS: [BuiltinErrorDescriptor; 4] = [
         message: "logspace: number of points must be a scalar",
     },
     BuiltinErrorDescriptor {
-        code: "RM.LOGSPACE.COUNT_NOT_INTEGER",
+        code: "RM.LOGSPACE.COUNT_NOT_FINITE",
         identifier: None,
-        when: "The count argument is not an integer value.",
-        message: "logspace: number of points must be an integer",
+        when: "The count argument is NaN or infinite.",
+        message: "logspace: number of points must be finite",
     },
     BuiltinErrorDescriptor {
-        code: "RM.LOGSPACE.COUNT_NEGATIVE",
+        code: "RM.LOGSPACE.COUNT_TOO_LARGE",
         identifier: None,
-        when: "The count argument is negative.",
-        message: "logspace: number of points must be >= 0",
+        when: "The count argument exceeds platform limits.",
+        message: "logspace: number of points is too large for this platform",
     },
 ];
 
@@ -200,26 +200,63 @@ enum Scalar {
     Complex { re: f64, im: f64 },
 }
 
-impl Scalar {
+#[derive(Clone, Copy)]
+struct Endpoint {
+    scalar: Scalar,
+    single: bool,
+}
+
+impl Endpoint {
     fn parts(&self) -> (f64, f64) {
-        match *self {
+        match self.scalar {
             Scalar::Real(r) => (r, 0.0),
             Scalar::Complex { re, im } => (re, im),
         }
     }
+
+    fn is_complex(&self) -> bool {
+        matches!(self.scalar, Scalar::Complex { .. })
+    }
 }
 
-async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar, bool)> {
+async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Endpoint, bool)> {
     match value {
-        Value::Num(n) => Ok((Scalar::Real(n), false)),
-        Value::Int(i) => Ok((Scalar::Real(i.to_f64()), false)),
-        Value::Bool(b) => Ok((Scalar::Real(if b { 1.0 } else { 0.0 }), false)),
-        Value::Complex(re, im) => Ok((Scalar::Complex { re, im }, false)),
+        Value::Num(n) => Ok((
+            Endpoint {
+                scalar: Scalar::Real(n),
+                single: false,
+            },
+            false,
+        )),
+        Value::Complex(re, im) => Ok((
+            Endpoint {
+                scalar: Scalar::Complex { re, im },
+                single: false,
+            },
+            false,
+        )),
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => Err(builtin_error(format!(
+            "{name}: endpoints must be single or double scalars"
+        ))),
         Value::Tensor(t) => tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|scalar| (scalar, false)),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            tensor_scalar(name, &tensor).map(|scalar| (scalar, true))
+            if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(&handle)
+            {
+                return Err(builtin_error(format!(
+                    "{name}: endpoints must be single or double scalars"
+                )));
+            }
+            match gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await? {
+                Value::Tensor(tensor) => tensor_scalar(name, &tensor).map(|scalar| (scalar, true)),
+                Value::ComplexTensor(tensor) => {
+                    complex_tensor_scalar(name, &tensor).map(|scalar| (scalar, true))
+                }
+                _ => Err(builtin_error(format!(
+                    "{name}: endpoints must be single or double scalars"
+                ))),
+            }
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(builtin_error(
             format!("{name}: endpoints must be numeric scalars; received a string-like value"),
@@ -230,44 +267,45 @@ async fn parse_scalar(name: &str, value: Value) -> crate::BuiltinResult<(Scalar,
     }
 }
 
-fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Scalar> {
+fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Endpoint> {
     if !tensor::is_scalar_tensor(tensor) {
         return Err(builtin_error(format!("{name}: expected scalar input")));
     }
-    Ok(Scalar::Real(tensor::tensor_value_f64(tensor, 0)))
+    if !matches!(
+        tensor.numeric_dtype(),
+        runmat_builtins::NumericDType::F32 | runmat_builtins::NumericDType::F64
+    ) {
+        return Err(builtin_error(format!(
+            "{name}: endpoints must be single or double scalars"
+        )));
+    }
+    Ok(Endpoint {
+        scalar: Scalar::Real(tensor::tensor_value_f64(tensor, 0)),
+        single: tensor.numeric_dtype() == NumericDType::F32,
+    })
 }
 
-fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Scalar> {
-    if let Some(storage) = tensor.integer_storage() {
-        if storage.len() != 1 {
-            return Err(builtin_error(format!("{name}: expected scalar input")));
-        }
-        let re = storage
-            .real
-            .value_at(0)
-            .expect("scalar complex integer tensor has one real value")
-            .to_f64();
-        let im = storage
-            .imag
-            .value_at(0)
-            .expect("scalar complex integer tensor has one imaginary value")
-            .to_f64();
-        return Ok(Scalar::Complex { re, im });
+fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<Endpoint> {
+    if tensor.integer_storage().is_some() {
+        return Err(builtin_error(format!(
+            "{name}: endpoints must be single or double scalars"
+        )));
     }
-    if tensor.materialize_f64().len() != 1 {
+    let values = tensor.materialize_f64();
+    if values.len() != 1 {
         return Err(builtin_error(format!("{name}: expected scalar input")));
     }
-    let (re, im) = tensor.materialize_f64()[0];
-    Ok(Scalar::Complex { re, im })
+    let (re, im) = values[0];
+    Ok(Endpoint {
+        scalar: Scalar::Complex { re, im },
+        single: tensor.numeric_dtype() == NumericDType::F32,
+    })
 }
 
 async fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
-        Value::Int(i) => i
-            .try_to_usize()
-            .ok_or_else(|| builtin_error("logspace: number of points must be >= 0")),
+        Value::Int(i) => parse_integer_count(i),
         Value::Num(n) => parse_numeric_count(*n),
-        Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if !tensor::is_scalar_tensor(t) {
                 return Err(builtin_error("logspace: number of points must be a scalar"));
@@ -298,50 +336,62 @@ fn parse_tensor_count(tensor: &Tensor) -> crate::BuiltinResult<usize> {
 }
 
 fn parse_integer_count(value: &IntValue) -> crate::BuiltinResult<usize> {
+    if value.try_to_i64().is_some_and(|value| value < 0) {
+        return Ok(0);
+    }
     value
         .try_to_usize()
-        .ok_or_else(|| builtin_error("logspace: number of points must be >= 0"))
+        .ok_or_else(|| builtin_error("logspace: number of points is too large for this platform"))
 }
 
 fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     if !raw.is_finite() {
         return Err(builtin_error("logspace: number of points must be finite"));
     }
-    let rounded = raw.round();
-    if (rounded - raw).abs() > f64::EPSILON {
-        return Err(builtin_error(
-            "logspace: number of points must be an integer",
-        ));
+    let floored = raw.floor();
+    if floored <= 0.0 {
+        return Ok(0);
     }
-    if rounded < 0.0 {
-        return Err(builtin_error("logspace: number of points must be >= 0"));
-    }
-    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+    if floored > usize::MAX as f64 || (usize::BITS == 64 && floored == usize::MAX as f64) {
         return Err(builtin_error(
             "logspace: number of points is too large for this platform",
         ));
     }
-    Ok(rounded as usize)
+    Ok(floored as usize)
 }
 
 async fn build_sequence(
-    start: Scalar,
-    stop: Scalar,
+    start: Endpoint,
+    stop: Endpoint,
     count: usize,
     prefer_gpu: bool,
 ) -> crate::BuiltinResult<Value> {
     let (start_re, start_im) = start.parts();
     let (stop_re, stop_im) = stop.parts();
-    let complex = start_im != 0.0 || stop_im != 0.0;
+    let complex = start.is_complex() || stop.is_complex();
+    let single = start.single || stop.single;
 
     if complex {
         let data = generate_complex_log_sequence(start_re, start_im, stop_re, stop_im, count);
-        let tensor = ComplexTensor::new(data, vec![1, count])
-            .map_err(|e| builtin_error(format!("logspace: {e}")))?;
+        let tensor = if single {
+            ComplexTensor::from_f32(
+                data.into_iter()
+                    .map(|(real, imag)| (real as f32, imag as f32))
+                    .collect(),
+                vec![1, count],
+            )
+        } else {
+            ComplexTensor::new(data, vec![1, count])
+        }
+        .map_err(|e| builtin_error(format!("logspace: {e}")))?;
         return Ok(Value::ComplexTensor(tensor));
     }
 
-    if prefer_gpu {
+    if prefer_gpu
+        && runmat_accelerate_api::provider().is_some_and(|provider| {
+            !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
+        })
+    {
         if let Some(value) = try_gpu_logspace(start_re, stop_re, count).await {
             return Ok(value);
         }
@@ -357,7 +407,9 @@ async fn build_sequence(
                 );
             }
         }
-        if let Some(provider) = runmat_accelerate_api::provider() {
+        if let Some(provider) = runmat_accelerate_api::provider().filter(|provider| {
+            !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
+        }) {
             let shape = [1usize, count];
             let view = HostTensorView {
                 data: &data,
@@ -369,8 +421,15 @@ async fn build_sequence(
         }
     }
 
-    let tensor =
-        Tensor::new(data, vec![1, count]).map_err(|e| builtin_error(format!("logspace: {e}")))?;
+    let tensor = if single {
+        Tensor::from_f32(
+            data.into_iter().map(|value| value as f32).collect(),
+            vec![1, count],
+        )
+    } else {
+        Tensor::new(data, vec![1, count])
+    }
+    .map_err(|e| builtin_error(format!("logspace: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -496,7 +555,10 @@ pub(crate) mod tests {
             futures::executor::block_on(parse_count(&Value::Int(IntValue::U64(u64::MAX)))).ok(),
             usize::try_from(u64::MAX).ok()
         );
-        assert!(futures::executor::block_on(parse_count(&Value::Int(IntValue::I64(-1)))).is_err());
+        assert_eq!(
+            futures::executor::block_on(parse_count(&Value::Int(IntValue::I64(-1)))).unwrap(),
+            0
+        );
         assert!(futures::executor::block_on(parse_count(&Value::Num(usize::MAX as f64))).is_err());
         assert!(
             futures::executor::block_on(parse_count(&Value::Num((usize::MAX as f64) + 1.0)))
@@ -505,6 +567,7 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     fn logspace_builtin(
@@ -561,29 +624,26 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn logspace_count_parser_rejects_negative_typed_integer_tensors() {
+    fn logspace_count_parser_maps_negative_typed_integer_tensors_to_empty() {
         let count = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
 
-        assert!(block_on(parse_count(&Value::Tensor(count))).is_err());
+        assert_eq!(block_on(parse_count(&Value::Tensor(count))).unwrap(), 0);
     }
 
     #[test]
-    fn logspace_real_integer_tensor_endpoints_read_exact_storage() {
+    fn logspace_rejects_real_integer_tensor_endpoints() {
         let start =
             Tensor::new_integer(IntegerStorage::I64(vec![0]), vec![1, 1]).expect("start tensor");
         let stop =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("stop tensor");
 
-        let result = logspace_builtin(
+        let error = logspace_builtin(
             Value::Tensor(start),
             Value::Tensor(stop),
             vec![Value::Int(IntValue::I32(3))],
         )
-        .expect("logspace");
-        match result {
-            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 10.0, 100.0]),
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        .expect_err("integer endpoints must be rejected");
+        assert!(error.message().contains("single or double"));
     }
 
     #[test]
@@ -637,16 +697,10 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn logspace_zero_points_bool_count() {
-        let result = logspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Bool(false)])
-            .expect("logspace");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
-                assert!(t.materialize_f64().is_empty());
-            }
-            other => panic!("expected empty tensor, got {other:?}"),
-        }
+    fn logspace_rejects_logical_count() {
+        let error = logspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Bool(false)])
+            .expect_err("logical count must be rejected");
+        assert!(error.message().contains("numeric"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -691,7 +745,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn logspace_complex_integer_tensor_endpoints_read_exact_storage() {
+    fn logspace_rejects_complex_integer_tensor_endpoints() {
         let start_storage =
             IntegerComplexStorage::new(IntegerStorage::I16(vec![0]), IntegerStorage::I16(vec![1]))
                 .expect("start storage");
@@ -701,24 +755,13 @@ pub(crate) mod tests {
                 .expect("stop storage");
         let stop = ComplexTensor::new_integer(stop_storage, vec![1, 1]).expect("stop tensor");
 
-        let result = logspace_builtin(
+        let error = logspace_builtin(
             Value::ComplexTensor(start),
             Value::ComplexTensor(stop),
             vec![Value::Int(IntValue::I32(4))],
         )
-        .expect("logspace");
-
-        match result {
-            Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
-                let expected = generate_complex_log_sequence(0.0, 1.0, 0.0, 2.0, 4);
-                for (actual, expected) in t.materialize_f64().iter().zip(expected.iter()) {
-                    assert!((actual.0 - expected.0).abs() < 1e-12);
-                    assert!((actual.1 - expected.1).abs() < 1e-12);
-                }
-            }
-            other => panic!("expected complex tensor result, got {other:?}"),
-        }
+        .expect_err("integer endpoints must be rejected");
+        assert!(error.message().contains("single or double"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -745,46 +788,74 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn logspace_typed_integer_tensor_endpoints_read_exact_storage() {
+    fn logspace_preserves_single_real_and_complex_endpoint_class() {
+        let start = Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap();
+        let stop = Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap();
+        let result = logspace_builtin(
+            Value::Tensor(start),
+            Value::Tensor(stop),
+            vec![Value::Num(3.9)],
+        )
+        .unwrap();
+        let Value::Tensor(result) = result else {
+            panic!("expected real single tensor")
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(result.as_f32_slice(), Some(&[1.0, 10.0, 100.0][..]));
+
+        let start = ComplexTensor::from_f32(vec![(0.0, 0.0)], vec![1, 1]).unwrap();
+        let stop = ComplexTensor::from_f32(vec![(1.0, 0.0)], vec![1, 1]).unwrap();
+        let result = logspace_builtin(
+            Value::ComplexTensor(start),
+            Value::ComplexTensor(stop),
+            vec![Value::Int(IntValue::I32(2))],
+        )
+        .unwrap();
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex single tensor")
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert!(result.as_f32_slice().is_some());
+    }
+
+    #[test]
+    fn logspace_rejects_typed_integer_tensor_endpoints() {
         let start = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("start");
         let stop = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("stop");
 
-        let result = logspace_builtin(
+        let error = logspace_builtin(
             Value::Tensor(start),
             Value::Tensor(stop),
             vec![Value::Int(IntValue::I32(3))],
         )
-        .expect("logspace");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
-                let expected = generate_real_log_sequence(-1.0, 1.0, 3);
-                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
-                    assert!((actual - exp).abs() < 1e-12);
-                }
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
+        .expect_err("integer endpoints must be rejected");
+        assert!(error.message().contains("single or double"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn logspace_rejects_non_integer_count() {
-        let err = logspace_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::Num(3.5)])
-            .expect_err("expected error");
-        assert!(err.message().contains("integer"));
+    fn logspace_fractional_count_rounds_down() {
+        let result = logspace_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::Num(3.5)])
+            .expect("fractional counts floor");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected tensor")
+        };
+        assert_eq!(tensor.shape, vec![1, 3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn logspace_rejects_negative_count() {
-        let err = logspace_builtin(
+    fn logspace_negative_count_returns_empty() {
+        let result = logspace_builtin(
             Value::Num(0.0),
             Value::Num(1.0),
             vec![Value::Int(IntValue::I32(-1))],
         )
-        .expect_err("expected error");
-        assert!(err.message().contains(">="));
+        .expect("negative count");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected tensor")
+        };
+        assert_eq!(tensor.shape, vec![1, 0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -797,6 +868,46 @@ pub(crate) mod tests {
         )
         .expect_err("expected error");
         assert!(err.message().contains("finite"));
+    }
+
+    #[test]
+    fn logspace_rejects_nan_count() {
+        let error = logspace_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Num(f64::NAN)])
+            .expect_err("NaN is not a documented logspace count");
+        assert!(error.message().contains("finite"));
+    }
+
+    #[test]
+    fn logspace_rejects_scalar_integer_and_logical_endpoints() {
+        for endpoint in [Value::Int(IntValue::I8(0)), Value::Bool(false)] {
+            let error = logspace_builtin(
+                endpoint,
+                Value::Num(1.0),
+                vec![Value::Int(IntValue::I32(3))],
+            )
+            .expect_err("nonfloating endpoints must be rejected");
+            assert!(error.message().contains("single or double"));
+        }
+    }
+
+    #[test]
+    fn logspace_rejects_resident_integer_endpoints_from_metadata() {
+        test_support::with_test_provider(|provider| {
+            let endpoint = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::I64(&[9_007_199_254_740_993]),
+                    shape: &[1, 1],
+                })
+                .expect("integer endpoint upload");
+            let error = logspace_builtin(
+                Value::GpuTensor(endpoint.clone()),
+                Value::Num(1.0),
+                vec![Value::Int(IntValue::I32(3))],
+            )
+            .expect_err("resident integer endpoint must be rejected");
+            assert!(error.message().contains("single or double"));
+            provider.free(&endpoint).ok();
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -843,9 +954,13 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn logspace_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .is_err()
+        {
+            return;
+        }
         let cpu = logspace_builtin(
             Value::Num(1.0),
             Value::Num(2.0),

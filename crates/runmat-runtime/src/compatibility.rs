@@ -262,4 +262,30 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn generated_builtin_catalog_matches_sequence_and_integer_limit_descriptors() {
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
+                .expect("builtin metadata catalog");
+        let builtins = catalog["builtins"].as_array().expect("builtin entries");
+        for name in ["intmax", "intmin", "linspace", "logspace"] {
+            let registered = runmat_builtins::builtin_functions()
+                .into_iter()
+                .find(|builtin| builtin.name == name)
+                .unwrap_or_else(|| panic!("registered {name} builtin"));
+            let expected = serde_json::to_value(registered.descriptor.expect("public descriptor"))
+                .expect("serialize descriptor");
+            let mut exported = builtins
+                .iter()
+                .find(|entry| entry["name"] == name)
+                .unwrap_or_else(|| panic!("exported {name} metadata"))
+                .clone();
+            exported
+                .as_object_mut()
+                .expect("catalog entry object")
+                .remove("name");
+            assert_eq!(exported, expected, "{name} descriptor");
+        }
+    }
 }

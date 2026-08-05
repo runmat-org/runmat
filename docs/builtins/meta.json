@@ -50310,99 +50310,167 @@
     },
     {
       "name": "intmax",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "value = limit()",
-          "inputs": [],
-          "outputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value."
-            }
-          ]
-        },
-        {
-          "label": "value = limit(classname)",
-          "inputs": [
-            {
-              "name": "classname",
-              "ty": "StringScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "Numeric class name."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.NUMERIC_LIMITS.INVALID_CLASS",
           "identifier": "RunMat:numericLimits:InvalidClass",
-          "when": "The requested class is not supported by the limit query.",
-          "message": "numeric limit: unsupported class"
+          "message": "numeric limit: unsupported class",
+          "when": "The requested class is not supported by the limit query."
+        },
+        {
+          "code": "RM.NUMERIC_LIMITS.INVALID_SYNTAX",
+          "identifier": "RunMat:numericLimits:InvalidSyntax",
+          "message": "numeric limit: invalid syntax",
+          "when": "The arguments do not match a documented class-name or like-prototype form."
+        }
+      ],
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [],
+          "label": "value = intmax()",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value.",
+              "name": "value",
+              "ty": "Any"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric class name.",
+              "name": "classname",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "value = intmax(classname)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value.",
+              "name": "value",
+              "ty": "Any"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Like keyword.",
+              "name": "like",
+              "ty": "StringScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Integer prototype whose class and complexity are copied.",
+              "name": "prototype",
+              "ty": "LikePrototype"
+            }
+          ],
+          "label": "value = intmax(like=prototype)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value.",
+              "name": "value",
+              "ty": "Any"
+            }
+          ]
         }
       ]
     },
     {
       "name": "intmin",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "value = limit()",
-          "inputs": [],
-          "outputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value."
-            }
-          ]
-        },
-        {
-          "label": "value = limit(classname)",
-          "inputs": [
-            {
-              "name": "classname",
-              "ty": "StringScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "Numeric class name."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Limit value."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.NUMERIC_LIMITS.INVALID_CLASS",
           "identifier": "RunMat:numericLimits:InvalidClass",
-          "when": "The requested class is not supported by the limit query.",
-          "message": "numeric limit: unsupported class"
+          "message": "numeric limit: unsupported class",
+          "when": "The requested class is not supported by the limit query."
+        },
+        {
+          "code": "RM.NUMERIC_LIMITS.INVALID_SYNTAX",
+          "identifier": "RunMat:numericLimits:InvalidSyntax",
+          "message": "numeric limit: invalid syntax",
+          "when": "The arguments do not match a documented class-name or like-prototype form."
+        }
+      ],
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [],
+          "label": "value = intmin()",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value.",
+              "name": "value",
+              "ty": "Any"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric class name.",
+              "name": "classname",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "value = intmin(classname)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value.",
+              "name": "value",
+              "ty": "Any"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Like keyword.",
+              "name": "like",
+              "ty": "StringScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Integer prototype whose class and complexity are copied.",
+              "name": "prototype",
+              "ty": "LikePrototype"
+            }
+          ],
+          "label": "value = intmin(like=prototype)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Limit value.",
+              "name": "value",
+              "ty": "Any"
+            }
+          ]
         }
       ]
     },
@@ -56938,109 +57006,97 @@
     },
     {
       "name": "linspace",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "x = linspace(start, stop)",
-          "inputs": [
-            {
-              "name": "start",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Starting value."
-            },
-            {
-              "name": "stop",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Ending value."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "x",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Row vector of linearly spaced values."
-            }
-          ]
-        },
-        {
-          "label": "x = linspace(start, stop, n)",
-          "inputs": [
-            {
-              "name": "start",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Starting value."
-            },
-            {
-              "name": "stop",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Ending value."
-            },
-            {
-              "name": "n",
-              "ty": "IntegerScalar",
-              "arity": "Optional",
-              "default": "100",
-              "description": "Number of points."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "x",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Row vector of linearly spaced values."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.LINSPACE.ARG_COUNT",
           "identifier": null,
-          "when": "More than three input arguments are provided.",
-          "message": "linspace: expected at most three input arguments"
+          "message": "linspace: expected at most three input arguments",
+          "when": "More than three input arguments are provided."
         },
         {
           "code": "RM.LINSPACE.COUNT_NOT_SCALAR",
           "identifier": null,
-          "when": "The count argument is not a numeric scalar value.",
-          "message": "linspace: number of points must be a scalar"
-        },
-        {
-          "code": "RM.LINSPACE.COUNT_NOT_INTEGER",
-          "identifier": null,
-          "when": "The count argument is not an integer value.",
-          "message": "linspace: number of points must be an integer"
-        },
-        {
-          "code": "RM.LINSPACE.COUNT_NEGATIVE",
-          "identifier": null,
-          "when": "The count argument is negative.",
-          "message": "linspace: number of points must be >= 0"
+          "message": "linspace: number of points must be a scalar",
+          "when": "The count argument is not a numeric scalar value."
         },
         {
           "code": "RM.LINSPACE.COUNT_NOT_FINITE",
           "identifier": null,
-          "when": "The count argument is not finite.",
-          "message": "linspace: number of points must be finite"
+          "message": "linspace: number of points must not be infinite",
+          "when": "The count argument is infinite."
         },
         {
           "code": "RM.LINSPACE.COUNT_TOO_LARGE",
           "identifier": null,
-          "when": "The count argument exceeds platform limits.",
-          "message": "linspace: number of points is too large for this platform"
+          "message": "linspace: number of points is too large for this platform",
+          "when": "The count argument exceeds platform limits."
+        }
+      ],
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Starting value.",
+              "name": "start",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Ending value.",
+              "name": "stop",
+              "ty": "NumericScalar"
+            }
+          ],
+          "label": "x = linspace(start, stop)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of linearly spaced values.",
+              "name": "x",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Starting value.",
+              "name": "start",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Ending value.",
+              "name": "stop",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Optional",
+              "default": "100",
+              "description": "Number of points.",
+              "name": "n",
+              "ty": "NumericScalar"
+            }
+          ],
+          "label": "x = linspace(start, stop, n)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of linearly spaced values.",
+              "name": "x",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
@@ -57611,97 +57667,97 @@
     },
     {
       "name": "logspace",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "x = logspace(start, stop)",
-          "inputs": [
-            {
-              "name": "start",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Starting exponent value."
-            },
-            {
-              "name": "stop",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Ending exponent value."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "x",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Row vector of logarithmically spaced values."
-            }
-          ]
-        },
-        {
-          "label": "x = logspace(start, stop, n)",
-          "inputs": [
-            {
-              "name": "start",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Starting exponent value."
-            },
-            {
-              "name": "stop",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Ending exponent value."
-            },
-            {
-              "name": "n",
-              "ty": "IntegerScalar",
-              "arity": "Optional",
-              "default": "50",
-              "description": "Number of points."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "x",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Row vector of logarithmically spaced values."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.LOGSPACE.ARG_COUNT",
           "identifier": null,
-          "when": "More than three input arguments are provided.",
-          "message": "logspace: expected two or three input arguments"
+          "message": "logspace: expected two or three input arguments",
+          "when": "More than three input arguments are provided."
         },
         {
           "code": "RM.LOGSPACE.COUNT_NOT_SCALAR",
           "identifier": null,
-          "when": "The count argument is not a numeric scalar value.",
-          "message": "logspace: number of points must be a scalar"
+          "message": "logspace: number of points must be a scalar",
+          "when": "The count argument is not a numeric scalar value."
         },
         {
-          "code": "RM.LOGSPACE.COUNT_NOT_INTEGER",
+          "code": "RM.LOGSPACE.COUNT_NOT_FINITE",
           "identifier": null,
-          "when": "The count argument is not an integer value.",
-          "message": "logspace: number of points must be an integer"
+          "message": "logspace: number of points must be finite",
+          "when": "The count argument is NaN or infinite."
         },
         {
-          "code": "RM.LOGSPACE.COUNT_NEGATIVE",
+          "code": "RM.LOGSPACE.COUNT_TOO_LARGE",
           "identifier": null,
-          "when": "The count argument is negative.",
-          "message": "logspace: number of points must be >= 0"
+          "message": "logspace: number of points is too large for this platform",
+          "when": "The count argument exceeds platform limits."
+        }
+      ],
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Starting exponent value.",
+              "name": "start",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Ending exponent value.",
+              "name": "stop",
+              "ty": "NumericScalar"
+            }
+          ],
+          "label": "x = logspace(start, stop)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of logarithmically spaced values.",
+              "name": "x",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Starting exponent value.",
+              "name": "start",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Ending exponent value.",
+              "name": "stop",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Optional",
+              "default": "50",
+              "description": "Number of points.",
+              "name": "n",
+              "ty": "NumericScalar"
+            }
+          ],
+          "label": "x = logspace(start, stop, n)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of logarithmically spaced values.",
+              "name": "x",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },

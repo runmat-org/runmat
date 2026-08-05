@@ -725,6 +725,58 @@ fn test_delaunaytri_integer_extensions_follow_session_compatibility_mode() {
 }
 
 #[test]
+fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Matlab);
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = intmax(like=uint64(1)); out",
+        )
+        .expect("name-value integer prototype form executes");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        assert_eq!(
+            outcome.value,
+            Some(runmat_builtins::Value::Int(runmat_builtins::IntValue::U64(
+                u64::MAX
+            )))
+        );
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = linspace(0, 1, 3.9); out",
+        )
+        .expect("fractional linspace count executes");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_builtins::Value::Tensor(values)) = outcome.value else {
+            panic!("expected linspace tensor")
+        };
+        assert_eq!(values.shape, vec![1, 3]);
+        assert_eq!(values.materialize_f64(), vec![0.0, 0.5, 1.0]);
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = linspace(0, 1, NaN); out",
+        )
+        .expect("NaN linspace count executes");
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let Some(runmat_builtins::Value::Tensor(values)) = outcome.value else {
+            panic!("expected scalar NaN tensor")
+        };
+        assert_eq!(values.shape, vec![1, 1]);
+        assert!(values.materialize_f64()[0].is_nan());
+
+        let outcome = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "out = logspace(int8(0), 2, 3);",
+        )
+        .expect("compatibility error is returned in the execution outcome");
+        assert!(outcome.error.is_some());
+    });
+}
+
+#[test]
 fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
