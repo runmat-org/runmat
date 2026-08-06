@@ -5983,10 +5983,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6011,10 +6011,38 @@
           "outputs": [
             {
               "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
+            }
+          ]
+        },
+        {
+          "label": "h = area(Y, basevalue)",
+          "inputs": [
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y data vector or matrix. Columns are rendered as stacked series."
+            },
+            {
+              "name": "basevalue",
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Horizontal baseline value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6039,10 +6067,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6067,10 +6095,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6102,10 +6130,45 @@
           "outputs": [
             {
               "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
+            }
+          ]
+        },
+        {
+          "label": "h = area(X, Y, basevalue)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates matching the row count of Y."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y data vector or matrix. Columns are rendered as stacked series."
+            },
+            {
+              "name": "basevalue",
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Horizontal baseline value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6137,10 +6200,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6165,10 +6228,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6200,10 +6263,45 @@
           "outputs": [
             {
               "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
+            }
+          ]
+        },
+        {
+          "label": "h = area(ax, Y, basevalue)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y data vector or matrix. Columns are rendered as stacked series."
+            },
+            {
+              "name": "basevalue",
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Horizontal baseline value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6235,10 +6333,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -6277,10 +6375,52 @@
           "outputs": [
             {
               "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
+            }
+          ]
+        },
+        {
+          "label": "h = area(ax, X, Y, basevalue)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates matching the row count of Y."
+            },
+            {
+              "name": "Y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y data vector or matrix. Columns are rendered as stacked series."
+            },
+            {
+              "name": "basevalue",
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first area series in the rendered chart."
+              "description": "Horizontal baseline value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Area graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         }
@@ -6297,6 +6437,140 @@
           "identifier": "RunMat:area:Internal",
           "when": "Renderer/GPU conversion fails during chart construction.",
           "message": "area: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "area-linespec",
+          "mode": "RunMatOnly",
+          "description": "area with a compact positional LineSpec is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AreaLineSpecExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "a = area(integer_Y)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Y independently accepts every built-in integer class as vector or matrix data."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "An implicit double X axis is generated from one through the vector length or matrix row count. Authoritative integer Y storage crosses one explicit client graphics boundary; resident integer data gathers because area accepts GPU arrays but executes on the client."
+        },
+        {
+          "form": "a = area(integer_X, integer_Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "X independently accepts every built-in integer class as vector or matrix coordinates."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Y independently accepts every built-in integer class as vector or matrix data."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "X and Y retain authoritative typed storage through shape validation and exact integer X ordering before the deliberate client graphics conversion. The output is one or more opaque Area graphics handles rather than integer data."
+        },
+        {
+          "form": "a = area(..., integer_basevalue)",
+          "inputs": [
+            {
+              "name": "basevalue",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The positional or BaseValue name-value control accepts a real numeric scalar."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The positional and BaseValue name-value forms read exactly one real numeric scalar and then cross the explicit f64 graphics-property boundary; a resident scalar gathers on the client."
+        },
+        {
+          "form": "a = area(..., \"LineWidth\", integer_width)",
+          "inputs": [
+            {
+              "name": "LineWidth",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "LineWidth explicitly accepts every built-in integer class as a scalar point width."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "LineWidth is validated and converted once by the shared host graphics-style parser; it does not create an integer output. Applying and exposing the parsed outline width is a general Area graphics-property gap, not an integer-storage distinction."
         }
       ]
     },

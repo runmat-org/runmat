@@ -703,6 +703,20 @@ fn animatedline_accepts_all_integer_coordinate_and_maximum_classes_through_vm() 
 }
 
 #[test]
+fn area_accepts_all_integer_data_and_property_classes_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "x = {constructor}([2;1]); y = {constructor}([10 20;30 40]); h = area(x, y, {constructor}(2), 'LineWidth', {constructor}(3)); if numel(h) ~= 2; error('integer area handle count mismatch'); end; if ~strcmp(get(h(1), 'Type'), 'area') || ~strcmp(get(h(2), 'Type'), 'area'); error('integer area type mismatch'); end; xo = get(h(1), 'XData'); y1 = get(h(1), 'YData'); y2 = get(h(2), 'YData'); if xo(1) ~= 1 || xo(2) ~= 2; error('integer area X ordering mismatch'); end; if y1(1) ~= 30 || y1(2) ~= 10; error('integer area first series mismatch'); end; if y2(1) ~= 70 || y2(2) ~= 30; error('integer area stacked series mismatch'); end; if get(h(1), 'BaseValue') ~= 2 || get(h(2), 'BaseValue') ~= 2; error('integer area BaseValue mismatch'); end;"
+        );
+        execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: area failed: {error}"));
+    }
+}
+
+#[test]
 fn plotmatrix_dispatches_multi_output_grid_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

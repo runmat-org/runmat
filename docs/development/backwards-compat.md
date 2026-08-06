@@ -2,7 +2,7 @@
 title: "Semantic Compatibility Engineering Policy"
 category: "Development"
 section: "14.7"
-last_updated: "August 4, 2026"
+last_updated: "August 5, 2026"
 ---
 
 # Semantic Compatibility Engineering Policy
@@ -163,6 +163,8 @@ Dynamic-object `addprop` accepts a `dynamicprops` receiver plus a character-vect
 `animatedline` independently accepts all eight integer classes for its X, Y, and Z starting-coordinate vectors and for the positive scalar `MaximumNumPoints` control. Coordinate storage remains authoritative until one explicit conversion into RunMat's client-side `f64` graphics domain; the point limit is instead validated exactly and converted only to a checked host count. Resident coordinates and limit scalars gather because the documented GPU-array surface executes on the client, while the returned numeric encoding remains an opaque graphics handle rather than an integer-class output.
 
 `append` is a text-only API over string arrays, character vectors, and cell arrays of character vectors, with documented output-type precedence and compatible-size expansion. Numeric and logical values, including all eight integer classes in scalar and array form, reject without implicit text conversion; resident numeric handles reject before provider dispatch or gather, and the API has no integer-output or interactive GPU-array surface.
+
+`area` independently accepts all eight integer classes for X and Y vectors or matrices, the positional or name-value `BaseValue` scalar, and the `LineWidth` scalar. Typed X ordering remains exact until sorting is complete, then X, cumulative Y, and the baseline deliberately enter the client graphics `f64` domain; resident integer data gathers because the documented GPU-array surface executes on the client. Matrix Y returns one opaque graphics handle per column, and RunMat's pre-existing positional compact LineSpec form is retained only as an explicitly gated extension.
 
 ## Evidence policy
 

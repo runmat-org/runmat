@@ -209,6 +209,7 @@ mod tests {
                 ("allfinite", "allfinite-string-input"),
                 ("and", "and-character-input"),
                 ("and", "and-complex-input"),
+                ("area", "area-linespec"),
                 ("acos", "acos-character-input"),
                 ("acos", "acos-gpu-real-complex-promotion"),
                 ("acos", "acos-integer-input"),
@@ -497,6 +498,7 @@ mod tests {
             "bounds",
             "prod",
             "accept",
+            "area",
         ] {
             let builtin = registered
                 .iter()
