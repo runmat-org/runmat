@@ -16,7 +16,15 @@
     "reduction": false,
     "precisions": [
       "single",
-      "double"
+      "double",
+      "int8",
+      "int16",
+      "int32",
+      "int64",
+      "uint8",
+      "uint16",
+      "uint32",
+      "uint64"
     ],
     "broadcasting": "none",
     "notes": "`addpoints` mutates graphics handle state. GPU-resident coordinate inputs are accepted through the plotting input path and gathered before appending."
@@ -36,13 +44,15 @@
   "behaviors": [
     "`addpoints(an,x,y)` appends 2-D points to an animated line.",
     "`addpoints(an,x,y,z)` appends 3-D points. An empty 2-D animated line is promoted to a 3-D line when Z data is first added, unless the handle has marker metadata that the 3-D renderer cannot preserve.",
+    "Each X, Y, or Z coordinate independently accepts single, double, or any of the eight integer classes. Integer storage is read authoritatively before coordinates enter the host graphics representation.",
     "Coordinate inputs must be scalars or vectors with matching element counts.",
+    "Logical coordinate values are not numeric integer coordinates and are rejected.",
     "If the target is already 3-D, callers must provide X, Y, and Z coordinates.",
     "The function mutates graphics state and has no MATLAB output."
   ],
   "options": [
     "The first argument must be an `animatedline` handle.",
-    "X, Y, and optional Z coordinates may be scalars, vectors, or GPU-resident vectors."
+    "X, Y, and optional Z coordinates may be single, double, or any integer class, including GPU-resident scalars or vectors."
   ],
   "examples": [
     {

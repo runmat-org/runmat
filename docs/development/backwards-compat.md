@@ -150,6 +150,8 @@ The tokenized-document enrichment cohort `addDependencyDetails`, `addEntityDetai
 
 `addpath` documents character-vector and string-scalar folder names and returns the previous path as a character vector. RunMat additionally accepts a dense one-row numeric tensor as Unicode folder-name code points; this convenience form is a mode-gated extension, including all eight exact integer classes and resident numeric tensors. Integer code points decode without a floating intermediary, invalid Unicode values reject, resident inputs are classified before gather, and all path-state mutation remains host-only.
 
+`addpoints` documents single, double, and all eight integer classes independently for each X, Y, and Z coordinate vector. RunMat reads host integer storage authoritatively before entering the deliberate host `f64` graphics domain; resident coordinates gather because the function accepts GPU arrays but executes on the client. Logical scalars are not documented coordinate data and reject rather than entering through the shared plotting adapter.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

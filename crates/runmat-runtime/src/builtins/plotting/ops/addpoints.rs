@@ -1,9 +1,12 @@
 //! MATLAB-compatible `addpoints` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -109,6 +112,70 @@ pub const ADDPOINTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ADDPOINTS_ERRORS,
 };
 
+const ADDPOINTS_2D_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "X coordinates independently accept every integer class or documented floating coordinate data.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Y coordinates independently accept every integer class or documented floating coordinate data.",
+    },
+];
+
+const ADDPOINTS_3D_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "X coordinates independently accept every integer class or documented floating coordinate data.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Y coordinates independently accept every integer class or documented floating coordinate data.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "z",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Z coordinates independently accept every integer class or documented floating coordinate data.",
+    },
+];
+
+pub const ADDPOINTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "addpoints(an, integer_x, integer_y)",
+        inputs: &ADDPOINTS_2D_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Coordinate vectors must have equal element counts. Host integer storage is read authoritatively before values enter the f64 graphics domain; GPU arrays gather because graphics state and rendering are client-side.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "addpoints(an, integer_x, integer_y, integer_z)",
+        inputs: &ADDPOINTS_3D_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "All three coordinate vectors must have equal element counts. Host integer storage is read authoritatively before values enter the f64 graphics domain; GPU arrays gather because graphics state and rendering are client-side.",
+    },
+];
+
 #[runtime_builtin(
     name = "addpoints",
     category = "plotting",
@@ -118,6 +185,7 @@ pub const ADDPOINTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(set_type),
     descriptor(crate::builtins::plotting::addpoints::ADDPOINTS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::addpoints::ADDPOINTS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::addpoints"
 )]
 pub async fn addpoints_builtin(args: Vec<Value>) -> BuiltinResult<String> {
@@ -156,6 +224,9 @@ pub async fn addpoints_builtin(args: Vec<Value>) -> BuiltinResult<String> {
 }
 
 async fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        return Err(addpoints_err(format!("{name} must not be logical data")));
+    }
     let tensor = NumericInput::from_value(value, BUILTIN_NAME)?
         .into_tensor_async(BUILTIN_NAME)
         .await?;
@@ -184,6 +255,7 @@ mod tests {
         clear_figure, current_figure_handle, reset_hold_state_for_run,
     };
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -249,6 +321,19 @@ mod tests {
     }
 
     #[test]
+    fn addpoints_descriptor_classifies_both_integer_coordinate_forms() {
+        assert_eq!(ADDPOINTS_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(
+            ADDPOINTS_INTEGER_CAPABILITIES[0].form,
+            "addpoints(an, integer_x, integer_y)"
+        );
+        assert_eq!(
+            ADDPOINTS_INTEGER_CAPABILITIES[1].form,
+            "addpoints(an, integer_x, integer_y, integer_z)"
+        );
+    }
+
+    #[test]
     fn addpoints_rejects_3d_promotion_when_markers_would_be_lost() {
         let _guard = setup();
         let handle = block_on(animatedline_builtin(vec![
@@ -279,28 +364,57 @@ mod tests {
     }
 
     #[test]
-    fn addpoints_reads_typed_integer_coordinates_exactly() {
+    fn addpoints_accepts_all_integer_coordinate_classes_and_mixed_double() {
+        let _guard = setup();
+        let coordinates = [
+            IntegerStorage::I8(vec![1, 2]),
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I32(vec![1, 2]),
+            IntegerStorage::I64(vec![1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![1, 2]),
+        ];
+        for storage in coordinates {
+            let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
+            block_on(addpoints_builtin(vec![
+                handle.clone(),
+                integer_value(storage.clone()),
+                vector(&[10.0, 20.0]),
+                integer_value(storage),
+            ]))
+            .unwrap();
+            assert_eq!(
+                tensor_data(
+                    get_builtin(vec![handle.clone(), Value::String("XData".into())]).unwrap()
+                ),
+                vec![1.0, 2.0]
+            );
+            assert_eq!(
+                tensor_data(
+                    get_builtin(vec![handle.clone(), Value::String("YData".into())]).unwrap()
+                ),
+                vec![10.0, 20.0]
+            );
+            assert_eq!(
+                tensor_data(get_builtin(vec![handle, Value::String("ZData".into())]).unwrap()),
+                vec![1.0, 2.0]
+            );
+        }
+    }
+
+    #[test]
+    fn addpoints_rejects_undocumented_logical_coordinates() {
         let _guard = setup();
         let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
-        block_on(addpoints_builtin(vec![
-            handle.clone(),
-            integer_vector(&[1, 2]),
-            integer_vector(&[10, 20]),
-            integer_vector(&[100, 200]),
+        let err = block_on(addpoints_builtin(vec![
+            handle,
+            Value::Bool(true),
+            Value::Num(2.0),
         ]))
-        .unwrap();
-        assert_eq!(
-            tensor_data(get_builtin(vec![handle.clone(), Value::String("XData".into())]).unwrap()),
-            vec![1.0, 2.0]
-        );
-        assert_eq!(
-            tensor_data(get_builtin(vec![handle.clone(), Value::String("YData".into())]).unwrap()),
-            vec![10.0, 20.0]
-        );
-        assert_eq!(
-            tensor_data(get_builtin(vec![handle, Value::String("ZData".into())]).unwrap()),
-            vec![100.0, 200.0]
-        );
+        .expect_err("logical coordinates are not documented");
+        assert!(err.message.contains("must not be logical"));
     }
 
     fn vector(values: &[f64]) -> Value {
@@ -309,12 +423,9 @@ mod tests {
         )
     }
 
-    fn integer_vector(values: &[i16]) -> Value {
-        let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(values.to_vec()),
-            vec![1, values.len()],
-        )
-        .unwrap();
+    fn integer_value(storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        let tensor = Tensor::new_integer(storage, vec![1, len]).unwrap();
         Value::Tensor(tensor)
     }
 
