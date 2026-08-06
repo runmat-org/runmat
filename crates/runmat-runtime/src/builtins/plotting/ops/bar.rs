@@ -431,6 +431,41 @@ const BAR_LINE_WIDTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
             "LineWidth explicitly accepts every built-in integer class as a real numeric scalar.",
     }];
 
+const BARH_Y_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Y explicitly accepts every built-in integer class as scalar, vector, or matrix horizontal-bar-length data.",
+    }];
+
+const BARH_X_Y_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "X explicitly accepts every built-in integer class as vertical-axis category-position data.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Y independently accepts every built-in integer class as scalar, vector, or matrix horizontal-bar-length data.",
+    },
+];
+
+const BARH_WIDTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "width",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The positional thickness explicitly accepts every built-in integer class as a real numeric scalar.",
+    }];
+
 pub const BAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
     BuiltinIntegerCapabilityDescriptor {
         form: "b = bar(integer_Y)",
@@ -464,6 +499,49 @@ pub const BAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "b = bar(..., \"LineWidth\", integer_width)",
+        inputs: &BAR_LINE_WIDTH_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "LineWidth reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data.",
+    },
+];
+
+pub const BARH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = barh(integer_Y)",
+        inputs: &BARH_Y_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Authoritative integer Y storage crosses one explicit client graphics boundary. Resident integer data gathers exactly before conversion because the floating shared-WGPU vertex path cannot reinterpret native integer buffers; the output is one or more opaque Bar handles.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = barh(integer_X, integer_Y)",
+        inputs: &BARH_X_Y_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "X remains exact through vertical-category count and uniqueness validation, including wide int64 and uint64 labels, before the deliberate client graphics conversion. Resident X and integer Y inputs gather through the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = barh(..., integer_width)",
+        inputs: &BARH_WIDTH_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The positional thickness reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = barh(..., \"LineWidth\", integer_width)",
         inputs: &BAR_LINE_WIDTH_INTEGER_INPUT,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::NotApplicable,
@@ -628,6 +706,7 @@ pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     suppress_auto_output = true,
     type_resolver(handle_array_type),
     descriptor(crate::builtins::plotting::bar::BARH_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::bar::BARH_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::bar"
 )]
 pub async fn barh_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1519,6 +1598,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn barh_integer_capabilities_cover_documented_forms_and_all_classes() {
+        assert_eq!(BARH_INTEGER_CAPABILITIES.len(), 4);
+        for capability in BARH_INTEGER_CAPABILITIES {
+            assert!(capability.form.starts_with("b = barh("));
+            for input in capability.inputs {
+                assert_eq!(
+                    input.classes,
+                    crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+                );
+                assert_eq!(
+                    input.availability,
+                    BuiltinIntegerInputAvailability::Documented
+                );
+            }
+        }
+    }
+
+    #[test]
     fn bar_invalid_argument_uses_stable_identifier() {
         let err = block_on(super::bar_builtin(vec![])).expect_err("missing args should fail");
         assert_eq!(err.identifier(), BAR_ERROR_INVALID_ARGUMENT.identifier);
@@ -1646,6 +1743,23 @@ pub(crate) mod tests {
                 build_bar_series_from_tensor(None, tensor, &style, BAR_CONFIG).expect("bar charts");
             assert_eq!(charts.len(), 2);
             assert_eq!(charts[0].bar_count(), 2);
+        }
+    }
+
+    #[test]
+    fn barh_accepts_all_integer_y_classes_at_the_graphics_boundary() {
+        setup_plot_tests();
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let style = parse_bar_style_args("barh", &[], defaults).unwrap();
+        for storage in all_integer_bar_storages() {
+            let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
+            let charts = build_bar_series_from_tensor(None, tensor, &style, BARH_CONFIG)
+                .expect("horizontal bar charts");
+            assert_eq!(charts.len(), 2);
+            assert_eq!(charts[0].bar_count(), 2);
+            assert!(charts
+                .iter()
+                .all(|chart| chart.orientation == Orientation::Horizontal));
         }
     }
 
@@ -1890,24 +2004,24 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bar_gathers_all_resident_integer_classes_before_floating_gpu_geometry() {
+    fn bar_and_barh_gather_all_resident_integer_classes_before_floating_gpu_geometry() {
         test_support::with_test_provider(|provider| {
-            for storage in all_integer_bar_storages() {
-                let expected = storage.clone();
-                let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
-                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-                let input = block_on(BarInput::from_value(
-                    None,
-                    Value::GpuTensor(handle),
-                    BAR_CONFIG,
-                ))
-                .expect("bar input");
-                match input {
-                    BarInput::Host { y, .. } => {
-                        assert_eq!(y.integer_storage(), Some(&expected));
-                    }
-                    BarInput::Gpu { .. } => {
-                        panic!("resident integer Y must not enter floating GPU geometry")
+            for config in [BAR_CONFIG, BARH_CONFIG] {
+                for storage in all_integer_bar_storages() {
+                    let expected = storage.clone();
+                    let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
+                    let handle =
+                        gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                    let input =
+                        block_on(BarInput::from_value(None, Value::GpuTensor(handle), config))
+                            .expect("bar input");
+                    match input {
+                        BarInput::Host { y, .. } => {
+                            assert_eq!(y.integer_storage(), Some(&expected));
+                        }
+                        BarInput::Gpu { .. } => {
+                            panic!("resident integer Y must not enter floating GPU geometry")
+                        }
                     }
                 }
             }
@@ -1916,7 +2030,7 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "wgpu")]
-    fn bar_wgpu_gathers_all_resident_integer_classes_before_geometry() {
+    fn bar_and_barh_wgpu_gather_all_resident_integer_classes_before_geometry() {
         let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -1924,20 +2038,18 @@ pub(crate) mod tests {
         let Some(provider) = runmat_accelerate_api::provider() else {
             return;
         };
-        for storage in all_integer_bar_storages() {
-            let expected = storage.clone();
-            let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-            let input = block_on(BarInput::from_value(
-                None,
-                Value::GpuTensor(handle),
-                BAR_CONFIG,
-            ))
-            .expect("bar input");
-            match input {
-                BarInput::Host { y, .. } => assert_eq!(y.integer_storage(), Some(&expected)),
-                BarInput::Gpu { .. } => {
-                    panic!("resident integer Y must not enter floating WGPU geometry")
+        for config in [BAR_CONFIG, BARH_CONFIG] {
+            for storage in all_integer_bar_storages() {
+                let expected = storage.clone();
+                let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                let input = block_on(BarInput::from_value(None, Value::GpuTensor(handle), config))
+                    .expect("bar input");
+                match input {
+                    BarInput::Host { y, .. } => assert_eq!(y.integer_storage(), Some(&expected)),
+                    BarInput::Gpu { .. } => {
+                        panic!("resident integer Y must not enter floating WGPU geometry")
+                    }
                 }
             }
         }

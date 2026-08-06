@@ -179,6 +179,20 @@ fn bar_compiled_integer_matrix_returns_one_handle_per_series() {
 }
 
 #[test]
+fn barh_accepts_all_integer_classes_through_compiled_execution() {
+    let _guard = disable_interactive_plots_for_test();
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "x = {constructor}([1; 2; 3]); y = {constructor}([10 20; 30 40; 50 60]); h = barh(x, y, {constructor}(1), 'LineWidth', {constructor}(2)); if numel(h) ~= 2; error('integer barh handle count mismatch'); end; if ~isgraphics(h(1)) || ~isgraphics(h(2)); error('integer barh handles invalid'); end; if ~strcmp(get(h(1), 'Type'), 'bar') || ~strcmp(get(h(2), 'Type'), 'bar'); error('integer barh handle type mismatch'); end;"
+        );
+        execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: integer barh failed: {error}"));
+    }
+}
+
+#[test]
 fn ancestor_dispatches_graphics_parent_queries() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

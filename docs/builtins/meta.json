@@ -10008,10 +10008,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10029,17 +10029,17 @@
               "name": "width",
               "ty": "NumericScalar",
               "arity": "Required",
-              "default": "0.75",
+              "default": "0.8",
               "description": "Fraction of available category space occupied by each bar."
             }
           ],
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10057,7 +10057,7 @@
               "name": "width",
               "ty": "NumericScalar",
               "arity": "Required",
-              "default": "0.75",
+              "default": "0.8",
               "description": "Fraction of available category space occupied by each bar."
             },
             {
@@ -10071,10 +10071,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10099,10 +10099,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10127,10 +10127,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10155,10 +10155,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10183,17 +10183,17 @@
               "name": "width",
               "ty": "NumericScalar",
               "arity": "Required",
-              "default": "0.75",
+              "default": "0.8",
               "description": "Fraction of available category space occupied by each bar."
             }
           ],
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10218,7 +10218,7 @@
               "name": "width",
               "ty": "NumericScalar",
               "arity": "Required",
-              "default": "0.75",
+              "default": "0.8",
               "description": "Fraction of available category space occupied by each bar."
             },
             {
@@ -10232,10 +10232,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10267,10 +10267,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         },
@@ -10302,10 +10302,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericScalar",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Handle to the first rendered bar series."
+              "description": "Bar graphics handle or handle row vector, with one handle per plotted series."
             }
           ]
         }
@@ -10322,6 +10322,132 @@
           "identifier": "RunMat:barh:Internal",
           "when": "Renderer/GPU conversion fails while building horizontal bar geometry.",
           "message": "barh: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "b = barh(integer_Y)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Y explicitly accepts every built-in integer class as scalar, vector, or matrix horizontal-bar-length data."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative integer Y storage crosses one explicit client graphics boundary. Resident integer data gathers exactly before conversion because the floating shared-WGPU vertex path cannot reinterpret native integer buffers; the output is one or more opaque Bar handles."
+        },
+        {
+          "form": "b = barh(integer_X, integer_Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "X explicitly accepts every built-in integer class as vertical-axis category-position data."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Y independently accepts every built-in integer class as scalar, vector, or matrix horizontal-bar-length data."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "X remains exact through vertical-category count and uniqueness validation, including wide int64 and uint64 labels, before the deliberate client graphics conversion. Resident X and integer Y inputs gather through the owning provider."
+        },
+        {
+          "form": "b = barh(..., integer_width)",
+          "inputs": [
+            {
+              "name": "width",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The positional thickness explicitly accepts every built-in integer class as a real numeric scalar."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The positional thickness reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data."
+        },
+        {
+          "form": "b = barh(..., \"LineWidth\", integer_width)",
+          "inputs": [
+            {
+              "name": "LineWidth",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "LineWidth explicitly accepts every built-in integer class as a real numeric scalar."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "LineWidth reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data."
         }
       ]
     },
