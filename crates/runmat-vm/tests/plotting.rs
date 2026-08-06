@@ -919,6 +919,31 @@ fn axes_compiled_dispatch_accepts_integer_graphics_properties() {
 }
 
 #[test]
+fn axis_compiled_dispatch_accepts_integer_limits_query_and_visibility() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        ax = axes; \
+        axis(uint64([0 10 1 2 0 3 2 8])); \
+        lim = axis(ax); \
+        if numel(lim) ~= 6 || lim(1) ~= 0 || lim(2) ~= 10 || lim(5) ~= 0 || lim(6) ~= 3; \
+            error('axis integer limits or target query mismatch'); \
+        end; \
+        clim = get(ax, 'CLim'); \
+        if clim(1) ~= 2 || clim(2) ~= 8; \
+            error('axis integer color limits mismatch'); \
+        end; \
+        axis(uint8(0)); \
+        if get(ax, 'Visible'); \
+            error('axis integer visibility did not turn axes off'); \
+        end; \
+        axis(true); \
+        if ~get(ax, 'Visible'); \
+            error('axis logical visibility did not turn axes on'); \
+        end;";
+    execute_source(input).expect("execute axis integer semantics script");
+}
+
+#[test]
 fn axes_parent_property_targets_figure_and_updates_current_axes() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

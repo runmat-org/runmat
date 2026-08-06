@@ -8961,41 +8961,54 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "ok = axis()",
+          "label": "lim = axis()",
           "inputs": [],
           "outputs": [
             {
-              "name": "ok",
-              "ty": "LogicalArray",
+              "name": "lim",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "True on success."
+              "description": "Current x/y limits, with z limits included for a configured 3-D view."
             }
           ]
         },
         {
-          "label": "ok = axis([xmin xmax ymin ymax | ... zmin zmax])",
+          "label": "lim = axis(ax)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing axes handle whose limits are queried."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "lim",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current x/y limits, with z limits included for a configured 3-D view."
+            }
+          ]
+        },
+        {
+          "label": "axis([xmin xmax ymin ymax | ... cmin cmax])",
           "inputs": [
             {
               "name": "limits",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Axis limits vector [xmin xmax ymin ymax] or [xmin xmax ymin ymax zmin zmax]."
+              "description": "Four-, six-, or eight-element x/y, x/y/z, or x/y/z/color limits vector."
             }
           ],
-          "outputs": [
-            {
-              "name": "ok",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "True on success."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "ok = axis(mode)",
+          "label": "axis(mode)",
           "inputs": [
             {
               "name": "mode",
@@ -9005,15 +9018,20 @@
               "description": "Mode token: 'equal'|'image'|'auto'|'tight'|'manual'|'ij'|'xy'|'on'|'off'."
             }
           ],
-          "outputs": [
+          "outputs": []
+        },
+        {
+          "label": "axis(visibility)",
+          "inputs": [
             {
-              "name": "ok",
-              "ty": "LogicalArray",
+              "name": "visibility",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "True on success."
+              "description": "Axes visibility as on/off, logical true/false, or numeric 1/0."
             }
-          ]
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -9022,6 +9040,62 @@
           "identifier": "RunMat:axis:InvalidArgument",
           "when": "Axis argument is unsupported, malformed, non-finite, or has invalid bounds ordering.",
           "message": "axis: invalid argument"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "axis(integer_limits)",
+          "inputs": [
+            {
+              "name": "limits",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Four-, six-, and eight-element limit vectors accept every built-in integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Authoritative integer storage is shape- and order-validated before one conversion into host f64 graphics limits; the separate query form returns double limits."
+        },
+        {
+          "form": "axis(integer_visibility)",
+          "inputs": [
+            {
+              "name": "visibility",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Current numeric visibility syntax accepts scalar zero or one; logical false/true is the noninteger counterpart."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Only exact scalar zero and one are accepted, without provider dispatch or integer output."
         }
       ]
     },

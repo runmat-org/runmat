@@ -514,6 +514,7 @@ mod tests {
             "atan2",
             "audioread",
             "axes",
+            "axis",
         ] {
             let builtin = registered
                 .iter()

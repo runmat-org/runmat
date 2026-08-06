@@ -827,6 +827,7 @@ fn get_axes_property(
                 "FontSize",
                 Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
             );
+            st.insert("Visible", Value::Bool(meta.axes_style.visible));
             st.insert(
                 "XScale",
                 Value::String(if meta.x_log { "log" } else { "linear" }.into()),
@@ -933,6 +934,7 @@ fn get_axes_property(
         Some("xticklabelrotation") => Ok(Value::Num(meta.x_tick_label_rotation.unwrap_or(0.0))),
         Some("yticklabelrotation") => Ok(Value::Num(meta.y_tick_label_rotation.unwrap_or(0.0))),
         Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
+        Some("visible") => Ok(Value::Bool(meta.axes_style.visible)),
         Some("xscale") => Ok(Value::String(
             if meta.x_log { "log" } else { "linear" }.into(),
         )),
@@ -1653,6 +1655,18 @@ fn apply_axes_property(
                 .map_err(|err| map_figure_error(builtin, err))?;
             let mut style = meta.axes_style;
             style.font_size = Some(font_size as f32);
+            set_axes_style_for_axes(handle, axes_index, style)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "visible" => {
+            let visible = value_as_bool(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
+            })?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let mut style = meta.axes_style;
+            style.visible = visible;
             set_axes_style_for_axes(handle, axes_index, style)
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())

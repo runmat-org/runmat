@@ -9,19 +9,41 @@
     "axis tight",
     "matlab axis"
   ],
-  "summary": "Set axis limits and aspect behavior in MATLAB and RunMat plotting.",
+  "summary": "Query or set axis limits, visibility, and aspect behavior in MATLAB and RunMat plotting.",
   "requires_feature": null,
   "tested": {
     "unit": "builtins::plotting::cmds"
   },
-  "description": "`axis` configures limits and aspect behavior for the active axes. It supports numeric limit vectors and command forms such as `axis equal`, `axis image`, `axis auto`, and `axis tight`, matching MATLAB and RunMat plotting semantics.",
+  "description": "`axis` queries or configures limits, visibility, and aspect behavior for the active axes. It supports four-, six-, and eight-element numeric limit vectors, target-handle queries, logical or numeric visibility controls, and command forms such as `axis equal`, `axis image`, `axis auto`, and `axis tight`.",
   "behaviors": [
-    "Passing a four-element numeric vector sets `[xmin xmax ymin ymax]` directly.",
+    "`axis()` returns the current x and y limits as a four-element double vector, adding z limits for a configured 3-D view. `axis(ax)` queries the specified axes.",
+    "Four-, six-, and eight-element vectors set x/y, x/y/z, or x/y/z/color limits respectively. A `-Inf` lower endpoint or `Inf` upper endpoint retains the current data-fitted endpoint.",
+    "Limit vectors accept all eight integer classes. Authoritative integer storage is validated before one deliberate conversion into host double graphics state, and later limit queries return double.",
+    "`axis('on')`, `axis('off')`, logical scalars, and numeric zero or one control axes visibility. Numeric visibility accepts all eight integer classes.",
     "`axis equal` enables equal aspect behavior on the current axes.",
     "`axis image` enables equal aspect behavior and returns limits to data-fitted bounds, matching MATLAB's `axis equal` plus `axis tight` behavior.",
     "`axis auto` clears explicit limits and returns to automatic fitting.",
     "`axis tight` uses data-driven fitting behavior while leaving figure-local plot contents unchanged.",
-    "Axis settings are subplot-local because they act on the active axes state."
+    "Axis settings are subplot-local because they act on the active axes state.",
+    "GPU-resident limits and visibility controls reject before provider access because `axis` is a host graphics-state operation and exposes no interactive GPU-array input surface.",
+    "Multiple mode arguments, target-handle setter forms, mode subsets, and complete direction/style mode effects remain general graphics compatibility gaps."
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`axis` updates host-side plotting state. Numeric plot data can still use the existing GPU rendering fast paths."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "gpu_residency": "`axis` returns host-side limit vectors and does not change array GPU residency.",
+  "gpu_behavior": [
+    "`axis` performs no provider dispatch; resident limits and visibility controls reject rather than gathering."
   ],
   "examples": [
     {
@@ -48,7 +70,7 @@
     },
     {
       "question": "How do I set manual axis limits?",
-      "answer": "Pass a four-element vector: `axis([xmin xmax ymin ymax])`. For 3-D plots, use six elements: `axis([xmin xmax ymin ymax zmin zmax])`. This overrides auto-fitting until you call `axis auto` to return to data-driven limits."
+      "answer": "Pass a four-element vector: `axis([xmin xmax ymin ymax])`. For 3-D plots, use six elements: `axis([xmin xmax ymin ymax zmin zmax])`; append color limits for the eight-element form. Use `-Inf` for an automatic lower endpoint or `Inf` for an automatic upper endpoint. Explicit bounds override auto-fitting until you call `axis auto`."
     },
     {
       "question": "What does axis tight actually do?",
