@@ -57,3 +57,15 @@ fn bag_of_ngrams_accepts_all_integer_count_and_length_classes() {
         execute_source(&source).expect("execute integer bagOfNgrams script");
     }
 }
+
+#[test]
+fn bag_of_words_accepts_all_integer_count_classes() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "bag = bagOfWords([\"alpha\" \"beta\"], {constructor}([2 3])); counts = bag.Counts; if counts(1) ~= 2 || counts(2) ~= 3; error('integer bagOfWords counts mismatch'); end;"
+        );
+        execute_source(&source).expect("execute integer bagOfWords script");
+    }
+}

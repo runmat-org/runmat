@@ -9365,10 +9365,39 @@
       ],
       "errors": [
         {
-          "code": "RM.TEXT_ANALYTICS_DOCUMENTS.INVALID_INPUT",
-          "identifier": "RunMat:textAnalyticsDocuments:InvalidInput",
-          "when": "Inputs do not match a supported Text Analytics document or model helper form.",
-          "message": "Text Analytics document helper received invalid input"
+          "code": "RM.BAGOFWORDS.INVALID_INPUT",
+          "identifier": "RunMat:bagOfWords:InvalidInput",
+          "when": "Inputs do not match a supported bagOfWords form.",
+          "message": "bagOfWords: invalid input"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "bag = bagOfWords(uniqueWords, integer_counts)",
+          "inputs": [
+            {
+              "name": "counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Explicit count matrices accept every integer class and require nonnegative values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Counts remain authoritative through nonnegative-integer validation and vocabulary-column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object."
         }
       ]
     },

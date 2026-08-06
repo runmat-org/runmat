@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`bagOfWords` builds host text-model metadata and currently stores dense host counts."
+    "notes": "`bagOfWords` builds host text-model metadata and currently stores dense host double counts."
   },
   "fusion": {
     "elementwise": false,
@@ -32,10 +32,11 @@
     "`bagOfWords` with no input creates an empty model.",
     "`bagOfWords(documents)` accepts RunMat `tokenizedDocument` objects created by `tokenizedDocument`.",
     "`bagOfWords(words)` accepts a word vector as a single-document model.",
-    "`bagOfWords(uniqueWords, counts)` accepts a word vector and a numeric count matrix whose columns match the vocabulary length.",
+    "`bagOfWords(uniqueWords, counts)` accepts a word vector and a nonnegative integer-valued count matrix whose columns match the vocabulary length. All eight integer classes are supported; values remain authoritative through exact validation and vocabulary-column filtering before one deliberate conversion into the double `Counts` property.",
     "`uniqueWords` must not contain duplicate nonmissing words. Missing string entries are ignored along with their corresponding count columns.",
     "The returned object stores `Vocabulary`, `Counts`, `NumWords`, and `NumDocuments` properties.",
-    "Counts are stored as a dense host tensor with one row per document and one column per vocabulary word. Very large dense count matrices are rejected with a controlled error until native sparse bag storage is implemented.",
+    "Counts are stored as a dense host double tensor with one row per document and one column per vocabulary word. Very large dense count matrices are rejected with a controlled error until native sparse bag storage is implemented.",
+    "GPU-resident inputs reject before provider access because `bagOfWords` exposes no interactive GPU-array input surface.",
     "Native sparse bag storage and sparse-preserving GPU residency remain outside this slice.",
     "Vocabulary order follows first token appearance for document input and the supplied order for explicit `uniqueWords` input."
   ],
@@ -62,7 +63,7 @@
     },
     {
       "question": "Does `bagOfWords` execute on the GPU?",
-      "answer": "No. It builds a host text-model object and does not use a `runmat-accelerate` provider path."
+      "answer": "No. It builds a host text-model object and has no `runmat-accelerate` provider path. Resident inputs reject rather than gathering."
     }
   ],
   "links": [
@@ -95,5 +96,5 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/documents.rs"
   },
-  "gpu_residency": "`bagOfWords` stores host text-model metadata and dense host counts in this slice."
+  "gpu_residency": "`bagOfWords` stores host text-model metadata and dense host double counts in this slice; resident inputs reject before provider access."
 }

@@ -6,10 +6,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, LogicalArray, NumericScalar, ObjectInstance, PropertyDef, ResolveContext,
-    StringArray, Tensor, Type, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, ClassDef, IntegerStorage, LogicalArray, NumericScalar,
+    ObjectInstance, PropertyDef, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -206,6 +209,15 @@ const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
 
+const ERROR_BAG_OF_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BAGOFWORDS.INVALID_INPUT",
+    identifier: Some("RunMat:bagOfWords:InvalidInput"),
+    when: "Inputs do not match a supported bagOfWords form.",
+    message: "bagOfWords: invalid input",
+};
+
+const BAG_OF_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_BAG_OF_WORDS_INVALID_INPUT];
+
 const ERROR_REMOVE_LONG_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REMOVELONGWORDS.INVALID_INPUT",
     identifier: Some("RunMat:removeLongWords:InvalidInput"),
@@ -278,8 +290,29 @@ pub const BAG_OF_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     ],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
+    errors: &BAG_OF_WORDS_ERRORS,
 };
+
+const BAG_OF_WORDS_COUNTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "counts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Explicit count matrices accept every integer class and require nonnegative values.",
+    }];
+
+pub const BAG_OF_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "bag = bagOfWords(uniqueWords, integer_counts)",
+        inputs: &BAG_OF_WORDS_COUNTS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Counts remain authoritative through nonnegative-integer validation and vocabulary-column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object.",
+    }];
 
 pub const REMOVE_SHORT_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -364,6 +397,7 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
         "addEntityDetails" => "RunMat:addEntityDetails:InvalidInput",
         "addDependencyDetails" => "RunMat:addDependencyDetails:InvalidInput",
         "vaderSentimentScores" => "RunMat:vaderSentimentScores:InvalidInput",
+        "bagOfWords" => "RunMat:bagOfWords:InvalidInput",
         _ => "RunMat:textAnalyticsDocuments:InvalidInput",
     };
     build_runtime_error(message)
@@ -474,9 +508,18 @@ pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_bui
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::documents::BAG_OF_WORDS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::documents::BAG_OF_WORDS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 async fn bag_of_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
+        return Err(text_analytics_error(
+            "bagOfWords",
+            "bagOfWords: GPU-resident inputs are not supported",
+        ));
+    }
     let gathered = gather_args(args, "bagOfWords").await?;
     match gathered.as_slice() {
         [] => bag_from_documents(Vec::new()),
@@ -2527,11 +2570,20 @@ fn bag_from_documents(documents: Vec<Vec<String>>) -> BuiltinResult<Value> {
 
 fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinResult<Value> {
     let raw_words = words_from_word_vector_preserving_missing(words, "bagOfWords")?;
-    let Value::Tensor(tensor) = counts else {
-        return Err(text_analytics_error(
-            "bagOfWords",
-            format!("bagOfWords: counts must be a numeric matrix, got {counts:?}"),
-        ));
+    let tensor = match counts {
+        Value::Tensor(tensor) => tensor.clone(),
+        Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
+            .map_err(|err| text_analytics_error("bagOfWords", err))?,
+        Value::Int(value) => {
+            Tensor::new_integer(IntegerStorage::from_scalar(value.clone()), vec![1, 1])
+                .map_err(|err| text_analytics_error("bagOfWords", err))?
+        }
+        other => {
+            return Err(text_analytics_error(
+                "bagOfWords",
+                format!("bagOfWords: counts must be a numeric matrix, got {other:?}"),
+            ))
+        }
     };
     if tensor.cols != raw_words.len() {
         return Err(text_analytics_error(
@@ -2576,7 +2628,7 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
         keep_cols.len(),
         "bagOfWords",
     )?);
-    let values = tensor_utils::tensor_values_f64_cow(tensor);
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     for col in keep_cols {
         for row in 0..tensor.rows {
             filtered_counts.push(values[row + col * tensor.rows]);
@@ -3371,6 +3423,82 @@ mod tests {
             object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(2.0)));
+    }
+
+    #[test]
+    fn bag_of_words_accepts_all_integer_count_classes_with_double_model_metadata() {
+        let words =
+            || StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).expect("words");
+        let counts = [
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+        for storage in counts {
+            let counts = Tensor::new_integer(storage, vec![1, 2]).expect("integer counts");
+            let bag = object(
+                run_bag(vec![Value::StringArray(words()), Value::Tensor(counts)])
+                    .expect("integer bag"),
+            );
+            let actual = tensor_property(&bag, "Counts");
+            assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(actual.materialize_f64(), vec![2.0, 3.0]);
+        }
+    }
+
+    #[test]
+    fn bag_of_words_accepts_exact_integer_scalar_counts() {
+        let words = StringArray::new(vec!["alpha".into()], vec![1, 1]).expect("words");
+        let bag = object(
+            run_bag(vec![
+                Value::StringArray(words),
+                Value::Int(runmat_builtins::IntValue::U64(7)),
+            ])
+            .expect("scalar integer count"),
+        );
+        let actual = tensor_property(&bag, "Counts");
+        assert_eq!(actual.shape, vec![1, 1]);
+        assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(actual.materialize_f64(), vec![7.0]);
+    }
+
+    #[test]
+    fn bag_of_words_wide_counts_cross_only_the_documented_double_property_boundary() {
+        let words = StringArray::new(vec!["wide".into()], vec![1, 1]).expect("words");
+        let wide = (1_u64 << 53) + 1;
+        let counts =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("counts");
+        let bag =
+            object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
+        let actual = tensor_property(&bag, "Counts");
+        assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(actual.materialize_f64(), vec![wide as f64]);
+    }
+
+    #[test]
+    fn bag_of_words_rejects_resident_inputs_before_provider_access() {
+        let resident = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_363_001,
+        };
+        let error =
+            run_bag(vec![Value::GpuTensor(resident)]).expect_err("resident input must reject");
+        assert_eq!(error.identifier(), Some("RunMat:bagOfWords:InvalidInput"));
+    }
+
+    #[test]
+    fn bag_of_words_integer_capability_covers_all_classes() {
+        assert_eq!(BAG_OF_WORDS_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            BAG_OF_WORDS_INTEGER_CAPABILITIES[0].inputs[0].classes,
+            crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+        );
     }
 
     #[test]

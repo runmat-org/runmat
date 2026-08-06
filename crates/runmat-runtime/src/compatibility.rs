@@ -516,6 +516,7 @@ mod tests {
             "axes",
             "axis",
             "bagOfNgrams",
+            "bagOfWords",
         ] {
             let builtin = registered
                 .iter()
