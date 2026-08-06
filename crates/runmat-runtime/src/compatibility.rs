@@ -245,6 +245,8 @@ mod tests {
                 ("atanh", "atanh-integer-input"),
                 ("atanh", "atanh-logical-input"),
                 ("any", "any-nanflag"),
+                ("bandwidth", "bandwidth-integer-input"),
+                ("bandwidth", "bandwidth-logical-input"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -517,6 +519,7 @@ mod tests {
             "axis",
             "bagOfNgrams",
             "bagOfWords",
+            "bandwidth",
         ] {
             let builtin = registered
                 .iter()

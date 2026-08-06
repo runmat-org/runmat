@@ -328,12 +328,8 @@ pub fn symrcm_type(args: &[Type], _context: &ResolveContext) -> Type {
 }
 
 pub fn bandwidth_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.len() > 1 {
-        return Type::Num;
-    }
-    Type::Tensor {
-        shape: Some(vec![Some(1), Some(2)]),
-    }
+    let _ = args;
+    Type::Num
 }
 
 pub fn numeric_tensor_from_shape(shape: Vec<Option<usize>>) -> Type {

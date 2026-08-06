@@ -31,20 +31,22 @@
     "unit": "builtins::math::linalg::structure::bandwidth::tests",
     "integration": "builtins::math::linalg::structure::bandwidth::tests::bandwidth_gpu_roundtrip"
   },
-  "description": "`bandwidth(A)` inspects the nonzero pattern of matrix `A` and reports lower and upper bandwidth values (subdiagonal and superdiagonal extent). Optional mode arguments return one side only, matching MATLAB behavior.",
+  "description": "`bandwidth(A)` inspects the nonzero pattern of matrix `A` and returns the lower bandwidth as its first output and the upper bandwidth as its optional second output. A `'lower'` or `'upper'` selector returns one side.",
   "behaviors": [
-    "`bandwidth(A)` returns a row vector `[lower upper]`. A diagonal matrix has `[0 0]`, a strictly upper-triangular matrix has `[0 k]`, and a strictly lower-triangular matrix has `[k 0]`, where `k` counts the furthest nonzero from the main diagonal.",
+    "`lower = bandwidth(A)` returns the lower bandwidth. `[lower, upper] = bandwidth(A)` returns separate lower and upper double scalars. A diagonal matrix has zero for both, and each side counts the furthest nonzero from the main diagonal.",
     "`bandwidth(A, 'lower')` returns only the lower bandwidth, while `bandwidth(A, 'upper')` returns only the upper bandwidth.",
+    "The documented matrix domain is full or sparse single/double, including complex values. RunMat mode additionally accepts logical matrices and all eight real or paired complex-integer classes; MATLAB-compatible mode rejects those extensions before host or provider dispatch.",
+    "Integer matrices are scanned through authoritative storage, so exact zero/nonzero structure never crosses a floating conversion. Outputs remain double scalar metadata.",
     "Nonzero detection treats any value that is not numerically equal to zero (including `NaN` or `Inf`) as nonzero, matching MATLAB semantics.",
-    "Empty matrices and all-zero matrices report `[0 0]`.",
-    "Inputs must be numeric or logical and two-dimensional. Higher-dimensional arrays (with any dimension beyond the second larger than one) raise an error.",
+    "Empty matrices and all-zero matrices report zero for both the lower and upper outputs.",
+    "Inputs must be two-dimensional matrices. Higher-dimensional arrays (with any dimension beyond the second larger than one) raise an error.",
     "Complex matrices are supported. A complex entry counts as nonzero if either the real or imaginary part is nonzero."
   ],
   "examples": [
     {
       "description": "Checking the bandwidth of a diagonal matrix",
       "input": "A = eye(4);\nbw = bandwidth(A)",
-      "output": "bw = [0 0]"
+      "output": "bw = 0"
     },
     {
       "description": "Requesting only the lower bandwidth",
@@ -58,24 +60,24 @@
     },
     {
       "description": "Analysing a rectangular matrix",
-      "input": "C = [0 0 7; 8 0 0; 0 9 0; 0 0 10];\nbw = bandwidth(C)",
-      "output": "bw = [1 2]"
+      "input": "C = [0 0 7; 8 0 0; 0 9 0; 0 0 10];\n[lower, upper] = bandwidth(C)",
+      "output": "lower = 1, upper = 2"
     },
     {
       "description": "Working with complex-valued matrices",
-      "input": "Z = [1+2i 0; 0 3-4i; 5i 0];\nbw = bandwidth(Z)",
-      "output": "bw = [2 0]"
+      "input": "Z = [1+2i 0; 0 3-4i; 5i 0];\n[lower, upper] = bandwidth(Z)",
+      "output": "lower = 2, upper = 0"
     },
     {
       "description": "Inspecting a GPU-resident matrix",
-      "input": "G = gpuArray([0 1 0; 2 0 3; 0 0 0]);\nbw = bandwidth(G)",
-      "output": "bw = [1 1]"
+      "input": "G = gpuArray([0 1 0; 2 0 3; 0 0 0]);\n[lower, upper] = bandwidth(G)",
+      "output": "lower = 1, upper = 1"
     }
   ],
   "faqs": [
     {
-      "question": "What does a bandwidth of `[0 0]` mean?",
-      "answer": "It indicates the matrix is diagonal: all nonzero elements are on the main diagonal."
+      "question": "What do lower and upper bandwidths of zero mean?",
+      "answer": "Separate lower and upper outputs of zero indicate that all nonzero elements are on the main diagonal."
     },
     {
       "question": "How are rows or columns full of zeros handled?",
@@ -103,15 +105,15 @@
     },
     {
       "question": "Will this function keep my data on the GPU?",
-      "answer": "Yes, when the provider implements the hook: the matrix stays resident on the GPU and only the two bandwidth values are copied back. If the provider lacks support, RunMat gathers the tensor and computes the bandwidth on the CPU instead."
+      "answer": "Documented floating input stays resident when the provider implements the hook, with only lower/upper metadata read back. Providers without the hook gather. Integer and logical extension inputs gather exactly before provider dispatch."
     },
     {
       "question": "Can I call `bandwidth` inside fused expressions?",
-      "answer": "Yes. The builtin returns a small host tensor, so it behaves like any other metadata query."
+      "answer": "Yes. The builtin returns host double scalar metadata, so it behaves like other metadata queries."
     },
     {
       "question": "What happens if I pass logical matrices?",
-      "answer": "Logical values are promoted to doubles (0 or 1) internally. `true` entries count as nonzero and contribute to the bandwidth calculation."
+      "answer": "Logical input is a gated RunMat extension because the documented matrix domain is single/double. In RunMat mode, `true` entries count as nonzero."
     }
   ],
   "links": [
@@ -156,8 +158,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/structure/bandwidth.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/bandwidth.rs"
   },
-  "gpu_residency": "You usually do NOT need to move data manually. When the active provider exposes the `bandwidth` hook (the WGPU backend does), RunMat launches a device-side kernel and only reads back the two bandwidth values. Providers without support seamlessly gather the tensor and reuse the CPU implementation, so explicit `gpuArray` / `gather` calls remain optional.",
+  "gpu_residency": "Documented single/double GPU inputs use the provider `bandwidth` hook when available and otherwise gather. Integer and logical GPU inputs are gated RunMat extensions; admitted values gather exactly before the floating-only provider hook and return host double scalar metadata.",
   "gpu_behavior": [
-    "`bandwidth` leverages the active acceleration provider when available. The WGPU backend launches a lightweight compute kernel that scans the matrix on-device and returns the lower and upper bandwidths without transferring the entire tensor. Providers that do not implement the `bandwidth` hook trigger a graceful fallback that gathers the matrix and executes the CPU implementation instead. Either way, the result is returned as a small host-side double tensor."
+    "`bandwidth` leverages the active acceleration provider for documented floating input when available. The WGPU backend scans the matrix on-device and reads back lower/upper metadata. Providers without the hook gather and reuse the CPU implementation. Admitted integer/logical extensions gather before provider dispatch so packed typed buffers are never interpreted by floating shaders."
   ]
 }
