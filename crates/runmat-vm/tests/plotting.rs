@@ -903,6 +903,22 @@ fn axes_creates_axes_and_round_trips_position_properties() {
 }
 
 #[test]
+fn axes_compiled_dispatch_accepts_integer_graphics_properties() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        ax = axes('DataAspectRatio', uint64([1 2 3]), 'XTick', int16([1 2 3])); \
+        ratio = get(ax, 'DataAspectRatio'); \
+        ticks = get(ax, 'XTick'); \
+        if ratio(1) ~= 1 || ratio(2) ~= 2 || ratio(3) ~= 3; \
+            error('axes integer aspect ratio mismatch'); \
+        end; \
+        if ticks(1) ~= 1 || ticks(2) ~= 2 || ticks(3) ~= 3; \
+            error('axes integer ticks mismatch'); \
+        end;";
+    execute_source(input).expect("execute axes integer-property script");
+}
+
+#[test]
 fn axes_parent_property_targets_figure_and_updates_current_axes() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

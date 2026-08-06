@@ -8870,6 +8870,89 @@
           "when": "Internal axes state operation fails.",
           "message": "axes: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ax = axes(..., ruler_property, integer_values)",
+          "inputs": [
+            {
+              "name": "XTick/YTick/XLim/YLim/ZLim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Documented numeric tick and limit vectors accept every built-in integer class; supported values cross once into host graphics state."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Integer values remain authoritative through shape validation and then cross the explicit f64 graphics-state boundary. The result is an opaque axes object encoding, not integer data."
+        },
+        {
+          "form": "ax = axes(..., \"DataAspectRatio\", integer_ratio)",
+          "inputs": [
+            {
+              "name": "DataAspectRatio",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "DataAspectRatio explicitly accepts every built-in integer class as a positive three-element vector."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact typed vector is validated as three positive finite values before one conversion into the client graphics domain."
+        },
+        {
+          "form": "ax = axes(..., appearance_property, integer_value)",
+          "inputs": [
+            {
+              "name": "Position/FontSize/XTickLabelRotation/YTickLabelRotation",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The supported layout vector and numeric scalar appearance properties accept real numeric values, including integer classes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Supported integer layout and scalar appearance controls are validated on the host and converted once into graphics state; resident property values are not an interactive GPU-array surface."
+        }
       ]
     },
     {
