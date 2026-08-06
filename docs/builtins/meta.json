@@ -5227,6 +5227,65 @@
           "when": "Input shapes are not broadcast-compatible.",
           "message": "and: array sizes are not compatible for broadcasting"
         }
+      ],
+      "extensions": [
+        {
+          "id": "and-complex-input",
+          "mode": "RunMatOnly",
+          "description": "and with a complex operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AndComplexInputExtension"
+        },
+        {
+          "id": "and-character-input",
+          "mode": "RunMatOnly",
+          "description": "and with a character-array operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AndCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = and(integer_A, integer_B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A independently accepts every built-in integer class and may be paired with scalar double data; zero is false and every nonzero value is true."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "B independently accepts every built-in integer class and may be paired with scalar double data; zero is false and every nonzero value is true."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "The function form and element-wise & operator share exact zero/nonzero truth semantics and compatible-size expansion. Resident integer inputs gather through authoritative typed storage when the provider lacks a native logical hook, and the logical result is restored to the owning provider."
+        }
       ]
     },
     {

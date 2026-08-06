@@ -36,6 +36,39 @@ fn logical_operators_and_short_circuit() {
 }
 
 #[test]
+fn elementwise_and_accepts_all_integer_classes_through_vm_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "a = {constructor}([0 1]); b = {constructor}([2; 0]); via_operator = a & b; via_function = and(a, b);"
+        );
+        let vars = execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: compiled and failed: {error}"));
+        for index in [2, 3] {
+            assert!(
+                matches!(
+                    &vars[index],
+                    Value::LogicalArray(array)
+                        if array.shape == vec![2, 2] && array.data == vec![0, 0, 1, 0]
+                ),
+                "{constructor}: unexpected result at {index}: {:?}",
+                vars[index]
+            );
+        }
+    }
+
+    let vars = execute_source(
+        "wide = uint64([0 9007199254740993 18446744073709551615]); mask = wide & int8([1 1 0]);",
+    )
+    .expect("wide integer and");
+    assert!(matches!(
+        &vars[1],
+        Value::LogicalArray(array) if array.data == vec![0, 1, 0]
+    ));
+}
+
+#[test]
 fn short_circuit_or_accepts_boolean_lhs_without_numeric_coercion() {
     let vars = execute_source(
         "tau = []; flight_duration = 10; guard = isempty(tau) || tau(end) < flight_duration;",

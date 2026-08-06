@@ -156,6 +156,8 @@ Dynamic-object `addprop` accepts a `dynamicprops` receiver plus a character-vect
 
 `ancestor` accepts graphics objects plus text type selectors and returns a matching graphics object or an empty handle array. RunMat's host-double graphics-handle encoding is opaque implementation state: integer scalars and arrays are ordinary non-graphics values and return empty rather than aliasing encoded root, figure, axes, or child handles. The API has no integer data, control, arithmetic, class-preserving output, or provider surface and is explicitly integer-inapplicable.
 
+`and(A,B)` and the element-wise `A & B` operator independently accept all eight integer classes, interpret exact zero as false and every nonzero integer as true, apply compatible-size expansion, and return logical output. Native host storage is never materialized through floating point for the truth test. Documented resident integer inputs use an exact typed gather fallback whenever the active provider lacks a suitable logical kernel, and the logical result is restored to the owning provider. Complex and character operands remain useful RunMat-only extensions and reject before provider dispatch or gather in MATLAB-compatible modes; `&&` remains the distinct scalar short-circuit operator.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

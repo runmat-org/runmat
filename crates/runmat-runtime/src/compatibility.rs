@@ -207,6 +207,8 @@ mod tests {
                 ("addpath", "addpath-numeric-character-codes"),
                 ("all", "all-nanflag"),
                 ("allfinite", "allfinite-string-input"),
+                ("and", "and-character-input"),
+                ("and", "and-complex-input"),
                 ("acos", "acos-character-input"),
                 ("acos", "acos-gpu-real-complex-promotion"),
                 ("acos", "acos-integer-input"),

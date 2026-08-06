@@ -1,7 +1,11 @@
 //! MATLAB-compatible logical `and` builtin with GPU support.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LogicalArray, Tensor, Value,
 };
@@ -63,6 +67,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "and";
 
+const AND_COMPLEX_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "and-complex-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "and with a complex operand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AndComplexInputExtension"),
+};
+
+const AND_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "and-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "and with a character-array operand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AndCharacterInputExtension"),
+};
+
+pub const AND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [AND_COMPLEX_INPUT_EXTENSION, AND_CHARACTER_INPUT_EXTENSION];
+
 const AND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
     ty: BuiltinParamType::LogicalArray,
@@ -110,6 +131,35 @@ const AND_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const AND_ERRORS: [BuiltinErrorDescriptor; 2] = [AND_ERROR_INVALID_INPUT, AND_ERROR_SIZE_MISMATCH];
 
+const AND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A independently accepts every built-in integer class and may be paired with scalar double data; zero is false and every nonzero value is true.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "B independently accepts every built-in integer class and may be paired with scalar double data; zero is false and every nonzero value is true.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = and(integer_A, integer_B)",
+        inputs: &AND_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "The function form and element-wise & operator share exact zero/nonzero truth semantics and compatible-size expansion. Resident integer inputs gather through authoritative typed storage when the provider lacks a native logical hook, and the logical result is restored to the owning provider.",
+    }];
+
 pub const AND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &AND_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -125,17 +175,88 @@ pub const AND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "elementwise",
     type_resolver(logical_binary_type),
     descriptor(crate::builtins::logical::bit::and::AND_DESCRIPTOR),
+    extensions(crate::builtins::logical::bit::and::AND_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::and::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::and"
 )]
 async fn and_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if [&lhs, &rhs].into_iter().any(is_complex_operand) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &AND_COMPLEX_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if [&lhs, &rhs]
+        .into_iter()
+        .any(|value| matches!(value, Value::CharArray(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &AND_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let output_provider = [&lhs, &rhs].into_iter().find_map(|value| {
+        let Value::GpuTensor(handle) = value else {
+            return None;
+        };
+        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
+    });
     if let (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) = (&lhs, &rhs) {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Ok(handle) = provider.logical_and(a, b) {
-                return Ok(gpu_helpers::logical_gpu_value(handle));
+        if !is_complex_operand(&lhs) && !is_complex_operand(&rhs) {
+            if let Some(provider) = runmat_accelerate_api::provider_for_handle(a)
+                .or_else(runmat_accelerate_api::provider)
+            {
+                if let Ok(handle) = provider.logical_and(a, b) {
+                    return Ok(gpu_helpers::logical_gpu_value(handle));
+                }
             }
         }
     }
-    and_host(lhs, rhs).await
+    let result = and_host(lhs, rhs).await?;
+    restore_logical_result(output_provider, result)
+}
+
+fn is_complex_operand(value: &Value) -> bool {
+    match value {
+        Value::Complex(_, _) | Value::ComplexTensor(_) => true,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        }
+        _ => false,
+    }
+}
+
+fn restore_logical_result(
+    provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let Some(provider) = provider else {
+        return Ok(value);
+    };
+    let tensor = match value {
+        Value::Bool(value) => Tensor::new(vec![f64::from(u8::from(value))], vec![1, 1]),
+        Value::LogicalArray(array) => tensor::logical_to_tensor(&array),
+        other => {
+            return Err(builtin_error_with_message(
+                format!("{BUILTIN_NAME}: internal fallback produced {other:?}"),
+                &AND_ERROR_INVALID_INPUT,
+            ))
+        }
+    }
+    .map_err(|error| {
+        builtin_error_with_message(
+            format!("{BUILTIN_NAME}: failed to materialize logical result: {error}"),
+            &AND_ERROR_INVALID_INPUT,
+        )
+    })?;
+    let handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
+        builtin_error_with_message(
+            format!("{BUILTIN_NAME}: failed to restore logical result to GPU: {error}"),
+            &AND_ERROR_INVALID_INPUT,
+        )
+    })?;
+    Ok(gpu_helpers::logical_gpu_value(handle))
 }
 
 async fn and_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -225,6 +346,30 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
         Value::ComplexTensor(tensor) => complex_tensor_to_logical_buffer(tensor),
         Value::CharArray(array) => char_array_to_logical_buffer(array),
         Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                let gathered =
+                    gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await.map_err(
+                        |err| {
+                            builtin_error_with_message(
+                                format!("{name}: {err}"),
+                                &AND_ERROR_INVALID_INPUT,
+                            )
+                        },
+                    )?;
+                return match gathered {
+                    Value::ComplexTensor(tensor) => complex_tensor_to_logical_buffer(tensor),
+                    Value::Complex(real, imaginary) => Ok(LogicalBuffer {
+                        data: vec![logical_from_complex(real, imaginary)],
+                        shape: vec![1, 1],
+                    }),
+                    other => Err(builtin_error_with_message(
+                        format!("{name}: expected gathered complex data, got {other:?}"),
+                        &AND_ERROR_INVALID_INPUT,
+                    )),
+                };
+            }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|err| {
@@ -397,11 +542,45 @@ pub(crate) mod tests {
             run_and(Value::Int(IntValue::U64(u64::MAX)), Value::Bool(true)).unwrap(),
             Value::Bool(true)
         );
+        assert_eq!(
+            run_and(Value::Int(IntValue::U64(u64::MAX)), Value::Num(-0.5)).unwrap(),
+            Value::Bool(true)
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn and_accepts_all_integer_classes_independently() {
+        let storages = [
+            IntegerStorage::I8(vec![0, -1]),
+            IntegerStorage::I16(vec![0, -2]),
+            IntegerStorage::I32(vec![0, -3]),
+            IntegerStorage::I64(vec![0, i64::MIN]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 2]),
+            IntegerStorage::U32(vec![0, 3]),
+            IntegerStorage::U64(vec![0, u64::MAX]),
+        ];
+        for storage in storages {
+            let class = storage.class_name();
+            let lhs = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            let result = run_and(Value::Tensor(lhs), Value::Bool(true))
+                .unwrap_or_else(|error| panic!("{class}: {error}"));
+            assert!(
+                matches!(
+                    &result,
+                    Value::LogicalArray(array)
+                        if array.shape == vec![1, 2] && array.data == vec![0, 1]
+                ),
+                "{class}: unexpected result {result:?}"
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_char_arrays() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
         let rhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
         let result =
@@ -425,11 +604,49 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn and_complex_inputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = run_and(Value::Complex(0.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
         assert_eq!(result, Value::Bool(false));
 
         let result = run_and(Value::Complex(1.0, 0.0), Value::Complex(0.0, 2.0)).unwrap();
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn and_complex_and_character_extensions_are_mode_gated_before_dispatch() {
+        assert_eq!(AND_EXTENSIONS[0].id, "and-complex-input");
+        assert_eq!(AND_EXTENSIONS[1].id, "and-character-input");
+        let complex_handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_347_001,
+        };
+        runmat_accelerate_api::set_handle_storage(
+            &complex_handle,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for complex in [
+            Value::Complex(1.0, 1.0),
+            Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 1.0)], vec![1, 1]).unwrap()),
+            Value::GpuTensor(complex_handle.clone()),
+        ] {
+            let error =
+                run_and(complex, Value::Bool(true)).expect_err("MATLAB mode rejects complex");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:AndComplexInputExtension")
+            );
+        }
+        runmat_accelerate_api::clear_handle_storage(&complex_handle);
+        let chars = CharArray::new_row("A");
+        let error = run_and(Value::CharArray(chars), Value::Bool(true))
+            .expect_err("MATLAB mode rejects character arrays");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:AndCharacterInputExtension")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -497,11 +714,62 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn and_resident_integer_fallback_is_exact_and_restores_residency() {
+        test_support::with_test_provider(|provider| {
+            let lhs = Tensor::new_integer(
+                IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+                vec![3, 1],
+            )
+            .unwrap();
+            let rhs = Tensor::new_integer(IntegerStorage::I8(vec![1, 0, -1]), vec![3, 1]).unwrap();
+            let gpu_lhs = gpu_helpers::upload_tensor(provider, &lhs).expect("upload lhs");
+            let gpu_rhs = gpu_helpers::upload_tensor(provider, &rhs).expect("upload rhs");
+
+            let result = run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs))
+                .expect("resident integer and");
+            assert!(
+                matches!(result, Value::GpuTensor(_)),
+                "fallback must restore gpuArray residency"
+            );
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![3, 1]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 1.0]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn and_resident_complex_extension_gathers_and_restores_residency() {
+        test_support::with_test_provider(|provider| {
+            let lhs = ComplexTensor::new(vec![(0.0, 0.0), (0.0, 2.0)], vec![2, 1]).unwrap();
+            let rhs = ComplexTensor::new(vec![(1.0, 0.0), (3.0, 0.0)], vec![2, 1]).unwrap();
+            let gpu_lhs = gpu_helpers::upload_complex_tensor(provider, &lhs).expect("upload lhs");
+            let gpu_rhs = gpu_helpers::upload_complex_tensor(provider, &rhs).expect("upload rhs");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+
+            let result = run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs))
+                .expect("resident complex and");
+            assert!(
+                matches!(result, Value::GpuTensor(_)),
+                "fallback must restore gpuArray residency"
+            );
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0]);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn and_wgpu_matches_host_path() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .is_err()
+        {
+            return;
+        }
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
 
         let lhs = Tensor::new(vec![0.0, 1.0, 2.0, 0.0], vec![2, 2]).unwrap();
@@ -546,5 +814,37 @@ pub(crate) mod tests {
                 "mismatch at index {idx}: got {actual}, expected {expected_f}"
             );
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn and_wgpu_integer_broadcast_fallback_restores_logical_gpuarray() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
+        let lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993]),
+            vec![2, 1],
+        )
+        .unwrap();
+        let rhs = Tensor::new_integer(IntegerStorage::I8(vec![1, 0]), vec![1, 2]).unwrap();
+        let gpu_lhs = gpu_helpers::upload_tensor(provider, &lhs).expect("upload lhs");
+        let gpu_rhs = gpu_helpers::upload_tensor(provider, &rhs).expect("upload rhs");
+
+        let result = run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs))
+            .expect("wgpu integer broadcast and");
+        assert!(
+            matches!(result, Value::GpuTensor(_)),
+            "fallback must restore gpuArray residency"
+        );
+        let gathered = test_support::gather(result).expect("gather");
+        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0]);
     }
 }
