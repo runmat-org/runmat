@@ -69,6 +69,26 @@ fn elementwise_and_accepts_all_integer_classes_through_vm_dispatch() {
 }
 
 #[test]
+fn angle_rejects_all_real_and_componentwise_complex_integer_classes_through_vm_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        for source in [
+            format!("out = angle({constructor}(1));"),
+            format!("out = angle({constructor}([1 2]));"),
+            format!("z = complex({constructor}([1 2]), {constructor}([3 4])); out = angle(z);"),
+        ] {
+            let error = execute_source(&source).expect_err("angle must reject integer input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:angle:InvalidInput"),
+                "{constructor}: {source}"
+            );
+        }
+    }
+}
+
+#[test]
 fn short_circuit_or_accepts_boolean_lhs_without_numeric_coercion() {
     let vars = execute_source(
         "tau = []; flight_duration = 10; guard = isempty(tau) || tau(end) < flight_duration;",

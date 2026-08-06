@@ -5301,7 +5301,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numeric, logical, char, or complex input."
+              "description": "Real or complex single- or double-precision input."
             }
           ],
           "outputs": [
@@ -5319,7 +5319,7 @@
         {
           "code": "RM.ANGLE.INVALID_INPUT",
           "identifier": "RunMat:angle:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
+          "when": "Input is not real or complex single- or double-precision data.",
           "message": "angle: invalid input"
         },
         {
@@ -5327,6 +5327,26 @@
           "identifier": "RunMat:angle:Internal",
           "when": "Internal tensor conversion/allocation/provider interaction failed.",
           "message": "angle: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "theta = angle(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented input domain is real or complex single/double; every real or componentwise-complex typed-integer class is rejected before host or provider computation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "angle has no integer overload. Host scalars, dense arrays, typed complex integer arrays, and resident integer handles reject with the same public invalid-input category without floating materialization."
         }
       ]
     },

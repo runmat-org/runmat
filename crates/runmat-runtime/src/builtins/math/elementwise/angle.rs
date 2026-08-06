@@ -2,9 +2,13 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, NumericStorage, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, NumericStorage, ResolveContext,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -92,6 +96,28 @@ const ANGLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "angle: internal error",
 };
 const ANGLE_ERRORS: [BuiltinErrorDescriptor; 2] = [ANGLE_ERROR_INVALID_INPUT, ANGLE_ERROR_INTERNAL];
+
+const ANGLE_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented input domain is real or complex single/double; every real or componentwise-complex typed-integer class is rejected before host or provider computation.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "theta = angle(integer_X)",
+        inputs: &ANGLE_REJECTED_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "angle has no integer overload. Host scalars, dense arrays, typed complex integer arrays, and resident integer handles reject with the same public invalid-input category without floating materialization.",
+    }];
+
 pub const ANGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ANGLE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -119,6 +145,7 @@ fn builtin_error_with_detail(
     accel = "unary",
     type_resolver(angle_type),
     descriptor(crate::builtins::math::elementwise::angle::ANGLE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::angle::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::angle"
 )]
 async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
@@ -126,7 +153,12 @@ async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => angle_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Num(angle_scalar(re, im))),
         Value::ComplexTensor(ct) => {
-            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "angle")?;
+            if ct.integer_storage().is_some() {
+                return Err(builtin_error_with_detail(
+                    &ANGLE_ERROR_INVALID_INPUT,
+                    "expected single or double input",
+                ));
+            }
             angle_complex_tensor(ct)
         }
         Value::Int(_)
@@ -257,6 +289,19 @@ pub(crate) mod tests {
         block_on(super::angle_builtin(value))
     }
 
+    fn all_integer_storages() -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ]
+    }
+
     #[test]
     fn angle_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = ANGLE_DESCRIPTOR
@@ -265,6 +310,12 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"theta = angle(X)"));
+        assert_eq!(INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Rejected
+        );
+        assert!(INTEGER_CAPABILITIES[0].inputs[0].classes.is_empty());
     }
 
     #[test]
@@ -374,27 +425,26 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn angle_rejects_signed_integer_tensor_by_class() {
-        let tensor = Tensor::new_integer(
-            IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX]),
-            vec![2, 2],
-        )
-        .expect("tensor");
-
-        let error = angle_builtin(Value::Tensor(tensor)).unwrap_err();
-        assert_eq!(error.identifier(), ANGLE_ERROR_INVALID_INPUT.identifier);
-    }
-
-    #[test]
-    fn angle_rejects_unsigned_integer_tensor_by_class() {
-        let tensor = Tensor::new_integer(
-            IntegerStorage::U64(vec![0, 1_u64 << 63, u64::MAX]),
-            vec![3, 1],
-        )
-        .expect("tensor");
-
-        let error = angle_builtin(Value::Tensor(tensor)).unwrap_err();
-        assert_eq!(error.identifier(), ANGLE_ERROR_INVALID_INPUT.identifier);
+    fn angle_rejects_every_real_integer_scalar_and_tensor_class() {
+        for storage in all_integer_storages() {
+            let class = storage.class_name();
+            let scalar = storage.value_at(1).expect("integer scalar");
+            let scalar_error =
+                angle_builtin(Value::Int(scalar)).expect_err("integer scalar must reject");
+            assert_eq!(
+                scalar_error.identifier(),
+                ANGLE_ERROR_INVALID_INPUT.identifier,
+                "{class} scalar"
+            );
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            let tensor_error =
+                angle_builtin(Value::Tensor(tensor)).expect_err("integer tensor must reject");
+            assert_eq!(
+                tensor_error.identifier(),
+                ANGLE_ERROR_INVALID_INPUT.identifier,
+                "{class} tensor"
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -413,17 +463,21 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn angle_rejects_typed_complex_integer_tensor() {
-        let storage = IntegerComplexStorage::new(
-            IntegerStorage::I16(vec![3, -4]),
-            IntegerStorage::I16(vec![4, 3]),
-        )
-        .unwrap();
-        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
-        let error = angle_builtin(Value::ComplexTensor(tensor)).unwrap_err();
-        assert!(error
-            .message()
-            .contains("complex numbers with integer types"));
+    fn angle_rejects_every_typed_complex_integer_class() {
+        for real in all_integer_storages() {
+            let class = real.class_name();
+            let imaginary = real.ones_like(real.len());
+            let storage = IntegerComplexStorage::new(real, imaginary).expect("complex storage");
+            let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex tensor");
+            let error = angle_builtin(Value::ComplexTensor(tensor))
+                .expect_err("complex integer must reject");
+            assert_eq!(
+                error.identifier(),
+                ANGLE_ERROR_INVALID_INPUT.identifier,
+                "{class} complex tensor"
+            );
+            assert!(error.message().contains("expected single or double"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -498,20 +552,48 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn angle_rejects_native_integer_gpu_input() {
+    fn angle_rejects_all_native_integer_gpu_classes() {
         test_support::with_test_provider(|provider| {
-            let values = [u64::MAX, 9_007_199_254_740_993];
-            let shape = [1usize, 2usize];
-            let handle = provider
-                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
-                    data: runmat_accelerate_api::HostIntegerDataView::U64(&values),
-                    shape: &shape,
-                })
-                .expect("upload integer gpu tensor");
-            let error = angle_builtin(Value::GpuTensor(handle)).unwrap_err();
-            assert_eq!(error.identifier(), ANGLE_ERROR_INVALID_INPUT.identifier);
-            assert!(error.message().contains("integer gpuArray"));
+            for storage in all_integer_storages() {
+                let class = storage.class_name();
+                let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+                let handle =
+                    gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer tensor");
+                let error = angle_builtin(Value::GpuTensor(handle))
+                    .expect_err("integer gpuArray must reject");
+                assert_eq!(
+                    error.identifier(),
+                    ANGLE_ERROR_INVALID_INPUT.identifier,
+                    "{class} gpuArray"
+                );
+                assert!(error.message().contains("integer gpuArray"));
+            }
         });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn angle_wgpu_rejects_all_native_integer_classes_before_float_dispatch() {
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        for storage in all_integer_storages() {
+            let class = storage.class_name();
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            let handle =
+                gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer tensor");
+            let error =
+                angle_builtin(Value::GpuTensor(handle)).expect_err("integer WGPU input rejects");
+            assert_eq!(
+                error.identifier(),
+                ANGLE_ERROR_INVALID_INPUT.identifier,
+                "{class} WGPU"
+            );
+            assert!(error.message().contains("integer gpuArray"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

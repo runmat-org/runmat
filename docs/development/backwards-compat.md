@@ -158,6 +158,8 @@ Dynamic-object `addprop` accepts a `dynamicprops` receiver plus a character-vect
 
 `and(A,B)` and the element-wise `A & B` operator independently accept all eight integer classes, interpret exact zero as false and every nonzero integer as true, apply compatible-size expansion, and return logical output. Native host storage is never materialized through floating point for the truth test. Documented resident integer inputs use an exact typed gather fallback whenever the active provider lacks a suitable logical kernel, and the logical result is restored to the owning provider. Complex and character operands remain useful RunMat-only extensions and reject before provider dispatch or gather in MATLAB-compatible modes; `&&` remains the distinct scalar short-circuit operator.
 
+`angle` accepts only real or complex single- and double-precision data and preserves the input floating precision in its output. All eight real integer classes and all eight componentwise-complex typed-integer classes reject with the same stable invalid-input category across host and compiled execution; resident integer handles reject from exact handle metadata before provider dispatch or gather, so there is no integer output or implicit floating materialization surface.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:
