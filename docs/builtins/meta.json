@@ -10768,6 +10768,115 @@
           "when": "Internal tensor conversion, allocation, or RNG state access fails.",
           "message": "distribution random: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "binornd-integer-trials",
+          "mode": "RunMatOnly",
+          "description": "binornd with typed-integer trial counts is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinorndIntegerTrialsExtension"
+        },
+        {
+          "id": "binornd-integer-probability",
+          "mode": "RunMatOnly",
+          "description": "binornd with typed-integer probabilities is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinorndIntegerProbabilityExtension"
+        },
+        {
+          "id": "binornd-integer-size",
+          "mode": "RunMatOnly",
+          "description": "binornd with typed-integer size arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinorndIntegerSizeExtension"
+        },
+        {
+          "id": "binornd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "binornd with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinorndLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "r = binornd(n, p, sz1, sz2, ...) with integer n",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer trial counts are gated by binornd-integer-trials and must be exactly representable at the floating binomial-sampling boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed-integer trial counts produce double samples unless a documented single probability makes the result single; resident fallback restores the result to the first resident input's owning provider."
+        },
+        {
+          "form": "r = binornd(n, p, sz1, sz2, ...) with integer p",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer probabilities are gated by binornd-integer-probability and remain authoritative until the floating binomial-sampling boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed-integer probabilities produce double samples unless a documented single trial-count input makes the result single."
+        },
+        {
+          "form": "r = binornd(n, p, sz1, sz2, ...) with integer size",
+          "inputs": [
+            {
+              "name": "sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer size arguments are gated by binornd-integer-size and parsed exactly into structural dimensions without a floating compatibility mirror."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed-integer sizes are exact structural controls and do not select output precision; nonpositive dimensions produce a documented empty result."
+        }
       ]
     },
     {

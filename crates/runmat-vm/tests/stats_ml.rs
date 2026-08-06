@@ -605,6 +605,19 @@ fn binocdf_integer_extensions_cover_every_class_and_preserve_single_output() {
 }
 
 #[test]
+fn binornd_integer_extensions_cover_every_class_input_position_and_single_output() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "rng('default'); n = [binornd(int8(1),1) binornd(int16(1),1) binornd(int32(1),1) binornd(int64(1),1) binornd(uint8(1),1) binornd(uint16(1),1) binornd(uint32(1),1) binornd(uint64(1),1)]; p = [binornd(1,int8(1)) binornd(1,int16(1)) binornd(1,int32(1)) binornd(1,int64(1)) binornd(1,uint8(1)) binornd(1,uint16(1)) binornd(1,uint32(1)) binornd(1,uint64(1))]; sizes = numel(binornd(1,1,int8(2))) + numel(binornd(1,1,int16(2))) + numel(binornd(1,1,int32(2))) + numel(binornd(1,1,int64(2))) + numel(binornd(1,1,uint8(2))) + numel(binornd(1,1,uint16(2))) + numel(binornd(1,1,uint32(2))) + numel(binornd(1,1,uint64(2))); score = sum(n) + sum(p); integer_class = class(n); single_class = class(binornd(single([1 1]),1));",
+    )
+    .expect("binornd integer extension script");
+    assert!(has_num(&vars, 16.0));
+    assert!(has_num(&vars, 32.0));
+    assert!(has_string(&vars, "double"));
+    assert!(has_string(&vars, "single"));
+}
+
+#[test]
 fn mvnrnd_surface_executes_from_scripts() {
     let vars = execute_source(
         "rng('default'); R = mvnrnd([1 2], [4 1; 1 9], 5); S = mvnrnd([0 0; 10 20], cat(3, eye(2), [4 0; 0 9])); T = mvnrnd([0 0], [1 4], 3); U = mvnrnd([0; 10; 20], 4); rcheck = 100*size(R,1)+size(R,2); scheck = 100*size(S,1)+size(S,2); tcheck = 100*size(T,1)+size(T,2); ucheck = 100*size(U,1)+size(U,2); r11 = R(1,1); s22 = S(2,2);",
