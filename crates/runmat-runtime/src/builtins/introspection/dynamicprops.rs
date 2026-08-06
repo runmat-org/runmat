@@ -6,9 +6,10 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, DynamicPropertyDef,
+    HandleRef, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::collections::HashMap;
@@ -170,6 +171,12 @@ pub const ADDPROP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &DYNAMIC_ERRORS,
+};
+
+pub const ADDPROP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "addprop accepts only a dynamicprops object receiver and a character-vector or string-scalar property name, then returns metadata. It does not accept an initial property value; values assigned through later object-property operations have their own class semantics.",
 };
 
 pub const FINDPROP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -585,6 +592,7 @@ fn remove_dynamic_property(target: &HandleRef, name: &str) -> BuiltinResult<()> 
     keywords = "dynamicprops,addprop,dynamic property,handle object,meta.DynamicProperty",
     sink = true,
     descriptor(crate::builtins::introspection::dynamicprops::ADDPROP_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::dynamicprops::ADDPROP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::dynamicprops"
 )]
 async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value> {
@@ -828,6 +836,15 @@ mod tests {
     use runmat_builtins::IntValue;
 
     #[test]
+    fn addprop_descriptor_is_integer_inapplicable() {
+        assert_eq!(
+            ADDPROP_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(ADDPROP_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
     fn metadata_bool_accepts_only_exact_typed_logical_values() {
         assert_eq!(
             metadata_bool(&Value::Int(IntValue::U64(1)), "Hidden").expect("logical one"),
@@ -966,6 +983,16 @@ mod tests {
                 "unexpected error: {err}"
             );
         });
+    }
+
+    #[test]
+    fn addprop_rejects_integer_receiver_instead_of_treating_it_as_property_data() {
+        let err = block_on(addprop_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            "gain".to_string(),
+        ))
+        .expect_err("integer is not a dynamicprops receiver");
+        assert_eq!(err.identifier(), Some("RunMat:dynamicprops:InvalidTarget"));
     }
 
     #[test]

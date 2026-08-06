@@ -152,6 +152,8 @@ The tokenized-document enrichment cohort `addDependencyDetails`, `addEntityDetai
 
 `addpoints` documents single, double, and all eight integer classes independently for each X, Y, and Z coordinate vector. RunMat reads host integer storage authoritatively before entering the deliberate host `f64` graphics domain; resident coordinates gather because the function accepts GPU arrays but executes on the client. Logical scalars are not documented coordinate data and reject rather than entering through the shared plotting adapter.
 
+Dynamic-object `addprop` accepts a `dynamicprops` receiver plus a character-vector or string-scalar property name and returns a `matlab.metadata.DynamicProperty` object. It does not accept an initial property value, so later integer data stored through dot assignment, `setfield`, or other object-property operations does not create an integer surface on `addprop`; the builtin is explicitly integer-inapplicable.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

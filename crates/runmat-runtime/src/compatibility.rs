@@ -598,6 +598,7 @@ mod tests {
                 "addSentenceDetails",
                 "addTypeDetails",
                 "addlistener",
+                "addprop",
                 "argsort",
                 "cancel",
                 "onCleanup",

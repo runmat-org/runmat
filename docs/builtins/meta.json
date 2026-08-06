@@ -4758,7 +4758,11 @@
           "when": "A metadata property assignment uses an unsupported property name or value.",
           "message": "dynamicprops: unsupported dynamic property metadata assignment"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "addprop accepts only a dynamicprops object receiver and a character-vector or string-scalar property name, then returns metadata. It does not accept an initial property value; values assigned through later object-property operations have their own class semantics."
+      }
     },
     {
       "name": "all",
