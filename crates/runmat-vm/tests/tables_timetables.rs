@@ -112,6 +112,29 @@ fn array2timetable_compiled_surface_preserves_all_integer_classes() {
 }
 
 #[test]
+fn array_datastore_compiled_surface_preserves_all_integer_classes() {
+    let vars = execute_source(
+        "a = arrayDatastore(int8([-128 127]), 'ReadSize', 2, 'OutputType', 'same').Data; b = arrayDatastore(int16([-32768 32767])).Data; c = arrayDatastore(int32([-2147483648 2147483647])).Data; d = arrayDatastore(int64([-7 9])).Data; e = arrayDatastore(uint8([0 255])).Data; f = arrayDatastore(uint16([0 65535])).Data; g = arrayDatastore(uint32([0 4294967295])).Data; base = uint64(9007199254740992); h = arrayDatastore(base + uint64([1 2])).Data;",
+    )
+    .expect("compiled arrayDatastore integer construction");
+    for expected in [
+        IntegerStorage::I8(vec![-128, 127]),
+        IntegerStorage::I16(vec![-32768, 32767]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![-7, 9]),
+        IntegerStorage::U8(vec![0, 255]),
+        IntegerStorage::U16(vec![0, 65535]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            has_integer_storage(&vars, &expected),
+            "missing compiled storage {expected:?}"
+        );
+    }
+}
+
+#[test]
 fn timetable_conversion_surface_executes_from_scripts() {
     let vars = execute_source(
         "TT = timetable([1; 2], [10; 20], 'VariableNames', {'X'}); tf = istimetable(TT); H = head(TT, 1); tm = H.Time; T = timetable2table(TT, 'ConvertRowTimes', true); TT2 = table2timetable(T);",

@@ -1,15 +1,15 @@
 {
   "title": "arrayDatastore",
   "category": "io/tabular",
-  "keywords": ["arrayDatastore", "datastore", "array", "table"],
-  "summary": "Create an array datastore descriptor object.",
-  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Datastore descriptors are host metadata."},
+  "keywords": ["arrayDatastore", "datastore", "array", "ReadSize", "IterationDimension", "OutputType"],
+  "summary": "Create a datastore for an in-memory array.",
+  "gpu_support": {"elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Interactive resident input is a mode-gated RunMat extension that gathers before host datastore construction."},
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::table::tests", "integration": "crates/runmat-vm/tests/tables_timetables.rs"},
-  "description": "`arrayDatastore(A)` creates a descriptor object with `Data` and `ReadSize` properties.",
-  "behaviors": ["The constructor preserves the input data and `ReadSize` metadata for code that passes datastore descriptors around.", "Iterator-style operations such as `read`, `hasdata`, and `reset` require the generic datastore dispatch layer and are not provided by this constructor builtin."],
-  "examples": [{"description": "Create datastore", "input": "ds = arrayDatastore([1;2])", "output": "ds = arrayDatastore object"}],
+  "description": "`arrayDatastore(A)` retains an in-memory array together with `ReadSize`, `IterationDimension`, and `OutputType` properties. Integer A remains in its exact native class.",
+  "behaviors": ["`ReadSize` and `IterationDimension` must be positive integer-valued doubles; typed-integer controls reject. `OutputType` is `\"cell\"` or `\"same\"`, and `\"same\"` requires iteration dimension 1.", "Interactive resident input is a mode-gated RunMat extension. It gathers exact typed storage before host object construction and rejects in MATLAB-compatible mode.", "RunMat currently represents this as a value descriptor whose `Data` property exposes the retained payload. Stateful iterator operations such as `read`, `readall`, `preview`, `hasdata`, and `reset` require a datastore handle/dispatch layer and are not yet provided."],
+  "examples": [{"description": "Retain typed data with explicit read properties", "input": "ds = arrayDatastore(int16([1;2]), 'ReadSize', 2, 'OutputType', 'same')", "output": "ds = arrayDatastore object"}],
   "links": [{"label": "parquetDatastore", "url": "./parquetDatastore"}],
-  "source": {"label": "`crates/runmat-runtime/src/builtins/table/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"}
+  "source": {"label": "`crates/runmat-runtime/src/builtins/table/builtins/constructors.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/constructors.rs"}
 }

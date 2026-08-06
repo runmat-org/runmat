@@ -1,5 +1,86 @@
 use super::*;
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    NumericDType,
+};
 use runmat_macros::runtime_builtin;
+
+const ARRAY_DATASTORE_BUILTIN_NAME: &str = "arrayDatastore";
+
+pub(crate) const ARRAY_DATASTORE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "arraydatastore-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "arrayDatastore with an interactive resident GPU argument is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ArrayDatastoreGpuInputExtension"),
+    };
+
+pub const ARRAY_DATASTORE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [ARRAY_DATASTORE_GPU_INPUT_EXTENSION];
+
+const ARRAY_DATASTORE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented in-memory array input accepts matrices whose values use any of the eight real integer classes.",
+    }];
+
+const ARRAY_DATASTORE_READ_SIZE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ReadSize",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public property is explicitly double and typed-integer values are rejected.",
+    }];
+
+const ARRAY_DATASTORE_ITERATION_DIMENSION_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "IterationDimension",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public property is explicitly double and typed-integer values are rejected.",
+    }];
+
+pub const ARRAY_DATASTORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "arrds = arrayDatastore(integer_A, Name,Value...)",
+        inputs: &ARRAY_DATASTORE_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The datastore object retains A in authoritative same-class storage. Interactive resident input is a mode-gated RunMat extension that gathers before host datastore construction.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "arrds = arrayDatastore(A, \"ReadSize\", typed_integer)",
+        inputs: &ARRAY_DATASTORE_READ_SIZE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "ReadSize is documented as a double-only value; all typed-integer scalar and tensor classes reject.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "arrds = arrayDatastore(A, \"IterationDimension\", typed_integer)",
+        inputs: &ARRAY_DATASTORE_ITERATION_DIMENSION_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "IterationDimension is documented as a double-only value; all typed-integer scalar and tensor classes reject.",
+    },
+];
 
 #[runtime_builtin(
     name = "table",
@@ -160,26 +241,104 @@ pub(crate) async fn rowfilter_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
 #[runtime_builtin(
     name = "arrayDatastore",
     category = "io/tabular",
-    summary = "Create an array datastore descriptor.",
-    keywords = "arrayDatastore,datastore,array,data",
-    accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    summary = "Create a datastore for an in-memory array.",
+    keywords = "arrayDatastore,datastore,array,ReadSize,IterationDimension,OutputType",
+    accel = "gather",
+    descriptor(crate::builtins::table::ARRAY_DATASTORE_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::ARRAY_DATASTORE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::ARRAY_DATASTORE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn array_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ARRAY_DATASTORE_GPU_INPUT_EXTENSION,
+            ARRAY_DATASTORE_BUILTIN_NAME,
+        )?;
+    }
     let args = gather_values(&args).await?;
+    let Some(data) = args.first().cloned() else {
+        return Err(invalid_argument(
+            "arrayDatastore: input array A is required",
+        ));
+    };
+    if (args.len() - 1) % 2 != 0 {
+        return Err(invalid_argument(
+            "arrayDatastore: name-value options must be provided in pairs",
+        ));
+    }
+    let mut read_size = 1usize;
+    let mut iteration_dimension = 1usize;
+    let mut output_type = "cell".to_string();
+    let mut index = 1usize;
+    while index < args.len() {
+        let name = scalar_text(&args[index], "arrayDatastore option")?;
+        let value = &args[index + 1];
+        if name.eq_ignore_ascii_case("ReadSize") {
+            read_size = array_datastore_positive_double_integer(value, "ReadSize")?;
+        } else if name.eq_ignore_ascii_case("IterationDimension") {
+            iteration_dimension =
+                array_datastore_positive_double_integer(value, "IterationDimension")?;
+        } else if name.eq_ignore_ascii_case("OutputType") {
+            output_type = scalar_text(value, "arrayDatastore OutputType")?.to_ascii_lowercase();
+            if output_type != "cell" && output_type != "same" {
+                return Err(invalid_argument(
+                    "arrayDatastore: OutputType must be 'cell' or 'same'",
+                ));
+            }
+        } else {
+            return Err(invalid_argument(format!(
+                "arrayDatastore: unsupported option '{name}'"
+            )));
+        }
+        index += 2;
+    }
+    if output_type == "same" && iteration_dimension != 1 {
+        return Err(invalid_argument(
+            "arrayDatastore: IterationDimension must be 1 when OutputType is 'same'",
+        ));
+    }
     let mut object = ObjectInstance::new(ARRAY_DATASTORE_CLASS.to_string());
+    object.properties.insert("Data".to_string(), data);
+    object
+        .properties
+        .insert("ReadSize".to_string(), Value::Num(read_size as f64));
     object.properties.insert(
-        "Data".to_string(),
-        args.first()
-            .cloned()
-            .unwrap_or_else(|| Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap())),
+        "IterationDimension".to_string(),
+        Value::Num(iteration_dimension as f64),
     );
     object
         .properties
-        .insert("ReadSize".to_string(), Value::Num(1.0));
+        .insert("OutputType".to_string(), Value::String(output_type));
     Ok(Value::Object(object))
+}
+
+fn array_datastore_positive_double_integer(value: &Value, property: &str) -> BuiltinResult<usize> {
+    let value = match value {
+        Value::Num(value) => *value,
+        Value::Tensor(tensor)
+            if tensor.len() == 1 && tensor.numeric_dtype() == NumericDType::F64 =>
+        {
+            crate::builtins::common::tensor::tensor_value_f64(tensor, 0)
+        }
+        _ => {
+            return Err(invalid_argument(format!(
+                "arrayDatastore: {property} must be a positive double integer"
+            )))
+        }
+    };
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 || value >= usize::MAX as f64 {
+        return Err(invalid_argument(format!(
+            "arrayDatastore: {property} must be a positive double integer"
+        )));
+    }
+    Ok(value as usize)
 }
 
 #[runtime_builtin(

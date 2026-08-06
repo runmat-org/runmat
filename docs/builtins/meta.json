@@ -7138,23 +7138,51 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(args...)",
+          "label": "arrds = arrayDatastore(A)",
           "inputs": [
             {
-              "name": "args",
+              "name": "A",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "Input values and name-value options."
+              "description": "In-memory array managed by the datastore."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "arrds",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "ArrayDatastore object retaining the in-memory data and read properties."
+            }
+          ]
+        },
+        {
+          "label": "arrds = arrayDatastore(A, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "In-memory array managed by the datastore."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "ReadSize, IterationDimension, or OutputType options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "arrds",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ArrayDatastore object retaining the in-memory data and read properties."
             }
           ]
         }
@@ -7189,6 +7217,79 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "arraydatastore-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "arrayDatastore with an interactive resident GPU argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ArrayDatastoreGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "arrds = arrayDatastore(integer_A, Name,Value...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented in-memory array input accepts matrices whose values use any of the eight real integer classes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The datastore object retains A in authoritative same-class storage. Interactive resident input is a mode-gated RunMat extension that gathers before host datastore construction."
+        },
+        {
+          "form": "arrds = arrayDatastore(A, \"ReadSize\", typed_integer)",
+          "inputs": [
+            {
+              "name": "ReadSize",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The public property is explicitly double and typed-integer values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "ReadSize is documented as a double-only value; all typed-integer scalar and tensor classes reject."
+        },
+        {
+          "form": "arrds = arrayDatastore(A, \"IterationDimension\", typed_integer)",
+          "inputs": [
+            {
+              "name": "IterationDimension",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The public property is explicitly double and typed-integer values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "IterationDimension is documented as a double-only value; all typed-integer scalar and tensor classes reject."
         }
       ]
     },

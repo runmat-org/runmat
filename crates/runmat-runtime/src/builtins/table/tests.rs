@@ -2345,6 +2345,202 @@ fn categorical_dictionary_and_selector_objects_materialize() {
 }
 
 #[test]
+fn array_datastore_preserves_every_integer_storage_class_and_options() {
+    for storage in [
+        IntegerStorage::I8(vec![i8::MIN, -1, 0, i8::MAX]),
+        IntegerStorage::I16(vec![i16::MIN, -1, 0, i16::MAX]),
+        IntegerStorage::I32(vec![i32::MIN, -1, 0, i32::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX]),
+        IntegerStorage::U8(vec![0, 1, u8::MAX - 1, u8::MAX]),
+        IntegerStorage::U16(vec![0, 1, u16::MAX - 1, u16::MAX]),
+        IntegerStorage::U32(vec![0, 1, u32::MAX - 1, u32::MAX]),
+        IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX - 1, u64::MAX]),
+    ] {
+        let datastore = block_on(array_datastore_builtin(vec![
+            Value::Tensor(Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap()),
+            Value::from("ReadSize"),
+            Value::Num(2.0),
+            Value::from("IterationDimension"),
+            Value::Num(1.0),
+            Value::from("OutputType"),
+            Value::from("same"),
+        ]))
+        .unwrap();
+        let Value::Object(datastore) = datastore else {
+            panic!("expected ArrayDatastore object");
+        };
+        assert_eq!(datastore.class_name, ARRAY_DATASTORE_CLASS);
+        let Some(Value::Tensor(data)) = datastore.properties.get("Data") else {
+            panic!("expected typed datastore data");
+        };
+        assert_eq!(data.integer_storage(), Some(&storage));
+        assert_eq!(datastore.properties.get("ReadSize"), Some(&Value::Num(2.0)));
+        assert_eq!(
+            datastore.properties.get("IterationDimension"),
+            Some(&Value::Num(1.0))
+        );
+        assert_eq!(
+            datastore.properties.get("OutputType"),
+            Some(&Value::from("same"))
+        );
+    }
+}
+
+#[test]
+fn array_datastore_rejects_typed_integer_controls_and_invalid_forms() {
+    let data = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+    for storage in [
+        IntegerStorage::I8(vec![1]),
+        IntegerStorage::I16(vec![1]),
+        IntegerStorage::I32(vec![1]),
+        IntegerStorage::I64(vec![1]),
+        IntegerStorage::U8(vec![1]),
+        IntegerStorage::U16(vec![1]),
+        IntegerStorage::U32(vec![1]),
+        IntegerStorage::U64(vec![1]),
+    ] {
+        for property in ["ReadSize", "IterationDimension"] {
+            let error = block_on(array_datastore_builtin(vec![
+                data.clone(),
+                Value::from(property),
+                Value::Tensor(Tensor::new_integer(storage.clone(), vec![1, 1]).unwrap()),
+            ]))
+            .expect_err("typed integer property must reject");
+            assert!(
+                error.message.contains("positive double integer"),
+                "{}",
+                error.message
+            );
+        }
+    }
+    for args in [
+        Vec::new(),
+        vec![data.clone(), Value::from("ReadSize")],
+        vec![data.clone(), Value::from("ReadSize"), Value::Num(0.0)],
+        vec![data.clone(), Value::from("ReadSize"), Value::Num(1.5)],
+        vec![
+            data.clone(),
+            Value::from("OutputType"),
+            Value::from("table"),
+        ],
+        vec![
+            data.clone(),
+            Value::from("IterationDimension"),
+            Value::Num(2.0),
+            Value::from("OutputType"),
+            Value::from("same"),
+        ],
+        vec![data.clone(), Value::from("Unknown"), Value::Num(1.0)],
+    ] {
+        let error = block_on(array_datastore_builtin(args))
+            .expect_err("invalid arrayDatastore form must reject");
+        assert!(
+            error.message.contains("arrayDatastore"),
+            "{}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn array_datastore_resident_integer_input_is_mode_gated_and_gathers_exactly() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        for storage in [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ] {
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap(),
+            )
+            .unwrap();
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(array_datastore_builtin(vec![Value::GpuTensor(
+                    handle.clone(),
+                )]))
+                .expect_err("MATLAB mode must reject interactive GPU input");
+                assert_eq!(
+                    error.identifier(),
+                    ARRAY_DATASTORE_GPU_INPUT_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let datastore =
+                    block_on(array_datastore_builtin(vec![Value::GpuTensor(handle)])).unwrap();
+                let Value::Object(datastore) = datastore else {
+                    panic!("expected ArrayDatastore object");
+                };
+                let Some(Value::Tensor(data)) = datastore.properties.get("Data") else {
+                    panic!("expected gathered typed data");
+                };
+                assert_eq!(data.integer_storage(), Some(&storage));
+            }
+        }
+    });
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn array_datastore_wgpu_gathers_every_resident_integer_class_exactly() {
+    let _guard = crate::builtins::common::test_support::accel_test_lock();
+    if !register_wgpu_provider_available() {
+        return;
+    }
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+    for storage in [
+        IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+        IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+        IntegerStorage::U8(vec![0, u8::MAX]),
+        IntegerStorage::U16(vec![0, u16::MAX]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+    ] {
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(
+            provider,
+            &Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap(),
+        )
+        .unwrap();
+        let datastore = block_on(array_datastore_builtin(vec![Value::GpuTensor(handle)])).unwrap();
+        let Value::Object(datastore) = datastore else {
+            panic!("expected ArrayDatastore object");
+        };
+        let Some(Value::Tensor(data)) = datastore.properties.get("Data") else {
+            panic!("expected gathered typed data");
+        };
+        assert_eq!(data.integer_storage(), Some(&storage));
+    }
+}
+
+#[test]
+fn array_datastore_metadata_classifies_integer_and_gpu_forms() {
+    assert_eq!(ARRAY_DATASTORE_INTEGER_CAPABILITIES.len(), 3);
+    assert_eq!(
+        ARRAY_DATASTORE_INTEGER_CAPABILITIES[0].output_class,
+        runmat_builtins::BuiltinIntegerOutputClassRule::PreserveInput
+    );
+    assert!(ARRAY_DATASTORE_INTEGER_CAPABILITIES[1..]
+        .iter()
+        .flat_map(|capability| capability.inputs)
+        .all(|input| input.availability
+            == runmat_builtins::BuiltinIntegerInputAvailability::Rejected));
+    assert_eq!(
+        ARRAY_DATASTORE_EXTENSIONS,
+        [ARRAY_DATASTORE_GPU_INPUT_EXTENSION]
+    );
+}
+
+#[test]
 fn file_datastore_preserves_constructor_metadata() {
     let files = Value::StringArray(
         StringArray::new(vec!["a.txt".into(), "b.log".into()], vec![1, 2]).unwrap(),

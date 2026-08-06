@@ -212,6 +212,7 @@ mod tests {
                 ("area", "area-linespec"),
                 ("array2table", "array2table-gpu-input"),
                 ("array2timetable", "array2timetable-gpu-input"),
+                ("arrayDatastore", "arraydatastore-gpu-input"),
                 ("acos", "acos-character-input"),
                 ("acos", "acos-gpu-real-complex-promotion"),
                 ("acos", "acos-integer-input"),

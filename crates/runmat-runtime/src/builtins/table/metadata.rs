@@ -375,6 +375,36 @@ const ARRAY2TIMETABLE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
         description: "Timing, StartTime, VariableNames, or DimensionNames options.",
     },
 ];
+const ARRAY_DATASTORE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "arrds",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "ArrayDatastore object retaining the in-memory data and read properties.",
+}];
+const ARRAY_DATASTORE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "In-memory array managed by the datastore.",
+}];
+const ARRAY_DATASTORE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "In-memory array managed by the datastore.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "ReadSize, IterationDimension, or OutputType options.",
+    },
+];
 const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
     ty: BuiltinParamType::Any,
@@ -487,6 +517,18 @@ const ARRAY2TIMETABLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         label: "TT = array2timetable(X, nameValuePairs...)",
         inputs: &ARRAY2TIMETABLE_INPUTS_NAME_VALUE,
         outputs: &ARRAY2TIMETABLE_OUTPUT,
+    },
+];
+const ARRAY_DATASTORE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "arrds = arrayDatastore(A)",
+        inputs: &ARRAY_DATASTORE_INPUT,
+        outputs: &ARRAY_DATASTORE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "arrds = arrayDatastore(A, nameValuePairs...)",
+        inputs: &ARRAY_DATASTORE_INPUTS_NAME_VALUE,
+        outputs: &ARRAY_DATASTORE_OUTPUT,
     },
 ];
 const GROUPSUMMARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -634,6 +676,12 @@ pub const ARRAY2TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const ARRAY2TIMETABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ARRAY2TIMETABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const ARRAY_DATASTORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ARRAY_DATASTORE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
