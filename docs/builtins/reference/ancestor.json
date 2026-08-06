@@ -37,7 +37,7 @@
     "`ancestor(h, type)` returns the nearest matching object, including `h` itself when its type matches.",
     "`ancestor(h, type, 'toplevel')` returns the highest matching object among the requested types.",
     "Invalid or non-graphics scalar handles return an empty handle array instead of throwing.",
-    "Numeric handle arrays are processed elementwise and return the matching ancestor handles in a row vector; if no entries match, the result is empty.",
+    "RunMat graphics handle arrays use an opaque host-double representation and are processed elementwise. Integer scalars and arrays are ordinary numeric data, not graphics handles, and return an empty handle array without exposing the internal encoding.",
     "Supported graphics types include `root`, `figure`, `axes`, `numericruler`, `text`, `legend`, and RunMat plot child types such as `line`, `scatter`, `bar`, `surface`, `patch`, and `contour`."
   ],
   "examples": [
@@ -63,7 +63,7 @@
       "answer": "No. RunMat graphics handles encode or snapshot their own object type and parent location, so `ancestor` builds the parent chain directly from handle metadata."
     },
     {
-      "question": "Why do array results use `NaN` for misses?",
+      "question": "Are unmatched array entries preserved as placeholders?",
       "answer": "No. Unmatched or invalid entries are omitted from array results. If none of the entries has a matching ancestor, `ancestor` returns an empty handle array."
     }
   ],

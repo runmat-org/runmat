@@ -154,6 +154,8 @@ The tokenized-document enrichment cohort `addDependencyDetails`, `addEntityDetai
 
 Dynamic-object `addprop` accepts a `dynamicprops` receiver plus a character-vector or string-scalar property name and returns a `matlab.metadata.DynamicProperty` object. It does not accept an initial property value, so later integer data stored through dot assignment, `setfield`, or other object-property operations does not create an integer surface on `addprop`; the builtin is explicitly integer-inapplicable.
 
+`ancestor` accepts graphics objects plus text type selectors and returns a matching graphics object or an empty handle array. RunMat's host-double graphics-handle encoding is opaque implementation state: integer scalars and arrays are ordinary non-graphics values and return empty rather than aliasing encoded root, figure, axes, or child handles. The API has no integer data, control, arithmetic, class-preserving output, or provider surface and is explicitly integer-inapplicable.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

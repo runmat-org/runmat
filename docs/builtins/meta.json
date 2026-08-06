@@ -5174,7 +5174,11 @@
           "when": "Arguments are missing, the type selector is invalid, or the option is not 'toplevel'.",
           "message": "ancestor: invalid argument"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "ancestor accepts graphics objects plus text type selectors and returns a graphics object or empty handle array. Integer scalars and arrays are non-graphics inputs and return empty; RunMat's host-double handle encoding is opaque object state, not integer data."
+      }
     },
     {
       "name": "and",

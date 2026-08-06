@@ -599,6 +599,7 @@ mod tests {
                 "addTypeDetails",
                 "addlistener",
                 "addprop",
+                "ancestor",
                 "argsort",
                 "cancel",
                 "onCleanup",
