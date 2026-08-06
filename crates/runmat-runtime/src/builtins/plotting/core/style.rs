@@ -1152,8 +1152,11 @@ pub fn parse_bar_style_args(
                     "only one positional width argument is supported",
                 ));
             }
-            if width <= 0.0 {
-                return Err(bar_ctx_err(builtin, "width must be positive"));
+            if !width.is_finite() || !(0.0..=1.0).contains(&width) || width == 0.0 {
+                return Err(bar_ctx_err(
+                    builtin,
+                    "width must be a finite scalar greater than zero and no greater than one",
+                ));
             }
             style.bar_width = width as f32;
             saw_positional_width = true;
@@ -1210,18 +1213,24 @@ pub fn parse_bar_style_args(
                 };
             }
             "linewidth" => {
-                let width = value_as_f64(&pair[1])
-                    .ok_or_else(|| bar_ctx_err(builtin, "LineWidth must be numeric"))?;
-                if width <= 0.0 {
-                    return Err(bar_ctx_err(builtin, "LineWidth must be positive"));
+                let width = value_as_scalar_f64(&pair[1])
+                    .ok_or_else(|| bar_ctx_err(builtin, "LineWidth must be a numeric scalar"))?;
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(bar_ctx_err(
+                        builtin,
+                        "LineWidth must be a finite positive scalar",
+                    ));
                 }
                 style.line_width = width as f32;
             }
             "barwidth" => {
-                let width = value_as_f64(&pair[1])
-                    .ok_or_else(|| bar_ctx_err(builtin, "BarWidth must be numeric"))?;
-                if width <= 0.0 {
-                    return Err(bar_ctx_err(builtin, "BarWidth must be positive"));
+                let width = value_as_scalar_f64(&pair[1])
+                    .ok_or_else(|| bar_ctx_err(builtin, "BarWidth must be a numeric scalar"))?;
+                if !width.is_finite() || !(0.0..=1.0).contains(&width) || width == 0.0 {
+                    return Err(bar_ctx_err(
+                        builtin,
+                        "BarWidth must be a finite scalar greater than zero and no greater than one",
+                    ));
                 }
                 style.bar_width = width as f32;
             }

@@ -168,6 +168,17 @@ fn barh_dispatches_and_sets_horizontal_bars() {
 }
 
 #[test]
+fn bar_compiled_integer_matrix_returns_one_handle_per_series() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        h = bar(int16([1 2; 3 4; 5 6]), uint8(1), 'LineWidth', uint16(2)); \
+        if numel(h) ~= 2; error('bar matrix handle count mismatch'); end; \
+        if ~isgraphics(h(1)) || ~isgraphics(h(2)); error('bar matrix handles invalid'); end; \
+        if ~strcmp(get(h(1), 'Type'), 'bar') || ~strcmp(get(h(2), 'Type'), 'bar'); error('bar handle type mismatch'); end;";
+    execute_source(input).expect("execute integer matrix bar script");
+}
+
+#[test]
 fn ancestor_dispatches_graphics_parent_queries() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

@@ -5,9 +5,12 @@ use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
@@ -30,17 +33,17 @@ use super::common::numeric_vector;
 use super::gpu_helpers::axis_bounds;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::builtins::plotting::type_resolvers::handle_array_type;
 
 const BUILTIN_NAME: &str = "bar";
 const BARH_BUILTIN_NAME: &str = "barh";
 
 const BAR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
-    ty: BuiltinParamType::NumericScalar,
+    ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Handle to the first rendered bar series.",
+    description: "Bar graphics handle or handle row vector, with one handle per plotted series.",
 }];
 
 const BAR_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -80,7 +83,7 @@ const BAR_INPUTS_Y_WIDTH: [BuiltinParamDescriptor; 2] = [
         name: "width",
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Required,
-        default: Some("0.75"),
+        default: Some("0.8"),
         description: "Fraction of available category space occupied by each bar.",
     },
 ];
@@ -97,7 +100,7 @@ const BAR_INPUTS_Y_WIDTH_COLOR: [BuiltinParamDescriptor; 3] = [
         name: "width",
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Required,
-        default: Some("0.75"),
+        default: Some("0.8"),
         description: "Fraction of available category space occupied by each bar.",
     },
     BuiltinParamDescriptor {
@@ -186,7 +189,7 @@ const BAR_INPUTS_X_Y_WIDTH: [BuiltinParamDescriptor; 3] = [
         name: "width",
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Required,
-        default: Some("0.75"),
+        default: Some("0.8"),
         description: "Fraction of available category space occupied by each bar.",
     },
 ];
@@ -210,7 +213,7 @@ const BAR_INPUTS_X_Y_WIDTH_COLOR: [BuiltinParamDescriptor; 4] = [
         name: "width",
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Required,
-        default: Some("0.75"),
+        default: Some("0.8"),
         description: "Fraction of available category space occupied by each bar.",
     },
     BuiltinParamDescriptor {
@@ -384,6 +387,93 @@ const BARH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const BARH_ERRORS: [BuiltinErrorDescriptor; 2] = [BARH_ERROR_INVALID_ARGUMENT, BARH_ERROR_INTERNAL];
 
+const BAR_Y_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "Y",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "Y explicitly accepts every built-in integer class as scalar, vector, or matrix bar-height data.",
+}];
+
+const BAR_X_Y_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "X explicitly accepts every built-in integer class as category-position data.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "Y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Y independently accepts every built-in integer class as scalar, vector, or matrix bar-height data.",
+    },
+];
+
+const BAR_WIDTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "width",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The positional width explicitly accepts every built-in integer class as a real numeric scalar.",
+    }];
+
+const BAR_LINE_WIDTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "LineWidth",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "LineWidth explicitly accepts every built-in integer class as a real numeric scalar.",
+    }];
+
+pub const BAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = bar(integer_Y)",
+        inputs: &BAR_Y_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Authoritative integer Y storage crosses one explicit client graphics boundary. Resident integer data gathers exactly before conversion because the floating shared-WGPU vertex path cannot reinterpret native integer buffers; the output is one or more opaque Bar handles.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = bar(integer_X, integer_Y)",
+        inputs: &BAR_X_Y_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "X remains exact through category-count and uniqueness validation, including wide int64 and uint64 labels, before the deliberate client graphics conversion. Resident X and integer Y inputs gather through the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = bar(..., integer_width)",
+        inputs: &BAR_WIDTH_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The positional width reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "b = bar(..., \"LineWidth\", integer_width)",
+        inputs: &BAR_LINE_WIDTH_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "LineWidth reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data.",
+    },
+];
+
 pub const BAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &BAR_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -520,11 +610,12 @@ pub const BARH_FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "bar,barchart,plotting",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
+    type_resolver(handle_array_type),
     descriptor(crate::builtins::plotting::bar::BAR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::bar::BAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::bar"
 )]
-pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     bar_impl(args, BAR_CONFIG).await
 }
 
@@ -535,27 +626,27 @@ pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     keywords = "barh,horizontal bar,barchart,plotting",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
+    type_resolver(handle_array_type),
     descriptor(crate::builtins::plotting::bar::BARH_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::bar"
 )]
-pub async fn barh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn barh_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     bar_impl(args, BARH_CONFIG).await
 }
 
-async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinResult<f64> {
+async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinResult<Value> {
     let (x_values, values, rest) = parse_bar_call_args(args, config)?;
     let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
     let style = parse_bar_style_args(config.builtin_name, &rest, defaults)?;
-    let mut input = Some(BarInput::from_value(x_values, values, config)?);
+    let mut input = Some(BarInput::from_value(x_values, values, config).await?);
     let opts = PlotRenderOptions {
         title: config.title,
         x_label: config.x_label,
         y_label: config.y_label,
         ..Default::default()
     };
-    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
-    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let plot_indices = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let plot_indices_slot = std::rc::Rc::clone(&plot_indices);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(config.builtin_name, opts, move |figure, axes| {
         let style = style.clone();
@@ -569,9 +660,7 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
                             let default_label = default_series_label(idx, total);
                             apply_bar_style(&mut bar, &style, &default_label);
                             let plot_index = figure.add_bar_chart_on_axes(bar, axes);
-                            if idx == 0 {
-                                *plot_index_slot.borrow_mut() = Some((axes, plot_index));
-                            }
+                            plot_indices_slot.borrow_mut().push((axes, plot_index));
                         }
                         return Ok(());
                     }
@@ -589,28 +678,27 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
             let default_label = default_series_label(idx, total);
             apply_bar_style(&mut bar, &style, &default_label);
             let plot_index = figure.add_bar_chart_on_axes(bar, axes);
-            if idx == 0 {
-                *plot_index_slot.borrow_mut() = Some((axes, plot_index));
-            }
+            plot_indices_slot.borrow_mut().push((axes, plot_index));
         }
         Ok(())
     });
-    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
-        return render_result.map(|_| f64::NAN);
-    };
-    let handle =
-        crate::builtins::plotting::state::register_bar_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
-            return Ok(handle);
+        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
+            return Err(err);
         }
-        return Err(err);
     }
-    Ok(handle)
+    let handles = plot_indices
+        .borrow()
+        .iter()
+        .map(|(axes, plot_index)| {
+            crate::builtins::plotting::state::register_bar_handle(figure_handle, *axes, *plot_index)
+        })
+        .collect();
+    Ok(super::line::handles_value(handles))
 }
 
-const DEFAULT_BAR_WIDTH: f32 = 0.75;
+const DEFAULT_BAR_WIDTH: f32 = 0.8;
 
 const BAR_DEFAULT_LABEL: &str = "Series 1";
 const MATLAB_COLOR_ORDER: [Vec4; 7] = [
@@ -918,15 +1006,27 @@ fn category_labels_from_x(
     let Some(x) = x_tensor else {
         return Ok((1..=rows).map(|idx| format!("{idx}")).collect());
     };
-    let labels: Vec<String> = numeric_vector(x)
-        .into_iter()
-        .map(format_number_label)
-        .collect();
-    if labels.len() != rows {
+    if numeric_tensor_len(&x) != rows {
         return Err(config.invalid(format!(
             "X must contain {rows} category position{}",
             if rows == 1 { "" } else { "s" }
         )));
+    }
+    let labels = (0..rows)
+        .map(|index| {
+            x.numeric_value_at(index)
+                .map(format_numeric_label)
+                .ok_or_else(|| {
+                    config.internal(format!(
+                        "X {} storage is unavailable at element {index}",
+                        x.numeric_dtype().class_name()
+                    ))
+                })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let mut unique = std::collections::HashSet::with_capacity(labels.len());
+    if labels.iter().any(|label| !unique.insert(label.clone())) {
+        return Err(config.invalid("X values must be unique"));
     }
     Ok(labels)
 }
@@ -1027,15 +1127,26 @@ enum BarInput {
 }
 
 impl BarInput {
-    fn from_value(x: Option<Value>, value: Value, config: BarRenderConfig) -> BuiltinResult<Self> {
+    async fn from_value(
+        x: Option<Value>,
+        value: Value,
+        config: BarRenderConfig,
+    ) -> BuiltinResult<Self> {
         match (x, value) {
             (x, Value::GpuTensor(handle)) => {
                 let x = match x {
-                    Some(Value::GpuTensor(handle)) => Some(gather_tensor_from_gpu(handle, config)?),
+                    Some(Value::GpuTensor(handle)) => {
+                        Some(gather_tensor_from_gpu_async(handle, config).await?)
+                    }
                     Some(value) => Some(Tensor::try_from(&value).map_err(|e| config.invalid(&e))?),
                     None => None,
                 };
-                Ok(Self::Gpu { x, y: handle })
+                if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+                    let y = gather_tensor_from_gpu_async(handle, config).await?;
+                    Ok(Self::Host { x, y })
+                } else {
+                    Ok(Self::Gpu { x, y: handle })
+                }
             }
             (x, other) => {
                 let y = Tensor::try_from(&other).map_err(|e| config.invalid(&e))?;
@@ -1253,11 +1364,26 @@ fn build_bar_series_from_matrix(
     Ok(charts)
 }
 
-fn format_number_label(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{}", value as i64)
+fn format_numeric_label(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => format_floating_label(value),
+        NumericScalar::F32(value) => format_floating_label(f64::from(value)),
+        NumericScalar::I8(value) => value.to_string(),
+        NumericScalar::I16(value) => value.to_string(),
+        NumericScalar::I32(value) => value.to_string(),
+        NumericScalar::I64(value) => value.to_string(),
+        NumericScalar::U8(value) => value.to_string(),
+        NumericScalar::U16(value) => value.to_string(),
+        NumericScalar::U32(value) => value.to_string(),
+        NumericScalar::U64(value) => value.to_string(),
+    }
+}
+
+fn format_floating_label(value: f64) -> String {
+    if value == 0.0 {
+        "0".to_string()
     } else {
-        format!("{value}")
+        value.to_string()
     }
 }
 
@@ -1286,6 +1412,7 @@ fn compute_stack_offsets(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use futures::executor::block_on;
     use runmat_builtins::{IntegerStorage, Value};
@@ -1295,11 +1422,11 @@ pub(crate) mod tests {
         ensure_plot_test_env();
     }
 
-    fn bar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    fn bar_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::bar_builtin(args))
     }
 
-    fn barh_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    fn barh_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::barh_builtin(args))
     }
 
@@ -1314,6 +1441,19 @@ pub(crate) mod tests {
     fn poisoned_integer_matrix(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
         let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer matrix");
         tensor
+    }
+
+    fn all_integer_bar_storages() -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![1, -2, 3, 4]),
+            IntegerStorage::I16(vec![1, -2, 3, 4]),
+            IntegerStorage::I32(vec![1, -2, 3, 4]),
+            IntegerStorage::I64(vec![1, -2, 3, 4]),
+            IntegerStorage::U8(vec![1, 2, 3, 4]),
+            IntegerStorage::U16(vec![1, 2, 3, 4]),
+            IntegerStorage::U32(vec![1, 2, 3, 4]),
+            IntegerStorage::U64(vec![1, 2, 3, u64::MAX]),
+        ]
     }
 
     fn row_vector_tensor(data: &[f64]) -> Tensor {
@@ -1341,6 +1481,26 @@ pub(crate) mod tests {
         assert!(labels.contains(&"h = bar(X, Y)"));
         assert!(labels.contains(&"h = bar(X, Y, width)"));
         assert!(labels.contains(&"h = bar(X, Y, Name, Value, ...)"));
+        assert_eq!(BAR_OUTPUT_HANDLE[0].ty, BuiltinParamType::NumericArray);
+        assert_eq!(BAR_INPUTS_Y_WIDTH[1].default, Some("0.8"));
+        assert_eq!(DEFAULT_BAR_WIDTH, 0.8);
+    }
+
+    #[test]
+    fn bar_integer_capabilities_cover_documented_forms_and_all_classes() {
+        assert_eq!(BAR_INTEGER_CAPABILITIES.len(), 4);
+        for capability in BAR_INTEGER_CAPABILITIES {
+            for input in capability.inputs {
+                assert_eq!(
+                    input.classes,
+                    crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+                );
+                assert_eq!(
+                    input.availability,
+                    BuiltinIntegerInputAvailability::Documented
+                );
+            }
+        }
     }
 
     #[test]
@@ -1389,6 +1549,24 @@ pub(crate) mod tests {
                     || msg_lower.contains("non-main thread"),
                 "unexpected error: {err}"
             );
+        }
+    }
+
+    #[test]
+    fn bar_matrix_returns_one_handle_per_series() {
+        setup_plot_tests();
+        let output = bar_builtin(vec![Value::Tensor(matrix_tensor(
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            3,
+            2,
+        ))])
+        .expect("matrix bar");
+        match output {
+            Value::Tensor(handles) => {
+                assert_eq!(handles.shape, vec![1, 2]);
+                assert_eq!(handles.len(), 2);
+            }
+            other => panic!("expected a two-handle row vector, got {other:?}"),
         }
     }
 
@@ -1458,6 +1636,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn bar_accepts_all_integer_y_classes_at_the_graphics_boundary() {
+        setup_plot_tests();
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let style = parse_bar_style_args("bar", &[], defaults).unwrap();
+        for storage in all_integer_bar_storages() {
+            let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
+            let charts =
+                build_bar_series_from_tensor(None, tensor, &style, BAR_CONFIG).expect("bar charts");
+            assert_eq!(charts.len(), 2);
+            assert_eq!(charts[0].bar_count(), 2);
+        }
+    }
+
+    #[test]
     fn bar_width_candidate_accepts_typed_integer_scalar_without_double_mirror() {
         let width =
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("typed width");
@@ -1466,6 +1658,48 @@ pub(crate) mod tests {
             &Value::Tensor(width),
             &[Value::String("grouped".into())]
         ));
+    }
+
+    #[test]
+    fn bar_width_and_line_width_accept_all_integer_scalar_classes() {
+        let widths = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in widths {
+            let width = Value::Tensor(
+                Tensor::new_integer(storage, vec![1, 1]).expect("typed integer width"),
+            );
+            let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+            let positional =
+                parse_bar_style_args("bar", std::slice::from_ref(&width), defaults).unwrap();
+            assert_eq!(positional.bar_width, 1.0);
+            let line =
+                parse_bar_style_args("bar", &[Value::String("LineWidth".into()), width], defaults)
+                    .unwrap();
+            assert_eq!(line.line_width, 1.0);
+        }
+    }
+
+    #[test]
+    fn bar_rejects_nonscalar_and_out_of_range_width_controls() {
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        assert!(parse_bar_style_args(
+            "bar",
+            &[
+                Value::String("LineWidth".into()),
+                Value::Tensor(tensor_from(&[1.0, 2.0]))
+            ],
+            defaults,
+        )
+        .is_err());
+        assert!(parse_bar_style_args("bar", &[Value::Num(2.0)], defaults).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1525,6 +1759,36 @@ pub(crate) mod tests {
         assert_eq!(charts.len(), 1);
         assert_eq!(charts[0].labels[0], "10");
         assert_eq!(charts[0].labels[1], "20");
+    }
+
+    #[test]
+    fn bar_preserves_wide_integer_x_labels_and_validates_uniqueness_exactly() {
+        setup_plot_tests();
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let style = parse_bar_style_args("bar", &[], defaults).unwrap();
+        let x = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2, 1],
+        )
+        .expect("wide X");
+        let charts =
+            build_bar_series_from_tensor(Some(x), tensor_from(&[1.0, 2.0]), &style, BAR_CONFIG)
+                .unwrap();
+        assert_eq!(
+            charts[0].labels,
+            vec!["9007199254740993", "18446744073709551615"]
+        );
+
+        let duplicate =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, u64::MAX]), vec![2, 1])
+                .expect("duplicate X");
+        assert!(build_bar_series_from_tensor(
+            Some(duplicate),
+            tensor_from(&[1.0, 2.0]),
+            &style,
+            BAR_CONFIG,
+        )
+        .is_err());
     }
 
     #[test]
@@ -1615,14 +1879,68 @@ pub(crate) mod tests {
 
     #[test]
     fn explicit_x_with_gpu_y_preserves_gpu_input() {
-        let input = BarInput::from_value(
+        let input = block_on(BarInput::from_value(
             Some(Value::Tensor(tensor_from(&[1980.0, 1990.0, 2000.0]))),
             Value::GpuTensor(gpu_handle_with_shape(&[1, 3])),
             BARH_CONFIG,
-        )
+        ))
         .unwrap();
         assert!(input.gpu_handle().is_some());
         assert_eq!(input.x_tensor().map(numeric_tensor_len), Some(3));
+    }
+
+    #[test]
+    fn bar_gathers_all_resident_integer_classes_before_floating_gpu_geometry() {
+        test_support::with_test_provider(|provider| {
+            for storage in all_integer_bar_storages() {
+                let expected = storage.clone();
+                let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                let input = block_on(BarInput::from_value(
+                    None,
+                    Value::GpuTensor(handle),
+                    BAR_CONFIG,
+                ))
+                .expect("bar input");
+                match input {
+                    BarInput::Host { y, .. } => {
+                        assert_eq!(y.integer_storage(), Some(&expected));
+                    }
+                    BarInput::Gpu { .. } => {
+                        panic!("resident integer Y must not enter floating GPU geometry")
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn bar_wgpu_gathers_all_resident_integer_classes_before_geometry() {
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        for storage in all_integer_bar_storages() {
+            let expected = storage.clone();
+            let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let input = block_on(BarInput::from_value(
+                None,
+                Value::GpuTensor(handle),
+                BAR_CONFIG,
+            ))
+            .expect("bar input");
+            match input {
+                BarInput::Host { y, .. } => assert_eq!(y.integer_storage(), Some(&expected)),
+                BarInput::Gpu { .. } => {
+                    panic!("resident integer Y must not enter floating WGPU geometry")
+                }
+            }
+        }
     }
 
     #[test]
@@ -1650,10 +1968,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bar_type_is_numeric_handle() {
+    fn bar_type_is_numeric_handle_array() {
         assert_eq!(
-            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::Num
+            handle_array_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::tensor()
         );
     }
 }
