@@ -1,26 +1,106 @@
 use super::*;
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
+
+const BUILTIN_NAME: &str = "array2table";
+
+pub(crate) const ARRAY2TABLE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "array2table-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "array2table with an interactive resident GPU input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Array2TableGpuInputExtension"),
+    };
+
+pub const ARRAY2TABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [ARRAY2TABLE_GPU_INPUT_EXTENSION];
+
+const ARRAY2TABLE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented homogeneous array domain includes all eight real integer classes.",
+    }];
+
+pub const ARRAY2TABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "T = array2table(integer_A, Name,Value...)",
+        inputs: &ARRAY2TABLE_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each column becomes a table variable with A's exact authoritative integer storage and class. Interactive resident GPU input is a mode-gated RunMat extension that gathers before table construction.",
+    }];
 
 #[runtime_builtin(
     name = "array2table",
     category = "table",
     summary = "Convert an array into a table.",
-    keywords = "array2table,table,VariableNames,RowNames",
-    accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_COMPAT_DESCRIPTOR),
+    keywords = "array2table,table,VariableNames,RowNames,DimensionNames",
+    accel = "gather",
+    descriptor(crate::builtins::table::ARRAY2TABLE_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::conversions::ARRAY2TABLE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::conversions::ARRAY2TABLE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn array2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ARRAY2TABLE_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(map_control_flow)?;
     let rest = gather_values(&rest).await?;
-    let options = parse_table_options(&rest, "array2table")?;
+    let mut options = parse_array2table_options(&rest)?;
     let columns = split_value_columns(value)?;
     let names = options
         .variable_names
         .unwrap_or_else(|| generated_variable_names(columns.len()));
-    table_from_columns_with_properties(names, columns, options.row_names)
+    validate_array2table_names(
+        &names,
+        &mut options.row_names,
+        options.dimension_names.as_deref(),
+    )?;
+    let table = table_from_columns_with_properties(names, columns, options.row_names)?;
+    apply_array2table_dimension_names(table, options.dimension_names)
+}
+
+fn apply_array2table_dimension_names(
+    mut table: Value,
+    dimension_names: Option<Vec<String>>,
+) -> BuiltinResult<Value> {
+    let Some(dimension_names) = dimension_names else {
+        return Ok(table);
+    };
+    let Value::Object(object) = &mut table else {
+        return Err(invalid_variable(
+            "array2table: internal table construction failed",
+        ));
+    };
+    let mut properties = table_public_properties(object)?;
+    properties.insert(
+        DIMENSION_NAMES,
+        Value::StringArray(
+            StringArray::new(dimension_names, vec![1, 2])
+                .map_err(|error| invalid_variable(format!("array2table: {error}")))?,
+        ),
+    );
+    sync_table_properties(object, properties);
+    Ok(table)
 }
 
 #[runtime_builtin(

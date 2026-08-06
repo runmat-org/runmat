@@ -274,6 +274,36 @@ const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Name-value options or conversion arguments.",
     },
 ];
+const ARRAY2TABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "T",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Table whose variables are the columns of A.",
+}];
+const ARRAY2TABLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Homogeneous array to split into table variables by column.",
+}];
+const ARRAY2TABLE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into table variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "VariableNames, RowNames, or DimensionNames options.",
+    },
+];
 const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
     ty: BuiltinParamType::Any,
@@ -354,6 +384,18 @@ const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     inputs: &TABLE_INPUTS_VALUES,
     outputs: &ANY_OUTPUT,
 }];
+const ARRAY2TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "T = array2table(A)",
+        inputs: &ARRAY2TABLE_INPUT,
+        outputs: &ARRAY2TABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "T = array2table(A, nameValuePairs...)",
+        inputs: &ARRAY2TABLE_INPUTS_NAME_VALUE,
+        outputs: &ARRAY2TABLE_OUTPUT,
+    },
+];
 const GROUPSUMMARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "G = groupsummary(T, groupvars, method, datavars)",
     inputs: &GROUPSUMMARY_INPUTS,
@@ -487,6 +529,12 @@ pub const PARQUETINFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &TABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const ARRAY2TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ARRAY2TABLE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,

@@ -6798,30 +6798,51 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(A, ...)",
+          "label": "T = array2table(A)",
           "inputs": [
             {
               "name": "A",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
-            },
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Name-value options or conversion arguments."
+              "description": "Homogeneous array to split into table variables by column."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "T",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Table whose variables are the columns of A."
+            }
+          ]
+        },
+        {
+          "label": "T = array2table(A, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Homogeneous array to split into table variables by column."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "VariableNames, RowNames, or DimensionNames options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "T",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Table whose variables are the columns of A."
             }
           ]
         }
@@ -6856,6 +6877,43 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "array2table-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "array2table with an interactive resident GPU input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Array2TableGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "T = array2table(integer_A, Name,Value...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented homogeneous array domain includes all eight real integer classes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each column becomes a table variable with A's exact authoritative integer storage and class. Interactive resident GPU input is a mode-gated RunMat extension that gathers before table construction."
         }
       ]
     },

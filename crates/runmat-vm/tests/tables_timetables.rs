@@ -1,4 +1,4 @@
-use runmat_builtins::{CellArray, Value};
+use runmat_builtins::{CellArray, IntegerStorage, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -39,6 +39,12 @@ fn has_num(vars: &[Value], expected: f64) -> bool {
     )
 }
 
+fn has_integer_storage(vars: &[Value], expected: &IntegerStorage) -> bool {
+    vars.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.integer_storage() == Some(expected))
+    })
+}
+
 #[test]
 fn table_conversion_surface_executes_from_scripts() {
     let vars = execute_source(
@@ -57,6 +63,29 @@ fn table_conversion_surface_executes_from_scripts() {
             ..
         })
     )));
+}
+
+#[test]
+fn array2table_compiled_surface_preserves_all_integer_classes() {
+    let vars = execute_source(
+        "a = table2array(array2table(int8([-128 127]))); b = table2array(array2table(int16([-32768 32767]))); c = table2array(array2table(int32([-2147483648 2147483647]))); d = table2array(array2table(int64([-7 9]))); e = table2array(array2table(uint8([0 255]))); f = table2array(array2table(uint16([0 65535]))); g = table2array(array2table(uint32([0 4294967295]))); base = uint64(9007199254740992); h = table2array(array2table(base + uint64([1 2])));",
+    )
+    .expect("compiled array2table integer conversion");
+    for expected in [
+        IntegerStorage::I8(vec![-128, 127]),
+        IntegerStorage::I16(vec![-32768, 32767]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![-7, 9]),
+        IntegerStorage::U8(vec![0, 255]),
+        IntegerStorage::U16(vec![0, 65535]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            has_integer_storage(&vars, &expected),
+            "missing compiled storage {expected:?}"
+        );
+    }
 }
 
 #[test]

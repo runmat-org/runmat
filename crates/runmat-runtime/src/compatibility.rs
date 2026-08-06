@@ -210,6 +210,7 @@ mod tests {
                 ("and", "and-character-input"),
                 ("and", "and-complex-input"),
                 ("area", "area-linespec"),
+                ("array2table", "array2table-gpu-input"),
                 ("acos", "acos-character-input"),
                 ("acos", "acos-gpu-real-complex-promotion"),
                 ("acos", "acos-integer-input"),
@@ -499,6 +500,7 @@ mod tests {
             "prod",
             "accept",
             "area",
+            "array2table",
         ] {
             let builtin = registered
                 .iter()

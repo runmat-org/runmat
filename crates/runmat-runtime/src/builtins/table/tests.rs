@@ -14,6 +14,15 @@ use std::fs;
 use std::io;
 use std::io::Write;
 
+#[cfg(feature = "wgpu")]
+fn register_wgpu_provider_available() -> bool {
+    runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .is_ok()
+        && runmat_accelerate_api::provider().is_some()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 struct PrefixSandboxProvider {
     prefix: &'static str,
@@ -1702,7 +1711,220 @@ fn table_conversion_builtins_round_trip_arrays_cells_and_structs() {
 }
 
 #[test]
-fn explicit_variable_names_reject_duplicates_and_invalid_identifiers() {
+fn array2table_preserves_every_integer_storage_class_exactly() {
+    let storages = [
+        IntegerStorage::I8(vec![i8::MIN, -1, 0, i8::MAX]),
+        IntegerStorage::I16(vec![i16::MIN, -1, 0, i16::MAX]),
+        IntegerStorage::I32(vec![i32::MIN, -1, 0, i32::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX]),
+        IntegerStorage::U8(vec![0, 1, u8::MAX - 1, u8::MAX]),
+        IntegerStorage::U16(vec![0, 1, u16::MAX - 1, u16::MAX]),
+        IntegerStorage::U32(vec![0, 1, u32::MAX - 1, u32::MAX]),
+        IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX - 1, u64::MAX]),
+    ];
+    for storage in storages {
+        let table = block_on(array2table_builtin(
+            Value::Tensor(Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap()),
+            vec![
+                Value::from("VariableNames"),
+                Value::StringArray(
+                    StringArray::new(vec!["A".into(), "B".into()], vec![1, 2]).unwrap(),
+                ),
+            ],
+        ))
+        .unwrap();
+        let object = object(table.clone());
+        let variables = table_variables(&object).unwrap();
+        for name in ["A", "B"] {
+            let Value::Tensor(column) = variables.fields.get(name).unwrap() else {
+                panic!("expected typed integer column");
+            };
+            assert_eq!(column.shape, vec![2, 1]);
+            assert_eq!(
+                column.integer_storage().unwrap().numeric_dtype(),
+                storage.numeric_dtype(),
+                "{name}"
+            );
+        }
+        let Value::Tensor(round_trip) = block_on(table2array_builtin(table)).unwrap() else {
+            panic!("expected typed integer array");
+        };
+        assert_eq!(round_trip.shape, vec![2, 2]);
+        assert_eq!(round_trip.integer_storage(), Some(&storage));
+    }
+}
+
+#[test]
+fn array2table_supports_current_names_and_properties_rules() {
+    let table = block_on(array2table_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap()),
+        vec![
+            Value::from("VariableNames"),
+            Value::StringArray(
+                StringArray::new(vec![" 1 café ".into(), "A".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::from("RowNames"),
+            Value::StringArray(
+                StringArray::new(vec![" first ".into(), "second".into()], vec![2, 1]).unwrap(),
+            ),
+            Value::from("DimensionNames"),
+            Value::StringArray(
+                StringArray::new(vec!["Samples".into(), "Signals".into()], vec![1, 2]).unwrap(),
+            ),
+        ],
+    ))
+    .unwrap();
+    let table_object_value = object(table);
+    assert_eq!(
+        table_variable_names_from_object(&table_object_value).unwrap(),
+        vec![" 1 café ".to_string(), "A".to_string()]
+    );
+    let properties = table_public_properties(&table_object_value).unwrap();
+    assert_eq!(
+        properties.fields.get(ROW_NAMES),
+        Some(&Value::StringArray(
+            StringArray::new(vec!["first".into(), "second".into()], vec![2, 1]).unwrap()
+        ))
+    );
+    assert_eq!(
+        properties.fields.get(DIMENSION_NAMES),
+        Some(&Value::StringArray(
+            StringArray::new(vec!["Samples".into(), "Signals".into()], vec![1, 2]).unwrap()
+        ))
+    );
+    let case_distinct = block_on(array2table_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::from("VariableNames"),
+            Value::StringArray(StringArray::new(vec!["A".into(), "a".into()], vec![1, 2]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    assert_eq!(
+        table_variable_names_from_object(&object(case_distinct)).unwrap(),
+        vec!["A".to_string(), "a".to_string()]
+    );
+
+    for options in [
+        vec![
+            Value::from("VariableNames"),
+            Value::StringArray(StringArray::new(vec!["A".into(), "A".into()], vec![1, 2]).unwrap()),
+        ],
+        vec![
+            Value::from("VariableNames"),
+            Value::StringArray(
+                StringArray::new(vec!["Rows".into(), "B".into()], vec![1, 2]).unwrap(),
+            ),
+        ],
+        vec![
+            Value::from("RowNames"),
+            Value::StringArray(
+                StringArray::new(vec!["same".into(), " same ".into()], vec![2, 1]).unwrap(),
+            ),
+        ],
+        vec![
+            Value::from("DimensionNames"),
+            Value::StringArray(StringArray::new(vec!["A".into(), "A".into()], vec![1, 2]).unwrap()),
+        ],
+    ] {
+        let error = block_on(array2table_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap()),
+            options,
+        ))
+        .expect_err("invalid names must reject");
+        assert!(error.message.contains("array2table"));
+    }
+}
+
+#[test]
+fn array2table_resident_integer_input_is_mode_gated_and_gathers_exactly() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(array2table_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Vec::new(),
+                ))
+                .expect_err("MATLAB mode must reject interactive GPU input");
+                assert_eq!(
+                    error.identifier(),
+                    ARRAY2TABLE_GPU_INPUT_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let table =
+                    block_on(array2table_builtin(Value::GpuTensor(handle), Vec::new())).unwrap();
+                let Value::Tensor(round_trip) = block_on(table2array_builtin(table)).unwrap()
+                else {
+                    panic!("expected typed integer array");
+                };
+                assert_eq!(round_trip.integer_storage(), Some(&storage));
+            }
+        }
+    });
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn array2table_wgpu_gathers_every_resident_integer_class_exactly() {
+    let _guard = crate::builtins::common::test_support::accel_test_lock();
+    if !register_wgpu_provider_available() {
+        return;
+    }
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+    for storage in [
+        IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+        IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+        IntegerStorage::U8(vec![0, u8::MAX]),
+        IntegerStorage::U16(vec![0, u16::MAX]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+    ] {
+        let tensor = Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap();
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+        let table = block_on(array2table_builtin(Value::GpuTensor(handle), Vec::new())).unwrap();
+        let Value::Tensor(round_trip) = block_on(table2array_builtin(table)).unwrap() else {
+            panic!("expected typed integer array");
+        };
+        assert_eq!(round_trip.integer_storage(), Some(&storage));
+    }
+}
+
+#[test]
+fn array2table_metadata_classifies_integer_and_gpu_forms() {
+    assert_eq!(ARRAY2TABLE_INTEGER_CAPABILITIES.len(), 1);
+    assert_eq!(
+        ARRAY2TABLE_INTEGER_CAPABILITIES[0].output_class,
+        runmat_builtins::BuiltinIntegerOutputClassRule::PreserveInput
+    );
+    assert_eq!(
+        ARRAY2TABLE_INTEGER_CAPABILITIES[0].backend,
+        runmat_builtins::BuiltinIntegerBackendRule::GatherFallback
+    );
+    assert_eq!(ARRAY2TABLE_EXTENSIONS, [ARRAY2TABLE_GPU_INPUT_EXTENSION]);
+}
+
+#[test]
+fn explicit_variable_names_reject_duplicates_and_accept_current_identifiers() {
     let duplicate = block_on(table_builtin(vec![
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap()),
@@ -1714,17 +1936,20 @@ fn explicit_variable_names_reject_duplicates_and_invalid_identifiers() {
         .message
         .contains("duplicate variable name"));
 
-    let invalid = block_on(array2table_builtin(
+    let current = block_on(array2table_builtin(
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         vec![
             Value::from("VariableNames"),
-            Value::Cell(CellArray::new(vec![Value::from("1bad"), Value::from("B")], 1, 2).unwrap()),
+            Value::Cell(
+                CellArray::new(vec![Value::from("1 bad"), Value::from("B")], 1, 2).unwrap(),
+            ),
         ],
-    ));
-    assert!(invalid
-        .unwrap_err()
-        .message
-        .contains("invalid variable name"));
+    ))
+    .unwrap();
+    assert_eq!(
+        table_variable_names_from_object(&object(current)).unwrap(),
+        vec!["1 bad".to_string(), "B".to_string()]
+    );
 }
 
 #[test]

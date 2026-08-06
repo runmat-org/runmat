@@ -20,6 +20,13 @@ pub(in crate::builtins::table) struct TableConstructorOptions {
     pub(in crate::builtins::table) row_names: Option<Vec<String>>,
 }
 
+#[derive(Default)]
+pub(in crate::builtins::table) struct Array2TableOptions {
+    pub(in crate::builtins::table) variable_names: Option<Vec<String>>,
+    pub(in crate::builtins::table) row_names: Option<Vec<String>>,
+    pub(in crate::builtins::table) dimension_names: Option<Vec<String>>,
+}
+
 pub(in crate::builtins::table) struct Struct2TableOptions {
     pub(in crate::builtins::table) table: TableConstructorOptions,
     pub(in crate::builtins::table) as_array: bool,
@@ -74,6 +81,34 @@ pub(in crate::builtins::table) fn parse_table_options(
         } else {
             return Err(invalid_argument(format!(
                 "{context}: unsupported option '{name}'"
+            )));
+        }
+        idx += 2;
+    }
+    Ok(options)
+}
+
+pub(in crate::builtins::table) fn parse_array2table_options(
+    args: &[Value],
+) -> BuiltinResult<Array2TableOptions> {
+    let mut options = Array2TableOptions::default();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        if idx + 1 >= args.len() {
+            return Err(invalid_argument(
+                "array2table: name-value options must be provided in pairs",
+            ));
+        }
+        let name = scalar_text(&args[idx], "array2table option")?;
+        if name.eq_ignore_ascii_case("VariableNames") {
+            options.variable_names = Some(raw_variable_name_list(&args[idx + 1])?);
+        } else if name.eq_ignore_ascii_case("RowNames") {
+            options.row_names = Some(string_list(&args[idx + 1])?);
+        } else if name.eq_ignore_ascii_case("DimensionNames") {
+            options.dimension_names = Some(string_list(&args[idx + 1])?);
+        } else {
+            return Err(invalid_argument(format!(
+                "array2table: unsupported option '{name}'"
             )));
         }
         idx += 2;
