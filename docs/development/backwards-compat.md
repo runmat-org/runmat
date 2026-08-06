@@ -162,6 +162,8 @@ Dynamic-object `addprop` accepts a `dynamicprops` receiver plus a character-vect
 
 `animatedline` independently accepts all eight integer classes for its X, Y, and Z starting-coordinate vectors and for the positive scalar `MaximumNumPoints` control. Coordinate storage remains authoritative until one explicit conversion into RunMat's client-side `f64` graphics domain; the point limit is instead validated exactly and converted only to a checked host count. Resident coordinates and limit scalars gather because the documented GPU-array surface executes on the client, while the returned numeric encoding remains an opaque graphics handle rather than an integer-class output.
 
+`append` is a text-only API over string arrays, character vectors, and cell arrays of character vectors, with documented output-type precedence and compatible-size expansion. Numeric and logical values, including all eight integer classes in scalar and array form, reject without implicit text conversion; resident numeric handles reject before provider dispatch or gather, and the API has no integer-output or interactive GPU-array surface.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

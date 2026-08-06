@@ -89,6 +89,55 @@ fn angle_rejects_all_real_and_componentwise_complex_integer_classes_through_vm_d
 }
 
 #[test]
+fn append_rejects_all_integer_classes_through_vm_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        for source in [
+            format!("out = append({constructor}(1), 'suffix');"),
+            format!("out = append({constructor}([1 2]), 'suffix');"),
+        ] {
+            let error = execute_source(&source).expect_err("append must reject integer input");
+            assert!(
+                error.to_string().contains(
+                    "expected string, character vector, or cell array of character vectors"
+                ),
+                "{constructor}: {source}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn append_preserves_text_output_precedence_through_vm_dispatch() {
+    let vars = execute_source(
+        "char_out = append('Hello ', 'World'); cell_out = append({'alpha','beta'}, ' '); string_out = append([\"A\";\"B\"], {'x','y'});",
+    )
+    .expect("append text outputs");
+
+    assert!(matches!(
+        &vars[0],
+        Value::CharArray(array)
+            if array.rows == 1
+                && array.cols == 11
+                && array.data.iter().collect::<String>() == "Hello World"
+    ));
+    assert!(matches!(
+        &vars[1],
+        Value::Cell(cell)
+            if cell.shape == vec![1, 2]
+                && matches!(&cell.data[0], Value::CharArray(array) if array.data.iter().collect::<String>() == "alpha ")
+                && matches!(&cell.data[1], Value::CharArray(array) if array.data.iter().collect::<String>() == "beta ")
+    ));
+    assert!(matches!(
+        &vars[2],
+        Value::StringArray(array)
+            if array.shape == vec![2, 2]
+                && array.data == vec!["Ax", "Bx", "Ay", "By"]
+    ));
+}
+
+#[test]
 fn short_circuit_or_accepts_boolean_lhs_without_numeric_coercion() {
     let vars = execute_source(
         "tau = []; flight_duration = 10; guard = isempty(tau) || tau(end) < flight_duration;",

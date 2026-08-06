@@ -602,6 +602,7 @@ mod tests {
                 "addlistener",
                 "addprop",
                 "ancestor",
+                "append",
                 "argsort",
                 "cancel",
                 "onCleanup",

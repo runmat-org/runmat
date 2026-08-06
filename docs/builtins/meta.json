@@ -5958,7 +5958,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "append combines string arrays, character vectors, or cell arrays of character vectors. Numeric and integer values are not text inputs; all eight integer classes and resident numeric handles reject without implicit string conversion or provider gather."
+      }
     },
     {
       "name": "area",

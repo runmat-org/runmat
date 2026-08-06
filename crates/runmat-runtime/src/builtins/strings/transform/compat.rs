@@ -2,9 +2,10 @@
 
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, ResolveContext, StringArray, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CharArray, IntValue,
+    ResolveContext, StringArray, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -84,6 +85,12 @@ macro_rules! descriptor {
 }
 
 descriptor!(APPEND_DESCRIPTOR, "s = append(arg1, ...)", &REST, &OUT_ANY);
+
+pub const APPEND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "append combines string arrays, character vectors, or cell arrays of character vectors. Numeric and integer values are not text inputs; all eight integer classes and resident numeric handles reject without implicit string conversion or provider gather.",
+};
 descriptor!(REVERSE_DESCRIPTOR, "s = reverse(text)", &IN_TEXT, &OUT_ANY);
 descriptor!(DEBLANK_DESCRIPTOR, "s = deblank(text)", &IN_TEXT, &OUT_ANY);
 descriptor!(
@@ -171,6 +178,7 @@ fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::Runtim
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::APPEND_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::compat::APPEND_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn append_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -178,11 +186,17 @@ async fn append_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         return Ok(Value::String(String::new()));
     }
     let mut lists = Vec::with_capacity(rest.len());
+    let mut output_kind = AppendOutputKind::Char;
     for value in rest {
-        let value = gather_if_needed_async(&value)
-            .await
-            .map_err(map_flow("append"))?;
-        lists.push(text_items(value, "append")?);
+        if matches!(value, Value::GpuTensor(_)) {
+            return Err(transform_error(
+                "append",
+                "append: expected string, character vector, or cell array of character vectors",
+            ));
+        }
+        let (list, kind) = append_text_items(value)?;
+        output_kind = output_kind.combine(kind);
+        lists.push(list);
     }
     let shape = lists
         .iter()
@@ -202,7 +216,99 @@ async fn append_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         out.push(text);
     }
-    string_array_or_scalar(out, shape, "append")
+    append_output(out, shape, output_kind)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum AppendOutputKind {
+    Char,
+    Cell,
+    String,
+}
+
+impl AppendOutputKind {
+    fn combine(self, other: Self) -> Self {
+        self.max(other)
+    }
+}
+
+fn append_text_items(
+    value: Value,
+) -> BuiltinResult<(
+    crate::builtins::strings::core::compat::TextList,
+    AppendOutputKind,
+)> {
+    match value {
+        Value::String(text) => Ok((
+            text_items(Value::String(text), "append")?,
+            AppendOutputKind::String,
+        )),
+        Value::StringArray(array) => Ok((
+            text_items(Value::StringArray(array), "append")?,
+            AppendOutputKind::String,
+        )),
+        Value::Cell(cell) => {
+            let mut items = Vec::with_capacity(cell.data.len());
+            for value in cell.data {
+                match value {
+                    Value::CharArray(array) if array.rows <= 1 || array.cols <= 1 => {
+                        items.push(Some(array.data.into_iter().collect::<String>()));
+                    }
+                    _ => {
+                        return Err(transform_error(
+                            "append",
+                            "append: cell inputs must contain only character vectors",
+                        ));
+                    }
+                }
+            }
+            Ok((
+                crate::builtins::strings::core::compat::TextList {
+                    items,
+                    shape: cell.shape,
+                },
+                AppendOutputKind::Cell,
+            ))
+        }
+        Value::CharArray(array) if array.rows <= 1 || array.cols <= 1 => {
+            let text = array.data.into_iter().collect::<String>();
+            Ok((
+                text_items(Value::String(text), "append")?,
+                AppendOutputKind::Char,
+            ))
+        }
+        Value::CharArray(_) => Err(transform_error(
+            "append",
+            "append: character inputs must be vectors",
+        )),
+        other => Err(transform_error(
+            "append",
+            format!(
+                "append: expected string, character vector, or cell array of character vectors, got {other:?}"
+            ),
+        )),
+    }
+}
+
+fn append_output(
+    values: Vec<String>,
+    shape: Vec<usize>,
+    kind: AppendOutputKind,
+) -> BuiltinResult<Value> {
+    match kind {
+        AppendOutputKind::String => string_array_or_scalar(values, shape, "append"),
+        AppendOutputKind::Cell => {
+            let values = values
+                .into_iter()
+                .map(|text| char_rows(vec![text], "append"))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            make_cell_with_shape(values, shape).map_err(|error| transform_error("append", error))
+        }
+        AppendOutputKind::Char => {
+            let text = values.into_iter().next().unwrap_or_default();
+            char_rows(vec![text], "append")
+        }
+    }
 }
 
 #[runtime_builtin(
@@ -844,7 +950,7 @@ fn justify(text: &str, side: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
+    use runmat_builtins::{BuiltinIntegerAuditKind, CellArray, IntValue, IntegerStorage, Tensor};
 
     fn block(
         value: impl std::future::Future<Output = BuiltinResult<Value>>,
@@ -906,6 +1012,170 @@ mod tests {
             .unwrap(),
             Value::String("a[new]b".into())
         );
+    }
+
+    #[test]
+    fn append_integer_audit_is_explicitly_inapplicable() {
+        assert_eq!(
+            APPEND_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(APPEND_INTEGER_AUDIT.canonical_builtin.is_none());
+        assert!(APPEND_INTEGER_AUDIT.notes.contains("all eight integer"));
+    }
+
+    #[test]
+    fn append_preserves_documented_text_output_precedence_and_whitespace() {
+        assert_eq!(
+            block(append_builtin(vec![
+                Value::CharArray(CharArray::new_row("Hello ")),
+                Value::CharArray(CharArray::new_row("World")),
+            ]))
+            .expect("all-char append"),
+            Value::CharArray(CharArray::new_row("Hello World"))
+        );
+
+        let cell = CellArray::new(
+            vec![
+                Value::CharArray(CharArray::new_row("alpha")),
+                Value::CharArray(CharArray::new_row("beta")),
+            ],
+            1,
+            2,
+        )
+        .expect("cellstr");
+        let result = block(append_builtin(vec![
+            Value::Cell(cell.clone()),
+            Value::CharArray(CharArray::new_row(" ")),
+        ]))
+        .expect("cell append");
+        let Value::Cell(cell_result) = result else {
+            panic!("expected cellstr output");
+        };
+        assert_eq!(cell_result.shape, vec![1, 2]);
+        assert_eq!(
+            cell_result.data,
+            vec![
+                Value::CharArray(CharArray::new_row("alpha ")),
+                Value::CharArray(CharArray::new_row("beta ")),
+            ]
+        );
+
+        let strings = StringArray::new(vec!["A".into(), "B".into()], vec![2, 1]).expect("strings");
+        let result = block(append_builtin(vec![
+            Value::StringArray(strings),
+            Value::Cell(cell),
+        ]))
+        .expect("string-cell append");
+        let Value::StringArray(string_result) = result else {
+            panic!("expected string-array output");
+        };
+        assert_eq!(string_result.shape, vec![2, 2]);
+        assert_eq!(
+            string_result.data,
+            vec!["Aalpha", "Balpha", "Abeta", "Bbeta"]
+        );
+    }
+
+    #[test]
+    fn append_rejects_every_integer_class_without_numeric_conversion() {
+        let cases = [
+            ("int8", IntValue::I8(-1), IntegerStorage::I8(vec![-1, 2])),
+            ("int16", IntValue::I16(-2), IntegerStorage::I16(vec![-2, 3])),
+            ("int32", IntValue::I32(-3), IntegerStorage::I32(vec![-3, 4])),
+            (
+                "int64",
+                IntValue::I64(i64::MIN),
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            ),
+            (
+                "uint8",
+                IntValue::U8(5),
+                IntegerStorage::U8(vec![5, u8::MAX]),
+            ),
+            (
+                "uint16",
+                IntValue::U16(6),
+                IntegerStorage::U16(vec![6, u16::MAX]),
+            ),
+            (
+                "uint32",
+                IntValue::U32(7),
+                IntegerStorage::U32(vec![7, u32::MAX]),
+            ),
+            (
+                "uint64",
+                IntValue::U64(u64::MAX),
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            ),
+        ];
+        for (class, scalar, storage) in cases {
+            for value in [
+                Value::Int(scalar),
+                Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor")),
+            ] {
+                let error = block(append_builtin(vec![
+                    value,
+                    Value::CharArray(CharArray::new_row("suffix")),
+                ]))
+                .expect_err("numeric append input must reject");
+                assert!(
+                    error.message().contains(
+                        "expected string, character vector, or cell array of character vectors"
+                    ),
+                    "{class}: {error}"
+                );
+            }
+        }
+
+        for value in [Value::Num(1.0), Value::Bool(true)] {
+            let error = block(append_builtin(vec![
+                value,
+                Value::CharArray(CharArray::new_row("suffix")),
+            ]))
+            .expect_err("nontext append input must reject");
+            assert!(error.message().contains("expected string"), "{error}");
+        }
+
+        let invalid_cell =
+            CellArray::new(vec![Value::String("not a character vector".into())], 1, 1)
+                .expect("cell");
+        let error = block(append_builtin(vec![Value::Cell(invalid_cell)]))
+            .expect_err("non-cellstr input must reject");
+        assert!(
+            error
+                .message()
+                .contains("must contain only character vectors"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn append_rejects_resident_integer_handles_before_provider_gather() {
+        for (offset, element_type) in [
+            (0, runmat_accelerate_api::IntegerElementType::I8),
+            (1, runmat_accelerate_api::IntegerElementType::I16),
+            (2, runmat_accelerate_api::IntegerElementType::I32),
+            (3, runmat_accelerate_api::IntegerElementType::I64),
+            (4, runmat_accelerate_api::IntegerElementType::U8),
+            (5, runmat_accelerate_api::IntegerElementType::U16),
+            (6, runmat_accelerate_api::IntegerElementType::U32),
+            (7, runmat_accelerate_api::IntegerElementType::U64),
+        ] {
+            let handle = runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX - 350 - offset,
+            };
+            runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
+            let result = block(append_builtin(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::String("suffix".into()),
+            ]));
+            runmat_accelerate_api::clear_handle_integer_type(&handle);
+            let error = result.expect_err("resident numeric append input must reject");
+            assert!(error.message().contains("expected string"), "{error}");
+        }
     }
 
     #[test]
