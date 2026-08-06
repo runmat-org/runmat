@@ -3213,27 +3213,216 @@
     },
     {
       "name": "accumarray",
-      "output_mode": "ByRequestedOutputCount",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "varargout = groupingBuiltin(args...)",
+          "label": "B = accumarray(ind, data)",
           "inputs": [
             {
-              "name": "args",
+              "name": "ind",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "MATLAB-compatible arguments."
+              "description": "Positive one-based output subscripts."
+            },
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar or vector data to accumulate."
             }
           ],
           "outputs": [
             {
-              "name": "varargout",
+              "name": "B",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "Builtin outputs."
+              "description": "Accumulated full or sparse array."
+            }
+          ]
+        },
+        {
+          "label": "B = accumarray(ind, data, sz)",
+          "inputs": [
+            {
+              "name": "ind",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive one-based output subscripts."
+            },
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar or vector data to accumulate."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Positive output-size vector or []."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Accumulated full or sparse array."
+            }
+          ]
+        },
+        {
+          "label": "B = accumarray(ind, data, sz, fun)",
+          "inputs": [
+            {
+              "name": "ind",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive one-based output subscripts."
+            },
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar or vector data to accumulate."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Positive output-size vector or []."
+            },
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "@sum",
+              "description": "Scalar-returning group function or []."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Accumulated full or sparse array."
+            }
+          ]
+        },
+        {
+          "label": "B = accumarray(ind, data, sz, fun, fillval)",
+          "inputs": [
+            {
+              "name": "ind",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive one-based output subscripts."
+            },
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar or vector data to accumulate."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Positive output-size vector or []."
+            },
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "@sum",
+              "description": "Scalar-returning group function or []."
+            },
+            {
+              "name": "fillval",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "0",
+              "description": "Scalar fill matching the group-function output class or []."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Accumulated full or sparse array."
+            }
+          ]
+        },
+        {
+          "label": "B = accumarray(ind, data, sz, fun, fillval, issparse)",
+          "inputs": [
+            {
+              "name": "ind",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive one-based output subscripts."
+            },
+            {
+              "name": "data",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Scalar or vector data to accumulate."
+            },
+            {
+              "name": "sz",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "[]",
+              "description": "Positive output-size vector or []."
+            },
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "@sum",
+              "description": "Scalar-returning group function or []."
+            },
+            {
+              "name": "fillval",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "0",
+              "description": "Scalar fill matching the group-function output class or []."
+            },
+            {
+              "name": "issparse",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "false",
+              "description": "Logical or numeric scalar 0 or 1 selecting sparse output."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "B",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Accumulated full or sparse array."
             }
           ]
         }
@@ -3256,6 +3445,169 @@
           "identifier": "RunMat:grouping:TooLarge",
           "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
           "message": "grouping builtin: output is too large"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = accumarray(integer_ind, data, integer_sz)",
+          "inputs": [
+            {
+              "name": "ind",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive one-based subscripts accept every integer class or exactly integral floating values and are parsed without an f64 intermediary."
+            },
+            {
+              "name": "sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Explicit positive output dimensions accept every integer class or exactly integral floating values within platform and materialization bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Subscripts and explicit sizes remain exact through bounds checks and column-major linearization; oversized or unmaterializable results reject deterministically."
+        },
+        {
+          "form": "B = accumarray(ind, integer_data, sz, [])",
+          "inputs": [
+            {
+              "name": "data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Scalar or vector data accepts every integer class; scalar data expands in its native class before groups are formed."
+            },
+            {
+              "name": "fillval",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The default integer-data sum returns double, so its fill value must also be double rather than a typed integer."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "SameSizeOrScalar",
+          "notes": "The default sum follows sum's default integer rule and returns double; interactive GPU accumarray does not admit integer data."
+        },
+        {
+          "form": "B = accumarray(ind, integer_data, sz, fun, integer_fillval)",
+          "inputs": [
+            {
+              "name": "data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Scalar or vector data accepts every integer class and reaches the group computation as a native-class column vector."
+            },
+            {
+              "name": "fillval",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer fill value is valid when it has the same class as the scalar returned by the group computation."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "GpuRestricted",
+          "overload": "SameSizeOrScalar",
+          "notes": "Each group reaches fun as a native-class column vector; B has the class returned by fun, and any integer fill must match that class exactly."
+        },
+        {
+          "form": "B = accumarray(ind, integer_data, sz, fun, integer_fillval, true)",
+          "inputs": [
+            {
+              "name": "data",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Sparse accumarray output requires double input data; typed-integer data is rejected before accumulation."
+            },
+            {
+              "name": "fillval",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Sparse accumarray output requires a double zero or omitted fill; typed-integer fills are rejected."
+            },
+            {
+              "name": "issparse",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The sparse selector accepts logical or numeric scalar 0 or 1 in every integer class and rejects every other numeric value."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The documented sparse form is double-only for both data and group results and permits only an omitted or double-zero fill."
         }
       ]
     },
