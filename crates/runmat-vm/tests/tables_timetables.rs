@@ -89,6 +89,29 @@ fn array2table_compiled_surface_preserves_all_integer_classes() {
 }
 
 #[test]
+fn array2timetable_compiled_surface_preserves_all_integer_classes() {
+    let vars = execute_source(
+        "a = table2array(timetable2table(array2timetable(int8([-128 127]), 'SampleRate', int8(2)))); b = table2array(timetable2table(array2timetable(int16([-32768 32767]), 'SampleRate', int16(2)))); c = table2array(timetable2table(array2timetable(int32([-2147483648 2147483647]), 'SampleRate', int32(2)))); d = table2array(timetable2table(array2timetable(int64([-7 9]), 'SampleRate', int64(2)))); e = table2array(timetable2table(array2timetable(uint8([0 255]), 'SampleRate', uint8(2)))); f = table2array(timetable2table(array2timetable(uint16([0 65535]), 'SampleRate', uint16(2)))); g = table2array(timetable2table(array2timetable(uint32([0 4294967295]), 'SampleRate', uint32(2)))); base = uint64(9007199254740992); h = table2array(timetable2table(array2timetable(base + uint64([1 2]), 'SampleRate', uint64(2))));",
+    )
+    .expect("compiled array2timetable integer conversion");
+    for expected in [
+        IntegerStorage::I8(vec![-128, 127]),
+        IntegerStorage::I16(vec![-32768, 32767]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![-7, 9]),
+        IntegerStorage::U8(vec![0, 255]),
+        IntegerStorage::U16(vec![0, 65535]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            has_integer_storage(&vars, &expected),
+            "missing compiled storage {expected:?}"
+        );
+    }
+}
+
+#[test]
 fn timetable_conversion_surface_executes_from_scripts() {
     let vars = execute_source(
         "TT = timetable([1; 2], [10; 20], 'VariableNames', {'X'}); tf = istimetable(TT); H = head(TT, 1); tm = H.Time; T = timetable2table(TT, 'ConvertRowTimes', true); TT2 = table2timetable(T);",

@@ -6923,30 +6923,114 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(A, ...)",
+          "label": "TT = array2timetable(X, \"RowTimes\", rowTimes)",
           "inputs": [
             {
-              "name": "A",
+              "name": "X",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
+              "description": "Homogeneous array to split into timetable variables by column."
             },
             {
-              "name": "args",
+              "name": "rowTimes",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "Name-value options or conversion arguments."
+              "description": "Datetime or duration column vector labeling the rows."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "TT",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Timetable whose variables are the columns of X."
+            }
+          ]
+        },
+        {
+          "label": "TT = array2timetable(X, \"SampleRate\", Fs)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Homogeneous array to split into timetable variables by column."
+            },
+            {
+              "name": "Fs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive sample rate in samples per second."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "TT",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Timetable whose variables are the columns of X."
+            }
+          ]
+        },
+        {
+          "label": "TT = array2timetable(X, \"TimeStep\", dt)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Homogeneous array to split into timetable variables by column."
+            },
+            {
+              "name": "dt",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive duration or calendarDuration scalar time step."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "TT",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Timetable whose variables are the columns of X."
+            }
+          ]
+        },
+        {
+          "label": "TT = array2timetable(X, nameValuePairs...)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Homogeneous array to split into timetable variables by column."
+            },
+            {
+              "name": "nameValuePairs",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Timing, StartTime, VariableNames, or DimensionNames options."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "TT",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Timetable whose variables are the columns of X."
             }
           ]
         }
@@ -6981,6 +7065,70 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "array2timetable-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "array2timetable with an interactive resident GPU argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Array2TimetableGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "TT = array2timetable(integer_X, timingName,timingValue, Name,Value...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented homogeneous array domain includes all eight real integer classes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each X column becomes a timetable variable with X's exact authoritative integer storage and class; row times are stored separately. Interactive resident GPU arguments are mode-gated RunMat extensions that gather before timetable construction."
+        },
+        {
+          "form": "TT = array2timetable(X, \"SampleRate\", integer_Fs, Name,Value...)",
+          "inputs": [
+            {
+              "name": "Fs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive numeric scalar SampleRate control accepts every real integer class as well as floating scalars."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Fs is decoded as an exact positive scalar before the reciprocal seconds-to-days timing boundary; timetable variable classes are determined independently by X."
         }
       ]
     },

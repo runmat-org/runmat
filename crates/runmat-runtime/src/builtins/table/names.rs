@@ -45,26 +45,56 @@ pub(super) fn validate_array2table_names(
     row_names: &mut Option<Vec<String>>,
     dimension_names: Option<&[String]>,
 ) -> BuiltinResult<()> {
+    validate_tabular_conversion_names(
+        "array2table",
+        variable_names,
+        row_names,
+        dimension_names,
+        DEFAULT_ROW_DIM_NAME,
+    )
+}
+
+pub(super) fn validate_array2timetable_names(
+    variable_names: &[String],
+    dimension_names: Option<&[String]>,
+) -> BuiltinResult<()> {
+    let mut no_row_names = None;
+    validate_tabular_conversion_names(
+        "array2timetable",
+        variable_names,
+        &mut no_row_names,
+        dimension_names,
+        "Time",
+    )
+}
+
+fn validate_tabular_conversion_names(
+    context: &str,
+    variable_names: &[String],
+    row_names: &mut Option<Vec<String>>,
+    dimension_names: Option<&[String]>,
+    default_row_dimension_name: &str,
+) -> BuiltinResult<()> {
     let default_dimension_names = [
-        DEFAULT_ROW_DIM_NAME.to_string(),
+        default_row_dimension_name.to_string(),
         DEFAULT_VARIABLE_DIM_NAME.to_string(),
     ];
     let effective_dimension_names = dimension_names.unwrap_or(&default_dimension_names);
     if effective_dimension_names.len() != 2 {
-        return Err(invalid_variable(
-            "array2table: DimensionNames must contain exactly two names",
-        ));
+        return Err(invalid_variable(format!(
+            "{context}: DimensionNames must contain exactly two names"
+        )));
     }
-    validate_nonempty_distinct_names(effective_dimension_names, "dimension")?;
+    validate_nonempty_distinct_names(context, effective_dimension_names, "dimension")?;
     for name in effective_dimension_names {
         if is_reserved_table_name(name) {
             return Err(invalid_variable(format!(
-                "array2table: reserved dimension name '{name}'"
+                "{context}: reserved dimension name '{name}'"
             )));
         }
     }
 
-    validate_nonempty_distinct_names(variable_names, "variable")?;
+    validate_nonempty_distinct_names(context, variable_names, "variable")?;
     for name in variable_names {
         if is_reserved_table_name(name)
             || effective_dimension_names
@@ -72,7 +102,7 @@ pub(super) fn validate_array2table_names(
                 .any(|dimension_name| dimension_name == name)
         {
             return Err(invalid_variable(format!(
-                "array2table: reserved variable name '{name}'"
+                "{context}: reserved variable name '{name}'"
             )));
         }
     }
@@ -81,27 +111,31 @@ pub(super) fn validate_array2table_names(
         for name in names.iter_mut() {
             *name = name.trim().to_string();
         }
-        validate_nonempty_distinct_names(names, "row")?;
+        validate_nonempty_distinct_names(context, names, "row")?;
         if let Some(name) = names.iter().find(|name| name.contains(':')) {
             return Err(invalid_variable(format!(
-                "array2table: row name '{name}' must not contain a colon"
+                "{context}: row name '{name}' must not contain a colon"
             )));
         }
     }
     Ok(())
 }
 
-fn validate_nonempty_distinct_names(names: &[String], kind: &str) -> BuiltinResult<()> {
+fn validate_nonempty_distinct_names(
+    context: &str,
+    names: &[String],
+    kind: &str,
+) -> BuiltinResult<()> {
     let mut used = HashSet::new();
     for name in names {
         if name.trim().is_empty() {
             return Err(invalid_variable(format!(
-                "array2table: {kind} names must not be empty"
+                "{context}: {kind} names must not be empty"
             )));
         }
         if !used.insert(name.as_str()) {
             return Err(invalid_variable(format!(
-                "array2table: duplicate {kind} name '{name}'"
+                "{context}: duplicate {kind} name '{name}'"
             )));
         }
     }

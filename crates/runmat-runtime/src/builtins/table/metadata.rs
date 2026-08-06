@@ -304,6 +304,77 @@ const ARRAY2TABLE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
         description: "VariableNames, RowNames, or DimensionNames options.",
     },
 ];
+const ARRAY2TIMETABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "TT",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Timetable whose variables are the columns of X.",
+}];
+const ARRAY2TIMETABLE_INPUTS_ROW_TIMES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "rowTimes",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Datetime or duration column vector labeling the rows.",
+    },
+];
+const ARRAY2TIMETABLE_INPUTS_SAMPLE_RATE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "Fs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive sample rate in samples per second.",
+    },
+];
+const ARRAY2TIMETABLE_INPUTS_TIME_STEP: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "dt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive duration or calendarDuration scalar time step.",
+    },
+];
+const ARRAY2TIMETABLE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Timing, StartTime, VariableNames, or DimensionNames options.",
+    },
+];
 const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
     ty: BuiltinParamType::Any,
@@ -394,6 +465,28 @@ const ARRAY2TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         label: "T = array2table(A, nameValuePairs...)",
         inputs: &ARRAY2TABLE_INPUTS_NAME_VALUE,
         outputs: &ARRAY2TABLE_OUTPUT,
+    },
+];
+const ARRAY2TIMETABLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "TT = array2timetable(X, \"RowTimes\", rowTimes)",
+        inputs: &ARRAY2TIMETABLE_INPUTS_ROW_TIMES,
+        outputs: &ARRAY2TIMETABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TT = array2timetable(X, \"SampleRate\", Fs)",
+        inputs: &ARRAY2TIMETABLE_INPUTS_SAMPLE_RATE,
+        outputs: &ARRAY2TIMETABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TT = array2timetable(X, \"TimeStep\", dt)",
+        inputs: &ARRAY2TIMETABLE_INPUTS_TIME_STEP,
+        outputs: &ARRAY2TIMETABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TT = array2timetable(X, nameValuePairs...)",
+        inputs: &ARRAY2TIMETABLE_INPUTS_NAME_VALUE,
+        outputs: &ARRAY2TIMETABLE_OUTPUT,
     },
 ];
 const GROUPSUMMARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -535,6 +628,12 @@ pub const TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const ARRAY2TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ARRAY2TABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const ARRAY2TIMETABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ARRAY2TIMETABLE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,

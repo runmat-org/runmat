@@ -1923,6 +1923,315 @@ fn array2table_metadata_classifies_integer_and_gpu_forms() {
     assert_eq!(ARRAY2TABLE_EXTENSIONS, [ARRAY2TABLE_GPU_INPUT_EXTENSION]);
 }
 
+fn array2timetable_duration_row_times(days: Vec<f64>) -> Value {
+    crate::builtins::duration::duration_object_from_days_tensor(
+        Tensor::new(days.clone(), vec![days.len(), 1]).unwrap(),
+        "hh:mm:ss".to_string(),
+    )
+    .unwrap()
+}
+
+fn assert_array2timetable_duration_row_times(value: &Value, expected_days: &[f64]) {
+    let Value::Object(object) = value else {
+        panic!("expected timetable object");
+    };
+    let row_times = timetable_row_times(object)
+        .unwrap()
+        .expect("array2timetable row times");
+    let tensor =
+        crate::builtins::duration::duration_tensor_from_duration_value(&row_times).unwrap();
+    let actual = tensor.materialize_f64();
+    assert_eq!(actual.len(), expected_days.len());
+    for (actual, expected) in actual.iter().zip(expected_days) {
+        assert!(
+            (actual - expected).abs() <= f64::EPSILON,
+            "{actual} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn array2timetable_preserves_every_integer_storage_class_exactly() {
+    let row_times = array2timetable_duration_row_times(vec![0.0, 1.0]);
+    for storage in [
+        IntegerStorage::I8(vec![i8::MIN, -1, 0, i8::MAX]),
+        IntegerStorage::I16(vec![i16::MIN, -1, 0, i16::MAX]),
+        IntegerStorage::I32(vec![i32::MIN, -1, 0, i32::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, -1, 0, i64::MAX]),
+        IntegerStorage::U8(vec![0, 1, u8::MAX - 1, u8::MAX]),
+        IntegerStorage::U16(vec![0, 1, u16::MAX - 1, u16::MAX]),
+        IntegerStorage::U32(vec![0, 1, u32::MAX - 1, u32::MAX]),
+        IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX - 1, u64::MAX]),
+    ] {
+        let timetable = block_on(array2timetable_builtin(
+            Value::Tensor(Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap()),
+            vec![
+                Value::from("RowTimes"),
+                row_times.clone(),
+                Value::from("VariableNames"),
+                Value::StringArray(
+                    StringArray::new(vec!["A".into(), "B".into()], vec![1, 2]).unwrap(),
+                ),
+            ],
+        ))
+        .unwrap();
+        assert_array2timetable_duration_row_times(&timetable, &[0.0, 1.0]);
+        let Value::Tensor(round_trip) = block_on(table2array_builtin(
+            block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected typed integer array");
+        };
+        assert_eq!(round_trip.integer_storage(), Some(&storage));
+    }
+}
+
+#[test]
+fn array2timetable_accepts_every_integer_sample_rate_class() {
+    let input = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap());
+    for storage in [
+        IntegerStorage::I8(vec![2]),
+        IntegerStorage::I16(vec![2]),
+        IntegerStorage::I32(vec![2]),
+        IntegerStorage::I64(vec![2]),
+        IntegerStorage::U8(vec![2]),
+        IntegerStorage::U16(vec![2]),
+        IntegerStorage::U32(vec![2]),
+        IntegerStorage::U64(vec![2]),
+    ] {
+        let timetable = block_on(array2timetable_builtin(
+            input.clone(),
+            vec![
+                Value::from("SampleRate"),
+                Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap()),
+            ],
+        ))
+        .unwrap();
+        assert_array2timetable_duration_row_times(&timetable, &[0.0, 0.5 / 86_400.0]);
+    }
+}
+
+#[test]
+fn array2timetable_supports_current_timing_and_name_rules() {
+    let input = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+    let timetable = block_on(array2timetable_builtin(
+        input.clone(),
+        vec![
+            Value::from("TimeStep"),
+            array2timetable_duration_row_times(vec![0.25]),
+            Value::from("StartTime"),
+            array2timetable_duration_row_times(vec![1.0]),
+            Value::from("VariableNames"),
+            Value::StringArray(
+                StringArray::new(vec![" 1 café ".into(), "A".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::from("DimensionNames"),
+            Value::StringArray(
+                StringArray::new(vec!["Observations".into(), "Signals".into()], vec![1, 2])
+                    .unwrap(),
+            ),
+        ],
+    ))
+    .unwrap();
+    assert_array2timetable_duration_row_times(&timetable, &[1.0, 1.25]);
+    let object = object(timetable);
+    assert_eq!(
+        table_variable_names_from_object(&object).unwrap(),
+        vec![" 1 café ".to_string(), "A".to_string()]
+    );
+    assert_eq!(
+        table_public_properties(&object)
+            .unwrap()
+            .fields
+            .get(DIMENSION_NAMES),
+        Some(&Value::StringArray(
+            StringArray::new(vec!["Observations".into(), "Signals".into()], vec![1, 2]).unwrap()
+        ))
+    );
+
+    for options in [
+        Vec::new(),
+        vec![
+            Value::from("RowNames"),
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap()),
+        ],
+        vec![
+            Value::from("RowTimes"),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+        ],
+        vec![
+            Value::from("RowTimes"),
+            array2timetable_duration_row_times(vec![0.0, 1.0]),
+            Value::from("SampleRate"),
+            Value::Num(1.0),
+        ],
+        vec![
+            Value::from("RowTimes"),
+            array2timetable_duration_row_times(vec![0.0, 1.0]),
+            Value::from("StartTime"),
+            array2timetable_duration_row_times(vec![1.0]),
+        ],
+        vec![
+            Value::from("SampleRate"),
+            Value::Num(1.0),
+            Value::from("DimensionNames"),
+            Value::StringArray(StringArray::new(vec!["A".into(), "A".into()], vec![1, 2]).unwrap()),
+        ],
+    ] {
+        let error = block_on(array2timetable_builtin(input.clone(), options))
+            .expect_err("invalid array2timetable form must reject");
+        assert!(
+            error.message.contains("array2timetable"),
+            "{}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn array2timetable_calendar_step_uses_datetime_calendar_arithmetic() {
+    let start = crate::builtins::datetime::datetime_object_from_serial_tensor(
+        Tensor::new(vec![739_282.0], vec![1, 1]).unwrap(),
+        "yyyy-MM-dd".to_string(),
+    )
+    .unwrap();
+    let mut step = ObjectInstance::new("calendarDuration".to_string());
+    step.properties.insert(
+        "__months".to_string(),
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+    );
+    step.properties.insert(
+        "__days".to_string(),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+    );
+    let timetable = block_on(array2timetable_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
+        vec![
+            Value::from("TimeStep"),
+            Value::Object(step),
+            Value::from("StartTime"),
+            start,
+        ],
+    ))
+    .unwrap();
+    let Value::Object(object) = timetable else {
+        panic!("expected timetable object");
+    };
+    let row_times = timetable_row_times(&object).unwrap().unwrap();
+    let serials = crate::builtins::datetime::serials_from_datetime_value(&row_times).unwrap();
+    assert_eq!(
+        serials.materialize_f64(),
+        vec![739_282.0, 739_311.0, 739_342.0]
+    );
+}
+
+#[test]
+fn array2timetable_resident_integer_input_is_mode_gated_and_gathers_exactly() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let row_times = array2timetable_duration_row_times(vec![0.0, 1.0]);
+        for storage in [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ] {
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap(),
+            )
+            .unwrap();
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(array2timetable_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::from("RowTimes"), row_times.clone()],
+                ))
+                .expect_err("MATLAB mode must reject interactive GPU input");
+                assert_eq!(
+                    error.identifier(),
+                    ARRAY2TIMETABLE_GPU_INPUT_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let timetable = block_on(array2timetable_builtin(
+                    Value::GpuTensor(handle),
+                    vec![Value::from("RowTimes"), row_times.clone()],
+                ))
+                .unwrap();
+                let Value::Tensor(round_trip) = block_on(table2array_builtin(
+                    block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+                ))
+                .unwrap() else {
+                    panic!("expected typed integer array");
+                };
+                assert_eq!(round_trip.integer_storage(), Some(&storage));
+            }
+        }
+    });
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn array2timetable_wgpu_gathers_every_resident_integer_class_exactly() {
+    let _guard = crate::builtins::common::test_support::accel_test_lock();
+    if !register_wgpu_provider_available() {
+        return;
+    }
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+    let row_times = array2timetable_duration_row_times(vec![0.0, 1.0]);
+    for storage in [
+        IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+        IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+        IntegerStorage::U8(vec![0, u8::MAX]),
+        IntegerStorage::U16(vec![0, u16::MAX]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+    ] {
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(
+            provider,
+            &Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap(),
+        )
+        .unwrap();
+        let timetable = block_on(array2timetable_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::from("RowTimes"), row_times.clone()],
+        ))
+        .unwrap();
+        let Value::Tensor(round_trip) = block_on(table2array_builtin(
+            block_on(timetable2table_builtin(timetable, Vec::new())).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected typed integer array");
+        };
+        assert_eq!(round_trip.integer_storage(), Some(&storage));
+    }
+}
+
+#[test]
+fn array2timetable_metadata_classifies_integer_and_gpu_forms() {
+    assert_eq!(ARRAY2TIMETABLE_INTEGER_CAPABILITIES.len(), 2);
+    assert_eq!(
+        ARRAY2TIMETABLE_INTEGER_CAPABILITIES[0].output_class,
+        runmat_builtins::BuiltinIntegerOutputClassRule::PreserveInput
+    );
+    assert_eq!(
+        ARRAY2TIMETABLE_INTEGER_CAPABILITIES[1].overload,
+        runmat_builtins::BuiltinIntegerOverloadKind::StructuralParameter
+    );
+    assert_eq!(
+        ARRAY2TIMETABLE_EXTENSIONS,
+        [ARRAY2TIMETABLE_GPU_INPUT_EXTENSION]
+    );
+}
+
 #[test]
 fn explicit_variable_names_reject_duplicates_and_accept_current_identifiers() {
     let duplicate = block_on(table_builtin(vec![

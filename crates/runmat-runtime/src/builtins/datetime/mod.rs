@@ -1286,6 +1286,68 @@ pub(crate) fn datetime_format_from_value(value: &Value) -> String {
     }
 }
 
+pub(crate) fn datetime_row_times_from_calendar_step(
+    start: &Value,
+    step: &Value,
+    count: usize,
+) -> BuiltinResult<Value> {
+    let start_serials = serials_from_datetime_value(start)?;
+    if start_serials.len() != 1 {
+        return Err(datetime_error(
+            "array2timetable: StartTime must be a scalar",
+        ));
+    }
+    let (months, days) = calendar_duration_tensors_from_value(step)?;
+    if months.len() != 1 || days.len() != 1 {
+        return Err(datetime_error("array2timetable: TimeStep must be a scalar"));
+    }
+    let month_step = tensor::tensor_value_f64(&months, 0);
+    let day_step = tensor::tensor_value_f64(&days, 0);
+    if !month_step.is_finite() || !day_step.is_finite() {
+        return Err(datetime_error("array2timetable: TimeStep must be finite"));
+    }
+    let one_month_step = Tensor::new(vec![month_step], vec![1, 1])
+        .map_err(|error| datetime_error(format!("array2timetable: {error}")))?;
+    let one_day_step = Tensor::new(vec![day_step], vec![1, 1])
+        .map_err(|error| datetime_error(format!("array2timetable: {error}")))?;
+    let (next_serial, _) = apply_calendar_duration_to_serials(
+        &start_serials,
+        &one_month_step,
+        &one_day_step,
+        1.0,
+        "array2timetable",
+    )?;
+    if next_serial[0] <= tensor::tensor_value_f64(&start_serials, 0) {
+        return Err(datetime_error("array2timetable: TimeStep must be positive"));
+    }
+    let mut serials = Vec::with_capacity(count);
+    for index in 0..count {
+        let factor = index as f64;
+        let month_offset = Tensor::new(vec![month_step * factor], vec![1, 1])
+            .map_err(|error| datetime_error(format!("array2timetable: {error}")))?;
+        let day_offset = Tensor::new(vec![day_step * factor], vec![1, 1])
+            .map_err(|error| datetime_error(format!("array2timetable: {error}")))?;
+        let (value, _) = apply_calendar_duration_to_serials(
+            &start_serials,
+            &month_offset,
+            &day_offset,
+            1.0,
+            "array2timetable",
+        )?;
+        serials.push(value[0]);
+    }
+    if count > 1 && serials.windows(2).any(|pair| pair[1] <= pair[0]) {
+        return Err(datetime_error(
+            "array2timetable: TimeStep must produce increasing row times",
+        ));
+    }
+    datetime_object_from_serial_tensor(
+        Tensor::new(serials, vec![count, 1])
+            .map_err(|error| datetime_error(format!("array2timetable: {error}")))?,
+        datetime_format_from_value(start),
+    )
+}
+
 pub fn datetime_string_array(value: &Value) -> BuiltinResult<Option<StringArray>> {
     let Value::Object(obj) = value else {
         return Ok(None);

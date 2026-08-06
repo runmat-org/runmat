@@ -91,15 +91,7 @@ fn apply_array2table_dimension_names(
             "array2table: internal table construction failed",
         ));
     };
-    let mut properties = table_public_properties(object)?;
-    properties.insert(
-        DIMENSION_NAMES,
-        Value::StringArray(
-            StringArray::new(dimension_names, vec![1, 2])
-                .map_err(|error| invalid_variable(format!("array2table: {error}")))?,
-        ),
-    );
-    sync_table_properties(object, properties);
+    set_table_dimension_names(object, dimension_names, "array2table")?;
     Ok(table)
 }
 
