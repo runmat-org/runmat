@@ -484,9 +484,14 @@ pub async fn vm_dynamic_workspace_builtin(
         }
         VmDynamicWorkspaceBuiltin::Assignin => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 3)?;
+            if requested_outputs > 0 {
+                return Err(
+                    runmat_runtime::builtins::introspection::dynamic_workspace::assignin_too_many_outputs_error(),
+                );
+            }
             let target = workspace_target_arg(builtin.name(), &args[0])?;
             let name = workspace_text_arg(builtin.name(), &args[1])?;
-            if !is_valid_workspace_identifier(&name) {
+            if !runmat_runtime::builtins::common::identifiers::is_valid_varname(&name) {
                 return Err(mex(
                     "DynamicWorkspaceName",
                     &format!(
@@ -514,6 +519,7 @@ pub async fn vm_dynamic_workspace_builtin(
             let source_context = DynamicSourceContext {
                 source_id: dynamic_source_id,
                 name: source.display_name.clone(),
+                fullpath_name: None,
                 text: source.text.clone(),
             };
             eval_workspace_source(
@@ -587,6 +593,7 @@ async fn execute_runtests_case(
     let source_context = DynamicSourceContext {
         source_id: dynamic_source_id,
         name: case.display_name.clone(),
+        fullpath_name: None,
         text: case.source.clone(),
     };
     let eval_result = eval_workspace_source(
@@ -698,15 +705,6 @@ fn workspace_target_arg(builtin: &str, value: &Value) -> Result<WorkspaceTarget,
             &format!("{builtin}: workspace selector must be 'base' or 'caller'"),
         )),
     }
-}
-
-fn is_valid_workspace_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 struct WorkspaceEvalRequest {
@@ -826,6 +824,7 @@ async fn eval_workspace_source(
 struct DynamicSourceContext {
     source_id: runmat_hir::SourceId,
     name: String,
+    fullpath_name: Option<String>,
     text: String,
 }
 
@@ -837,16 +836,23 @@ fn install_dynamic_source_context(
     entries.push((
         context.source_id,
         context.name.clone(),
-        None,
+        context.fullpath_name.clone(),
         context.text.clone(),
     ));
     runmat_runtime::source_context::replace_source_catalog_with_fullpaths(entries)
 }
 
 fn dynamic_source_context(name: impl Into<String>, text: &str) -> DynamicSourceContext {
+    let fallback_name = name.into();
+    let current_source = runmat_runtime::source_context::current_source_info();
     DynamicSourceContext {
         source_id: next_dynamic_source_id(),
-        name: name.into(),
+        name: current_source
+            .as_ref()
+            .map(|source| source.name.to_string())
+            .unwrap_or(fallback_name),
+        fullpath_name: current_source
+            .and_then(|source| source.fullpath_name.map(|path| path.to_string())),
         text: text.to_string(),
     }
 }

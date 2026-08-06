@@ -30,6 +30,7 @@ futures = "0.3"
 default = ["native-accel", "plot-core"]
 test-classes = ["runmat-runtime/test-classes"]
 native-accel = ["runmat-accelerate", "runmat-accelerate-api"]
+wgpu = ["native-accel", "runmat-accelerate/wgpu"]
 plot-core = ["runmat-runtime/plot-core"]
 
 [dev-dependencies]

@@ -8119,6 +8119,47 @@
           "identifier": "RunMat:DynamicWorkspaceRequiresVm",
           "when": "A dynamic workspace builtin is dispatched outside the VM workspace frame.",
           "message": "dynamic workspace builtin requires VM workspace context"
+        },
+        {
+          "code": "RM.ASSIGNIN.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:assignin:TooManyOutputs",
+          "when": "One or more outputs are requested from assignin.",
+          "message": "assignin: too many output arguments"
+        },
+        {
+          "code": "RM.ASSIGNIN.INVALID_NAME",
+          "identifier": "RunMat:DynamicWorkspaceName",
+          "when": "The variable-name argument is not a valid MATLAB variable name.",
+          "message": "assignin: invalid workspace variable name"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "assignin(ws, var, integer_val)",
+          "inputs": [
+            {
+              "name": "val",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented value domain accepts any data type, including scalar or array values from every real integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Assignment clones the already evaluated value into the selected workspace without numeric conversion, preserving exact integer class, shape, authoritative storage, and resident provider ownership. The public builtin has no output."
         }
       ]
     },

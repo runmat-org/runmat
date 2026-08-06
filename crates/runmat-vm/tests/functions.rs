@@ -1601,6 +1601,91 @@ fn dynamic_workspace_evalin_caller_from_function_targets_vm_script_workspace() {
 }
 
 #[test]
+fn assignin_compiled_transfer_preserves_all_integer_classes_exactly() {
+    let vars = execute_source(
+        "assignin('base','ai_i8',int8([-128 127])); assignin('base','ai_i16',int16([-32768 32767])); assignin('base','ai_i32',int32([-2147483648 2147483647])); assignin('base','ai_i64',int64([-7 9])); assignin('base','ai_u8',uint8([0 255])); assignin('base','ai_u16',uint16([0 65535])); assignin('base','ai_u32',uint32([0 4294967295])); base = uint64(9007199254740992); assignin('base','ai_u64',base + uint64([1 2]));",
+    );
+    for expected in [
+        runmat_builtins::IntegerStorage::I8(vec![-128, 127]),
+        runmat_builtins::IntegerStorage::I16(vec![-32768, 32767]),
+        runmat_builtins::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        runmat_builtins::IntegerStorage::I64(vec![-7, 9]),
+        runmat_builtins::IntegerStorage::U8(vec![0, 255]),
+        runmat_builtins::IntegerStorage::U16(vec![0, u16::MAX]),
+        runmat_builtins::IntegerStorage::U32(vec![0, u32::MAX]),
+        runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            vars.iter().any(|value| {
+                matches!(
+                    value,
+                    runmat_builtins::Value::Tensor(tensor)
+                        if tensor.integer_storage() == Some(&expected)
+                )
+            }),
+            "missing exact assignin storage {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn assignin_preserves_resident_integer_provider_ownership() {
+    runmat_accelerate::simple_provider::register_inprocess_provider();
+    let vars = execute_source(
+        "base = uint64(9007199254740992); source_gpu = gpuArray([base + uint64(1) intmax('uint64')]); assignin('base','assigned_gpu',source_gpu); copied = evalin('base','gather(assigned_gpu)');",
+    );
+    let resident_ids = vars
+        .iter()
+        .filter_map(|value| match value {
+            runmat_builtins::Value::GpuTensor(handle) => Some(handle.buffer_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        resident_ids.iter().any(|id| resident_ids
+            .iter()
+            .filter(|candidate| *candidate == id)
+            .count()
+            >= 2),
+        "assignin should clone the same resident handle, got {resident_ids:?}"
+    );
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            runmat_builtins::Value::Tensor(tensor)
+                if tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::U64(vec![
+                        9_007_199_254_740_993,
+                        u64::MAX,
+                    ]))
+        )
+    }));
+}
+
+#[test]
+fn assignin_rejects_outputs_and_invalid_variable_names() {
+    let output_err = execute_source_result("out = assignin('base', 'x', uint64(1));")
+        .expect_err("assignin must expose no output");
+    assert_eq!(
+        output_err.identifier(),
+        Some("RunMat:assignin:TooManyOutputs")
+    );
+
+    for name in ["_leading", "for", "éclair"] {
+        let source = format!("assignin('base', '{name}', int8(1));");
+        let err = execute_source_result(&source).expect_err("invalid variable name must reject");
+        assert_eq!(err.identifier(), Some("RunMat:DynamicWorkspaceName"));
+    }
+
+    let overlong = format!(
+        "assignin('base', '{}', uint8(1));",
+        "a".repeat(runmat_runtime::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX + 1)
+    );
+    let err = execute_source_result(&overlong).expect_err("overlong variable name must reject");
+    assert_eq!(err.identifier(), Some("RunMat:DynamicWorkspaceName"));
+}
+
+#[test]
 fn dynamic_workspace_invalid_selector_errors_are_catchable() {
     let vars = execute_source(
         r#"

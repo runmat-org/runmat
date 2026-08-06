@@ -176,6 +176,8 @@ Dynamic-object `addprop` accepts a `dynamicprops` receiver plus a character-vect
 
 `assert` accepts every real integer condition class through exact logical conversion: the condition is true only when nonempty and every element is nonzero, empty conditions fail, and no public output exists. NaN cannot convert to logical. The documented message-replacement A domain includes numeric scalars, so all eight integer classes retain exact formatting values, including after client-side gpuArray gather. Qualified identifiers must contain colon-separated fields with the public letter-first grammar. Complex conditions and automatic `RunMat:` qualification of unqualified identifiers are separately registered RunMat-only extensions; they are not presented as MATLAB-compatible behavior.
 
+`assignin` accepts any scalar or array value and transfers the already evaluated value into the `base` or `caller` workspace without numeric conversion. All eight integer classes therefore retain exact class, shape, and authoritative storage, including wide `uint64`; resident values retain provider ownership without gather or kernel execution. The destination name must satisfy the current public variable-name grammar—an English letter followed by English letters, digits, or underscores, no keyword, and at most `namelengthmax` characters—and cannot contain indexing. The builtin exposes no output, so assigning its call result is an error.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:
