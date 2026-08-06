@@ -593,6 +593,18 @@ fn distribution_compatibility_surface_executes_from_scripts() {
 }
 
 #[test]
+fn binocdf_integer_extensions_cover_every_class_and_preserve_single_output() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "x = [binocdf(int8(1),2,0.5) binocdf(int16(1),2,0.5) binocdf(int32(1),2,0.5) binocdf(int64(1),2,0.5) binocdf(uint8(1),2,0.5) binocdf(uint16(1),2,0.5) binocdf(uint32(1),2,0.5) binocdf(uint64(1),2,0.5)]; n = [binocdf(0,int8(1),0.5) binocdf(0,int16(1),0.5) binocdf(0,int32(1),0.5) binocdf(0,int64(1),0.5) binocdf(0,uint8(1),0.5) binocdf(0,uint16(1),0.5) binocdf(0,uint32(1),0.5) binocdf(0,uint64(1),0.5)]; p = [binocdf(0,1,int8(1)) binocdf(0,1,int16(1)) binocdf(0,1,int32(1)) binocdf(0,1,int64(1)) binocdf(0,1,uint8(1)) binocdf(0,1,uint16(1)) binocdf(0,1,uint32(1)) binocdf(0,1,uint64(1))]; score = sum(x) + sum(n) + sum(p); integer_class = class(x); single_class = class(binocdf(single([1 1]),2,0.5));",
+    )
+    .expect("binocdf integer extension script");
+    assert!(has_num(&vars, 10.0));
+    assert!(has_string(&vars, "double"));
+    assert!(has_string(&vars, "single"));
+}
+
+#[test]
 fn mvnrnd_surface_executes_from_scripts() {
     let vars = execute_source(
         "rng('default'); R = mvnrnd([1 2], [4 1; 1 9], 5); S = mvnrnd([0 0; 10 20], cat(3, eye(2), [4 0; 0 9])); T = mvnrnd([0 0], [1 4], 3); U = mvnrnd([0; 10; 20], 4); rcheck = 100*size(R,1)+size(R,2); scheck = 100*size(S,1)+size(S,2); tcheck = 100*size(T,1)+size(T,2); ucheck = 100*size(U,1)+size(U,2); r11 = R(1,1); s22 = S(2,2);",

@@ -10540,6 +10540,115 @@
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normal distribution: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "binocdf-integer-x",
+          "mode": "RunMatOnly",
+          "description": "binocdf with typed-integer evaluation points is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinocdfIntegerXExtension"
+        },
+        {
+          "id": "binocdf-integer-trials",
+          "mode": "RunMatOnly",
+          "description": "binocdf with typed-integer trial counts is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinocdfIntegerTrialsExtension"
+        },
+        {
+          "id": "binocdf-integer-probability",
+          "mode": "RunMatOnly",
+          "description": "binocdf with typed-integer probabilities is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinocdfIntegerProbabilityExtension"
+        },
+        {
+          "id": "binocdf-logical-input",
+          "mode": "RunMatOnly",
+          "description": "binocdf with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinocdfLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "y = binocdf(x, n, p) with integer x",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer evaluation points are gated by binocdf-integer-x and enter the floating binomial-CDF boundary without an integer compatibility mirror."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed-integer x values produce double probabilities unless a documented single input makes the output single; resident inputs use host fallback and the result is re-uploaded to the owning provider."
+        },
+        {
+          "form": "y = binocdf(x, n, p) with integer n",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer trial counts are gated by binocdf-integer-trials and must be exactly representable at the documented floating computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed-integer n values produce double probabilities unless a documented single input makes the output single, after an exact-representability check at the binary64 boundary."
+        },
+        {
+          "form": "y = binocdf(x, n, p) with integer p",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer probabilities are gated by binocdf-integer-probability; only values in the ordinary probability domain can produce non-NaN results."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed-integer p values produce double probabilities unless a documented single input makes the output single; resident inputs use host fallback and preserve output residency."
+        }
       ]
     },
     {
