@@ -237,6 +237,9 @@ mod tests {
                 ("atan", "atan-integer-input"),
                 ("atan", "atan-like-output-template"),
                 ("atan", "atan-logical-input"),
+                ("atan2", "atan2-character-input"),
+                ("atan2", "atan2-integer-input"),
+                ("atan2", "atan2-logical-input"),
                 ("atanh", "atanh-character-input"),
                 ("atanh", "atanh-gpu-real-complex-promotion"),
                 ("atanh", "atanh-integer-input"),
@@ -508,6 +511,7 @@ mod tests {
             "accept",
             "area",
             "array2table",
+            "atan2",
         ] {
             let builtin = registered
                 .iter()

@@ -14,6 +14,11 @@ fn execute_source(source: &str) -> Vec<Value> {
     interpret(&bytecode).expect("execute bytecode")
 }
 
+fn execute_source_result(source: &str) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
+    let bytecode = compile_source(source).expect("compile source");
+    interpret(&bytecode).map_err(Box::new)
+}
+
 fn matlab_single_quoted_path(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
 }
@@ -775,6 +780,28 @@ fn atan2_explicit_comma_list_argument_path_unpacks_before_call() {
         ),
         "atan2(C{{:}}) should lower through expand-multi-output call shape, not fixed-arity builtin call"
     );
+}
+
+#[test]
+fn atan2_compiled_dispatch_gates_integer_extension() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let error = execute_source_result("y = atan2(uint64(18446744073709551615), 1);")
+        .expect_err("integer atan2 must be gated");
+    assert!(
+        error
+            .to_string()
+            .contains("atan2 with typed-integer input is a RunMat extension"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn atan2_compiled_dispatch_accepts_all_wide_integer_bits_in_extension_mode() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("y = atan2(uint64(18446744073709551615), 1);");
+    let actual: f64 = (&vars[0]).try_into().expect("convert atan2 result");
+    let expected = (u64::MAX as f64).atan2(1.0);
+    assert_eq!(actual, expected);
 }
 
 #[test]

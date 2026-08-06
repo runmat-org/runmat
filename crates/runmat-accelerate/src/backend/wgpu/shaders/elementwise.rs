@@ -1050,7 +1050,7 @@ fn apply(a: f64, b: f64) -> f64 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return atan2(a, b); }
+        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u64>(b) == 0x8000000000000000u), (a == 0.0) && (b == 0.0)); }
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -1100,7 +1100,7 @@ fn apply(a: f32, b: f32) -> f32 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return atan2(a, b); }
+        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u32>(b) == 0x80000000u), (a == 0.0) && (b == 0.0)); }
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -1163,7 +1163,7 @@ fn apply(a: f64, b: f64) -> f64 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return atan2(a, b); }
+        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u64>(b) == 0x8000000000000000u), (a == 0.0) && (b == 0.0)); }
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -1248,7 +1248,7 @@ fn apply(a: f32, b: f32) -> f32 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return atan2(a, b); }
+        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u32>(b) == 0x80000000u), (a == 0.0) && (b == 0.0)); }
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }

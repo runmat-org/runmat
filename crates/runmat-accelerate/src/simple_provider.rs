@@ -6155,7 +6155,11 @@ impl AccelProvider for InProcessProvider {
             }
             let mut out = vec![0.0; ybuf.len()];
             for idx in 0..ybuf.len() {
-                out[idx] = ybuf[idx].atan2(xbuf[idx]);
+                out[idx] = if ybuf[idx] == 0.0 && xbuf[idx] == 0.0 && xbuf[idx].is_sign_negative() {
+                    0.0
+                } else {
+                    ybuf[idx].atan2(xbuf[idx])
+                };
             }
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);

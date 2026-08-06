@@ -8338,14 +8338,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Numerator operand."
+              "description": "Real single/double y-coordinate; integer, logical, and character forms are RunMat-only extensions."
             },
             {
               "name": "X",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Denominator operand."
+              "description": "Real single/double x-coordinate; integer, logical, and character forms are RunMat-only extensions."
             }
           ],
           "outputs": [
@@ -8363,7 +8363,7 @@
         {
           "code": "RM.ATAN2.INVALID_INPUT",
           "identifier": "RunMat:atan2:InvalidInput",
-          "when": "An input cannot be interpreted as supported numeric/logical/char data.",
+          "when": "An input cannot be interpreted as supported real numeric data.",
           "message": "atan2: invalid input"
         },
         {
@@ -8383,6 +8383,77 @@
           "identifier": "RunMat:atan2:Internal",
           "when": "Internal gather/conversion/allocation/provider flow failed.",
           "message": "atan2: internal error"
+        },
+        {
+          "code": "RM.ATAN2.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:atan2:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "atan2: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "atan2-integer-input",
+          "mode": "RunMatOnly",
+          "description": "atan2 with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Atan2IntegerInputExtension"
+        },
+        {
+          "id": "atan2-logical-input",
+          "mode": "RunMatOnly",
+          "description": "atan2 with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Atan2LogicalInputExtension"
+        },
+        {
+          "id": "atan2-character-input",
+          "mode": "RunMatOnly",
+          "description": "atan2 with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Atan2CharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Z = atan2(integer_Y, integer_X)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented domain is real single/double; RunMat mode additionally accepts every real integer class for Y."
+            },
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented domain is real single/double; RunMat mode additionally accepts every real integer class for X."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer operands cross one explicit binary64 atan2 boundary after compatible-size expansion. Resident inputs gather exactly and the floating result returns to the owning provider."
         }
       ]
     },
