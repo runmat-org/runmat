@@ -1,9 +1,10 @@
 //! Dependency-detail helpers for Text Analytics tokenized documents.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray,
+    ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -55,6 +56,12 @@ pub const ADD_DEPENDENCY_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescript
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+const ADD_DEPENDENCY_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "addDependencyDetails accepts and returns tokenizedDocument objects only; it has no numeric arguments, and the Head token indices exposed through tokenDetails are double metadata rather than integer-class results.",
+    };
 
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
@@ -69,6 +76,9 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     type_resolver(any_type),
     descriptor(
         crate::builtins::strings::text_analytics::dependencies::ADD_DEPENDENCY_DETAILS_DESCRIPTOR
+    ),
+    integer_audit(
+        crate::builtins::strings::text_analytics::dependencies::ADD_DEPENDENCY_DETAILS_INTEGER_AUDIT
     ),
     builtin_path = "crate::builtins::strings::text_analytics::dependencies"
 )]

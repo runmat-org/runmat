@@ -146,6 +146,8 @@ The adjacent descriptive functions likewise retain their individually documented
 
 `corrcov` and `cov2corr` are distinct public APIs rather than aliases. `corrcov` documents single/double symmetric positive-semidefinite covariance input, correlation-first output with a column standard-deviation vector, and full GPU support; RunMat independently gates integer and logical covariance input. Finance Toolbox `cov2corr` documents double covariance input and returns a row standard-deviation vector before the correlation matrix; RunMat independently gates single, integer, logical, and resident-GPU inputs. Integer extensions validate symmetry from exact storage before entering double square-root and normalization arithmetic, and supported resident integer inputs use explicit gather fallback.
 
+The tokenized-document enrichment cohort `addDependencyDetails`, `addEntityDetails`, `addLemmaDetails`, `addPartOfSpeechDetails`, `addSentenceDetails`, and `addTypeDetails` has no public integer data surface. Each function accepts and returns a `tokenizedDocument`; the five `DiscardKnownValues` controls are documented logical scalars and reject numeric or integer 0/1 values. Sentence-number and dependency-head columns exposed later by `tokenDetails` are double object metadata rather than integer-class results, so the six enrichment functions are explicitly classified as integer-inapplicable.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

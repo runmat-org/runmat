@@ -3851,7 +3851,11 @@
           "when": "Input is not a supported tokenizedDocument object.",
           "message": "addDependencyDetails: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "addDependencyDetails accepts and returns tokenizedDocument objects only; it has no numeric arguments, and the Head token indices exposed through tokenDetails are double metadata rather than integer-class results."
+      }
     },
     {
       "name": "addEntityDetails",
@@ -3915,7 +3919,11 @@
           "when": "Input is not a supported tokenizedDocument object or option form.",
           "message": "addEntityDetails: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "addEntityDetails accepts a tokenizedDocument, text or model options, and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores categorical entity tags."
+      }
     },
     {
       "name": "addLemmaDetails",
@@ -3962,7 +3970,7 @@
             },
             {
               "name": "tf",
-              "ty": "Any",
+              "ty": "LogicalArray",
               "arity": "Required",
               "default": "false",
               "description": "Whether to recompute existing lemma details."
@@ -3986,7 +3994,11 @@
           "when": "Input is not a supported tokenizedDocument object or option form.",
           "message": "addLemmaDetails: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "addLemmaDetails accepts a tokenizedDocument and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores text lemma metadata."
+      }
     },
     {
       "name": "addPartOfSpeechDetails",
@@ -4050,7 +4062,11 @@
           "when": "Input is not a supported tokenizedDocument object or option form.",
           "message": "addPartOfSpeechDetails: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "addPartOfSpeechDetails accepts a tokenizedDocument, text options, and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores categorical part-of-speech tags."
+      }
     },
     {
       "name": "addSentenceDetails",
@@ -4114,7 +4130,11 @@
           "when": "Input is not a supported tokenizedDocument object or option form.",
           "message": "addSentenceDetails: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "addSentenceDetails accepts a tokenizedDocument plus text collections and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores sentence numbers as double metadata."
+      }
     },
     {
       "name": "addTypeDetails",
@@ -4178,7 +4198,11 @@
           "when": "Input is not a supported tokenizedDocument object or option form.",
           "message": "addTypeDetails: invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "addTypeDetails accepts a tokenizedDocument plus text collections and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores categorical token types."
+      }
     },
     {
       "name": "addlistener",
