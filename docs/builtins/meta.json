@@ -9237,6 +9237,62 @@
           "when": "Inputs do not match a supported bagOfNgrams form.",
           "message": "bagOfNgrams: invalid input"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "bag = bagOfNgrams(uniqueNgrams, integer_counts, ...)",
+          "inputs": [
+            {
+              "name": "counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Explicit count matrices accept every integer class and require nonnegative values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Counts remain authoritative through nonnegative-integer validation and column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object."
+        },
+        {
+          "form": "bag = bagOfNgrams(..., \"NgramLengths\", integer_lengths)",
+          "inputs": [
+            {
+              "name": "lengths",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "NgramLengths accepts positive integer scalars or vectors from every integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Lengths are converted exactly into bounded host indices and returned as double object metadata; the result has no integer-class output."
+        }
       ]
     },
     {

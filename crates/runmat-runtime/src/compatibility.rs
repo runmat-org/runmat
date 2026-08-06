@@ -515,6 +515,7 @@ mod tests {
             "audioread",
             "axes",
             "axis",
+            "bagOfNgrams",
         ] {
             let builtin = registered
                 .iter()

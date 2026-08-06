@@ -4,10 +4,13 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, ObjectInstance, PropertyDef, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ClassDef, IntegerStorage, NumericScalar, ObjectInstance,
+    PropertyDef, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -18,7 +21,7 @@ use crate::builtins::strings::text_analytics::documents::{
     checked_count_len, documents_from_object, is_nonnegative_integer_count, words_from_word_vector,
     words_from_word_vector_preserving_missing, TOKENIZED_DOCUMENT_CLASS,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
+use crate::{build_runtime_error, BuiltinResult};
 
 pub const BAG_OF_NGRAMS_CLASS: &str = "bagOfNgrams";
 
@@ -142,6 +145,45 @@ pub const BAG_OF_NGRAMS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const BAG_OF_NGRAMS_COUNTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "counts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Explicit count matrices accept every integer class and require nonnegative values.",
+    }];
+const BAG_OF_NGRAMS_LENGTHS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "lengths",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "NgramLengths accepts positive integer scalars or vectors from every integer class.",
+    }];
+pub const BAG_OF_NGRAMS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "bag = bagOfNgrams(uniqueNgrams, integer_counts, ...)",
+        inputs: &BAG_OF_NGRAMS_COUNTS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Counts remain authoritative through nonnegative-integer validation and column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "bag = bagOfNgrams(..., \"NgramLengths\", integer_lengths)",
+        inputs: &BAG_OF_NGRAMS_LENGTHS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Lengths are converted exactly into bounded host indices and returned as double object metadata; the result has no integer-class output.",
+    },
+];
+
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -199,11 +241,18 @@ fn property_def(name: &str) -> PropertyDef {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::ngrams::BAG_OF_NGRAMS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::ngrams::BAG_OF_NGRAMS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::ngrams"
 )]
 async fn bag_of_ngrams_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let gathered = gather_args(args).await?;
-    let parsed = parse_args(gathered)?;
+    if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
+        return Err(ngrams_error(
+            "bagOfNgrams: GPU-resident inputs are not supported",
+        ));
+    }
+    let parsed = parse_args(args)?;
     match parsed.source {
         NgramSource::Empty => bag_object(Vec::new(), parsed.lengths, Vec::new(), 0),
         NgramSource::Documents(documents) => bag_from_documents(documents, parsed.lengths),
@@ -213,18 +262,6 @@ async fn bag_of_ngrams_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             requested_lengths,
         } => bag_from_unique_ngrams(ngrams, counts, requested_lengths),
     }
-}
-
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(
-            gather_if_needed_async(&arg).await.map_err(|err| {
-                ngrams_error(format!("bagOfNgrams: failed to gather input: {err}"))
-            })?,
-        );
-    }
-    Ok(out)
 }
 
 struct ParsedArgs {
@@ -262,6 +299,11 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<ParsedArgs> {
     if args.len() >= 2 && !is_option_name(&args[1], "NgramLengths") {
         let counts = match &args[1] {
             Value::Tensor(tensor) => tensor.clone(),
+            Value::Num(value) => Tensor::new(vec![*value], vec![1, 1]).map_err(ngrams_error)?,
+            Value::Int(value) => {
+                Tensor::new_integer(IntegerStorage::from_scalar(value.clone()), vec![1, 1])
+                    .map_err(ngrams_error)?
+            }
             other => {
                 return Err(ngrams_error(format!(
                     "bagOfNgrams: counts must be a numeric matrix, got {other:?}"
@@ -323,10 +365,15 @@ fn parse_options(args: &[Value], start: usize) -> BuiltinResult<Option<Vec<usize
 
 fn parse_lengths(value: &Value) -> BuiltinResult<Vec<usize>> {
     let raw = match value {
-        Value::Num(n) => vec![*n],
-        Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) != 0 => {
-            tensor_utils::tensor_values_f64(tensor)
-        }
+        Value::Num(n) => vec![NumericScalar::F64(*n)],
+        Value::Int(value) => vec![NumericScalar::from(value.clone())],
+        Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) != 0 => (0..tensor.len())
+            .map(|index| {
+                tensor
+                    .numeric_value_at(index)
+                    .expect("tensor storage length matches shape")
+            })
+            .collect(),
         other => {
             return Err(ngrams_error(format!(
             "bagOfNgrams: NgramLengths must be a positive integer scalar or vector, got {other:?}"
@@ -336,17 +383,37 @@ fn parse_lengths(value: &Value) -> BuiltinResult<Vec<usize>> {
     let mut lengths = Vec::with_capacity(raw.len());
     let mut seen = HashSet::new();
     for n in raw {
-        if !n.is_finite() || n <= 0.0 || n.fract() != 0.0 {
+        let Some(len) = positive_length_usize(n) else {
             return Err(ngrams_error(format!(
-                "bagOfNgrams: NgramLengths must contain positive integers, got {n}"
+                "bagOfNgrams: NgramLengths must contain positive integers"
             )));
-        }
-        let len = n as usize;
+        };
         if seen.insert(len) {
             lengths.push(len);
         }
     }
     Ok(lengths)
+}
+
+fn positive_length_usize(value: NumericScalar) -> Option<usize> {
+    match value {
+        NumericScalar::F64(value) => positive_length_f64(value),
+        NumericScalar::F32(value) => positive_length_f64(f64::from(value)),
+        value => value
+            .into_int_value()?
+            .try_to_usize()
+            .filter(|value| *value > 0),
+    }
+}
+
+fn positive_length_f64(value: f64) -> Option<usize> {
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn documents_from_value(value: &Value) -> BuiltinResult<Vec<Vec<String>>> {
@@ -741,6 +808,102 @@ mod tests {
         assert_eq!(
             parse_lengths(&Value::Tensor(tensor)).expect("lengths"),
             vec![1, 3]
+        );
+    }
+
+    #[test]
+    fn accepts_all_integer_count_and_length_classes_with_double_model_metadata() {
+        let ngrams = || {
+            StringArray::new(
+                vec!["a".into(), "b".into(), "b".into(), "c".into()],
+                vec![2, 2],
+            )
+            .expect("ngrams")
+        };
+        let counts = [
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+        let lengths = [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ];
+        for (count_storage, length_storage) in counts.into_iter().zip(lengths) {
+            let count_tensor =
+                Tensor::new_integer(count_storage, vec![1, 2]).expect("integer counts");
+            let length_tensor =
+                Tensor::new_integer(length_storage, vec![1, 1]).expect("integer length");
+            let bag = object(
+                run(vec![
+                    Value::StringArray(ngrams()),
+                    Value::Tensor(count_tensor),
+                    Value::String("NgramLengths".into()),
+                    Value::Tensor(length_tensor),
+                ])
+                .expect("integer bag"),
+            );
+            let actual_counts = tensor_property(&bag, "Counts");
+            assert_eq!(
+                actual_counts.numeric_dtype(),
+                runmat_builtins::NumericDType::F64
+            );
+            assert_eq!(actual_counts.materialize_f64(), vec![2.0, 3.0]);
+            let actual_lengths = tensor_property(&bag, "NgramLengths");
+            assert_eq!(
+                actual_lengths.numeric_dtype(),
+                runmat_builtins::NumericDType::F64
+            );
+            assert_eq!(actual_lengths.materialize_f64(), vec![2.0]);
+        }
+    }
+
+    #[test]
+    fn exact_wide_counts_cross_only_the_documented_double_property_boundary() {
+        let ngrams = StringArray::new(vec!["wide".into()], vec![1, 1]).expect("ngrams");
+        let wide = (1_u64 << 53) + 1;
+        let counts =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("counts");
+        let bag =
+            object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
+        let actual = tensor_property(&bag, "Counts");
+        assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(actual.materialize_f64(), vec![wide as f64]);
+    }
+
+    #[test]
+    fn rejects_resident_inputs_before_provider_access() {
+        let resident = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_362_001,
+        };
+        let error = run(vec![Value::GpuTensor(resident)])
+            .expect_err("resident text-model input must reject");
+        assert_eq!(error.identifier(), Some("RunMat:bagOfNgrams:InvalidInput"));
+    }
+
+    #[test]
+    fn integer_capabilities_cover_counts_and_lengths() {
+        assert_eq!(BAG_OF_NGRAMS_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(
+            BAG_OF_NGRAMS_INTEGER_CAPABILITIES[0].inputs[0].classes,
+            crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+        );
+        assert_eq!(
+            BAG_OF_NGRAMS_INTEGER_CAPABILITIES[1].inputs[0].classes,
+            crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
         );
     }
 
