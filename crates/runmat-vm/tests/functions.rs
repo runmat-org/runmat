@@ -3461,6 +3461,41 @@ fn arrayfun_str2func_local_semantic_callback_executes() {
 }
 
 #[test]
+fn arrayfun_compiled_identity_preserves_all_integer_classes_and_single() {
+    let vars = execute_source(
+        "a = arrayfun(@(x) x, int8([-128 127])); b = arrayfun(@(x) x, int16([-32768 32767])); c = arrayfun(@(x) x, int32([-2147483648 2147483647])); d = arrayfun(@(x) x, int64([-7 9])); e = arrayfun(@(x) x, uint8([0 255])); f = arrayfun(@(x) x, uint16([0 65535])); g = arrayfun(@(x) x, uint32([0 4294967295])); base = uint64(9007199254740992); h = arrayfun(@(x) x, base + uint64([1 2])); s = arrayfun(@(x) x, single([0.25 -1.5]));",
+    );
+    for expected in [
+        runmat_builtins::IntegerStorage::I8(vec![-128, 127]),
+        runmat_builtins::IntegerStorage::I16(vec![-32768, 32767]),
+        runmat_builtins::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        runmat_builtins::IntegerStorage::I64(vec![-7, 9]),
+        runmat_builtins::IntegerStorage::U8(vec![0, 255]),
+        runmat_builtins::IntegerStorage::U16(vec![0, 65535]),
+        runmat_builtins::IntegerStorage::U32(vec![0, u32::MAX]),
+        runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            vars.iter().any(|value| {
+                matches!(
+                    value,
+                    runmat_builtins::Value::Tensor(tensor)
+                        if tensor.integer_storage() == Some(&expected)
+                )
+            }),
+            "missing compiled arrayfun storage {expected:?}"
+        );
+    }
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            runmat_builtins::Value::Tensor(tensor)
+                if tensor.as_f32_slice() == Some(&[0.25, -1.5][..])
+        )
+    }));
+}
+
+#[test]
 fn classes_static_and_inheritance() {
     // Register classes
     assert!(execute_source_result("__register_test_classes();").is_ok());

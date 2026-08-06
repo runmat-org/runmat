@@ -7511,6 +7511,116 @@
           "when": "External callable identity cannot be resolved in semantic/runtime boundaries.",
           "message": "arrayfun: undefined function"
         }
+      ],
+      "extensions": [
+        {
+          "id": "arrayfun-text-callable",
+          "mode": "RunMatOnly",
+          "description": "arrayfun with a character-vector or string-scalar callable is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ArrayfunTextCallableExtension"
+        },
+        {
+          "id": "arrayfun-host-scalar-expansion",
+          "mode": "RunMatOnly",
+          "description": "host arrayfun with scalar expansion across differently sized inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ArrayfunHostScalarExpansionExtension"
+        },
+        {
+          "id": "arrayfun-gpu-options",
+          "mode": "RunMatOnly",
+          "description": "gpuArray arrayfun with UniformOutput or ErrorHandler options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ArrayfunGpuOptionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = arrayfun(func, integer_A1, integer_An...)",
+          "inputs": [
+            {
+              "name": "A1",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Each element is passed to func in the exact integer class stored by A1."
+            },
+            {
+              "name": "An",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Additional arrays may independently use any real integer class; callback overload semantics decide whether a class combination is valid."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "arrayfun itself performs structural element extraction without conversion. The callback defines arithmetic, overflow, and result class. Host inputs must have equal size; the documented gpuArray overload permits compatible sizes."
+        },
+        {
+          "form": "integer_B = arrayfun(func_returning_integer, A1, An...)",
+          "inputs": [
+            {
+              "name": "func or ErrorHandler scalar result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Uniform output requires the same scalar class on every invocation and concatenates exact same-class integer results."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "FunctionSpecific",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Uniform same-class scalar integer callback results are collected in authoritative native storage. With gpuArray input, supported results remain resident after direct execution or exact gather fallback and typed re-upload."
+        },
+        {
+          "form": "B = arrayfun(func, A1, An..., \"UniformOutput\", typed_integer)",
+          "inputs": [
+            {
+              "name": "UniformOutput",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The public control is logical true or false; typed-integer controls are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "All eight typed-integer scalar and tensor control classes reject rather than being coerced to logical."
+        }
       ]
     },
     {

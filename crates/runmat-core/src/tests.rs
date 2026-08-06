@@ -12355,6 +12355,7 @@ fn arrayfun_session_function_uses_semantic_registry() {
 #[test]
 fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let source = "name = 'inc'; A = [2, 3]; B = arrayfun(name, A); y = B(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -12387,6 +12388,7 @@ fn cellfun_unresolved_external_callback_reports_undefined_function_identifier() 
 #[test]
 fn arrayfun_unresolved_external_callback_reports_undefined_function_identifier() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let outcome =
         execute_text_request(&mut session, "A = [2, 3]; y = arrayfun('pkg.callback', A);")
             .expect("unresolved external arrayfun callback should surface a runtime diagnostic");
