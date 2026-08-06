@@ -95,3 +95,27 @@ fn catch_index_error_and_continue() {
         .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
     assert!(has_ok && has_id);
 }
+
+#[test]
+fn assert_compiled_integer_conditions_and_formatting_are_exact() {
+    let vars = execute_source(
+        "assert(int8([-128 127])); assert(int16([-32768 32767])); assert(int32([-2147483648 2147483647])); assert(int64([-7 9])); assert(uint8([1 255])); assert(uint16([1 65535])); assert(uint32([1 4294967295])); base = uint64(9007199254740992); assert(base + uint64([1 2])); zero_failed = 0; empty_failed = 0; nan_rejected = 0; complex_gated = 0; try; assert(uint64([1 0])); catch e; zero_failed = 1; end; try; assert(uint8([])); catch e; empty_failed = 1; end; try; assert(single(NaN)); catch e; nan_rejected = strcmp(e.identifier, 'RunMat:assertion:invalidCondition'); end; try; assert(1i); catch e; complex_gated = strcmp(e.identifier, 'RunMat:compatibility:AssertComplexConditionExtension'); end; try; assert(false, 'wide=%u', base + uint64(1)); catch e; formatted = e.message; end;",
+    )
+    .expect("compiled assert program");
+    assert!(
+        vars.iter()
+            .filter(|value| {
+                matches!(value, runmat_builtins::Value::Num(number) if *number == 1.0)
+                    || matches!(value, runmat_builtins::Value::Bool(true))
+            })
+            .count()
+            >= 4,
+        "missing one or more assert failure-mode sentinels: {vars:?}"
+    );
+    assert!(vars.iter().any(
+        |value| matches!(value, runmat_builtins::Value::String(text) if text == "wide=9007199254740993")
+    ));
+
+    let err = execute_source("out = assert(true);").expect_err("assert has no public output");
+    assert_eq!(err.identifier(), Some("RunMat:assertion:TooManyOutputs"));
+}

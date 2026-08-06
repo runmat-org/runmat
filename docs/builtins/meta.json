@@ -7829,35 +7829,27 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "out = assert(condition)",
+          "label": "assert(condition)",
           "inputs": [
             {
               "name": "condition",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Logical/numeric condition that must evaluate to true."
+              "description": "Logical or logically convertible condition that must evaluate to true."
             }
           ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Zero when the assertion passes."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "out = assert(condition, message)",
+          "label": "assert(condition, message)",
           "inputs": [
             {
               "name": "condition",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Logical/numeric condition that must evaluate to true."
+              "description": "Logical or logically convertible condition that must evaluate to true."
             },
             {
               "name": "message",
@@ -7867,25 +7859,17 @@
               "description": "Failure message text."
             }
           ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Zero when the assertion passes."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "out = assert(condition, message, A...)",
+          "label": "assert(condition, message, A...)",
           "inputs": [
             {
               "name": "condition",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Logical/numeric condition that must evaluate to true."
+              "description": "Logical or logically convertible condition that must evaluate to true."
             },
             {
               "name": "message",
@@ -7902,25 +7886,17 @@
               "description": "Formatting values for the message template."
             }
           ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Zero when the assertion passes."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "out = assert(condition, message_id, message)",
+          "label": "assert(condition, message_id, message)",
           "inputs": [
             {
               "name": "condition",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Logical/numeric condition that must evaluate to true."
+              "description": "Logical or logically convertible condition that must evaluate to true."
             },
             {
               "name": "message_id",
@@ -7937,25 +7913,17 @@
               "description": "Failure message text."
             }
           ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Zero when the assertion passes."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "out = assert(condition, message_id, message, A...)",
+          "label": "assert(condition, message_id, message, A...)",
           "inputs": [
             {
               "name": "condition",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Logical/numeric condition that must evaluate to true."
+              "description": "Logical or logically convertible condition that must evaluate to true."
             },
             {
               "name": "message_id",
@@ -7979,15 +7947,7 @@
               "description": "Formatting values for the message template."
             }
           ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Zero when the assertion passes."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -8000,8 +7960,8 @@
         {
           "code": "RM.ASSERT.INVALID_CONDITION",
           "identifier": "RunMat:assertion:invalidCondition",
-          "when": "First argument is not a supported logical or numeric condition input.",
-          "message": "assert: first input must be logical or numeric."
+          "when": "First argument is not logical or convertible to a logical condition.",
+          "message": "assert: first input must be logical or convertible to logical."
         },
         {
           "code": "RM.ASSERT.INVALID_INPUT",
@@ -8014,6 +7974,109 @@
           "identifier": "RunMat:minrhs",
           "when": "No condition argument is provided.",
           "message": "Not enough input arguments."
+        },
+        {
+          "code": "RM.ASSERT.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:assertion:TooManyOutputs",
+          "when": "One or more public outputs are requested from assert.",
+          "message": "assert: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "assert-complex-condition",
+          "mode": "RunMatOnly",
+          "description": "assert with a complex condition is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AssertComplexConditionExtension"
+        },
+        {
+          "id": "assert-unqualified-identifier",
+          "mode": "RunMatOnly",
+          "description": "assert with an unqualified custom error identifier is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AssertUnqualifiedIdentifierExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "assert(integer_cond, ...)",
+          "inputs": [
+            {
+              "name": "cond",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every real integer scalar or array is convertible to logical; the condition passes only when it is nonempty and every element is nonzero."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Truth testing reads exact authoritative integer storage. The public builtin has no output; resident conditions gather to the host because assert accepts gpuArray input but does not execute on the GPU."
+        },
+        {
+          "form": "assert(complex_integer_cond, ...)",
+          "inputs": [
+            {
+              "name": "cond",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode additionally accepts paired complex-integer storage and tests each element for a nonzero real or imaginary component."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Public logical conversion rejects complex numeric values. RunMat mode retains the pre-existing nonzero-component predicate without floating materialization."
+        },
+        {
+          "form": "assert(cond, msg, integer_A...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Formatting replacement values accept numeric scalars and preserve exact integer values through integer and string conversion specifiers."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Each documented replacement A is a character vector, string scalar, or numeric scalar. Integer scalars remain exact during host formatting, including after resident gather."
         }
       ]
     },

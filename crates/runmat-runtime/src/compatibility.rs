@@ -216,6 +216,8 @@ mod tests {
                 ("arrayfun", "arrayfun-gpu-options"),
                 ("arrayfun", "arrayfun-host-scalar-expansion"),
                 ("arrayfun", "arrayfun-text-callable"),
+                ("assert", "assert-complex-condition"),
+                ("assert", "assert-unqualified-identifier"),
                 ("acos", "acos-character-input"),
                 ("acos", "acos-gpu-real-complex-promotion"),
                 ("acos", "acos-integer-input"),
