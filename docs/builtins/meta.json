@@ -4429,7 +4429,7 @@
         {
           "code": "RM.ADDPATH.ARG_TYPE",
           "identifier": null,
-          "when": "Folder arguments are not character vectors, string scalars/arrays, tensors of character codes, or cell arrays containing those forms.",
+          "when": "Folder arguments are not character vectors, string scalars/arrays, cell arrays containing those forms, or mode-admitted numeric character-code tensors.",
           "message": "addpath: folder names must be character vectors, string scalars, string arrays, or cell arrays of character vectors"
         },
         {
@@ -4467,6 +4467,43 @@
           "identifier": null,
           "when": "A requested path exists but is not a directory.",
           "message": "addpath: path is not a folder"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "addpath-numeric-character-codes",
+          "mode": "RunMatOnly",
+          "description": "addpath with a numeric character-code tensor is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:AddpathNumericCharacterCodesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "oldpath = addpath(integer_character_codes, options)",
+          "inputs": [
+            {
+              "name": "folder",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "A dense one-row integer tensor may encode Unicode scalar values for one folder name in RunMat mode; MATLAB-compatible modes accept documented character vectors and string scalars instead."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer code points are decoded exactly without an f64 intermediary, invalid Unicode values reject, path mutation is host-only, and resident numeric tensors are classified before gather. The output remains the previous path as a character vector."
         }
       ]
     },

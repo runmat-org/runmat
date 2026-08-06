@@ -204,6 +204,7 @@ mod tests {
                 ("abs", "abs-character-input"),
                 ("abs", "abs-logical-input"),
                 ("abs", "sparse-integer-storage"),
+                ("addpath", "addpath-numeric-character-codes"),
                 ("all", "all-nanflag"),
                 ("allfinite", "allfinite-string-input"),
                 ("acos", "acos-character-input"),

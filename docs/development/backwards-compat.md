@@ -148,6 +148,8 @@ The adjacent descriptive functions likewise retain their individually documented
 
 The tokenized-document enrichment cohort `addDependencyDetails`, `addEntityDetails`, `addLemmaDetails`, `addPartOfSpeechDetails`, `addSentenceDetails`, and `addTypeDetails` has no public integer data surface. Each function accepts and returns a `tokenizedDocument`; the five `DiscardKnownValues` controls are documented logical scalars and reject numeric or integer 0/1 values. Sentence-number and dependency-head columns exposed later by `tokenDetails` are double object metadata rather than integer-class results, so the six enrichment functions are explicitly classified as integer-inapplicable.
 
+`addpath` documents character-vector and string-scalar folder names and returns the previous path as a character vector. RunMat additionally accepts a dense one-row numeric tensor as Unicode folder-name code points; this convenience form is a mode-gated extension, including all eight exact integer classes and resident numeric tensors. Integer code points decode without a floating intermediary, invalid Unicode values reject, resident inputs are classified before gather, and all path-state mutation remains host-only.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:
