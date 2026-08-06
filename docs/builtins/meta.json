@@ -5466,6 +5466,137 @@
           "when": "Internal plotting state update fails.",
           "message": "animatedline: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "an = animatedline(integer_x, integer_y)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Starting X coordinates independently accept every integer class or other documented coordinate data."
+            },
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Starting Y coordinates independently accept every integer class or other documented coordinate data."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinate vectors must have equal element counts. Host integer storage is read authoritatively before values enter the f64 graphics domain; GPU arrays gather because animated graphics state and rendering are client-side."
+        },
+        {
+          "form": "an = animatedline(integer_x, integer_y, integer_z)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Starting X coordinates independently accept every integer class or other documented coordinate data."
+            },
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Starting Y coordinates independently accept every integer class or other documented coordinate data."
+            },
+            {
+              "name": "z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Starting Z coordinates independently accept every integer class or other documented coordinate data."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "All three coordinate vectors must have equal element counts. Host integer storage is read authoritatively before values enter the f64 graphics domain; GPU arrays gather because animated graphics state and rendering are client-side."
+        },
+        {
+          "form": "an = animatedline(..., \"MaximumNumPoints\", integer_n)",
+          "inputs": [
+            {
+              "name": "MaximumNumPoints",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The point limit accepts every integer class as a positive scalar; positive floating infinity selects an unbounded limit."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The limit is parsed from authoritative scalar integer storage, must be positive and representable as a host point count, and may gather from a resident scalar because the retained-point state is client-side."
+        }
       ]
     },
     {

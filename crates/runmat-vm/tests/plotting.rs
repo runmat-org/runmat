@@ -689,6 +689,20 @@ fn animatedline_and_addpoints_dispatch_through_vm() {
 }
 
 #[test]
+fn animatedline_accepts_all_integer_coordinate_and_maximum_classes_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "x = {constructor}([1 2 3]); y = {constructor}([10 20 30]); z = {constructor}([40 50 60]); an = animatedline(x, y, z, 'MaximumNumPoints', {constructor}(2)); xo = get(an, 'XData'); yo = get(an, 'YData'); zo = get(an, 'ZData'); if numel(xo) ~= 2; error('integer animatedline length mismatch'); end; if xo(1) ~= 2 || xo(2) ~= 3; error('integer animatedline x mismatch'); end; if yo(1) ~= 20 || yo(2) ~= 30; error('integer animatedline y mismatch'); end; if zo(1) ~= 50 || zo(2) ~= 60; error('integer animatedline z mismatch'); end;"
+        );
+        execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: animatedline failed: {error}"));
+    }
+}
+
+#[test]
 fn plotmatrix_dispatches_multi_output_grid_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

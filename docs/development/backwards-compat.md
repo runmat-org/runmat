@@ -160,6 +160,8 @@ Dynamic-object `addprop` accepts a `dynamicprops` receiver plus a character-vect
 
 `angle` accepts only real or complex single- and double-precision data and preserves the input floating precision in its output. All eight real integer classes and all eight componentwise-complex typed-integer classes reject with the same stable invalid-input category across host and compiled execution; resident integer handles reject from exact handle metadata before provider dispatch or gather, so there is no integer output or implicit floating materialization surface.
 
+`animatedline` independently accepts all eight integer classes for its X, Y, and Z starting-coordinate vectors and for the positive scalar `MaximumNumPoints` control. Coordinate storage remains authoritative until one explicit conversion into RunMat's client-side `f64` graphics domain; the point limit is instead validated exactly and converted only to a checked host count. Resident coordinates and limit scalars gather because the documented GPU-array surface executes on the client, while the returned numeric encoding remains an opaque graphics handle rather than an integer-class output.
+
 ## Evidence policy
 
 Compatibility decisions should be based on publicly available information and literature only. RunMat is a clean-room implementation of MATLAB compatable syntax, and as a result we do not rely on proprietary binaries, disassembly, or reverse engineering. Prefer evidence in this order:

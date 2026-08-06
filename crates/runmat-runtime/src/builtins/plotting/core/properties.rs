@@ -5084,10 +5084,38 @@ fn apply_animated_line_properties(
     Ok(())
 }
 
-fn animated_line_maximum_from_value(
+pub(crate) fn animated_line_maximum_from_value(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<Option<usize>> {
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: MaximumNumPoints must be numeric"),
+        ));
+    }
+    let integer = match value {
+        Value::Int(integer) => Some(integer.clone()),
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    };
+    if let Some(integer) = integer {
+        let Some(maximum) = integer.try_to_usize() else {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: MaximumNumPoints must be positive or Inf"),
+            ));
+        };
+        if maximum == 0 {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: MaximumNumPoints must be positive or Inf"),
+            ));
+        }
+        return Ok(Some(maximum));
+    }
     let Some(maximum) = value_as_f64(value) else {
         return Err(plotting_error(
             builtin,
