@@ -512,6 +512,7 @@ mod tests {
             "area",
             "array2table",
             "atan2",
+            "audioread",
         ] {
             let builtin = registered
                 .iter()

@@ -4,9 +4,12 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, NumericDType, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerClass, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntegerStorage, NumericDType, StructValue, Tensor, Value,
 };
 use runmat_filesystem as fs;
 use runmat_macros::runtime_builtin;
@@ -223,6 +226,50 @@ pub const AUDIOREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &AUDIOREAD_ERRORS,
 };
 
+const AUDIOREAD_NATIVE_INTEGER_CLASSES: [BuiltinIntegerClass; 3] = [
+    BuiltinIntegerClass::Uint8,
+    BuiltinIntegerClass::Int16,
+    BuiltinIntegerClass::Int32,
+];
+const AUDIOREAD_NATIVE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "native_audio_payload",
+        classes: &AUDIOREAD_NATIVE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "For documented integer-coded files, datatype=\"native\" returns uint8 for 8-bit unsigned PCM, int16 for 16-bit signed PCM, and int32 for 24-bit left-aligned or 32-bit signed PCM.",
+    }];
+const AUDIOREAD_REJECTED_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "samples",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented two-element sample range has data type double; typed-integer scalar or array controls reject rather than widening the public surface.",
+    }];
+pub const AUDIOREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = audioread(filename, ..., \"native\")",
+        inputs: &AUDIOREAD_NATIVE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Native integer samples are decoded directly into authoritative storage with file-format-dependent class and column-major N-by-C channel layout; Fs remains double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = audioread(filename, integer_samples, datatype)",
+        inputs: &AUDIOREAD_REJECTED_INTEGER_SAMPLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer sample-range controls are not part of the documented double-only range contract and reject before filesystem I/O; audioread has no interactive GPU-array surface.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::audio")]
 pub const AUDIOREAD_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "audioread",
@@ -319,18 +366,6 @@ fn map_audioinfo_control_flow(err: RuntimeError) -> RuntimeError {
     let message = err.message().to_string();
     let mut builder = build_runtime_error(message)
         .with_builtin(AUDIOINFO_BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn map_audioread_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(|value| value.to_string());
-    let message = err.message().to_string();
-    let mut builder = build_runtime_error(message)
-        .with_builtin(AUDIOREAD_BUILTIN_NAME)
         .with_source(err);
     if let Some(identifier) = identifier {
         builder = builder.with_identifier(identifier);
@@ -445,21 +480,19 @@ async fn read_audioinfo_scan(path: &Path) -> BuiltinResult<AudioInfoScan> {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::audioread_type),
     descriptor(crate::builtins::io::audio::AUDIOREAD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::audio::AUDIOREAD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::audio"
 )]
 async fn audioread_builtin(filename: Value, args: Vec<Value>) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(map_audioread_control_flow)?;
-    let mut gathered_args = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered_args.push(
-            gather_if_needed_async(&arg)
-                .await
-                .map_err(map_audioread_control_flow)?,
-        );
+    if matches!(&filename, Value::GpuTensor(_))
+        || args.iter().any(|arg| matches!(arg, Value::GpuTensor(_)))
+    {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: gpuArray inputs are not supported",
+        ));
     }
-    let options = parse_audioread_options(&gathered_args)?;
+    let options = parse_audioread_options(&args)?;
     let path = resolve_audioread_path(&filename)?;
     let bytes = fs::read_async(&path).await.map_err(|err| {
         audioread_error_with_source(
@@ -581,8 +614,14 @@ fn parse_wave(bytes: &[u8]) -> Result<AudioMetadata, String> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AudioreadOptions {
-    range: Option<(usize, usize)>,
+    range: Option<AudioSampleRange>,
     native: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AudioSampleRange {
+    first: usize,
+    last: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -634,46 +673,33 @@ fn parse_audioread_datatype(value: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn parse_sample_range(value: &Value) -> BuiltinResult<(usize, usize)> {
-    let parsed = match value {
-        Value::Tensor(t) => {
-            let mut values = Vec::with_capacity(t.len());
-            for index in 0..t.len() {
-                let value = t
-                    .numeric_value_at(index)
-                    .expect("index within authoritative numeric storage");
-                values.push(if let Some(value) = value.into_int_value() {
-                    parse_positive_integer_value(&value, "sample range")?
-                } else {
-                    parse_positive_integer(value.materialize_f64(), "sample range")?
-                });
-            }
-            values
-        }
-        Value::Num(n) => vec![parse_positive_integer(*n, "sample range")?],
-        Value::Int(i) => vec![parse_positive_integer_value(i, "sample range")?],
-        _ => {
-            return Err(audioread_error_with(
-                &AUDIOREAD_ERROR_ARGUMENT,
-                "audioread: sample range must be a two-element numeric vector",
-            ));
-        }
-    };
-    if parsed.len() != 2 {
+fn parse_sample_range(value: &Value) -> BuiltinResult<AudioSampleRange> {
+    let Value::Tensor(tensor) = value else {
         return Err(audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
-            "audioread: sample range must be [first last]",
+            "audioread: sample range must be a two-element double vector",
+        ));
+    };
+    if tensor.numeric_dtype() != NumericDType::F64 || tensor.len() != 2 {
+        return Err(audioread_error_with(
+            &AUDIOREAD_ERROR_ARGUMENT,
+            "audioread: sample range must be a two-element double vector",
         ));
     }
-    let first = parsed[0];
-    let last = parsed[1];
-    if first > last {
+    let values = tensor.materialize_f64();
+    let first = parse_positive_integer(values[0], "sample range")?;
+    let last = if values[1] == f64::INFINITY {
+        None
+    } else {
+        Some(parse_positive_integer(values[1], "sample range")?)
+    };
+    if last.is_some_and(|last| first > last) {
         return Err(audioread_error_with(
             &AUDIOREAD_ERROR_ARGUMENT,
             "audioread: sample range first sample must be less than or equal to last sample",
         ));
     }
-    Ok((first, last))
+    Ok(AudioSampleRange { first, last })
 }
 
 fn parse_positive_integer(value: f64, label: &str) -> BuiltinResult<usize> {
@@ -690,22 +716,6 @@ fn parse_positive_integer(value: f64, label: &str) -> BuiltinResult<usize> {
         ));
     }
     Ok(value as usize)
-}
-
-fn parse_positive_integer_value(value: &IntValue, label: &str) -> BuiltinResult<usize> {
-    let Some(parsed) = value.try_to_usize() else {
-        return Err(audioread_error_with(
-            &AUDIOREAD_ERROR_ARGUMENT,
-            format!("audioread: {label} must be a positive integer"),
-        ));
-    };
-    if parsed == 0 {
-        return Err(audioread_error_with(
-            &AUDIOREAD_ERROR_ARGUMENT,
-            format!("audioread: {label} must be a positive integer"),
-        ));
-    }
-    Ok(parsed)
 }
 
 fn scalar_text(value: &Value) -> Option<String> {
@@ -751,7 +761,8 @@ fn decode_wave_samples(bytes: &[u8], options: AudioreadOptions) -> Result<Decode
     }
     let total_frames = parsed.data_len / block_align;
     let (start_frame, end_frame_exclusive) = match options.range {
-        Some((first, last)) => {
+        Some(AudioSampleRange { first, last }) => {
+            let last = last.unwrap_or(total_frames);
             if last > total_frames {
                 return Err("sample range exceeds the available audio frames".to_string());
             }
@@ -2058,22 +2069,78 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(target_pointer_width = "64")]
-    fn audioread_sample_range_reads_typed_integer_storage_exactly() {
-        let exact = (1_u64 << 53) + 1;
-        let range = Tensor::new_integer(IntegerStorage::U64(vec![exact, exact + 1]), vec![1, 2])
-            .expect("range");
-
+    fn audioread_sample_range_accepts_documented_infinite_endpoint() {
+        let range = Tensor::new(vec![2.0, f64::INFINITY], vec![1, 2]).expect("range");
         assert_eq!(
             parse_sample_range(&Value::Tensor(range)).expect("sample range"),
-            (exact as usize, exact as usize + 1)
+            AudioSampleRange {
+                first: 2,
+                last: None
+            }
         );
-        assert!(parse_sample_range(&Value::Int(IntValue::U64(exact))).is_err());
+    }
 
-        let negative =
-            Tensor::new_integer(IntegerStorage::I16(vec![1, -2]), vec![1, 2]).expect("negative");
-        assert!(parse_sample_range(&Value::Tensor(negative)).is_err());
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_sample_range_rejects_all_typed_integer_classes() {
+        let ranges = [
+            IntegerStorage::I8(vec![1, 2]),
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I32(vec![1, 2]),
+            IntegerStorage::I64(vec![1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![1, 2]),
+        ];
+        for storage in ranges {
+            let range = Tensor::new_integer(storage, vec![1, 2]).expect("range");
+            let error =
+                parse_sample_range(&Value::Tensor(range)).expect_err("integer range must reject");
+            assert_eq!(error.identifier(), Some("RunMat:audioread:InvalidArgument"));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_rejects_resident_inputs_before_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 0,
+            buffer_id: 9_359_001,
+        });
+        let error = block_on(audioread_builtin(Value::from("unused.wav"), vec![resident]))
+            .expect_err("resident sample range must reject");
+        assert_eq!(error.identifier(), Some("RunMat:audioread:InvalidArgument"));
+        assert!(error
+            .message()
+            .contains("gpuArray inputs are not supported"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn audioread_infinite_endpoint_reads_through_last_frame() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let path = temp_path("wav");
+        fs::write(&path, pcm16_wav(8_000, 1, &[-4, 5, i16::MAX])).expect("write fixture");
+        let range = Tensor::new(vec![2.0, f64::INFINITY], vec![1, 2]).expect("sample range tensor");
+
+        let y = tensor(
+            block_on(audioread_builtin(
+                Value::from(path.to_string_lossy().into_owned()),
+                vec![Value::Tensor(range), Value::from("native")],
+            ))
+            .expect("audioread"),
+        );
+
+        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(
+            y.integer_storage(),
+            Some(&IntegerStorage::I16(vec![5, i16::MAX]))
+        );
+        let _ = fs::remove_file(path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -805,6 +805,18 @@ fn atan2_compiled_dispatch_accepts_all_wide_integer_bits_in_extension_mode() {
 }
 
 #[test]
+fn audioread_compiled_dispatch_rejects_typed_integer_sample_range_before_io() {
+    let error = execute_source_result("y = audioread(\"missing.wav\", uint8([1 2]));")
+        .expect_err("typed-integer sample range must reject");
+    assert!(
+        error
+            .message()
+            .contains("sample range must be a two-element double vector"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn fft_output_supports_scalar_and_range_indexing() {
     let input = r#"
         x = [1 2 3 4 5 6 7 8];

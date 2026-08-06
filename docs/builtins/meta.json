@@ -8752,6 +8752,48 @@
           "when": "The file is not a supported audio container, uses unsupported audio coding, or is malformed.",
           "message": "audioread: unsupported or invalid audio file"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "y = audioread(filename, ..., \"native\")",
+          "inputs": [
+            {
+              "name": "native_audio_payload",
+              "classes": [
+                "Uint8",
+                "Int16",
+                "Int32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "For documented integer-coded files, datatype=\"native\" returns uint8 for 8-bit unsigned PCM, int16 for 16-bit signed PCM, and int32 for 24-bit left-aligned or 32-bit signed PCM."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Native integer samples are decoded directly into authoritative storage with file-format-dependent class and column-major N-by-C channel layout; Fs remains double."
+        },
+        {
+          "form": "y = audioread(filename, integer_samples, datatype)",
+          "inputs": [
+            {
+              "name": "samples",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented two-element sample range has data type double; typed-integer scalar or array controls reject rather than widening the public surface."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer sample-range controls are not part of the documented double-only range contract and reject before filesystem I/O; audioread has no interactive GPU-array surface."
+        }
       ]
     },
     {
