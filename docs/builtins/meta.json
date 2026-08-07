@@ -12293,6 +12293,103 @@
           "when": "A required gpuArray gather or upload operation fails.",
           "message": "blkdiag: gpuArray operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "blkdiag-sparse-integer-input",
+          "mode": "RunMatOnly",
+          "description": "blkdiag with sparse integer blocks is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BlkdiagSparseIntegerInputExtension"
+        },
+        {
+          "id": "blkdiag-complex-integer-input",
+          "mode": "RunMatOnly",
+          "description": "blkdiag with complex integer blocks is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BlkdiagComplexIntegerInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = blkdiag(A1,...,AN) with dense real integer blocks",
+          "inputs": [
+            {
+              "name": "A1,...,AN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Dense scalar, vector, or matrix blocks accept every integer class; when classes differ, the first integer block determines output class and floating or logical blocks convert into it."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Blocks retain matrix geometry and occupy diagonal offsets. If any dense real input is integer, the first integer input class dominates all dense real and logical blocks; otherwise ordinary floating/logical rules apply. GPU inputs gather exactly and dense results return to the owning provider."
+        },
+        {
+          "form": "B = blkdiag(A1,...,AN) with sparse integer blocks",
+          "inputs": [
+            {
+              "name": "sparse A1,...,AN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat can structurally assemble same-class sparse integer blocks without a floating mirror; the public sparse numeric storage domain is single, double, or logical."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only same-class sparse integer assembly preserves exact CSC storage; sparse results remain host-resident."
+        },
+        {
+          "form": "B = blkdiag(A1,...,AN) with complex integer blocks",
+          "inputs": [
+            {
+              "name": "complex A1,...,AN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat can structurally assemble same-class paired integer components; the public integer domain does not support complex-integer operations."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only same-class paired integer-component assembly preserves exact real and imaginary storage."
+        }
       ]
     },
     {

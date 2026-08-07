@@ -856,6 +856,7 @@ fn typed_complex_integer_fft_shifts_preserve_exact_components() {
 
 #[test]
 fn typed_complex_integer_blkdiag_preserves_exact_components() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "a = complex(uint64([18446744073709551615 9223372036854775808]), uint64([5 6])); b = complex(uint64([7; 8]), uint64([9; 10])); out = blkdiag(a, b); real_out = real(out); imag_out = imag(out);",
     )
@@ -879,6 +880,7 @@ fn typed_complex_integer_blkdiag_preserves_exact_components() {
 
 #[test]
 fn typed_complex_integer_blkdiag_rejects_mixed_representations_before_f64_coercion() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for source in [
         "a = complex(uint64(9223372036854775808), uint64(1)); b = complex(uint32(2), uint32(3)); out = blkdiag(a, b);",
         "a = complex(uint64(9223372036854775808), uint64(1)); out = blkdiag(a, 2);",
@@ -2441,6 +2443,31 @@ fn blanks_all_integer_length_classes_execute_through_compiled_dispatch() {
     assert!(matches!(
         &vars[0],
         Value::CharArray(chars) if chars.shape == vec![1, 0] && chars.data.is_empty()
+    ));
+}
+
+#[test]
+fn blkdiag_mixed_dense_inputs_use_first_integer_class_in_compiled_dispatch() {
+    let vars = execute_source(
+        "a = blkdiag(300, single(-200.5), int8(5), uint16(500), true); b = blkdiag(uint16(5), int8(-3));",
+    )
+    .expect("compiled mixed integer blkdiag");
+    assert!(matches!(
+        &vars[0],
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == runmat_builtins::NumericDType::I8
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::I8(vec![
+                        127, 0, 0, 0, 0, 0, -128, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 127, 0, 0,
+                        0, 0, 0, 1,
+                    ]))
+    ));
+    assert!(matches!(
+        &vars[1],
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == runmat_builtins::NumericDType::U16
+                && tensor.integer_storage()
+                    == Some(&runmat_builtins::IntegerStorage::U16(vec![5, 0, 0, 0]))
     ));
 }
 

@@ -5,7 +5,11 @@
 
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
     NumericDType, NumericScalar, NumericStorage, ResolveContext, SparseTensor, Tensor, Type, Value,
@@ -119,6 +123,85 @@ pub const BLKDIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const BLKDIAG_SPARSE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "blkdiag-sparse-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "blkdiag with sparse integer blocks is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BlkdiagSparseIntegerInputExtension"),
+};
+
+const BLKDIAG_COMPLEX_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "blkdiag-complex-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "blkdiag with complex integer blocks is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BlkdiagComplexIntegerInputExtension"),
+};
+
+const BLKDIAG_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    BLKDIAG_SPARSE_INTEGER_EXTENSION,
+    BLKDIAG_COMPLEX_INTEGER_EXTENSION,
+];
+
+const BLKDIAG_DENSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A1,...,AN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Dense scalar, vector, or matrix blocks accept every integer class; when classes differ, the first integer block determines output class and floating or logical blocks convert into it.",
+    }];
+
+const BLKDIAG_SPARSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sparse A1,...,AN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat can structurally assemble same-class sparse integer blocks without a floating mirror; the public sparse numeric storage domain is single, double, or logical.",
+    }];
+
+const BLKDIAG_COMPLEX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "complex A1,...,AN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat can structurally assemble same-class paired integer components; the public integer domain does not support complex-integer operations.",
+    }];
+
+pub const BLKDIAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = blkdiag(A1,...,AN) with dense real integer blocks",
+        inputs: &BLKDIAG_DENSE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Blocks retain matrix geometry and occupy diagonal offsets. If any dense real input is integer, the first integer input class dominates all dense real and logical blocks; otherwise ordinary floating/logical rules apply. GPU inputs gather exactly and dense results return to the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = blkdiag(A1,...,AN) with sparse integer blocks",
+        inputs: &BLKDIAG_SPARSE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only same-class sparse integer assembly preserves exact CSC storage; sparse results remain host-resident.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = blkdiag(A1,...,AN) with complex integer blocks",
+        inputs: &BLKDIAG_COMPLEX_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only same-class paired integer-component assembly preserves exact real and imaginary storage.",
+    },
+];
+
 fn blkdiag_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Tensor {
@@ -182,9 +265,12 @@ fn type_matrix_dims(ty: &Type) -> Option<(Option<usize>, Option<usize>)> {
     keywords = "blkdiag,block diagonal,matrix,sparse,gpu",
     type_resolver(blkdiag_type),
     descriptor(crate::builtins::array::shape::blkdiag::BLKDIAG_DESCRIPTOR),
+    extensions(BLKDIAG_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::shape::blkdiag::BLKDIAG_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::blkdiag"
 )]
 async fn blkdiag_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_integer_extensions_enabled(&args)?;
     let has_gpu = args
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)));
@@ -192,6 +278,26 @@ async fn blkdiag_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return blkdiag_gpu(args).await;
     }
     blkdiag_host(args)
+}
+
+fn ensure_integer_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
+    if args.iter().any(
+        |value| matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some()),
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BLKDIAG_SPARSE_INTEGER_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if args.iter().any(
+        |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()),
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BLKDIAG_COMPLEX_INTEGER_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 async fn blkdiag_gpu(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -375,41 +481,86 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
     )
 }
 
-/// Assemble same-class real integer blocks without consulting their lossy f64 mirrors.
+/// Assemble dense real/logical blocks in the class of the first integer block.
 ///
-/// MATLAB integer matrices retain their class through structural block assembly. Mixed
-/// integer classes and mixed integer/non-integer inputs retain the legacy promotion path
-/// until that cross-class conversion policy has been differentially validated.
+/// MATLAB's public matrix-combination rules make the first integer class dominant over
+/// unlike integers, floating classes, and logical values. Integer sources remain exact and
+/// all other values use destination-class assignment conversion.
 fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
-    let mut blocks = Vec::with_capacity(args.len());
-    let mut prototype: Option<IntegerStorage> = None;
-    for value in args {
-        let (storage, shape) = match value {
-            Value::Tensor(tensor) => {
-                let storage = tensor.integer_storage()?;
-                (storage.clone(), tensor.shape.clone())
-            }
-            Value::Int(value) => (IntegerStorage::from_scalar(value.clone()), vec![1, 1]),
-            _ => return None,
-        };
-        if let Some(existing) = prototype.as_ref() {
-            if existing.class_name() != storage.class_name() {
-                return None;
-            }
-        } else {
-            prototype = Some(storage.clone());
-        }
-        if let Err(error) = validate_matrix_shape(&shape) {
-            return Some(Err(error));
-        }
-        blocks.push((storage, shape));
+    if args.iter().any(|value| {
+        matches!(
+            value,
+            Value::SparseTensor(_)
+                | Value::Complex(_, _)
+                | Value::ComplexTensor(_)
+                | Value::CharArray(_)
+        )
+    }) {
+        return None;
     }
 
-    let prototype = prototype?;
+    let prototype = args.iter().find_map(|value| match value {
+        Value::Tensor(tensor) => tensor.integer_storage().cloned(),
+        Value::Int(value) => Some(IntegerStorage::from_scalar(value.clone())),
+        _ => None,
+    })?;
+
+    enum DenseIntegerBlock<'a> {
+        Tensor(&'a Tensor),
+        Scalar(NumericScalar),
+        Logical(&'a LogicalArray),
+    }
+    const SCALAR_SHAPE: [usize; 2] = [1, 1];
+
+    impl DenseIntegerBlock<'_> {
+        fn shape(&self) -> &[usize] {
+            match self {
+                Self::Tensor(tensor) => &tensor.shape,
+                Self::Scalar(_) => &SCALAR_SHAPE,
+                Self::Logical(array) => &array.shape,
+            }
+        }
+
+        fn value_at(&self, index: usize) -> Option<NumericScalar> {
+            match self {
+                Self::Tensor(tensor) => tensor.numeric_value_at(index),
+                Self::Scalar(value) => (index == 0).then_some(*value),
+                Self::Logical(array) => array
+                    .data
+                    .get(index)
+                    .copied()
+                    .map(|value| NumericScalar::F64(f64::from(value))),
+            }
+        }
+    }
+
+    let mut blocks = Vec::with_capacity(args.len());
+    for value in args {
+        let block = match value {
+            Value::Tensor(tensor) => DenseIntegerBlock::Tensor(tensor),
+            Value::Num(value) => DenseIntegerBlock::Scalar(NumericScalar::F64(*value)),
+            Value::Int(value) => DenseIntegerBlock::Scalar(NumericScalar::from(value.clone())),
+            Value::Bool(value) => {
+                DenseIntegerBlock::Scalar(NumericScalar::F64(if *value { 1.0 } else { 0.0 }))
+            }
+            Value::LogicalArray(array) => DenseIntegerBlock::Logical(array),
+            _ => {
+                return Some(Err(error_with_detail(
+                    &ERROR_INVALID_INPUT,
+                    "blkdiag: integer-dominant blocks must be real numeric or logical matrices",
+                )))
+            }
+        };
+        if let Err(error) = validate_matrix_shape(block.shape()) {
+            return Some(Err(error));
+        }
+        blocks.push(block);
+    }
+
     let (rows, cols) = match blocks
         .iter()
-        .try_fold((0usize, 0usize), |(rows, cols), (_, shape)| {
-            let (block_rows, block_cols) = matrix_dims_from_shape(shape)?;
+        .try_fold((0usize, 0usize), |(rows, cols), block| {
+            let (block_rows, block_cols) = matrix_dims_from_shape(block.shape())?;
             Some((rows.checked_add(block_rows)?, cols.checked_add(block_cols)?))
         }) {
         Some(dims) => dims,
@@ -419,32 +570,35 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
         Ok(len) => len,
         Err(error) => return Some(Err(error)),
     };
-    let mut values = prototype.zeros_like(len).exact_values();
+    let storage = prototype.zeros_like(len);
+    let mut output = match Tensor::new_integer(storage, vec![rows, cols]) {
+        Ok(output) => output,
+        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+    };
     let mut row_offset = 0usize;
     let mut col_offset = 0usize;
-    for (storage, shape) in blocks {
+    for block in blocks {
         let (block_rows, block_cols) =
-            matrix_dims_from_shape(&shape).expect("typed integer block shape was checked above");
-        let source = storage.exact_values();
+            matrix_dims_from_shape(block.shape()).expect("integer block shape was checked above");
         for col in 0..block_cols {
             for row in 0..block_rows {
                 let src = row + col * block_rows;
                 let dst = (row_offset + row) + (col_offset + col) * rows;
-                values[dst] = source[src].clone();
+                let Some(value) = block.value_at(src) else {
+                    return Some(Err(error_with_detail(
+                        &ERROR_INVALID_INPUT,
+                        "blkdiag: block storage does not match its shape",
+                    )));
+                };
+                if let Err(detail) = output.set_numeric_assignment_at(dst, value) {
+                    return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail)));
+                }
             }
         }
         row_offset += block_rows;
         col_offset += block_cols;
     }
-    let storage = match prototype.from_exact_values_like(values) {
-        Ok(storage) => storage,
-        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
-    };
-    Some(
-        Tensor::new_integer(storage, vec![rows, cols])
-            .map(Value::Tensor)
-            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
-    )
+    Some(Ok(Value::Tensor(output)))
 }
 
 /// Assemble same-class complex integer blocks without consulting the lossy f64 mirror.
@@ -1289,7 +1443,7 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Type};
+    use runmat_builtins::{builtin_function_by_name, IntValue, Type};
 
     use crate::builtins::common::test_support;
 
@@ -1328,6 +1482,25 @@ mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn blkdiag_descriptor_declares_integer_forms_and_extensions() {
+        let builtin = builtin_function_by_name("blkdiag").expect("registered blkdiag");
+        assert_eq!(builtin.extensions, &BLKDIAG_EXTENSIONS);
+        assert_eq!(builtin.integer_capabilities.len(), 3);
+        assert_eq!(
+            builtin.integer_capabilities[0].form,
+            BLKDIAG_INTEGER_CAPABILITIES[0].form
+        );
+        assert_eq!(
+            builtin.integer_capabilities[1].form,
+            BLKDIAG_INTEGER_CAPABILITIES[1].form
+        );
+        assert_eq!(
+            builtin.integer_capabilities[2].form,
+            BLKDIAG_INTEGER_CAPABILITIES[2].form
+        );
     }
 
     #[test]
@@ -1388,7 +1561,89 @@ mod tests {
     }
 
     #[test]
+    fn blkdiag_first_integer_class_dominates_mixed_dense_blocks() {
+        let single = Tensor::from_f32(vec![-200.5], vec![1, 1]).expect("single block");
+        let logical = LogicalArray::new(vec![1], vec![1, 1]).expect("logical block");
+        let Value::Tensor(output) = call(vec![
+            Value::Num(300.0),
+            Value::Tensor(single),
+            Value::Int(IntValue::I8(5)),
+            Value::Int(IntValue::U16(500)),
+            Value::LogicalArray(logical),
+        ])
+        .expect("mixed integer-dominant blkdiag") else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::I8);
+        assert_eq!(output.shape, vec![5, 5]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I8(vec![
+                127, 0, 0, 0, 0, 0, -128, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 127, 0, 0, 0, 0, 0, 1,
+            ]))
+        );
+
+        let Value::Tensor(unsigned) = call(vec![
+            Value::Int(IntValue::U16(5)),
+            Value::Int(IntValue::I8(-3)),
+        ])
+        .expect("unsigned dominant blkdiag") else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(
+            unsigned.integer_storage(),
+            Some(&IntegerStorage::U16(vec![5, 0, 0, 0]))
+        );
+    }
+
+    #[test]
+    fn blkdiag_sparse_and_complex_integer_extensions_are_mode_gated() {
+        let sparse = || {
+            SparseTensor::new_integer(1, 1, vec![0, 1], vec![0], IntegerStorage::U16(vec![7]))
+                .expect("sparse integer")
+        };
+        let complex = || {
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U16(vec![7]),
+                    IntegerStorage::U16(vec![2]),
+                )
+                .expect("paired storage"),
+                vec![1, 1],
+            )
+            .expect("complex integer")
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(vec![Value::SparseTensor(sparse())])
+                .expect_err("strict mode rejects sparse integer");
+            assert_eq!(
+                error.identifier(),
+                BLKDIAG_SPARSE_INTEGER_EXTENSION.error_identifier
+            );
+            let error = call(vec![Value::ComplexTensor(complex())])
+                .expect_err("strict mode rejects complex integer");
+            assert_eq!(
+                error.identifier(),
+                BLKDIAG_COMPLEX_INTEGER_EXTENSION.error_identifier
+            );
+        }
+        {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(matches!(
+                call(vec![Value::SparseTensor(sparse())]).expect("RunMat sparse extension"),
+                Value::SparseTensor(_)
+            ));
+            assert!(matches!(
+                call(vec![Value::ComplexTensor(complex())]).expect("RunMat complex extension"),
+                Value::ComplexTensor(_)
+            ));
+        }
+    }
+
+    #[test]
     fn blkdiag_preserves_all_exact_sparse_integer_classes() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let storages = [
             IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
             IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
@@ -1451,6 +1706,7 @@ mod tests {
 
     #[test]
     fn blkdiag_preserves_exact_sparse_storage_with_typed_dense_blocks() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sparse = SparseTensor::new_integer(
             2,
             1,
@@ -1766,6 +2022,33 @@ mod tests {
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![1.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 4.0]
+            );
+        });
+    }
+
+    #[test]
+    fn gpu_integer_input_roundtrips_exact_dominant_class() {
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[9_007_199_254_740_993]),
+                    shape: &[1, 1],
+                })
+                .expect("upload wide integer");
+            let value = call(vec![Value::Num(-1.0), Value::GpuTensor(handle)]).expect("blkdiag");
+            let Value::GpuTensor(handle) = value else {
+                panic!("expected resident integer result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![0, 0, 0, 9_007_199_254_740_993,]))
             );
         });
     }

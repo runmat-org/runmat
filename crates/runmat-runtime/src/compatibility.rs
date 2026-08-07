@@ -270,6 +270,8 @@ mod tests {
                 ("bitshift", "bitshift-single-value-input"),
                 ("blackman", "blackman-logical-length"),
                 ("blanks", "blanks-gpu-input"),
+                ("blkdiag", "blkdiag-complex-integer-input"),
+                ("blkdiag", "blkdiag-sparse-integer-input"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -548,6 +550,7 @@ mod tests {
             "bitshift",
             "blackman",
             "blanks",
+            "blkdiag",
         ] {
             let builtin = registered
                 .iter()
