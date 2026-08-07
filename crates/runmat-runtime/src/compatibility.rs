@@ -256,6 +256,9 @@ mod tests {
                 ("binornd", "binornd-integer-trials"),
                 ("binornd", "binornd-logical-input"),
                 ("binscatter", "binscatter-gpu-input"),
+                ("bitand", "bitand-gpu-assumedtype"),
+                ("bitand", "bitand-gpu-undocumented-input"),
+                ("bitand", "bitand-single-input"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -529,6 +532,7 @@ mod tests {
             "bagOfNgrams",
             "bagOfWords",
             "bandwidth",
+            "bitand",
         ] {
             let builtin = registered
                 .iter()

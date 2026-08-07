@@ -11411,6 +11411,41 @@
               "description": "Bitwise numeric result."
             }
           ]
+        },
+        {
+          "label": "C = bitand(A, B, assumedtype)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Left integer-valued input."
+            },
+            {
+              "name": "B",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Right integer-valued input."
+            },
+            {
+              "name": "assumedtype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Integer class used to interpret double inputs."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bitwise numeric result."
+            }
+          ]
         }
       ],
       "errors": [
@@ -11423,20 +11458,116 @@
         {
           "code": "RM.BITWISE.SIZE_MISMATCH",
           "identifier": "RunMat:bitwise:SizeMismatch",
-          "when": "Input shapes are not compatible for implicit expansion.",
+          "when": "Input shapes violate the operation's expansion rule: binary bitwise functions use compatible-size expansion, while bit positions/counts require scalar expansion or exactly matching nonscalar sizes.",
           "message": "bitwise operation: array sizes are not compatible"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "bitand-single-input",
+          "mode": "RunMatOnly",
+          "description": "bitand with single-precision input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitandSingleInputExtension"
         },
         {
-          "code": "RM.IDIVIDE.DIVIDE_BY_ZERO",
-          "identifier": "RunMat:idivide:DivideByZero",
-          "when": "The divisor contains zero.",
-          "message": "idivide: division by zero"
+          "id": "bitand-gpu-undocumented-input",
+          "mode": "RunMatOnly",
+          "description": "bitand with a resident input outside the documented uint8/uint16/uint32 GPU domain is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitandGpuUndocumentedInputExtension"
         },
         {
-          "code": "RM.IDIVIDE.OVERFLOW",
-          "identifier": "RunMat:idivide:Overflow",
-          "when": "A rounded quotient cannot be represented in the dividend integer class.",
-          "message": "idivide: quotient overflows output class"
+          "id": "bitand-gpu-assumedtype",
+          "mode": "RunMatOnly",
+          "description": "bitand with resident input and assumedtype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitandGpuAssumedTypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = bitand(A, B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A accepts every built-in integer class; an integer array may be paired with a scalar double, and assumedtype must match an integer input's native class."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "B accepts every built-in integer class; an integer array may be paired with a scalar double, and assumedtype must match an integer input's native class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Same-class integer inputs preserve their class and use exact two's-complement bit patterns with compatible-size expansion. The documented interactive GPU subset is uint8, uint16, and uint32, including an integer array paired with scalar double; host fallback restores the exact result to the owning provider."
+        },
+        {
+          "form": "C = bitand(A, B, assumedtype)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A accepts every built-in integer class; an integer array may be paired with a scalar double, and assumedtype must match an integer input's native class."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "B accepts every built-in integer class; an integer array may be paired with a scalar double, and assumedtype must match an integer input's native class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "BroadcastCompatible",
+          "notes": "assumedtype selects the signed or unsigned bit width for double inputs and must equal the native class of integer inputs. Public GPU-array support excludes assumedtype; RunMat mode retains it as a gated gather-and-restore extension."
         }
       ]
     },

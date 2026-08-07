@@ -2298,6 +2298,43 @@ fn bit_position_and_count_functions_require_scalar_or_exact_sizes_when_compiled(
 }
 
 #[test]
+fn bitand_integer_and_logical_contracts_execute_through_compiled_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source =
+            format!("a = {constructor}([6 3]); b = {constructor}([3 1]); c = bitand(a, b);");
+        let vars = execute_source(&source).expect("compiled same-class bitand");
+        let expected = match constructor {
+            "int8" => IntegerStorage::I8(vec![2, 1]),
+            "int16" => IntegerStorage::I16(vec![2, 1]),
+            "int32" => IntegerStorage::I32(vec![2, 1]),
+            "int64" => IntegerStorage::I64(vec![2, 1]),
+            "uint8" => IntegerStorage::U8(vec![2, 1]),
+            "uint16" => IntegerStorage::U16(vec![2, 1]),
+            "uint32" => IntegerStorage::U32(vec![2, 1]),
+            "uint64" => IntegerStorage::U64(vec![2, 1]),
+            _ => unreachable!(),
+        };
+        assert!(matches!(
+            &vars[2],
+            Value::Tensor(tensor)
+                if tensor.integer_storage() == Some(&expected)
+        ));
+    }
+
+    let vars = execute_source(
+        "a = logical([1 1 0 0]); b = logical([1 0 1 0]); c = bitand(a, b); ok = islogical(c);",
+    )
+    .expect("compiled logical bitand");
+    assert!(matches!(
+        &vars[2],
+        Value::LogicalArray(array) if array.shape == vec![1, 4] && array.data == vec![1, 0, 0, 0]
+    ));
+    assert!(logical_truth(&vars[3]));
+}
+
+#[test]
 fn shiftdim_is_registered_and_preserves_exact_integer_shapes_through_vm_dispatch() {
     let vars = execute_source(
         "a = reshape(uint64([9223372036854775808 18446744073709551615 3 4]), 1, 2, 2); p = shiftdim(a, 1); base = reshape(a, 1, 1, 2, 2); [d, m] = shiftdim(base); n = shiftdim(a, -2);",
