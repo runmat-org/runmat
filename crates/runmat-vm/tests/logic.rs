@@ -2399,6 +2399,31 @@ fn bitshift_all_integer_value_and_count_classes_execute_through_compiled_dispatc
 }
 
 #[test]
+fn blackman_all_integer_length_classes_execute_through_compiled_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!(
+            "n = {constructor}(5); a = blackman(n); b = blackman(n, 'periodic', 'single');"
+        );
+        let vars = execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: compiled blackman failed: {error}"));
+        assert!(matches!(
+            &vars[1],
+            Value::Tensor(tensor)
+                if tensor.shape == vec![5, 1]
+                    && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+        ));
+        assert!(matches!(
+            &vars[2],
+            Value::Tensor(tensor)
+                if tensor.shape == vec![5, 1]
+                    && tensor.numeric_dtype() == runmat_builtins::NumericDType::F32
+        ));
+    }
+}
+
+#[test]
 fn shiftdim_is_registered_and_preserves_exact_integer_shapes_through_vm_dispatch() {
     let vars = execute_source(
         "a = reshape(uint64([9223372036854775808 18446744073709551615 3 4]), 1, 2, 2); p = shiftdim(a, 1); base = reshape(a, 1, 1, 2, 2); [d, m] = shiftdim(base); n = shiftdim(a, -2);",

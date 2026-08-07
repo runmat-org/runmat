@@ -1059,7 +1059,9 @@ fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64
                         WindowKind::Hann => 0.5 - 0.5 * phase.cos(),
                         WindowKind::Hamming => 0.54 - 0.46 * phase.cos(),
                         WindowKind::Blackman => {
-                            0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos()
+                            let first = 2.0 * idx as f64 / denom;
+                            let second = 4.0 * idx as f64 / denom;
+                            0.42 - 0.5 * window_cospi(first) + 0.08 * window_cospi(second)
                         }
                     }
                 })
@@ -1070,6 +1072,22 @@ fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64
             data
         }
     }
+}
+
+fn window_cospi(value: f64) -> f64 {
+    let doubled = value * 2.0;
+    let rounded = doubled.round();
+    if doubled == rounded {
+        return match rounded.rem_euclid(4.0) {
+            0.0 => 1.0,
+            1.0 | 3.0 => 0.0,
+            2.0 => -1.0,
+            _ => unreachable!("finite half turn has a modulo-four residue"),
+        };
+    }
+    let cycle = value.rem_euclid(2.0);
+    let reduced = if cycle > 1.0 { 2.0 - cycle } else { cycle };
+    (std::f64::consts::PI * reduced).cos()
 }
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 

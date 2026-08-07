@@ -268,6 +268,7 @@ mod tests {
                 ("bitshift", "bitshift-logical-value-input"),
                 ("bitshift", "bitshift-single-count-input"),
                 ("bitshift", "bitshift-single-value-input"),
+                ("blackman", "blackman-logical-length"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -544,6 +545,7 @@ mod tests {
             "bitand",
             "bitor",
             "bitshift",
+            "blackman",
         ] {
             let builtin = registered
                 .iter()

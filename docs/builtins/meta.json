@@ -12096,7 +12096,7 @@
           "code": "RM.BLACKMAN.INVALID_LENGTH",
           "identifier": "RunMat:blackman:InvalidLength",
           "when": "Length input is not a finite nonnegative scalar value.",
-          "message": "blackman: expected a nonnegative scalar integer length"
+          "message": "blackman: expected a nonnegative scalar length"
         },
         {
           "code": "RM.BLACKMAN.INVALID_OPTION",
@@ -12115,6 +12115,49 @@
           "identifier": "RunMat:blackman:InternalError",
           "when": "Window materialization fails internally.",
           "message": "blackman: internal error"
+        },
+        {
+          "code": "RM.BLACKMAN.ARG_COUNT",
+          "identifier": "RunMat:blackman:ArgumentCount",
+          "when": "More than a sampling option and an output-type option are supplied.",
+          "message": "blackman: too many input arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "blackman-logical-length",
+          "mode": "RunMatOnly",
+          "description": "blackman with a logical scalar length is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BlackmanLogicalLengthExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "w = blackman(L[, sflag][, typeName])",
+          "inputs": [
+            {
+              "name": "L",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "L accepts every built-in integer class as a nonnegative scalar length; floating L is rounded to the nearest integer."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default and sampling-only forms return a double column vector; typeName selects double or single. L is a host structural scalar with no interactive gpuArray overload; RunMat may materialize the new floating output on its active provider as an internal acceleration choice."
         }
       ]
     },

@@ -41,7 +41,11 @@ pub(crate) fn cospi_real(value: f64) -> f64 {
         Some(0) => 1.0,
         Some(1 | 3) => 0.0,
         Some(2) => -1.0,
-        _ => (std::f64::consts::PI * value).cos(),
+        _ => {
+            let cycle = value.rem_euclid(2.0);
+            let reduced = if cycle > 1.0 { 2.0 - cycle } else { cycle };
+            (std::f64::consts::PI * reduced).cos()
+        }
     }
 }
 
