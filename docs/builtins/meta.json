@@ -14478,6 +14478,132 @@
           "when": "Output tensor construction fails internally.",
           "message": "buttord: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "buttord-integer-frequency",
+          "mode": "RunMatOnly",
+          "description": "buttord with typed-integer passband or stopband edges is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButtordIntegerFrequencyExtension"
+        },
+        {
+          "id": "buttord-logical-frequency",
+          "mode": "RunMatOnly",
+          "description": "buttord with logical passband or stopband edges is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButtordLogicalFrequencyExtension"
+        },
+        {
+          "id": "buttord-complex-frequency",
+          "mode": "RunMatOnly",
+          "description": "buttord with complex passband or stopband edges is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButtordComplexFrequencyExtension"
+        },
+        {
+          "id": "buttord-integer-attenuation",
+          "mode": "RunMatOnly",
+          "description": "buttord with typed-integer ripple or attenuation is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButtordIntegerAttenuationExtension"
+        },
+        {
+          "id": "buttord-logical-attenuation",
+          "mode": "RunMatOnly",
+          "description": "buttord with logical ripple or attenuation is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButtordLogicalAttenuationExtension"
+        },
+        {
+          "id": "buttord-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "buttord with resident GPU-array design arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButtordGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[n,Wn] = buttord(integer_Wp,integer_Ws,Rp,Rs,...)",
+          "inputs": [
+            {
+              "name": "Wp",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented passband-edge datatypes are single and double; RunMat mode additionally accepts scalar or two-element typed-integer storage."
+            },
+            {
+              "name": "Ws",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented stopband-edge datatypes are single and double; RunMat mode additionally accepts scalar or two-element typed-integer storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer frequency edges cross the explicit binary64 Butterworth analysis boundary after compatibility and residency checks. Both n and Wn remain host double values."
+        },
+        {
+          "form": "[n,Wn] = buttord(Wp,Ws,integer_Rp,integer_Rs,...)",
+          "inputs": [
+            {
+              "name": "Rp",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented passband-ripple datatypes are single and double; RunMat mode additionally accepts every scalar integer class."
+            },
+            {
+              "name": "Rs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented stopband-attenuation datatypes are single and double; RunMat mode additionally accepts every scalar integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer ripple and attenuation controls cross the explicit binary64 decibel-analysis boundary after compatibility and residency checks. Both n and Wn remain host double values."
+        }
       ]
     },
     {

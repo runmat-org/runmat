@@ -296,6 +296,12 @@ mod tests {
                 ("butter", "butter-order-above-500"),
                 ("butter", "butter-single-cutoff"),
                 ("butter", "butter-single-order"),
+                ("buttord", "buttord-complex-frequency"),
+                ("buttord", "buttord-gpu-input"),
+                ("buttord", "buttord-integer-attenuation"),
+                ("buttord", "buttord-integer-frequency"),
+                ("buttord", "buttord-logical-attenuation"),
+                ("buttord", "buttord-logical-frequency"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -580,6 +586,7 @@ mod tests {
             "bsxfun",
             "builtin",
             "butter",
+            "buttord",
         ] {
             let builtin = registered
                 .iter()

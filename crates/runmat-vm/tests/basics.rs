@@ -306,6 +306,29 @@ fn buttord_builtin_executes_for_butterworth_workflow() {
 }
 
 #[test]
+fn compiled_buttord_integer_extensions_return_double_design_values() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("[n,Wn] = buttord(uint8(1),uint16(2),uint32(1),uint64(40),'s');");
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(order) if *order == 8.0)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(cutoff) if *cutoff > 1.0 && *cutoff < 2.0)));
+}
+
+#[test]
+fn compiled_buttord_integer_frequency_respects_compatibility_policy() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let err = execute_source_result("n = buttord(uint8(1),2,1,40,'s');")
+        .expect_err("typed integer frequency must be gated");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:compatibility:ButtordIntegerFrequencyExtension")
+    );
+}
+
+#[test]
 fn compiled_butter_integer_extensions_preserve_double_filter_outputs() {
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source("[b,a] = butter(uint16(1),uint8(1),'s');");
