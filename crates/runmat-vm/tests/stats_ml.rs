@@ -470,6 +470,30 @@ fn bootstrp_surface_executes_from_scripts() {
 }
 
 #[test]
+fn bootstrp_integer_extensions_preserve_exact_compiled_callback_output() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "rng('default'); wide = uint64(9007199254740992) + uint64(1); x = [wide; uint64(7)]; w = uint8([1;0]); [b,s] = bootstrp(uint16(2), @min, x, \"Weights\", w);",
+    )
+    .expect("compiled integer bootstrp");
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.shape == vec![2, 1]
+                    && tensor.integer_storage()
+                        == Some(&runmat_builtins::IntegerStorage::U64(vec![
+                            9_007_199_254_740_993,
+                            9_007_199_254_740_993,
+                        ]))
+        )
+    }));
+    assert!(vars.iter().any(
+        |value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![1.0; 4])
+    ));
+}
+
+#[test]
 fn dividerand_surface_executes_from_scripts() {
     let vars = execute_source(
         "rng('default'); [tr,val,te] = dividerand(10, 0.6, 0.2, 0.2); ntr = numel(tr); nv = numel(val); nt = numel(te); total = ntr + nv + nt; first = tr(1);",

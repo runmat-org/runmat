@@ -12523,6 +12523,133 @@
           "when": "Internal conversion or allocation fails.",
           "message": "sampling: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "bootstrp-integer-nboot",
+          "mode": "RunMatOnly",
+          "description": "bootstrp with an integer nboot control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BootstrpIntegerNbootExtension"
+        },
+        {
+          "id": "bootstrp-logical-nboot",
+          "mode": "RunMatOnly",
+          "description": "bootstrp with a logical nboot control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BootstrpLogicalNbootExtension"
+        },
+        {
+          "id": "bootstrp-integer-data",
+          "mode": "RunMatOnly",
+          "description": "bootstrp with integer sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BootstrpIntegerDataExtension"
+        },
+        {
+          "id": "bootstrp-integer-weights",
+          "mode": "RunMatOnly",
+          "description": "bootstrp with integer observation weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BootstrpIntegerWeightsExtension"
+        },
+        {
+          "id": "bootstrp-logical-weights",
+          "mode": "RunMatOnly",
+          "description": "bootstrp with logical observation weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BootstrpLogicalWeightsExtension"
+        },
+        {
+          "id": "bootstrp-text-callable",
+          "mode": "RunMatOnly",
+          "description": "bootstrp with a text callback name is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BootstrpTextCallableExtension"
+        },
+        {
+          "id": "bootstrp-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "bootstrp with gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BootstrpGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "bootstat = bootstrp(nboot,bootfun,d1,...,dN) with integer nboot",
+          "inputs": [
+            {
+              "name": "nboot",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat accepts every integer class as an exact positive scalar bootstrap count; the public control domain is single or double."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only exact structural count; callback output class determines bootstat and bootsam remains double."
+        },
+        {
+          "form": "bootstat = bootstrp(nboot,bootfun,d1,...,dN) with integer data",
+          "inputs": [
+            {
+              "name": "d1,...,dN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat samples every integer data class by exact row or vector indexing; public nongrouping numeric data is single or double."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only resampling preserves authoritative integer storage into each callback; homogeneous numeric or logical callback output determines bootstat class."
+        },
+        {
+          "form": "bootstat = bootstrp(___,Weights=w) with integer weights",
+          "inputs": [
+            {
+              "name": "Weights",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat accepts every nonnegative integer weight class and converts it once at the floating multinomial-probability boundary; the public weight domain is single or double."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer weights cross one deliberate binary64 probability boundary after exact nonnegative validation; sampled data and callback output retain their own classes."
+        }
       ]
     },
     {

@@ -1,9 +1,14 @@
 //! Sampling utilities for Statistics and Machine Learning Toolbox compatibility.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, IntValue, LogicalArray, NumericStorage, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -321,6 +326,125 @@ const BOOTSTRP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         label: "[bootstat, bootsam] = bootstrp(___)",
         inputs: &INPUTS_BOOTSTRP,
         outputs: &OUTPUT_BOOTSTAT_BOOTSAM,
+    },
+];
+
+const BOOTSTRP_INTEGER_NBOOT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bootstrp-integer-nboot",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bootstrp with an integer nboot control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BootstrpIntegerNbootExtension"),
+};
+
+const BOOTSTRP_LOGICAL_NBOOT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bootstrp-logical-nboot",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bootstrp with a logical nboot control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BootstrpLogicalNbootExtension"),
+};
+
+const BOOTSTRP_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bootstrp-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bootstrp with integer sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BootstrpIntegerDataExtension"),
+};
+
+const BOOTSTRP_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bootstrp-integer-weights",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bootstrp with integer observation weights is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BootstrpIntegerWeightsExtension"),
+};
+
+const BOOTSTRP_LOGICAL_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bootstrp-logical-weights",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bootstrp with logical observation weights is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BootstrpLogicalWeightsExtension"),
+};
+
+const BOOTSTRP_TEXT_CALLABLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bootstrp-text-callable",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bootstrp with a text callback name is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BootstrpTextCallableExtension"),
+};
+
+const BOOTSTRP_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bootstrp-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bootstrp with gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BootstrpGpuInputExtension"),
+};
+
+const BOOTSTRP_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    BOOTSTRP_INTEGER_NBOOT_EXTENSION,
+    BOOTSTRP_LOGICAL_NBOOT_EXTENSION,
+    BOOTSTRP_INTEGER_DATA_EXTENSION,
+    BOOTSTRP_INTEGER_WEIGHTS_EXTENSION,
+    BOOTSTRP_LOGICAL_WEIGHTS_EXTENSION,
+    BOOTSTRP_TEXT_CALLABLE_EXTENSION,
+    BOOTSTRP_GPU_INPUT_EXTENSION,
+];
+
+const BOOTSTRP_INTEGER_NBOOT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "nboot",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat accepts every integer class as an exact positive scalar bootstrap count; the public control domain is single or double.",
+    }];
+
+const BOOTSTRP_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "d1,...,dN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat samples every integer data class by exact row or vector indexing; public nongrouping numeric data is single or double.",
+    }];
+
+const BOOTSTRP_INTEGER_WEIGHT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Weights",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat accepts every nonnegative integer weight class and converts it once at the floating multinomial-probability boundary; the public weight domain is single or double.",
+    }];
+
+pub const BOOTSTRP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "bootstat = bootstrp(nboot,bootfun,d1,...,dN) with integer nboot",
+        inputs: &BOOTSTRP_INTEGER_NBOOT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only exact structural count; callback output class determines bootstat and bootsam remains double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "bootstat = bootstrp(nboot,bootfun,d1,...,dN) with integer data",
+        inputs: &BOOTSTRP_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only resampling preserves authoritative integer storage into each callback; homogeneous numeric or logical callback output determines bootstat class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "bootstat = bootstrp(___,Weights=w) with integer weights",
+        inputs: &BOOTSTRP_INTEGER_WEIGHT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer weights cross one deliberate binary64 probability boundary after exact nonnegative validation; sampled data and callback output retain their own classes.",
     },
 ];
 
@@ -1407,6 +1531,80 @@ struct BootstrpEval {
     bootsam: Option<Value>,
 }
 
+fn is_integer_bootstrp_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical_bootstrp_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn is_text_bootstrp_callable(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    )
+}
+
+fn enable_bootstrp_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(extension, "bootstrp")
+}
+
+fn ensure_bootstrp_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
+    if args.len() < 3 {
+        return Ok(());
+    }
+    if is_integer_bootstrp_value(&args[0]) {
+        enable_bootstrp_extension(&BOOTSTRP_INTEGER_NBOOT_EXTENSION)?;
+    }
+    if is_logical_bootstrp_value(&args[0]) {
+        enable_bootstrp_extension(&BOOTSTRP_LOGICAL_NBOOT_EXTENSION)?;
+    }
+    if is_text_bootstrp_callable(&args[1]) {
+        enable_bootstrp_extension(&BOOTSTRP_TEXT_CALLABLE_EXTENSION)?;
+    }
+
+    let mut idx = 2usize;
+    while idx < args.len() {
+        if let Some(keyword) = keyword_of(&args[idx]) {
+            match keyword.as_str() {
+                "weights" => {
+                    if let Some(value) = args.get(idx + 1) {
+                        if is_integer_bootstrp_value(value) {
+                            enable_bootstrp_extension(&BOOTSTRP_INTEGER_WEIGHTS_EXTENSION)?;
+                        }
+                        if is_logical_bootstrp_value(value) {
+                            enable_bootstrp_extension(&BOOTSTRP_LOGICAL_WEIGHTS_EXTENSION)?;
+                        }
+                    }
+                    idx += 2;
+                    continue;
+                }
+                "options" => {
+                    idx += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if is_integer_bootstrp_value(&args[idx]) {
+            enable_bootstrp_extension(&BOOTSTRP_INTEGER_DATA_EXTENSION)?;
+        }
+        idx += 1;
+    }
+
+    if args
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        enable_bootstrp_extension(&BOOTSTRP_GPU_INPUT_EXTENSION)?;
+    }
+    Ok(())
+}
+
 fn is_empty_function(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
@@ -1455,7 +1653,8 @@ async fn parse_bootstrp_args(args: Vec<Value>) -> BuiltinResult<BootstrpArgs> {
             "bootstrp: expected nboot, bootfun, and at least one data argument",
         ));
     }
-    let nboot = parse_positive_usize("bootstrp", &args[0], "nboot")?;
+    let nboot_value = gathered(args[0].clone(), "bootstrp").await?;
+    let nboot = parse_positive_usize("bootstrp", &nboot_value, "nboot")?;
     let bootfun = gathered(args[1].clone(), "bootstrp").await?;
     let mut data = Vec::new();
     let mut weight_value = None;
@@ -1544,7 +1743,28 @@ async fn parse_bootstrp_args(args: Vec<Value>) -> BuiltinResult<BootstrpArgs> {
     })
 }
 
-async fn bootstat_row(value: Value) -> BuiltinResult<Vec<f64>> {
+enum BootstatRow {
+    Numeric(NumericStorage),
+    Logical(Vec<u8>),
+}
+
+impl BootstatRow {
+    fn len(&self) -> usize {
+        match self {
+            Self::Numeric(storage) => storage.len(),
+            Self::Logical(values) => values.len(),
+        }
+    }
+
+    fn class_name(&self) -> &'static str {
+        match self {
+            Self::Numeric(storage) => storage.class_name(),
+            Self::Logical(_) => "logical",
+        }
+    }
+}
+
+async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
     let mut value = gather_if_needed_async(&value)
         .await
         .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
@@ -1565,15 +1785,16 @@ async fn bootstat_row(value: Value) -> BuiltinResult<Vec<f64>> {
             "bootstrp",
             "bootstrp: bootfun must return exactly one output",
         )),
-        Value::Num(v) => Ok(vec![v]),
-        Value::Int(v) => Ok(vec![v.to_f64()]),
-        Value::Bool(v) => Ok(vec![if v { 1.0 } else { 0.0 }]),
-        Value::Tensor(t) => Ok(tensor::tensor_into_values_f64(t)),
-        Value::LogicalArray(a) => Ok(a
-            .data
-            .into_iter()
-            .map(|value| if value != 0 { 1.0 } else { 0.0 })
-            .collect()),
+        Value::Num(v) => Ok(BootstatRow::Numeric(NumericStorage::F64(vec![v]))),
+        Value::Int(v) => Ok(BootstatRow::Numeric(
+            runmat_builtins::IntegerStorage::from_scalar(v).into(),
+        )),
+        Value::Bool(v) => Ok(BootstatRow::Logical(vec![u8::from(v)])),
+        Value::Tensor(t) => t
+            .into_numeric_storage()
+            .map(BootstatRow::Numeric)
+            .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}"))),
+        Value::LogicalArray(a) => Ok(BootstatRow::Logical(a.data)),
         other => Err(sampling_error(
             "bootstrp",
             format!("bootstrp: bootfun must return numeric or logical values, got {other:?}"),
@@ -1601,6 +1822,68 @@ fn empty_bootstat(nboot: usize) -> BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![nboot, 0])
         .map(Value::Tensor)
         .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))
+}
+
+fn assemble_bootstat(rows: Vec<BootstatRow>, nboot: usize) -> BuiltinResult<Value> {
+    let Some(first) = rows.first() else {
+        return empty_bootstat(nboot);
+    };
+    let width = first.len();
+    let class_name = first.class_name();
+    if rows
+        .iter()
+        .any(|row| row.len() != width || row.class_name() != class_name)
+    {
+        return Err(sampling_error(
+            "bootstrp",
+            "bootstrp: bootfun output size and class must be consistent across bootstrap samples",
+        ));
+    }
+    let len = nboot.checked_mul(width).ok_or_else(|| {
+        sampling_error(
+            "bootstrp",
+            "bootstrp: bootstrap statistic output is too large",
+        )
+    })?;
+
+    match first {
+        BootstatRow::Numeric(first_storage) => {
+            let mut storage = NumericStorage::zeros(first_storage.numeric_dtype(), len);
+            for (boot_idx, row) in rows.iter().enumerate() {
+                let BootstatRow::Numeric(row_storage) = row else {
+                    unreachable!("class consistency checked above");
+                };
+                for col in 0..width {
+                    let value = row_storage.value_at(col).ok_or_else(|| {
+                        sampling_error(
+                            "bootstrp",
+                            "bootstrp: callback output storage does not match its shape",
+                        )
+                    })?;
+                    storage
+                        .set_value(boot_idx + col * nboot, value)
+                        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
+                }
+            }
+            Tensor::from_numeric_storage(storage, vec![nboot, width])
+                .map(tensor::tensor_into_value)
+                .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))
+        }
+        BootstatRow::Logical(_) => {
+            let mut data = vec![0u8; len];
+            for (boot_idx, row) in rows.iter().enumerate() {
+                let BootstatRow::Logical(values) = row else {
+                    unreachable!("class consistency checked above");
+                };
+                for (col, value) in values.iter().enumerate() {
+                    data[boot_idx + col * nboot] = u8::from(*value != 0);
+                }
+            }
+            LogicalArray::new(data, vec![nboot, width])
+                .map(Value::LogicalArray)
+                .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))
+        }
+    }
 }
 
 async fn bootstrp_compute(
@@ -1657,28 +1940,7 @@ async fn bootstrp_compute(
     let bootstat = if is_empty_function(&args.bootfun) {
         empty_bootstat(args.nboot)?
     } else {
-        let width = rows.first().map(|row| row.len()).unwrap_or(0);
-        if rows.iter().any(|row| row.len() != width) {
-            return Err(sampling_error(
-                "bootstrp",
-                "bootstrp: bootfun output size must be consistent across bootstrap samples",
-            ));
-        }
-        let len = args.nboot.checked_mul(width).ok_or_else(|| {
-            sampling_error(
-                "bootstrp",
-                "bootstrp: bootstrap statistic output is too large",
-            )
-        })?;
-        let mut data = vec![0.0; len];
-        for (boot_idx, row) in rows.iter().enumerate() {
-            for (col, value) in row.iter().enumerate() {
-                data[boot_idx + col * args.nboot] = *value;
-            }
-        }
-        Tensor::new(data, vec![args.nboot, width])
-            .map(tensor::tensor_into_value)
-            .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?
+        assemble_bootstat(rows, args.nboot)?
     };
     Ok(BootstrpEval { bootstat, bootsam })
 }
@@ -1698,6 +1960,8 @@ pub mod bootstrp {
         keywords = "bootstrp,bootstrap,resampling,statistics,weights",
         type_resolver(super::sampling_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::BOOTSTRP_EXTENSIONS),
+        integer_capabilities(super::BOOTSTRP_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::random::sampling::bootstrp"
     )]
     pub(crate) async fn bootstrp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1712,6 +1976,7 @@ pub mod bootstrp {
             }
             _ => {}
         }
+        super::ensure_bootstrp_extensions_enabled(&args)?;
         let include_bootsam = matches!(requested_outputs, Some(2));
         let args = super::parse_bootstrp_args(args).await?;
         let eval = super::bootstrp_compute(args, include_bootsam).await?;
@@ -1731,7 +1996,7 @@ pub mod bootstrp {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, NumericStorage};
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage, NumericStorage};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
@@ -2109,6 +2374,208 @@ mod tests {
     }
 
     #[test]
+    fn bootstrp_descriptor_declares_integer_forms_and_extensions() {
+        let builtin = builtin_function_by_name("bootstrp").expect("registered bootstrp");
+        assert_eq!(builtin.extensions, &BOOTSTRP_EXTENSIONS);
+        assert_eq!(builtin.integer_capabilities.len(), 3);
+        assert_eq!(
+            builtin
+                .integer_capabilities
+                .iter()
+                .map(|capability| capability.form)
+                .collect::<Vec<_>>(),
+            BOOTSTRP_INTEGER_CAPABILITIES
+                .iter()
+                .map(|capability| capability.form)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn bootstrp_extensions_are_independently_mode_gated() {
+        let empty_callback =
+            || Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty callback"));
+        let data = || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("double data"));
+        let integer_data = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1])
+                    .expect("integer data"),
+            )
+        };
+        let integer_weights = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U8(vec![1, 1]), vec![2, 1])
+                    .expect("integer weights"),
+            )
+        };
+        let logical_weights = || {
+            Value::LogicalArray(LogicalArray::new(vec![1, 1], vec![2, 1]).expect("logical weights"))
+        };
+
+        let cases = [
+            (
+                vec![Value::Int(IntValue::U16(2)), empty_callback(), data()],
+                BOOTSTRP_INTEGER_NBOOT_EXTENSION.error_identifier,
+            ),
+            (
+                vec![Value::Bool(true), empty_callback(), data()],
+                BOOTSTRP_LOGICAL_NBOOT_EXTENSION.error_identifier,
+            ),
+            (
+                vec![Value::Num(2.0), empty_callback(), integer_data()],
+                BOOTSTRP_INTEGER_DATA_EXTENSION.error_identifier,
+            ),
+            (
+                vec![
+                    Value::Num(2.0),
+                    empty_callback(),
+                    data(),
+                    Value::from("Weights"),
+                    integer_weights(),
+                ],
+                BOOTSTRP_INTEGER_WEIGHTS_EXTENSION.error_identifier,
+            ),
+            (
+                vec![
+                    Value::Num(2.0),
+                    empty_callback(),
+                    data(),
+                    Value::from("Weights"),
+                    logical_weights(),
+                ],
+                BOOTSTRP_LOGICAL_WEIGHTS_EXTENSION.error_identifier,
+            ),
+            (
+                vec![Value::Num(2.0), Value::from("mean"), data()],
+                BOOTSTRP_TEXT_CALLABLE_EXTENSION.error_identifier,
+            ),
+        ];
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (args, identifier) in cases {
+            let error =
+                block_on(bootstrp::bootstrp_builtin(args)).expect_err("strict mode must reject");
+            assert_eq!(error.identifier(), identifier);
+        }
+    }
+
+    #[test]
+    fn bootstrp_integer_extensions_preserve_exact_callback_output() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::reset_rng();
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let wide = 9_007_199_254_740_993_u64;
+        let data = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![2, 1])
+                .expect("integer data"),
+        );
+        let weights = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U8(vec![1, 0]), vec![2, 1])
+                .expect("integer weights"),
+        );
+        let Value::OutputList(outputs) = block_on(bootstrp::bootstrp_builtin(vec![
+            Value::Int(IntValue::U16(2)),
+            Value::FunctionHandle("min".to_string()),
+            data,
+            Value::from("Weights"),
+            weights,
+        ]))
+        .expect("RunMat integer bootstrap") else {
+            panic!("expected output list");
+        };
+        assert!(matches!(
+            &outputs[0],
+            Value::Tensor(tensor)
+                if tensor.shape == vec![2, 1]
+                    && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![wide, wide]))
+        ));
+        assert!(matches!(
+            &outputs[1],
+            Value::Tensor(tensor)
+                if tensor.shape == vec![2, 2]
+                    && tensor.materialize_f64() == vec![1.0; 4]
+        ));
+    }
+
+    #[test]
+    fn bootstrp_gpu_extension_rejects_before_gather_and_admits_resident_nboot() {
+        use runmat_accelerate_api::HostTensorView;
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &[2.0],
+                    shape: &[1, 1],
+                })
+                .expect("resident nboot");
+            let empty_callback =
+                || Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty callback"));
+            let data =
+                || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("double data"));
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(bootstrp::bootstrp_builtin(vec![
+                    Value::GpuTensor(handle.clone()),
+                    empty_callback(),
+                    data(),
+                ]))
+                .expect_err("strict mode rejects resident input");
+                assert_eq!(
+                    error.identifier(),
+                    BOOTSTRP_GPU_INPUT_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let Value::Tensor(output) = block_on(bootstrp::bootstrp_builtin(vec![
+                    Value::GpuTensor(handle),
+                    empty_callback(),
+                    data(),
+                ]))
+                .expect("RunMat resident nboot") else {
+                    panic!("expected empty bootstat tensor");
+                };
+                assert_eq!(output.shape, vec![2, 0]);
+            }
+        });
+    }
+
+    #[test]
+    fn bootstrp_assembles_homogeneous_callback_rows_without_class_loss() {
+        let numeric_cases = [
+            NumericStorage::F64(vec![1.0, 2.0]),
+            NumericStorage::F32(vec![1.0, 2.0]),
+            NumericStorage::I8(vec![-1, 2]),
+            NumericStorage::I16(vec![-1, 2]),
+            NumericStorage::I32(vec![-1, 2]),
+            NumericStorage::I64(vec![-1, 2]),
+            NumericStorage::U8(vec![1, 2]),
+            NumericStorage::U16(vec![1, 2]),
+            NumericStorage::U32(vec![1, 2]),
+            NumericStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+        for storage in numeric_cases {
+            let expected = storage.clone();
+            let output = assemble_bootstat(vec![BootstatRow::Numeric(storage)], 1)
+                .expect("numeric bootstat");
+            let Value::Tensor(tensor) = output else {
+                panic!("expected tensor bootstat");
+            };
+            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.into_numeric_storage(), Ok(expected));
+        }
+
+        let Value::LogicalArray(logical) =
+            assemble_bootstat(vec![BootstatRow::Logical(vec![1, 0])], 1).expect("logical bootstat")
+        else {
+            panic!("expected logical bootstat");
+        };
+        assert_eq!(logical.shape, vec![1, 2]);
+        assert_eq!(logical.data, vec![1, 0]);
+    }
+
+    #[test]
     fn bootstrp_weighted_mean_returns_stats_and_samples() {
         let _lock = random::test_lock().lock().unwrap();
         random::reset_rng();
@@ -2362,14 +2829,14 @@ mod tests {
             vec![0.0, 2.0, 3.0]
         );
 
-        assert_eq!(
-            block_on(bootstat_row(poisoned_int_tensor(
-                IntegerStorage::I16(vec![4, 5]),
-                vec![1, 2],
-                f64::NAN,
-            )))
-            .unwrap(),
-            vec![4.0, 5.0]
-        );
+        let BootstatRow::Numeric(storage) = block_on(bootstat_row(poisoned_int_tensor(
+            IntegerStorage::I16(vec![4, 5]),
+            vec![1, 2],
+            f64::NAN,
+        )))
+        .unwrap() else {
+            panic!("expected numeric callback row");
+        };
+        assert_eq!(storage, NumericStorage::I16(vec![4, 5]));
     }
 }

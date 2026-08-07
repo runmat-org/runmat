@@ -272,6 +272,13 @@ mod tests {
                 ("blanks", "blanks-gpu-input"),
                 ("blkdiag", "blkdiag-complex-integer-input"),
                 ("blkdiag", "blkdiag-sparse-integer-input"),
+                ("bootstrp", "bootstrp-gpu-input"),
+                ("bootstrp", "bootstrp-integer-data"),
+                ("bootstrp", "bootstrp-integer-nboot"),
+                ("bootstrp", "bootstrp-integer-weights"),
+                ("bootstrp", "bootstrp-logical-nboot"),
+                ("bootstrp", "bootstrp-logical-weights"),
+                ("bootstrp", "bootstrp-text-callable"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -551,6 +558,7 @@ mod tests {
             "blackman",
             "blanks",
             "blkdiag",
+            "bootstrp",
         ] {
             let builtin = registered
                 .iter()
