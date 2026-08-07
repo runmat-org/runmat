@@ -259,6 +259,9 @@ mod tests {
                 ("bitand", "bitand-gpu-assumedtype"),
                 ("bitand", "bitand-gpu-undocumented-input"),
                 ("bitand", "bitand-single-input"),
+                ("bitor", "bitor-gpu-assumedtype"),
+                ("bitor", "bitor-gpu-undocumented-input"),
+                ("bitor", "bitor-single-input"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -533,6 +536,7 @@ mod tests {
             "bagOfWords",
             "bandwidth",
             "bitand",
+            "bitor",
         ] {
             let builtin = registered
                 .iter()

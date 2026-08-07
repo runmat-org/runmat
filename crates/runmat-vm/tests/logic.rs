@@ -2298,14 +2298,15 @@ fn bit_position_and_count_functions_require_scalar_or_exact_sizes_when_compiled(
 }
 
 #[test]
-fn bitand_integer_and_logical_contracts_execute_through_compiled_dispatch() {
+fn bitand_and_bitor_integer_and_logical_contracts_execute_through_compiled_dispatch() {
     for constructor in [
         "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
     ] {
-        let source =
-            format!("a = {constructor}([6 3]); b = {constructor}([3 1]); c = bitand(a, b);");
-        let vars = execute_source(&source).expect("compiled same-class bitand");
-        let expected = match constructor {
+        let source = format!(
+            "a = {constructor}([6 3]); b = {constructor}([3 1]); c = bitand(a, b); d = bitor(a, b);"
+        );
+        let vars = execute_source(&source).expect("compiled same-class bitand and bitor");
+        let expected_and = match constructor {
             "int8" => IntegerStorage::I8(vec![2, 1]),
             "int16" => IntegerStorage::I16(vec![2, 1]),
             "int32" => IntegerStorage::I32(vec![2, 1]),
@@ -2316,22 +2317,43 @@ fn bitand_integer_and_logical_contracts_execute_through_compiled_dispatch() {
             "uint64" => IntegerStorage::U64(vec![2, 1]),
             _ => unreachable!(),
         };
+        let expected_or = match constructor {
+            "int8" => IntegerStorage::I8(vec![7, 3]),
+            "int16" => IntegerStorage::I16(vec![7, 3]),
+            "int32" => IntegerStorage::I32(vec![7, 3]),
+            "int64" => IntegerStorage::I64(vec![7, 3]),
+            "uint8" => IntegerStorage::U8(vec![7, 3]),
+            "uint16" => IntegerStorage::U16(vec![7, 3]),
+            "uint32" => IntegerStorage::U32(vec![7, 3]),
+            "uint64" => IntegerStorage::U64(vec![7, 3]),
+            _ => unreachable!(),
+        };
         assert!(matches!(
             &vars[2],
             Value::Tensor(tensor)
-                if tensor.integer_storage() == Some(&expected)
+                if tensor.integer_storage() == Some(&expected_and)
+        ));
+        assert!(matches!(
+            &vars[3],
+            Value::Tensor(tensor)
+                if tensor.integer_storage() == Some(&expected_or)
         ));
     }
 
     let vars = execute_source(
-        "a = logical([1 1 0 0]); b = logical([1 0 1 0]); c = bitand(a, b); ok = islogical(c);",
+        "a = logical([1 1 0 0]); b = logical([1 0 1 0]); c = bitand(a, b); d = bitor(a, b); okc = islogical(c); okd = islogical(d);",
     )
-    .expect("compiled logical bitand");
+    .expect("compiled logical bitand and bitor");
     assert!(matches!(
         &vars[2],
         Value::LogicalArray(array) if array.shape == vec![1, 4] && array.data == vec![1, 0, 0, 0]
     ));
-    assert!(logical_truth(&vars[3]));
+    assert!(matches!(
+        &vars[3],
+        Value::LogicalArray(array) if array.shape == vec![1, 4] && array.data == vec![1, 1, 1, 0]
+    ));
+    assert!(logical_truth(&vars[4]));
+    assert!(logical_truth(&vars[5]));
 }
 
 #[test]

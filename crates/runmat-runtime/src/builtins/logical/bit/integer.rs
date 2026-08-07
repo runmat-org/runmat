@@ -58,6 +58,35 @@ pub const BITAND_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
     BITAND_GPU_ASSUMED_TYPE_EXTENSION,
 ];
 
+const BITOR_SINGLE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bitor-single-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bitor with single-precision input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BitorSingleInputExtension"),
+};
+
+const BITOR_GPU_UNDOCUMENTED_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "bitor-gpu-undocumented-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "bitor with a resident input outside the documented uint8/uint16/uint32 GPU domain is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:BitorGpuUndocumentedInputExtension"),
+    };
+
+const BITOR_GPU_ASSUMED_TYPE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bitor-gpu-assumedtype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bitor with resident input and assumedtype is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BitorGpuAssumedTypeExtension"),
+};
+
+pub const BITOR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    BITOR_SINGLE_INPUT_EXTENSION,
+    BITOR_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+    BITOR_GPU_ASSUMED_TYPE_EXTENSION,
+];
+
 const BITAND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "A",
@@ -89,6 +118,46 @@ pub const BITAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] =
     BuiltinIntegerCapabilityDescriptor {
         form: "C = bitand(A, B, assumedtype)",
         inputs: &BITAND_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "assumedtype selects the signed or unsigned bit width for double inputs and must equal the native class of integer inputs. Public GPU-array support excludes assumedtype; RunMat mode retains it as a gated gather-and-restore extension.",
+    },
+];
+
+const BITOR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A accepts every built-in integer class; an integer array may be paired with a scalar double, and assumedtype must match an integer input's native class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "B accepts every built-in integer class; an integer array may be paired with a scalar double, and assumedtype must match an integer input's native class.",
+    },
+];
+
+pub const BITOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = bitor(A, B)",
+        inputs: &BITOR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Same-class integer inputs preserve their class and use exact two's-complement bit patterns with compatible-size expansion. The documented interactive GPU subset is uint8, uint16, and uint32, including an integer array paired with scalar double; host fallback restores the exact result to the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = bitor(A, B, assumedtype)",
+        inputs: &BITOR_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
         output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
@@ -662,7 +731,32 @@ pub const SWAPBYTES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn bitand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    enforce_bitand_compatibility(&args)?;
+    public_binary_bitwise_builtin(
+        BITAND_NAME,
+        args,
+        &BITAND_SINGLE_INPUT_EXTENSION,
+        &BITAND_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+        &BITAND_GPU_ASSUMED_TYPE_EXTENSION,
+        |a, b| a & b,
+    )
+    .await
+}
+
+async fn public_binary_bitwise_builtin(
+    name: &'static str,
+    args: Vec<Value>,
+    single_extension: &BuiltinExtensionDescriptor,
+    gpu_undocumented_input_extension: &BuiltinExtensionDescriptor,
+    gpu_assumed_type_extension: &BuiltinExtensionDescriptor,
+    operation: impl Fn(u64, u64) -> u64,
+) -> BuiltinResult<Value> {
+    enforce_public_binary_bitwise_compatibility(
+        name,
+        &args,
+        single_extension,
+        gpu_undocumented_input_extension,
+        gpu_assumed_type_extension,
+    )?;
     let output_source = args.iter().find_map(|value| {
         let Value::GpuTensor(handle) = value else {
             return None;
@@ -670,34 +764,34 @@ async fn bitand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         Some(handle.clone())
     });
     let logical_output = args.len() >= 2 && args[..2].iter().all(is_logical_bitwise_value);
-    let result = binary_bitwise_from_args(BITAND_NAME, args, |a, b| a & b).await?;
+    let result = binary_bitwise_from_args(name, args, operation).await?;
     let result = if logical_output {
-        bitwise_result_as_logical(result)?
+        bitwise_result_as_logical(name, result)?
     } else {
         result
     };
-    restore_bitand_gpu_result(result, output_source.as_ref())
+    restore_binary_bitwise_gpu_result(name, result, output_source.as_ref())
 }
 
-fn enforce_bitand_compatibility(args: &[Value]) -> BuiltinResult<()> {
+fn enforce_public_binary_bitwise_compatibility(
+    name: &str,
+    args: &[Value],
+    single_extension: &BuiltinExtensionDescriptor,
+    gpu_undocumented_input_extension: &BuiltinExtensionDescriptor,
+    gpu_assumed_type_extension: &BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
     if !(2..=3).contains(&args.len()) {
         return Ok(());
     }
     if args.iter().take(2).any(is_single_bitwise_value) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &BITAND_SINGLE_INPUT_EXTENSION,
-            BITAND_NAME,
-        )?;
+        crate::compatibility::ensure_builtin_extension_enabled(single_extension, name)?;
     }
     let has_gpu_input = args
         .iter()
         .take(2)
         .any(|value| matches!(value, Value::GpuTensor(_)));
     if has_gpu_input && args.len() == 3 {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &BITAND_GPU_ASSUMED_TYPE_EXTENSION,
-            BITAND_NAME,
-        )?;
+        crate::compatibility::ensure_builtin_extension_enabled(gpu_assumed_type_extension, name)?;
     }
     if args.iter().take(2).any(|value| {
         matches!(value, Value::GpuTensor(handle) if !matches!(
@@ -710,8 +804,8 @@ fn enforce_bitand_compatibility(args: &[Value]) -> BuiltinResult<()> {
         ))
     }) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &BITAND_GPU_UNDOCUMENTED_INPUT_EXTENSION,
-            BITAND_NAME,
+            gpu_undocumented_input_extension,
+            name,
         )?;
     }
     Ok(())
@@ -736,7 +830,7 @@ fn is_logical_bitwise_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
-fn bitwise_result_as_logical(value: Value) -> BuiltinResult<Value> {
+fn bitwise_result_as_logical(name: &'static str, value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(value) => Ok(Value::Bool(value != 0.0)),
         Value::Tensor(tensor) => LogicalArray::new(
@@ -748,16 +842,17 @@ fn bitwise_result_as_logical(value: Value) -> BuiltinResult<Value> {
             tensor.shape,
         )
         .map(Value::LogicalArray)
-        .map_err(|error| error_with_detail(BITAND_NAME, &ERROR_INVALID_INPUT, error)),
+        .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error)),
         other => Err(error_with_detail(
-            BITAND_NAME,
+            name,
             &ERROR_INVALID_INPUT,
             format!("internal logical result had unsupported value {other:?}"),
         )),
     }
 }
 
-fn restore_bitand_gpu_result(
+fn restore_binary_bitwise_gpu_result(
+    name: &'static str,
     value: Value,
     source: Option<&runmat_accelerate_api::GpuTensorHandle>,
 ) -> BuiltinResult<Value> {
@@ -768,7 +863,7 @@ fn restore_bitand_gpu_result(
         .or_else(runmat_accelerate_api::provider)
         .ok_or_else(|| {
             error_with_detail(
-                BITAND_NAME,
+                name,
                 &ERROR_INVALID_INPUT,
                 "no acceleration provider is registered for resident output",
             )
@@ -776,35 +871,35 @@ fn restore_bitand_gpu_result(
     let (tensor, logical) = match value {
         Value::Int(value) => (
             Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
-                .map_err(|error| error_with_detail(BITAND_NAME, &ERROR_INVALID_INPUT, error))?,
+                .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))?,
             false,
         ),
         Value::Num(value) => (
             Tensor::new(vec![value], vec![1, 1])
-                .map_err(|error| error_with_detail(BITAND_NAME, &ERROR_INVALID_INPUT, error))?,
+                .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))?,
             false,
         ),
         Value::Tensor(tensor) => (tensor, false),
         Value::Bool(value) => (
             Tensor::new(vec![f64::from(u8::from(value))], vec![1, 1])
-                .map_err(|error| error_with_detail(BITAND_NAME, &ERROR_INVALID_INPUT, error))?,
+                .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))?,
             true,
         ),
         Value::LogicalArray(array) => (
             tensor::logical_to_tensor(&array)
-                .map_err(|error| error_with_detail(BITAND_NAME, &ERROR_INVALID_INPUT, error))?,
+                .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))?,
             true,
         ),
         other => {
             return Err(error_with_detail(
-                BITAND_NAME,
+                name,
                 &ERROR_INVALID_INPUT,
                 format!("cannot restore resident result {other:?}"),
             ))
         }
     };
     let handle = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|error| error_with_detail(BITAND_NAME, &ERROR_INVALID_INPUT, error))?;
+        .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))?;
     Ok(if logical {
         gpu_helpers::logical_gpu_value(handle)
     } else {
@@ -1089,10 +1184,20 @@ async fn sparse_bitset(
     keywords = "bitor,bitwise,or,integer,uint32",
     accel = "gather",
     descriptor(crate::builtins::logical::bit::integer::BITOR_DESCRIPTOR),
+    extensions(crate::builtins::logical::bit::integer::BITOR_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::integer::BITOR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn bitor_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    binary_bitwise_from_args(BITOR_NAME, args, |a, b| a | b).await
+    public_binary_bitwise_builtin(
+        BITOR_NAME,
+        args,
+        &BITOR_SINGLE_INPUT_EXTENSION,
+        &BITOR_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+        &BITOR_GPU_ASSUMED_TYPE_EXTENSION,
+        |a, b| a | b,
+    )
+    .await
 }
 
 #[runtime_builtin(
