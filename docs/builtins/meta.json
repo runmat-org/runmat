@@ -14776,10 +14776,10 @@
           "message": "cat: dimension must be numeric and >= 1"
         },
         {
-          "code": "RM.CAT.MIXED_RESIDENCY",
-          "identifier": "RunMat:cat:MixedResidency",
-          "when": "gpuArray and host inputs are mixed in one cat call.",
-          "message": "cat: cannot mix gpuArray inputs with host arrays; convert them first"
+          "code": "RM.CAT.GPU",
+          "identifier": "RunMat:cat:GpuError",
+          "when": "A required gpuArray gather, upload, or provider operation fails.",
+          "message": "cat: gpuArray operation failed"
         },
         {
           "code": "RM.CAT.TYPE_MISMATCH",
@@ -14792,6 +14792,136 @@
           "identifier": "RunMat:cat:InvalidLikePrototype",
           "when": "The 'like' name-value form is malformed or uses an unsupported prototype.",
           "message": "cat: invalid 'like' prototype"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cat-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "the trailing cat \"like\" prototype form is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CatLikePrototypeExtension"
+        },
+        {
+          "id": "cat-resident-dimension",
+          "mode": "RunMatOnly",
+          "description": "cat with a resident gpuArray dimension control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CatResidentDimensionExtension"
+        },
+        {
+          "id": "cat-complex-integer-input",
+          "mode": "RunMatOnly",
+          "description": "cat with typed complex-integer data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CatComplexIntegerInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = cat(integer_dim,A1,A2,...,An)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A host scalar from any integer class is read exactly as the positive one-based concatenation dimension; scalar double remains accepted by the same structural parser."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The integer dimension is a structural control only and does not affect output class. It is range-checked exactly before shape arithmetic; data inputs independently determine output class and residency."
+        },
+        {
+          "form": "B = cat(dim,A1,A2,...,An) with real integer data",
+          "inputs": [
+            {
+              "name": "A1,...,An",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every ordered mixture of the eight real integer classes is accepted together with real single, double, or logical data; the leftmost participating integer class determines the numeric output class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "The leftmost participating integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback. Public evidence leaves the narrow typed-empty class-dominance edge open."
+        },
+        {
+          "form": "B = cat(dim,complex_integer_A1,...,An)",
+          "inputs": [
+            {
+              "name": "complex A1,...,An",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode can structurally concatenate paired integer real and imaginary components; the public integer domain does not expose complex-integer arrays."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed complex-integer concatenation applies the leftmost integer component class independently to real and imaginary parts and preserves exact paired storage."
+        },
+        {
+          "form": "B = cat(gpuArray(integer_dim),A1,A2,...,An)",
+          "inputs": [
+            {
+              "name": "gpuArray dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode may gather a resident scalar dimension exactly before structural concatenation; the documented dimension control is a host positive integer scalar."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only resident dimension controls are gathered exactly after the extension gate; the scalar remains a structural control and data inputs independently determine output class and residency."
         }
       ]
     },

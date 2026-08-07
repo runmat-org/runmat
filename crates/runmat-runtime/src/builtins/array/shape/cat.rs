@@ -13,7 +13,11 @@ use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTa
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
     NumericDType, NumericStorage, ResolveContext, StringArray, Tensor, Type, Value,
@@ -33,7 +37,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Falls back to gather + upload when providers lack a native concatenation kernel.",
+    notes: "Falls back to exact gather, host assembly, and upload for typed integers, mixed host/device inputs, runtime empty omission, or providers without a native concatenation kernel.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::cat")]
@@ -52,6 +56,7 @@ fn cat_error(message: impl Into<String>) -> RuntimeError {
 }
 
 const MAX_CAT_DIMENSION: usize = 1024;
+const BUILTIN_NAME: &str = "cat";
 
 const CAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "B",
@@ -164,11 +169,11 @@ const CAT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescript
     message: "cat: dimension must be numeric and >= 1",
 };
 
-const CAT_ERROR_MIXED_RESIDENCY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CAT.MIXED_RESIDENCY",
-    identifier: Some("RunMat:cat:MixedResidency"),
-    when: "gpuArray and host inputs are mixed in one cat call.",
-    message: "cat: cannot mix gpuArray inputs with host arrays; convert them first",
+const CAT_ERROR_GPU: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CAT.GPU",
+    identifier: Some("RunMat:cat:GpuError"),
+    when: "A required gpuArray gather, upload, or provider operation fails.",
+    message: "cat: gpuArray operation failed",
 };
 
 const CAT_ERROR_TYPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -188,7 +193,7 @@ const CAT_ERROR_INVALID_LIKE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 const CAT_ERRORS: [BuiltinErrorDescriptor; 5] = [
     CAT_ERROR_TOO_FEW_INPUTS,
     CAT_ERROR_INVALID_DIMENSION,
-    CAT_ERROR_MIXED_RESIDENCY,
+    CAT_ERROR_GPU,
     CAT_ERROR_TYPE_MISMATCH,
     CAT_ERROR_INVALID_LIKE,
 ];
@@ -199,6 +204,112 @@ pub const CAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &CAT_ERRORS,
 };
+
+const CAT_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cat-like-prototype",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the trailing cat \"like\" prototype form is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CatLikePrototypeExtension"),
+};
+
+const CAT_RESIDENT_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cat-resident-dimension",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cat with a resident gpuArray dimension control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CatResidentDimensionExtension"),
+};
+
+const CAT_COMPLEX_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cat-complex-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cat with typed complex-integer data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CatComplexIntegerInputExtension"),
+};
+
+pub const CAT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    CAT_LIKE_EXTENSION,
+    CAT_RESIDENT_DIMENSION_EXTENSION,
+    CAT_COMPLEX_INTEGER_EXTENSION,
+];
+
+const CAT_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A host scalar from any integer class is read exactly as the positive one-based concatenation dimension; scalar double remains accepted by the same structural parser.",
+    }];
+
+const CAT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A1,...,An",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every ordered mixture of the eight real integer classes is accepted together with real single, double, or logical data; the leftmost participating integer class determines the numeric output class.",
+    }];
+
+const CAT_COMPLEX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "complex A1,...,An",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode can structurally concatenate paired integer real and imaginary components; the public integer domain does not expose complex-integer arrays.",
+    }];
+
+const CAT_RESIDENT_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "gpuArray dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat mode may gather a resident scalar dimension exactly before structural concatenation; the documented dimension control is a host positive integer scalar.",
+    }];
+
+pub const CAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = cat(integer_dim,A1,A2,...,An)",
+        inputs: &CAT_INTEGER_DIMENSION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The integer dimension is a structural control only and does not affect output class. It is range-checked exactly before shape arithmetic; data inputs independently determine output class and residency.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = cat(dim,A1,A2,...,An) with real integer data",
+        inputs: &CAT_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The leftmost participating integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback. Public evidence leaves the narrow typed-empty class-dominance edge open.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = cat(dim,complex_integer_A1,...,An)",
+        inputs: &CAT_COMPLEX_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only typed complex-integer concatenation applies the leftmost integer component class independently to real and imaginary parts and preserves exact paired storage.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = cat(gpuArray(integer_dim),A1,A2,...,An)",
+        inputs: &CAT_RESIDENT_INTEGER_DIMENSION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "RunMat-only resident dimension controls are gathered exactly after the extension gate; the scalar remains a structural control and data inputs independently determine output class and residency.",
+    },
+];
 
 #[derive(Clone, Copy, Debug)]
 struct ParsedCatTokens {
@@ -491,12 +602,36 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
     accel = "array_construct",
     type_resolver(cat_type),
     descriptor(crate::builtins::array::shape::cat::CAT_DESCRIPTOR),
+    extensions(crate::builtins::array::shape::cat::CAT_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::shape::cat::CAT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::cat"
 )]
 async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() < 2 {
         return Err(cat_err(CAT_ERROR_TOO_FEW_INPUTS.message));
     }
+    let (inputs, like) = extract_like(rest)?;
+    if inputs.len() < 2 {
+        return Err(cat_err(CAT_ERROR_TOO_FEW_INPUTS.message));
+    }
+    if like.explicit {
+        crate::compatibility::ensure_builtin_extension_enabled(&CAT_LIKE_EXTENSION, BUILTIN_NAME)?;
+    }
+    if matches!(dim, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CAT_RESIDENT_DIMENSION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if inputs.iter().any(
+        |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()),
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CAT_COMPLEX_INTEGER_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+
     let dim_index = match dim {
         Value::Int(_) | Value::Num(_) | Value::Tensor(_) | Value::GpuTensor(_) => {
             match tensor::dimension_from_value_async(&dim, "cat", false)
@@ -526,11 +661,6 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     }
     let dim_zero = dim_index - 1;
 
-    let (inputs, like) = extract_like(rest)?;
-    if inputs.len() < 2 {
-        return Err(cat_err(CAT_ERROR_TOO_FEW_INPUTS.message));
-    }
-
     if inputs.iter().any(|value| matches!(value, Value::Cell(_))) {
         let category = determine_category(&inputs, &like)?;
         debug_assert_eq!(category, CatCategory::Cell);
@@ -538,10 +668,7 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     }
 
     if inputs.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
-        if !inputs.iter().all(|v| matches!(v, Value::GpuTensor(_))) {
-            return Err(cat_err(CAT_ERROR_MIXED_RESIDENCY.message));
-        }
-        return cat_gpu_tensors(dim_zero, inputs, &like).await;
+        return cat_gpu_values(dim_zero, inputs, &like).await;
     }
 
     let category = determine_category(&inputs, &like)?;
@@ -1190,7 +1317,7 @@ fn cat_cell_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> 
         .map_err(|error| cat_err(format!("cat: {error}")))
 }
 
-async fn cat_gpu_tensors(
+async fn cat_gpu_values(
     dim_zero: usize,
     values: Vec<Value>,
     like: &LikeSpec,
@@ -1213,12 +1340,16 @@ async fn cat_gpu_tensors(
     }
     output_like.ensure_device(CatCategory::Numeric)?;
 
-    let mut handles = Vec::with_capacity(values.len());
-    for value in values {
-        if let Value::GpuTensor(handle) = value {
-            handles.push(handle);
-        }
-    }
+    let all_gpu = values
+        .iter()
+        .all(|value| matches!(value, Value::GpuTensor(_)));
+    let handles: Vec<_> = values
+        .iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect();
 
     let first_handle = handles
         .first()
@@ -1243,24 +1374,39 @@ async fn cat_gpu_tensors(
     let must_apply_runtime_empty_omission = has_empty_handle && has_nonempty_handle;
 
     // Native provider hook
-    if !has_integer_handle && !must_apply_runtime_empty_omission {
-        if let Ok(result) = provider.cat(dim_zero + 1, &handles) {
+    if all_gpu && !has_integer_handle && !must_apply_runtime_empty_omission {
+        let owned_handles: Vec<_> = handles.iter().map(|handle| (*handle).clone()).collect();
+        if let Ok(result) = provider.cat(dim_zero + 1, &owned_handles) {
             return finalize_gpu_value(result, &output_like).await;
         }
     }
 
-    let mut tensors = Vec::with_capacity(handles.len());
-    for handle in &handles {
-        let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-        tensors.push(tensor);
+    let mut gathered_values = Vec::with_capacity(values.len());
+    for value in values {
+        match value {
+            Value::GpuTensor(handle) => {
+                let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+                gathered_values.push(Value::Tensor(tensor));
+            }
+            value => gathered_values.push(value),
+        }
     }
 
-    let gathered_values: Vec<Value> = tensors.iter().cloned().map(Value::Tensor).collect();
+    let category = determine_category(&gathered_values, &output_like)?;
+    if !matches!(category, CatCategory::Numeric) {
+        return Err(cat_err(
+            "cat: mixed host and gpuArray concatenation currently supports numeric data",
+        ));
+    }
     if let Some(target) = leftmost_integer_target(&gathered_values) {
         let tensor = build_integer_cat_tensor(target, dim_zero, gathered_values)?;
         return finalize_numeric_output_with_provider(tensor, &output_like, Some(provider));
     }
 
+    let mut tensors = Vec::with_capacity(gathered_values.len());
+    for value in gathered_values {
+        tensors.push(tensor::value_into_tensor_for("cat", value).map_err(cat_err)?);
+    }
     let tensor = concat_floating_tensors(dim_zero, tensors)?;
     if matches!(output_like.device, LikeDevice::Host) {
         return Ok(tensor::tensor_into_value(tensor));
@@ -1626,6 +1772,30 @@ pub(crate) mod tests {
 
         let parsed = parse_cat_tokens(&[ArgToken::Integer(IntValue::I8(-1))]);
         assert_eq!(parsed.dim, None);
+    }
+
+    #[test]
+    fn cat_integer_capability_and_extension_metadata_is_explicit() {
+        let builtin = runmat_builtins::builtin_function_by_name("cat").expect("registered cat");
+        assert_eq!(builtin.integer_capabilities.len(), 4);
+        assert_eq!(builtin.extensions.len(), 3);
+        assert_eq!(
+            builtin.integer_capabilities[0].overload,
+            BuiltinIntegerOverloadKind::StructuralParameter
+        );
+        assert_eq!(
+            builtin.integer_capabilities[1].overflow,
+            BuiltinIntegerOverflowRule::Saturate
+        );
+        assert_eq!(
+            builtin.integer_capabilities[2].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(
+            builtin.integer_capabilities[3].backend,
+            BuiltinIntegerBackendRule::GatherFallback
+        );
+        assert_eq!(builtin.extensions, &CAT_EXTENSIONS);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2092,6 +2262,7 @@ pub(crate) mod tests {
     #[test]
     fn cat_like_gpu_from_host_inputs() {
         test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = HostTensorView {
                 data: &proto.materialize_f64(),
@@ -2121,6 +2292,7 @@ pub(crate) mod tests {
     #[test]
     fn cat_like_gpu_from_host_integer_inputs_uploads_exact_integer_storage() {
         test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_handle = provider
                 .upload(&HostTensorView {
@@ -2209,6 +2381,104 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn cat_mixed_host_and_gpu_integer_inputs_preserve_exact_storage() {
+        test_support::with_test_provider(|provider| {
+            let resident_values = [9_007_199_254_740_993_u64];
+            let resident = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&resident_values),
+                    shape: &[1, 1],
+                })
+                .expect("upload resident integer");
+            let host = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("host integer");
+
+            let result = cat_builtin(
+                Value::Int(IntValue::I32(2)),
+                vec![Value::GpuTensor(resident), Value::Tensor(host)],
+            )
+            .expect("mixed residency cat");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX,]))
+            );
+        });
+    }
+
+    #[test]
+    fn cat_runmat_only_forms_gate_before_provider_or_data_conversion() {
+        let left = Tensor::new(vec![1.0], vec![1, 1]).expect("left");
+        let right = Tensor::new(vec![2.0], vec![1, 1]).expect("right");
+        let like_error = cat_builtin(
+            Value::Int(IntValue::I32(1)),
+            vec![
+                Value::Tensor(left.clone()),
+                Value::Tensor(right.clone()),
+                Value::from("like"),
+                Value::Num(0.0),
+            ],
+        )
+        .expect_err("MATLAB mode rejects like form");
+        assert_eq!(like_error.identifier(), CAT_LIKE_EXTENSION.error_identifier);
+
+        let complex_storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![2]))
+                .expect("complex storage");
+        let complex =
+            ComplexTensor::new_integer(complex_storage, vec![1, 1]).expect("complex integer");
+        let complex_error = cat_builtin(
+            Value::Int(IntValue::I32(1)),
+            vec![
+                Value::ComplexTensor(complex.clone()),
+                Value::ComplexTensor(complex),
+            ],
+        )
+        .expect_err("MATLAB mode rejects typed complex integer");
+        assert_eq!(
+            complex_error.identifier(),
+            CAT_COMPLEX_INTEGER_EXTENSION.error_identifier
+        );
+
+        test_support::with_test_provider(|provider| {
+            let dim_values = [1_u16];
+            let dim = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U16(&dim_values),
+                    shape: &[1, 1],
+                })
+                .expect("upload dimension");
+            let dim_error = cat_builtin(
+                Value::GpuTensor(dim.clone()),
+                vec![Value::Tensor(left.clone()), Value::Tensor(right.clone())],
+            )
+            .expect_err("MATLAB mode rejects resident dimension");
+            assert_eq!(
+                dim_error.identifier(),
+                CAT_RESIDENT_DIMENSION_EXTENSION.error_identifier
+            );
+
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result = cat_builtin(
+                Value::GpuTensor(dim),
+                vec![Value::Tensor(left), Value::Tensor(right)],
+            )
+            .expect("RunMat mode accepts resident dimension");
+            let Value::Tensor(output) = result else {
+                panic!("expected host output");
+            };
+            assert_eq!(output.materialize_f64(), vec![1.0, 2.0]);
+        });
+    }
+
+    #[test]
     fn cat_gpu_fallback_omits_shaped_empty_geometry() {
         test_support::with_test_provider(|provider| {
             let empty = provider
@@ -2238,6 +2508,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_like_logical_mismatch_errors() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let proto = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
         let err = cat_builtin(
             Value::Int(IntValue::I32(1)),
@@ -2291,5 +2562,41 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, expected.shape);
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn cat_wgpu_mixed_residency_preserves_wide_integer_storage() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
+        let resident_values = [9_007_199_254_740_993_u64];
+        let resident = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&resident_values),
+                shape: &[1, 1],
+            })
+            .expect("upload resident integer");
+        let host = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("host integer");
+
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![Value::GpuTensor(resident), Value::Tensor(host)],
+        )
+        .expect("mixed WGPU cat");
+        let Value::GpuTensor(handle) = result else {
+            panic!("expected resident output");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&handle),
+            Some(IntegerElementType::U64)
+        );
+        let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+        assert_eq!(
+            gathered.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX,]))
+        );
     }
 }

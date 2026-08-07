@@ -1535,6 +1535,7 @@ fn transpose_operators_reject_nd_arrays_but_accept_trailing_singletons() {
 
 #[test]
 fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "a = complex(uint64([9223372036854775808 18446744073709551615]), uint64([7 8])); b = complex(uint64([1 2]), uint64([3 4])); h = horzcat(a, b); v = vertcat(a, b); c = cat(2, a, uint64([9 10])); q = [a b];",
     )

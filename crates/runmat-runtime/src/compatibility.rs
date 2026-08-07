@@ -302,6 +302,9 @@ mod tests {
                 ("buttord", "buttord-integer-frequency"),
                 ("buttord", "buttord-logical-attenuation"),
                 ("buttord", "buttord-logical-frequency"),
+                ("cat", "cat-complex-integer-input"),
+                ("cat", "cat-like-prototype"),
+                ("cat", "cat-resident-dimension"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -587,6 +590,7 @@ mod tests {
             "builtin",
             "butter",
             "buttord",
+            "cat",
         ] {
             let builtin = registered
                 .iter()

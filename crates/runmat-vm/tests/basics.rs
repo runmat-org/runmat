@@ -358,6 +358,28 @@ fn compiled_butter_integer_order_respects_compatibility_policy() {
 }
 
 #[test]
+fn compiled_cat_preserves_exact_integer_dimension_and_data_contracts() {
+    let vars = execute_source("c = cat(uint8(2),uint8([1 2]),int16(300),int8(-1));");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U8(vec![1, 2, u8::MAX, 0]))
+    )));
+}
+
+#[test]
+fn compiled_cat_like_form_respects_compatibility_policy() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let err = execute_source_result("c = cat(2,uint8(1),uint8(2),'like',uint8(0));")
+        .expect_err("cat like form must be gated");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:compatibility:CatLikePrototypeExtension")
+    );
+}
+
+#[test]
 fn pwelch_builtin_executes_for_psd_workflow() {
     let input = r#"
         fs = 32;
