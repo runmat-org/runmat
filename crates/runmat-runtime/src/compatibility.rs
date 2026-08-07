@@ -286,6 +286,7 @@ mod tests {
                 ("boxplot", "boxplot-logical-data"),
                 ("boxplot", "boxplot-logical-group"),
                 ("boxplot", "boxplot-logical-option"),
+                ("bsxfun", "bsxfun-text-callable"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -567,6 +568,7 @@ mod tests {
             "blkdiag",
             "bootstrp",
             "boxplot",
+            "bsxfun",
         ] {
             let builtin = registered
                 .iter()

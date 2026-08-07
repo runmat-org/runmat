@@ -13266,7 +13266,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Binary function handle or callable text."
+              "description": "Binary function handle; callable text is a RunMat-only extension."
             },
             {
               "name": "A",
@@ -13324,6 +13324,59 @@
           "identifier": "RunMat:bsxfun:Internal",
           "when": "Internal output allocation or GPU gather fails.",
           "message": "bsxfun: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "bsxfun-text-callable",
+          "mode": "RunMatOnly",
+          "description": "bsxfun with a text callback name is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BsxfunTextCallableExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = bsxfun(fun,A,B) with integer A or B",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "Every integer class is accepted when the selected binary callback accepts that class; mixed-class and scalar-double rules are inherited from the callback."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "Every integer class is accepted when the selected binary callback accepts that class; singleton expansion does not change callback class rules."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Input and output class, mixed-class admission, saturation, and errors are inherited from fun; RunMat preserves exact homogeneous callback results after singleton expansion. Public gpuArray input is currently gathered for host callback execution."
         }
       ]
     },

@@ -2,7 +2,7 @@
 mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
-use runmat_builtins::Value;
+use runmat_builtins::{IntegerStorage, Value};
 use runmat_vm::{EndExpr, Instr};
 use std::convert::TryInto;
 use std::path::Path;
@@ -31,6 +31,28 @@ fn arithmetic_and_assignment() {
     let y: f64 = (&vars[1]).try_into().unwrap();
     assert_eq!(x, 3.0);
     assert_eq!(y, 9.0);
+}
+
+#[test]
+fn compiled_bsxfun_preserves_exact_integer_and_native_single_results() {
+    let vars = execute_source(
+        "base = uint64(9007199254740992); a = [base+uint64(1);base+uint64(3)]; c = bsxfun(@plus,a,uint64(1)); p = bsxfun(@gt,a,base+uint64(2)); s = bsxfun(@plus,single([1 2]),single(1));",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U64(vec![9_007_199_254_740_994, 9_007_199_254_740_996]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![0, 1]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.as_f32_slice() == Some(&[2.0, 3.0])
+    )));
 }
 
 #[test]
