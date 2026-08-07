@@ -6,9 +6,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f32", "f64"],
-    "broadcasting": "matlab",
-    "notes": "GPU inputs gather to host for integer bit operations."
+    "precisions": [],
+    "broadcasting": "scalar-or-exact-size",
+    "notes": "Documented gpuArray calls require at least one integer-array input, unsigned non-64-bit A, no 64-bit integer input, and no assumedtype; exact fallback restores the result."
   },
   "fusion": {
     "elementwise": false,
@@ -21,13 +21,13 @@
     "unit": "builtins::logical::bit::integer::tests",
     "integration": null
   },
-  "description": "`bitshift(A, K)` shifts integer-valued input `A` left for positive `K` and right for negative `K`, using implicit expansion between `A` and `K`.",
+  "description": "`bitshift(A, k)` shifts integer-valued input `A` left for positive `k` and right for negative `k`. `A` and `k` must be scalar or exactly the same size; `bitshift(A, k, assumedtype)` selects the signed or unsigned interpretation width for double `A`.",
   "behaviors": [
-    "Accepts double integer-valued inputs, logical inputs, integer scalar values, integer-class tensors, and gatherable gpuArray tensors.",
-    "Positive shifts move bits left; negative shifts move bits right.",
-    "Shift magnitudes of 32 or more produce zero for the uint32 execution path.",
-    "Preserves uint8, uint16, and uint32 output class from the input being shifted.",
-    "Rejects fractional, infinite, NaN, complex, string, cell, and struct inputs."
+    "A accepts double and all eight built-in integer classes; k independently accepts double and all eight integer classes.",
+    "Positive shifts move bits left and truncate overflow bits; negative shifts move bits right and preserve the sign bit for signed A.",
+    "Shift magnitudes at least the width of A produce zero, except a negative shift of negative signed A produces all one-bits.",
+    "Output preserves the data type of A; the class of k does not affect output class.",
+    "Rejects fractional, infinite, NaN, complex, logical, single, string, cell, struct, and nonscalar unequal-size inputs in MATLAB-compatible mode."
   ],
   "examples": [
     {
@@ -39,7 +39,7 @@
   "faqs": [
     {
       "question": "Can shift counts be arrays?",
-      "answer": "Yes. `A` and `K` are implicitly expanded against each other when their shapes are compatible."
+      "answer": "Yes. `A` and `k` can each be scalar, or they can be arrays with exactly the same size; general singleton expansion is not supported."
     }
   ],
   "links": [
@@ -56,6 +56,9 @@
     "label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"
   },
-  "gpu_residency": "GPU inputs are gathered for host execution.",
-  "gpu_behavior": ["RunMat currently executes integer bitwise functions on the host."]
+  "gpu_residency": "Documented GPU calls gather exactly for host execution and restore the output class of A to the owning provider.",
+  "gpu_behavior": [
+    "At least one input must be an integer array, A cannot be signed, 64-bit integers are unsupported in either input, and assumedtype is unsupported.",
+    "RunMat mode separately gates single A, single k, logical A, logical k, broader resident input combinations, and resident assumedtype calls as extensions."
+  ]
 }

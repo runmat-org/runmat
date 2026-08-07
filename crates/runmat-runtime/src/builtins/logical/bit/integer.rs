@@ -167,6 +167,100 @@ pub const BITOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
     },
 ];
 
+const BITSHIFT_SINGLE_VALUE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bitshift-single-value-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bitshift with single-precision A is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BitshiftSingleValueInputExtension"),
+};
+
+const BITSHIFT_SINGLE_COUNT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bitshift-single-count-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bitshift with single-precision k is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BitshiftSingleCountInputExtension"),
+};
+
+const BITSHIFT_LOGICAL_VALUE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bitshift-logical-value-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bitshift with logical A is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BitshiftLogicalValueInputExtension"),
+};
+
+const BITSHIFT_LOGICAL_COUNT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "bitshift-logical-count-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "bitshift with logical k is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BitshiftLogicalCountInputExtension"),
+};
+
+const BITSHIFT_GPU_UNDOCUMENTED_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "bitshift-gpu-undocumented-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "bitshift with resident input outside the documented non-64-bit integer-array GPU domain is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:BitshiftGpuUndocumentedInputExtension"),
+    };
+
+const BITSHIFT_GPU_ASSUMED_TYPE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "bitshift-gpu-assumedtype",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "bitshift with resident input and assumedtype is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:BitshiftGpuAssumedTypeExtension"),
+    };
+
+pub const BITSHIFT_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    BITSHIFT_SINGLE_VALUE_EXTENSION,
+    BITSHIFT_SINGLE_COUNT_EXTENSION,
+    BITSHIFT_LOGICAL_VALUE_EXTENSION,
+    BITSHIFT_LOGICAL_COUNT_EXTENSION,
+    BITSHIFT_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+    BITSHIFT_GPU_ASSUMED_TYPE_EXTENSION,
+];
+
+const BITSHIFT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A accepts double or every built-in integer class and determines the output class; signed right shifts preserve the sign bit.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "k independently accepts double or every built-in integer class; A and k are scalar or exactly the same size, and the class of k does not affect output class.",
+    },
+];
+
+pub const BITSHIFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "intout = bitshift(A, k)",
+        inputs: &BITSHIFT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Positive counts shift left and truncate overflow bits; negative counts shift right with arithmetic sign extension for signed A. The documented interactive GPU domain requires at least one integer-array input, excludes signed A and every 64-bit integer input, and restores exact output to the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "intout = bitshift(A, k, assumedtype)",
+        inputs: &BITSHIFT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "assumedtype selects the signed or unsigned bit width for double A and must equal typed-integer A. Public GPU-array support excludes assumedtype; RunMat mode retains resident calls as a gated gather-and-restore extension.",
+    },
+];
+
 const IDIVIDE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "A",
@@ -830,6 +924,27 @@ fn is_logical_bitwise_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
+fn bitwise_integer_class(value: &Value) -> Option<IntegerClass> {
+    match value {
+        Value::Int(value) => Some(IntegerClass::from_int(value)),
+        Value::Tensor(tensor) => tensor.integer_storage().map(IntegerClass::from_storage),
+        Value::SparseTensor(sparse) => sparse.integer_storage().map(IntegerClass::from_storage),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_integer_type(handle).map(|class| match class {
+                runmat_accelerate_api::IntegerElementType::I8 => IntegerClass::I8,
+                runmat_accelerate_api::IntegerElementType::I16 => IntegerClass::I16,
+                runmat_accelerate_api::IntegerElementType::I32 => IntegerClass::I32,
+                runmat_accelerate_api::IntegerElementType::I64 => IntegerClass::I64,
+                runmat_accelerate_api::IntegerElementType::U8 => IntegerClass::U8,
+                runmat_accelerate_api::IntegerElementType::U16 => IntegerClass::U16,
+                runmat_accelerate_api::IntegerElementType::U32 => IntegerClass::U32,
+                runmat_accelerate_api::IntegerElementType::U64 => IntegerClass::U64,
+            })
+        }
+        _ => None,
+    }
+}
+
 fn bitwise_result_as_logical(name: &'static str, value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(value) => Ok(Value::Bool(value != 0.0)),
@@ -1220,9 +1335,18 @@ async fn bitxor_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "bitshift,bitwise,shift,integer,uint32",
     accel = "gather",
     descriptor(crate::builtins::logical::bit::integer::BITSHIFT_DESCRIPTOR),
+    extensions(crate::builtins::logical::bit::integer::BITSHIFT_EXTENSIONS),
+    integer_capabilities(crate::builtins::logical::bit::integer::BITSHIFT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::bit::integer"
 )]
 async fn bitshift_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    enforce_bitshift_compatibility(&args)?;
+    let output_source = args.iter().find_map(|value| {
+        let Value::GpuTensor(handle) = value else {
+            return None;
+        };
+        Some(handle.clone())
+    });
     let (value, shift, assumed) = value_bit_args(BITSHIFT_NAME, args)?;
     if let Value::SparseTensor(sparse) = value {
         return sparse_bitshift(sparse, shift, assumed).await;
@@ -1239,13 +1363,75 @@ async fn bitshift_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             left.compute_class,
         ));
     }
-    value_from_bits_with_classes(
+    let result = value_from_bits_with_classes(
         data,
         plan.output_shape().to_vec(),
         left.compute_class,
         left.output_class,
         BITSHIFT_NAME,
-    )
+    )?;
+    restore_binary_bitwise_gpu_result(BITSHIFT_NAME, result, output_source.as_ref())
+}
+
+fn enforce_bitshift_compatibility(args: &[Value]) -> BuiltinResult<()> {
+    if !(2..=3).contains(&args.len()) {
+        return Ok(());
+    }
+    if is_single_bitwise_value(&args[0]) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BITSHIFT_SINGLE_VALUE_EXTENSION,
+            BITSHIFT_NAME,
+        )?;
+    }
+    if is_single_bitwise_value(&args[1]) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BITSHIFT_SINGLE_COUNT_EXTENSION,
+            BITSHIFT_NAME,
+        )?;
+    }
+    if is_logical_bitwise_value(&args[0]) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BITSHIFT_LOGICAL_VALUE_EXTENSION,
+            BITSHIFT_NAME,
+        )?;
+    }
+    if is_logical_bitwise_value(&args[1]) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BITSHIFT_LOGICAL_COUNT_EXTENSION,
+            BITSHIFT_NAME,
+        )?;
+    }
+    let has_gpu_input = args
+        .iter()
+        .take(2)
+        .any(|value| matches!(value, Value::GpuTensor(_)));
+    if has_gpu_input && args.len() == 3 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BITSHIFT_GPU_ASSUMED_TYPE_EXTENSION,
+            BITSHIFT_NAME,
+        )?;
+    }
+    if has_gpu_input {
+        let value_class = bitwise_integer_class(&args[0]);
+        let count_class = bitwise_integer_class(&args[1]);
+        let outside_public_gpu_domain = value_class.is_some_and(IntegerClass::is_signed)
+            || value_class.is_some_and(|class| class.bit_width() == 64)
+            || count_class.is_some_and(|class| class.bit_width() == 64)
+            || (value_class.is_none() && count_class.is_none())
+            || args
+                .iter()
+                .take(2)
+                .any(|value| matches!(value, Value::SparseTensor(_)))
+            || args.iter().take(2).any(is_single_bitwise_value)
+            || args.iter().take(2).any(is_logical_bitwise_value);
+        if outside_public_gpu_domain {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &BITSHIFT_GPU_UNDOCUMENTED_INPUT_EXTENSION,
+                BITSHIFT_NAME,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 async fn sparse_bitshift(

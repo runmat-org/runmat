@@ -11795,6 +11795,41 @@
               "description": "Bitwise numeric result."
             }
           ]
+        },
+        {
+          "label": "C = bitshift(A, K, assumedtype)",
+          "inputs": [
+            {
+              "name": "A",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Integer-valued input."
+            },
+            {
+              "name": "K",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Shift count; positive shifts left and negative shifts right."
+            },
+            {
+              "name": "assumedtype",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Integer class used to interpret double input A."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Bitwise numeric result."
+            }
+          ]
         }
       ],
       "errors": [
@@ -11807,20 +11842,134 @@
         {
           "code": "RM.BITWISE.SIZE_MISMATCH",
           "identifier": "RunMat:bitwise:SizeMismatch",
-          "when": "Input shapes are not compatible for implicit expansion.",
+          "when": "Input shapes violate the operation's expansion rule: binary bitwise functions use compatible-size expansion, while bit positions/counts require scalar expansion or exactly matching nonscalar sizes.",
           "message": "bitwise operation: array sizes are not compatible"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "bitshift-single-value-input",
+          "mode": "RunMatOnly",
+          "description": "bitshift with single-precision A is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitshiftSingleValueInputExtension"
         },
         {
-          "code": "RM.IDIVIDE.DIVIDE_BY_ZERO",
-          "identifier": "RunMat:idivide:DivideByZero",
-          "when": "The divisor contains zero.",
-          "message": "idivide: division by zero"
+          "id": "bitshift-single-count-input",
+          "mode": "RunMatOnly",
+          "description": "bitshift with single-precision k is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitshiftSingleCountInputExtension"
         },
         {
-          "code": "RM.IDIVIDE.OVERFLOW",
-          "identifier": "RunMat:idivide:Overflow",
-          "when": "A rounded quotient cannot be represented in the dividend integer class.",
-          "message": "idivide: quotient overflows output class"
+          "id": "bitshift-logical-value-input",
+          "mode": "RunMatOnly",
+          "description": "bitshift with logical A is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitshiftLogicalValueInputExtension"
+        },
+        {
+          "id": "bitshift-logical-count-input",
+          "mode": "RunMatOnly",
+          "description": "bitshift with logical k is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitshiftLogicalCountInputExtension"
+        },
+        {
+          "id": "bitshift-gpu-undocumented-input",
+          "mode": "RunMatOnly",
+          "description": "bitshift with resident input outside the documented non-64-bit integer-array GPU domain is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitshiftGpuUndocumentedInputExtension"
+        },
+        {
+          "id": "bitshift-gpu-assumedtype",
+          "mode": "RunMatOnly",
+          "description": "bitshift with resident input and assumedtype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BitshiftGpuAssumedTypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "intout = bitshift(A, k)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A accepts double or every built-in integer class and determines the output class; signed right shifts preserve the sign bit."
+            },
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "k independently accepts double or every built-in integer class; A and k are scalar or exactly the same size, and the class of k does not affect output class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "FunctionSpecific",
+          "backend": "GpuRestricted",
+          "overload": "SameSizeOrScalar",
+          "notes": "Positive counts shift left and truncate overflow bits; negative counts shift right with arithmetic sign extension for signed A. The documented interactive GPU domain requires at least one integer-array input, excludes signed A and every 64-bit integer input, and restores exact output to the owning provider."
+        },
+        {
+          "form": "intout = bitshift(A, k, assumedtype)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A accepts double or every built-in integer class and determines the output class; signed right shifts preserve the sign bit."
+            },
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "k independently accepts double or every built-in integer class; A and k are scalar or exactly the same size, and the class of k does not affect output class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "assumedtype selects the signed or unsigned bit width for double A and must equal typed-integer A. Public GPU-array support excludes assumedtype; RunMat mode retains resident calls as a gated gather-and-restore extension."
         }
       ]
     },

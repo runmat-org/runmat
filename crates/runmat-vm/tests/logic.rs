@@ -2357,6 +2357,48 @@ fn bitand_and_bitor_integer_and_logical_contracts_execute_through_compiled_dispa
 }
 
 #[test]
+fn bitshift_all_integer_value_and_count_classes_execute_through_compiled_dispatch() {
+    for value_constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        for count_constructor in [
+            "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+        ] {
+            let source = format!(
+                "a = {value_constructor}([3 4]); k = {count_constructor}([1 2]); out = bitshift(a, k);"
+            );
+            let vars = execute_source(&source).unwrap_or_else(|error| {
+                panic!("{value_constructor}/{count_constructor}: compiled bitshift failed: {error}")
+            });
+            let expected = match value_constructor {
+                "int8" => IntegerStorage::I8(vec![6, 16]),
+                "int16" => IntegerStorage::I16(vec![6, 16]),
+                "int32" => IntegerStorage::I32(vec![6, 16]),
+                "int64" => IntegerStorage::I64(vec![6, 16]),
+                "uint8" => IntegerStorage::U8(vec![6, 16]),
+                "uint16" => IntegerStorage::U16(vec![6, 16]),
+                "uint32" => IntegerStorage::U32(vec![6, 16]),
+                "uint64" => IntegerStorage::U64(vec![6, 16]),
+                _ => unreachable!(),
+            };
+            assert!(
+                matches!(
+                    &vars[2],
+                    Value::Tensor(tensor)
+                        if tensor.integer_storage() == Some(&expected)
+                ),
+                "{value_constructor}/{count_constructor}: unexpected output {:?}",
+                vars[2]
+            );
+        }
+    }
+
+    let vars = execute_source("out = bitshift(-4, -1, 'int8');")
+        .expect("compiled assumedtype arithmetic shift");
+    assert!(matches!(vars[0], Value::Num(value) if value == -2.0));
+}
+
+#[test]
 fn shiftdim_is_registered_and_preserves_exact_integer_shapes_through_vm_dispatch() {
     let vars = execute_source(
         "a = reshape(uint64([9223372036854775808 18446744073709551615 3 4]), 1, 2, 2); p = shiftdim(a, 1); base = reshape(a, 1, 1, 2, 2); [d, m] = shiftdim(base); n = shiftdim(a, -2);",

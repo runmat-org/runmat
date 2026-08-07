@@ -262,6 +262,12 @@ mod tests {
                 ("bitor", "bitor-gpu-assumedtype"),
                 ("bitor", "bitor-gpu-undocumented-input"),
                 ("bitor", "bitor-single-input"),
+                ("bitshift", "bitshift-gpu-assumedtype"),
+                ("bitshift", "bitshift-gpu-undocumented-input"),
+                ("bitshift", "bitshift-logical-count-input"),
+                ("bitshift", "bitshift-logical-value-input"),
+                ("bitshift", "bitshift-single-count-input"),
+                ("bitshift", "bitshift-single-value-input"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -537,6 +543,7 @@ mod tests {
             "bandwidth",
             "bitand",
             "bitor",
+            "bitshift",
         ] {
             let builtin = registered
                 .iter()
