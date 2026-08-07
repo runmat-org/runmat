@@ -11157,6 +11157,226 @@
           "when": "RunMat cannot compute bins or render the chart.",
           "message": "binscatter: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "binscatter-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "binscatter with resident GPU-array inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BinscatterGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = binscatter(integer_x, integer_y, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented real vector X data accepts every built-in integer class and remains authoritative through vector validation and chart state."
+            },
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented real vector Y data accepts every built-in integer class and remains authoritative through vector validation and chart state."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact integer XData/YData class, shape, and values are retained in the opaque chart state; exact rational bin membership and relative normalization precede floating bin-edge and client-graphics construction. Resident input is a separately gated RunMat extension."
+        },
+        {
+          "form": "h = binscatter(x, y, integer_N)",
+          "inputs": [
+            {
+              "name": "N/NumBins",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Documented scalar or two-element bin counts accept every built-in integer class and are parsed exactly into bounded host dimensions."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Scalar N expands to both dimensions; a two-element vector selects each dimension; every count must be in 1..=250."
+        },
+        {
+          "form": "h = binscatter(..., XLimits/YLimits, integer_limits)",
+          "inputs": [
+            {
+              "name": "XLimits",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented two-element X limits accept every built-in integer class and are validated exactly before the floating bin-edge and graphics boundary."
+            },
+            {
+              "name": "YLimits",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented two-element Y limits accept every built-in integer class and are validated exactly before the floating bin-edge and graphics boundary."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Same-axis integer data and limits use exact i128 rational bin membership across the full built-in integer range, with relative normalization only for floating bin-edge rendering."
+        },
+        {
+          "form": "h = binscatter(tbl, integer_xvar, integer_yvar, ...)",
+          "inputs": [
+            {
+              "name": "xvar",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A documented positive numeric scalar can select the X table variable; typed integers are parsed exactly as one-based structural indices."
+            },
+            {
+              "name": "yvar",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A documented positive numeric scalar can select the Y table variable; typed integers are parsed exactly as one-based structural indices."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Positive scalar integer selectors resolve table variables without floating conversion; the selected data retains its own documented class."
+        },
+        {
+          "form": "h = binscatter(..., \"ShowEmptyBins\", integer_toggle)",
+          "inputs": [
+            {
+              "name": "ShowEmptyBins",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric zero-or-one toggle accepts every scalar integer class and is parsed exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Only exact zero and one are accepted; chart state exposes the resulting logical property."
+        },
+        {
+          "form": "h = binscatter(..., \"FaceAlpha\", integer_alpha)",
+          "inputs": [
+            {
+              "name": "FaceAlpha",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric scalar transparency control admits integer zero or one and crosses once into host graphics state."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Integer transparency is necessarily zero or one under the documented inclusive unit interval and enters one host f64 graphics boundary."
+        }
       ]
     },
     {

@@ -2307,13 +2307,13 @@ fn get_binscatter_property(
         None => {
             let mut st = child_base_struct("binscatter", binscatter.figure, binscatter.axes_index);
             st.insert("Values", Value::Tensor(binscatter.values.clone()));
-            st.insert("XData", tensor_from_vec(binscatter.x_data.clone()));
-            st.insert("YData", tensor_from_vec(binscatter.y_data.clone()));
+            st.insert("XData", Value::Tensor(binscatter.x_data.clone()));
+            st.insert("YData", Value::Tensor(binscatter.y_data.clone()));
             st.insert("XBinEdges", tensor_from_vec(binscatter.x_bin_edges.clone()));
             st.insert("YBinEdges", tensor_from_vec(binscatter.y_bin_edges.clone()));
             st.insert("NumBins", tensor_from_vec(num_bins_value(binscatter)));
-            st.insert("XLimits", tensor_from_vec(binscatter_x_limits(binscatter)));
-            st.insert("YLimits", tensor_from_vec(binscatter_y_limits(binscatter)));
+            st.insert("XLimits", binscatter_x_limits(binscatter));
+            st.insert("YLimits", binscatter_y_limits(binscatter));
             st.insert("ShowEmptyBins", Value::Bool(binscatter.show_empty_bins));
             st.insert("FaceAlpha", Value::Num(binscatter.face_alpha));
             st.insert(
@@ -2329,13 +2329,13 @@ fn get_binscatter_property(
         )),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("values") | Some("bindata") => Ok(Value::Tensor(binscatter.values.clone())),
-        Some("xdata") => Ok(tensor_from_vec(binscatter.x_data.clone())),
-        Some("ydata") => Ok(tensor_from_vec(binscatter.y_data.clone())),
+        Some("xdata") => Ok(Value::Tensor(binscatter.x_data.clone())),
+        Some("ydata") => Ok(Value::Tensor(binscatter.y_data.clone())),
         Some("xbinedges") => Ok(tensor_from_vec(binscatter.x_bin_edges.clone())),
         Some("ybinedges") => Ok(tensor_from_vec(binscatter.y_bin_edges.clone())),
         Some("numbins") => Ok(tensor_from_vec(num_bins_value(binscatter))),
-        Some("xlimits") => Ok(tensor_from_vec(binscatter_x_limits(binscatter))),
-        Some("ylimits") => Ok(tensor_from_vec(binscatter_y_limits(binscatter))),
+        Some("xlimits") => Ok(binscatter_x_limits(binscatter)),
+        Some("ylimits") => Ok(binscatter_y_limits(binscatter)),
         Some("showemptybins") => Ok(Value::Bool(binscatter.show_empty_bins)),
         Some("facealpha") => Ok(Value::Num(binscatter.face_alpha)),
         Some("displayname") => Ok(Value::String(
@@ -2352,12 +2352,20 @@ fn num_bins_value(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> 
     vec![binscatter.num_bins[0] as f64, binscatter.num_bins[1] as f64]
 }
 
-fn binscatter_x_limits(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> {
-    vec![binscatter.x_limits.0, binscatter.x_limits.1]
+fn binscatter_x_limits(binscatter: &super::state::BinscatterHandleState) -> Value {
+    binscatter
+        .x_limits_option
+        .clone()
+        .map(Value::Tensor)
+        .unwrap_or_else(|| tensor_from_vec(vec![binscatter.x_limits.0, binscatter.x_limits.1]))
 }
 
-fn binscatter_y_limits(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> {
-    vec![binscatter.y_limits.0, binscatter.y_limits.1]
+fn binscatter_y_limits(binscatter: &super::state::BinscatterHandleState) -> Value {
+    binscatter
+        .y_limits_option
+        .clone()
+        .map(Value::Tensor)
+        .unwrap_or_else(|| tensor_from_vec(vec![binscatter.y_limits.0, binscatter.y_limits.1]))
 }
 
 fn get_plot_child_property(
@@ -5843,10 +5851,16 @@ fn binscatter_numeric_data(
     value: &Value,
     name: &str,
     builtin: &'static str,
-) -> BuiltinResult<Vec<f64>> {
+) -> BuiltinResult<Tensor> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    Ok(tensor::tensor_values_f64(&tensor))
+    if tensor.shape.iter().filter(|&&dim| dim > 1).count() > 1 {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: {name} must be a real numeric vector"),
+        ));
+    }
+    Ok(tensor)
 }
 
 fn recompute_binscatter_chart(
@@ -5861,8 +5875,8 @@ fn recompute_binscatter_chart(
     }
     if next.auto_bins {
         next.num_bins = [
-            binscatter::auto_bin_count(&next.x_data, next.x_limits_option, 100)?,
-            binscatter::auto_bin_count(&next.y_data, next.y_limits_option, 100)?,
+            binscatter::auto_bin_count(&next.x_data, next.x_limits_option.as_ref(), 100)?,
+            binscatter::auto_bin_count(&next.y_data, next.y_limits_option.as_ref(), 100)?,
         ];
     }
     let color_limits = current_binscatter_color_limits(&next, builtin)?;
@@ -5870,8 +5884,8 @@ fn recompute_binscatter_chart(
         &next.x_data,
         &next.y_data,
         next.num_bins,
-        next.x_limits_option,
-        next.y_limits_option,
+        next.x_limits_option.as_ref(),
+        next.y_limits_option.as_ref(),
         next.show_empty_bins,
         next.face_alpha,
         next.display_name.as_deref(),

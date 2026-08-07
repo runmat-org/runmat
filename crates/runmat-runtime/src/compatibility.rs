@@ -255,6 +255,7 @@ mod tests {
                 ("binornd", "binornd-integer-size"),
                 ("binornd", "binornd-integer-trials"),
                 ("binornd", "binornd-logical-input"),
+                ("binscatter", "binscatter-gpu-input"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),

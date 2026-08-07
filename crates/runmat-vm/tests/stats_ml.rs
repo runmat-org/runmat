@@ -332,6 +332,21 @@ fn binscatter_surface_executes_from_scripts() {
 }
 
 #[test]
+fn binscatter_integer_classes_execute_from_compiled_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let vars = execute_source(
+        "h1 = binscatter(int8([0;1]),int8([0;1]),uint8([2 2])); c1 = class(get(h1,'XData')); h2 = binscatter(int16([0;1]),int16([0;1]),uint16([2 2])); c2 = class(get(h2,'XData')); h3 = binscatter(int32([0;1]),int32([0;1]),uint32([2 2])); c3 = class(get(h3,'XData')); h4 = binscatter(int64([0;1]),int64([0;1]),uint64([2 2])); c4 = class(get(h4,'XData')); h5 = binscatter(uint8([0;1]),uint8([0;1]),int8([2 2])); c5 = class(get(h5,'XData')); h6 = binscatter(uint16([0;1]),uint16([0;1]),int16([2 2])); c6 = class(get(h6,'XData')); h7 = binscatter(uint32([0;1]),uint32([0;1]),int32([2 2])); c7 = class(get(h7,'XData')); h8 = binscatter(uint64([0;1]),uint64([0;1]),int64([2 2])); c8 = class(get(h8,'XData')); vals = get(h8,'Values');",
+    )
+    .expect("compiled integer binscatter script");
+    for class in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        assert!(has_string(&vars, class), "missing class {class}");
+    }
+    assert!(has_tensor_data(&vars, &[2, 2], &[1.0, 0.0, 0.0, 1.0]));
+}
+
+#[test]
 fn scatterhist_surface_executes_from_scripts() {
     let _plot_guard = disable_interactive_plots_for_test();
     let vars = execute_source(
