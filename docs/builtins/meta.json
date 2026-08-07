@@ -13382,11 +13382,11 @@
     },
     {
       "name": "builtin",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "[out] = builtin(name, varargin)",
+          "label": "[varargout] = builtin(name, varargin)",
           "inputs": [
             {
               "name": "name",
@@ -13405,16 +13405,45 @@
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "varargout",
               "ty": "Any",
-              "arity": "Required",
+              "arity": "Variadic",
               "default": null,
-              "description": "Result from the builtin implementation."
+              "description": "Output value(s) from the selected builtin implementation."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "[varargout] = builtin(name,varargin) with integer target arguments or results",
+          "inputs": [
+            {
+              "name": "varargin",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are passed unchanged when they are valid inputs for the builtin selected by name; mixed-class and scalar-double rules belong to that target."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "FunctionSpecific",
+          "overload": "FunctionSpecific",
+          "notes": "builtin performs no numeric conversion or arithmetic of its own; input admission, output count and class, overflow, shape, and host or provider behavior are inherited from the selected registered builtin."
+        }
+      ]
     },
     {
       "name": "butter",

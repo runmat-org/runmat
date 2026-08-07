@@ -569,6 +569,7 @@ mod tests {
             "bootstrp",
             "boxplot",
             "bsxfun",
+            "builtin",
         ] {
             let builtin = registered
                 .iter()

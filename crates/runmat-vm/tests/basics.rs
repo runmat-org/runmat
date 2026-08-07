@@ -56,6 +56,39 @@ fn compiled_bsxfun_preserves_exact_integer_and_native_single_results() {
 }
 
 #[test]
+fn compiled_builtin_inherits_exact_integer_single_and_output_count_semantics() {
+    let vars = execute_source(
+        "base = uint64(9007199254740992); a = [base+uint64(1);base+uint64(3)]; c = builtin('plus',a,uint64(1)); s = builtin('plus',single([1 2]),single(1)); [i,j] = builtin('find',int16([0 3;4 0]));",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U64(vec![9_007_199_254_740_994, 9_007_199_254_740_996]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor) if tensor.as_f32_slice() == Some(&[2.0, 3.0])
+    )));
+    let double_indices = vars
+        .iter()
+        .filter(|value| {
+            matches!(
+                value,
+                Value::Tensor(tensor)
+                    if tensor.shape == vec![2, 1]
+                        && tensor.as_f64_slice().is_some()
+                        && tensor.materialize_f64().iter().all(|entry| matches!(*entry, 1.0 | 2.0))
+            )
+        })
+        .count();
+    assert!(
+        double_indices >= 2,
+        "expected delegated find row and column outputs"
+    );
+}
+
+#[test]
 fn compiled_integer_arithmetic_rejects_ordered_logical_operands() {
     let expressions = [
         "integer_value + logical_value",
