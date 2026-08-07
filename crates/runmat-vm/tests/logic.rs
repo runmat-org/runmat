@@ -2424,6 +2424,27 @@ fn blackman_all_integer_length_classes_execute_through_compiled_dispatch() {
 }
 
 #[test]
+fn blanks_all_integer_length_classes_execute_through_compiled_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!("n = {constructor}(3); a = blanks(n);");
+        let vars = execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: compiled blanks failed: {error}"));
+        assert!(matches!(
+            &vars[1],
+            Value::CharArray(chars)
+                if chars.shape == vec![1, 3] && chars.data == vec![' ', ' ', ' ']
+        ));
+    }
+    let vars = execute_source("a = blanks(int16(-3));").expect("negative integer length");
+    assert!(matches!(
+        &vars[0],
+        Value::CharArray(chars) if chars.shape == vec![1, 0] && chars.data.is_empty()
+    ));
+}
+
+#[test]
 fn shiftdim_is_registered_and_preserves_exact_integer_shapes_through_vm_dispatch() {
     let vars = execute_source(
         "a = reshape(uint64([9223372036854775808 18446744073709551615 3 4]), 1, 2, 2); p = shiftdim(a, 1); base = reshape(a, 1, 1, 2, 2); [d, m] = shiftdim(base); n = shiftdim(a, -2);",

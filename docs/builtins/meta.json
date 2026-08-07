@@ -12170,11 +12170,11 @@
           "label": "s = blanks(n)",
           "inputs": [
             {
-              "name": "value",
-              "ty": "Any",
+              "name": "n",
+              "ty": "IntegerScalar",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
+              "description": "Number of elements."
             }
           ],
           "outputs": [
@@ -12188,7 +12188,44 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "extensions": [
+        {
+          "id": "blanks-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "blanks with a GPU-resident length is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BlanksGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "chr = blanks(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "n accepts single, double, and every built-in integer class as an integer-valued scalar; negative values are treated as zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "n determines only the length of the returned 1-by-n character row. Values too large for the host allocation domain reject; interactive GPU input is not documented."
+        }
+      ]
     },
     {
       "name": "blkdiag",

@@ -2,7 +2,11 @@
 
 use encoding_rs::{Encoding, UTF_8};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, ResolveContext, StringArray,
     Tensor, Type, Value,
@@ -39,6 +43,14 @@ const IN_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Input value.",
+}];
+
+const IN_INTEGER_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of elements.",
 }];
 
 const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -132,7 +144,42 @@ macro_rules! descriptor_by_outputs {
 }
 
 descriptor!(NEWLINE_DESCRIPTOR, "s = newline", &NO_INPUTS, &OUT_ANY);
-descriptor!(BLANKS_DESCRIPTOR, "s = blanks(n)", &IN_VALUE, &OUT_ANY);
+descriptor!(
+    BLANKS_DESCRIPTOR,
+    "s = blanks(n)",
+    &IN_INTEGER_SCALAR,
+    &OUT_ANY
+);
+
+const BLANKS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "blanks-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "blanks with a GPU-resident length is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BlanksGpuInputExtension"),
+};
+
+const BLANKS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [BLANKS_GPU_INPUT_EXTENSION];
+
+const BLANKS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "n accepts single, double, and every built-in integer class as an integer-valued scalar; negative values are treated as zero.",
+    }];
+
+pub const BLANKS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "chr = blanks(n)",
+        inputs: &BLANKS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "n determines only the length of the returned 1-by-n character row. Values too large for the host allocation domain reject; interactive GPU input is not documented.",
+    }];
 descriptor!(
     IS_STRING_SCALAR_DESCRIPTOR,
     "tf = isStringScalar(value)",
@@ -306,14 +353,30 @@ fn newline_builtin() -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(string_type),
     descriptor(crate::builtins::strings::core::compat::BLANKS_DESCRIPTOR),
+    extensions(BLANKS_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::core::compat::BLANKS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn blanks_builtin(n: Value) -> BuiltinResult<Value> {
+    if matches!(n, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BLANKS_GPU_INPUT_EXTENSION,
+            "blanks",
+        )?;
+    }
     let n = gather_if_needed_async(&n)
         .await
         .map_err(map_flow("blanks"))?;
-    let n = parse_nonnegative_usize(&n, "blanks")?;
-    Ok(Value::CharArray(CharArray::new_row(&" ".repeat(n))))
+    let n = parse_blanks_length(&n)?;
+    let mut spaces = String::new();
+    spaces.try_reserve_exact(n).map_err(|_| {
+        compat_error(
+            "blanks",
+            "blanks: requested character array is too large".to_string(),
+        )
+    })?;
+    spaces.extend(std::iter::repeat_n(' ', n));
+    Ok(Value::CharArray(CharArray::new_row(&spaces)))
 }
 
 #[runtime_builtin(
@@ -943,6 +1006,60 @@ fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize>
             format!("{fn_name}: expected a nonnegative integer scalar"),
         )
     })
+}
+
+fn parse_blanks_length(value: &Value) -> BuiltinResult<usize> {
+    let parsed = match value {
+        Value::Num(n) if n.is_finite() && n.fract() == 0.0 && *n <= 0.0 => Some(0),
+        Value::Num(n) => nonnegative_platform_usize(*n),
+        Value::Int(value) => zero_clamped_integer_usize(value),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .value_at(0)
+                    .and_then(|value| zero_clamped_integer_usize(&value))
+            } else {
+                let value = tensor_utils::tensor_value_f64(tensor, 0);
+                if value.is_finite() && value.fract() == 0.0 && value <= 0.0 {
+                    Some(0)
+                } else {
+                    nonnegative_platform_usize(value)
+                }
+            }
+        }
+        _ => None,
+    };
+    parsed.ok_or_else(|| {
+        compat_error(
+            "blanks",
+            "blanks: expected an integer-valued numeric scalar".to_string(),
+        )
+    })
+}
+
+fn zero_clamped_integer_usize(value: &IntValue) -> Option<usize> {
+    match value {
+        IntValue::I8(value) => Some(if *value <= 0 { 0 } else { *value as usize }),
+        IntValue::I16(value) => Some(if *value <= 0 { 0 } else { *value as usize }),
+        IntValue::I32(value) => {
+            if *value <= 0 {
+                Some(0)
+            } else {
+                usize::try_from(*value).ok()
+            }
+        }
+        IntValue::I64(value) => {
+            if *value <= 0 {
+                Some(0)
+            } else {
+                usize::try_from(*value).ok()
+            }
+        }
+        IntValue::U8(value) => Some(*value as usize),
+        IntValue::U16(value) => Some(*value as usize),
+        IntValue::U32(value) => usize::try_from(*value).ok(),
+        IntValue::U64(value) => usize::try_from(*value).ok(),
+    }
 }
 
 fn nonnegative_platform_usize(value: f64) -> Option<usize> {
@@ -1708,6 +1825,7 @@ async fn bounded_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, IntegerStorage, NumericDType};
 
     #[test]
@@ -1829,6 +1947,74 @@ mod tests {
             is_string_scalar_builtin(Value::String("x".into())).unwrap(),
             Value::Bool(true)
         );
+    }
+
+    #[test]
+    fn blanks_accepts_every_integer_class_and_clamps_negative_lengths() {
+        for value in [
+            IntValue::I8(3),
+            IntValue::I16(3),
+            IntValue::I32(3),
+            IntValue::I64(3),
+            IntValue::U8(3),
+            IntValue::U16(3),
+            IntValue::U32(3),
+            IntValue::U64(3),
+        ] {
+            assert_eq!(
+                block(blanks_builtin(Value::Int(value))).expect("integer length"),
+                Value::CharArray(CharArray::new_row("   "))
+            );
+        }
+        for value in [
+            Value::Num(-3.0),
+            Value::Int(IntValue::I8(-3)),
+            Value::Int(IntValue::I16(-3)),
+            Value::Int(IntValue::I32(-3)),
+            Value::Int(IntValue::I64(-3)),
+        ] {
+            assert_eq!(
+                block(blanks_builtin(value)).expect("negative length"),
+                Value::CharArray(CharArray::new_row(""))
+            );
+        }
+        let single = Tensor::from_f32(vec![3.0], vec![1, 1]).expect("single scalar");
+        assert_eq!(
+            block(blanks_builtin(Value::Tensor(single))).expect("single length"),
+            Value::CharArray(CharArray::new_row("   "))
+        );
+        assert!(block(blanks_builtin(Value::Num(1.5))).is_err());
+        assert!(block(blanks_builtin(Value::Int(IntValue::U64(u64::MAX)))).is_err());
+    }
+
+    #[test]
+    fn blanks_gpu_input_follows_compatibility_mode() {
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U16(&[3]),
+                    shape: &[1, 1],
+                })
+                .expect("upload integer length");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block(blanks_builtin(Value::GpuTensor(handle.clone())))
+                    .expect_err("strict mode rejects resident length");
+                assert_eq!(
+                    error.identifier(),
+                    BLANKS_GPU_INPUT_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+                assert_eq!(
+                    block(blanks_builtin(Value::GpuTensor(handle))).expect("RunMat extension"),
+                    Value::CharArray(CharArray::new_row("   "))
+                );
+            }
+        });
     }
 
     #[test]
