@@ -14216,6 +14216,118 @@
           "when": "Filter design or output materialization fails internally.",
           "message": "butter: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "butter-integer-order",
+          "mode": "RunMatOnly",
+          "description": "butter with a typed-integer filter order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterIntegerOrderExtension"
+        },
+        {
+          "id": "butter-logical-order",
+          "mode": "RunMatOnly",
+          "description": "butter with a logical filter order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterLogicalOrderExtension"
+        },
+        {
+          "id": "butter-single-order",
+          "mode": "RunMatOnly",
+          "description": "butter with a single-precision filter order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterSingleOrderExtension"
+        },
+        {
+          "id": "butter-integer-cutoff",
+          "mode": "RunMatOnly",
+          "description": "butter with typed-integer cutoff frequencies is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterIntegerCutoffExtension"
+        },
+        {
+          "id": "butter-logical-cutoff",
+          "mode": "RunMatOnly",
+          "description": "butter with logical cutoff frequencies is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterLogicalCutoffExtension"
+        },
+        {
+          "id": "butter-single-cutoff",
+          "mode": "RunMatOnly",
+          "description": "butter with single-precision cutoff frequencies is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterSingleCutoffExtension"
+        },
+        {
+          "id": "butter-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "butter with resident GPU-array arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterGpuInputExtension"
+        },
+        {
+          "id": "butter-option-alias",
+          "mode": "RunMatOnly",
+          "description": "butter with a nonstandard filter-type alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterOptionAliasExtension"
+        },
+        {
+          "id": "butter-order-above-500",
+          "mode": "RunMatOnly",
+          "description": "butter with a filter order above the documented limit of 500 is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ButterLargeOrderExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[b,a]/[z,p,k]/[A,B,C,D] = butter(integer_n,Wn,...)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented order datatype is double; RunMat mode additionally accepts every scalar integer class and parses it exactly into a bounded host order."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Integer n is checked exactly against positive host and documented-order bounds. Resident order input is separately gated, gathers through its owning provider in RunMat mode, and every numeric output remains double."
+        },
+        {
+          "form": "[b,a]/[z,p,k]/[A,B,C,D] = butter(n,integer_Wn,...)",
+          "inputs": [
+            {
+              "name": "Wn",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented cutoff datatype is double; RunMat mode additionally accepts scalar or two-element integer cutoff storage before the deliberate double filter-design boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer Wn is retained through scalar/vector validation and then explicitly materialized into the double Butterworth design domain. Resident cutoff input is separately gated and returns host double outputs."
+        }
       ]
     },
     {

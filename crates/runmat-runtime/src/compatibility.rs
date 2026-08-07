@@ -287,6 +287,15 @@ mod tests {
                 ("boxplot", "boxplot-logical-group"),
                 ("boxplot", "boxplot-logical-option"),
                 ("bsxfun", "bsxfun-text-callable"),
+                ("butter", "butter-gpu-input"),
+                ("butter", "butter-integer-cutoff"),
+                ("butter", "butter-integer-order"),
+                ("butter", "butter-logical-cutoff"),
+                ("butter", "butter-logical-order"),
+                ("butter", "butter-option-alias"),
+                ("butter", "butter-order-above-500"),
+                ("butter", "butter-single-cutoff"),
+                ("butter", "butter-single-order"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -570,6 +579,7 @@ mod tests {
             "boxplot",
             "bsxfun",
             "builtin",
+            "butter",
         ] {
             let builtin = registered
                 .iter()

@@ -306,6 +306,35 @@ fn buttord_builtin_executes_for_butterworth_workflow() {
 }
 
 #[test]
+fn compiled_butter_integer_extensions_preserve_double_filter_outputs() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("[b,a] = butter(uint16(1),uint8(1),'s');");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                && tensor.materialize_f64() == vec![0.0, 1.0]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                && tensor.materialize_f64() == vec![1.0, 1.0]
+    )));
+}
+
+#[test]
+fn compiled_butter_integer_order_respects_compatibility_policy() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let err = execute_source_result("b = butter(uint16(1),0.5);")
+        .expect_err("typed integer order must be gated");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:compatibility:ButterIntegerOrderExtension")
+    );
+}
+
+#[test]
 fn pwelch_builtin_executes_for_psd_workflow() {
     let input = r#"
         fs = 32;
