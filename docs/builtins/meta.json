@@ -13124,6 +13124,133 @@
           "when": "RunMat cannot construct box statistics or plotting primitives.",
           "message": "boxplot: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "boxplot-integer-data",
+          "mode": "RunMatOnly",
+          "description": "boxplot with integer sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BoxplotIntegerDataExtension"
+        },
+        {
+          "id": "boxplot-logical-data",
+          "mode": "RunMatOnly",
+          "description": "boxplot with logical sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BoxplotLogicalDataExtension"
+        },
+        {
+          "id": "boxplot-integer-group",
+          "mode": "RunMatOnly",
+          "description": "boxplot with integer grouping data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BoxplotIntegerGroupExtension"
+        },
+        {
+          "id": "boxplot-logical-group",
+          "mode": "RunMatOnly",
+          "description": "boxplot with logical grouping data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BoxplotLogicalGroupExtension"
+        },
+        {
+          "id": "boxplot-integer-option",
+          "mode": "RunMatOnly",
+          "description": "boxplot with an integer numeric option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BoxplotIntegerOptionExtension"
+        },
+        {
+          "id": "boxplot-logical-option",
+          "mode": "RunMatOnly",
+          "description": "boxplot with a logical numeric option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BoxplotLogicalOptionExtension"
+        },
+        {
+          "id": "boxplot-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "boxplot with gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:BoxplotGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "boxplot(x) with integer sample data",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat accepts every integer class as sample data; the public sample-data domain is single or double."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only visualization form; integer observations cross one deliberate binary64 statistics/rendering boundary and the optional result is a host graphics-handle vector."
+        },
+        {
+          "form": "boxplot(x,g) or boxplot(___,ColorGroup,g) with integer grouping data",
+          "inputs": [
+            {
+              "name": "g or ColorGroup",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat accepts every integer class as direct or cell-contained grouping data and retains exact integer labels; the public numeric grouping domain is single or double."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only grouping form; integer group identity, order, and labels remain exact without a binary64 mirror."
+        },
+        {
+          "form": "boxplot(___,Name,Value) with integer numeric option values",
+          "inputs": [
+            {
+              "name": "numeric Name-Value option",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat accepts integer numeric option values; visualization controls cross an explicit floating boundary while numeric labels and grouping options retain exact text or identity. Public numeric option domains are single or double."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only option form; geometry, color, limit, and scale controls cross one deliberate binary64 boundary after option-specific validation, while labels and grouping identity remain exact."
+        }
       ]
     },
     {

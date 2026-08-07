@@ -279,6 +279,13 @@ mod tests {
                 ("bootstrp", "bootstrp-logical-nboot"),
                 ("bootstrp", "bootstrp-logical-weights"),
                 ("bootstrp", "bootstrp-text-callable"),
+                ("boxplot", "boxplot-gpu-input"),
+                ("boxplot", "boxplot-integer-data"),
+                ("boxplot", "boxplot-integer-group"),
+                ("boxplot", "boxplot-integer-option"),
+                ("boxplot", "boxplot-logical-data"),
+                ("boxplot", "boxplot-logical-group"),
+                ("boxplot", "boxplot-logical-option"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -559,6 +566,7 @@ mod tests {
             "blanks",
             "blkdiag",
             "bootstrp",
+            "boxplot",
         ] {
             let builtin = registered
                 .iter()

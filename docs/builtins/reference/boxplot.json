@@ -3,6 +3,13 @@
   "category": "stats/summary",
   "keywords": ["boxplot", "box plot", "statistics", "quartile", "outlier", "visualization"],
   "summary": "Visualize sample quartiles, whiskers, medians, and outliers.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["integer", "f32", "f64"],
+    "broadcasting": "none",
+    "notes": "Interactive gpuArray input is a RunMat-only extension. After compatibility admission, RunMat gathers to the host before statistics and rendering; graphics handles remain host-resident."
+  },
   "signatures": [
     "boxplot(x)",
     "boxplot(x,g)",
@@ -10,11 +17,13 @@
     "boxplot(___,Name,Value)",
     "h = boxplot(___)"
   ],
-  "description": "`boxplot(x)` plots one box for a vector and one box per matrix column. `boxplot(x,g)` groups vector data by numeric, text, cell, or categorical grouping variables. With an output, RunMat returns a row vector of graphics handles for the line and scatter primitives used to draw the boxes.",
+  "description": "`boxplot(x)` plots one box for a vector and one box per matrix column. `boxplot(x,g)` groups vector data by numeric, text, cell, or categorical grouping variables. With an output, RunMat returns a row vector of graphics handles for the line and scatter primitives used to draw the boxes. Public numeric data, groups, and numeric option values are single or double; integer and logical forms are independently gated RunMat extensions.",
   "notes": [
     "NaN data values are omitted from quartile, median, whisker, and outlier calculations.",
     "Quartiles use linear interpolation over sorted finite observations. Whiskers extend to the most extreme observations within `Whisker` times the interquartile range.",
     "Grouping variables can be numeric vectors, string arrays, character matrices, cell arrays of scalar group labels, categorical arrays, or cell arrays of grouping vectors. Missing group labels are omitted.",
+    "In RunMat mode, all eight integer classes and logical arrays are accepted independently for sample data, grouping data, and numeric option values. Integer sample observations and visualization-valued numeric options cross an explicit binary64 boundary; integer grouping identity, numeric order, and numeric labels remain exact, including `uint64` values above `flintmax`.",
+    "Interactive gpuArray input is independently gated and gathered only after compatibility admission.",
     "`DataLim`, `ExtremeMode`, and `Jitter` control outlier display. `ExtremeMode` clips or compresses outlier markers outside the data limits, and traditional plots default to no jitter.",
     "Recognized options include `Labels`, `GroupOrder`, `Orientation`, `Positions`, `Widths`, `Whisker`, `Colors`, `Symbol`, `OutlierSize`, `PlotStyle`, `BoxStyle`, `MedianStyle`, `Notch`, `DataLim`, `ExtremeMode`, `Jitter`, `LabelOrientation`, `LabelVerbosity`, and factor display validation options.",
     "`BoxStyle`, `MedianStyle`, `Notch`, and factor display layout options are accepted for compatibility; the current renderer draws an outline box, median line, whiskers, caps, and optional outlier markers."

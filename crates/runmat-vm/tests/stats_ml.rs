@@ -534,6 +534,18 @@ fn boxplot_surface_executes_from_scripts() {
 }
 
 #[test]
+fn boxplot_integer_extensions_execute_from_compiled_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "wide = uint64(9007199254740992) + uint64(1); x = int16([1;2;10;20]); g = [wide;wide+uint64(1);wide;wide+uint64(1)]; h = boxplot(x, g, 'Whisker', uint8(1), 'Labels', [wide,wide+uint64(1)]); n = numel(h);",
+    )
+    .expect("compiled integer boxplot");
+    assert!(has_tensor_shape(&vars, &[1, 12]));
+    assert!(has_num(&vars, 12.0));
+}
+
+#[test]
 fn outlier_cleanup_surface_executes_from_scripts() {
     let vars = execute_source(
         "A = [1;2;100;4;5]; [tf,L,U,C] = isoutlier(A); B = filloutliers(A, 'linear'); C2 = filloutliers(A, -1); b3 = B(3); c3 = C2(3);",

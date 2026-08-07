@@ -5,9 +5,13 @@ use std::collections::{BTreeMap, HashMap};
 
 use glam::Vec4;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, Tensor, Type, Value,
+    CellArray, CharArray, IntValue, NumericScalar, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle, MarkerStyle, ScatterPlot};
@@ -121,6 +125,125 @@ const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 };
 
 const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
+
+const BOXPLOT_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "boxplot-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "boxplot with integer sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BoxplotIntegerDataExtension"),
+};
+
+const BOXPLOT_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "boxplot-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "boxplot with logical sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BoxplotLogicalDataExtension"),
+};
+
+const BOXPLOT_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "boxplot-integer-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "boxplot with integer grouping data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BoxplotIntegerGroupExtension"),
+};
+
+const BOXPLOT_LOGICAL_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "boxplot-logical-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "boxplot with logical grouping data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BoxplotLogicalGroupExtension"),
+};
+
+const BOXPLOT_INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "boxplot-integer-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "boxplot with an integer numeric option is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BoxplotIntegerOptionExtension"),
+};
+
+const BOXPLOT_LOGICAL_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "boxplot-logical-option",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "boxplot with a logical numeric option is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BoxplotLogicalOptionExtension"),
+};
+
+const BOXPLOT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "boxplot-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "boxplot with gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BoxplotGpuInputExtension"),
+};
+
+const BOXPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    BOXPLOT_INTEGER_DATA_EXTENSION,
+    BOXPLOT_LOGICAL_DATA_EXTENSION,
+    BOXPLOT_INTEGER_GROUP_EXTENSION,
+    BOXPLOT_LOGICAL_GROUP_EXTENSION,
+    BOXPLOT_INTEGER_OPTION_EXTENSION,
+    BOXPLOT_LOGICAL_OPTION_EXTENSION,
+    BOXPLOT_GPU_INPUT_EXTENSION,
+];
+
+const BOXPLOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat accepts every integer class as sample data; the public sample-data domain is single or double.",
+    }];
+
+const BOXPLOT_INTEGER_GROUP_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "g or ColorGroup",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat accepts every integer class as direct or cell-contained grouping data and retains exact integer labels; the public numeric grouping domain is single or double.",
+    }];
+
+const BOXPLOT_INTEGER_OPTION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numeric Name-Value option",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat accepts integer numeric option values; visualization controls cross an explicit floating boundary while numeric labels and grouping options retain exact text or identity. Public numeric option domains are single or double.",
+    }];
+
+pub const BOXPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "boxplot(x) with integer sample data",
+        inputs: &BOXPLOT_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only visualization form; integer observations cross one deliberate binary64 statistics/rendering boundary and the optional result is a host graphics-handle vector.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "boxplot(x,g) or boxplot(___,ColorGroup,g) with integer grouping data",
+        inputs: &BOXPLOT_INTEGER_GROUP_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only grouping form; integer group identity, order, and labels remain exact without a binary64 mirror.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "boxplot(___,Name,Value) with integer numeric option values",
+        inputs: &BOXPLOT_INTEGER_OPTION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only option form; geometry, color, limit, and scale controls cross one deliberate binary64 boundary after option-specific validation, while labels and grouping identity remain exact.",
+    },
+];
 
 pub const BOXPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
@@ -236,6 +359,89 @@ fn map_plot_error(err: RuntimeError) -> RuntimeError {
     }
 }
 
+fn value_is_integer_numeric(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
+}
+
+fn value_is_logical_numeric(value: &Value) -> bool {
+    match value {
+        Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
+        _ => false,
+    }
+}
+
+fn value_contains_integer(value: &Value) -> bool {
+    value_is_integer_numeric(value)
+        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_integer))
+}
+
+fn value_contains_logical(value: &Value) -> bool {
+    value_is_logical_numeric(value)
+        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_logical))
+}
+
+fn value_contains_gpu(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(_))
+}
+
+fn enable_boxplot_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(extension, NAME)
+}
+
+fn ensure_boxplot_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
+    let Some(x) = args.first() else {
+        return Ok(());
+    };
+    if value_is_integer_numeric(x) {
+        enable_boxplot_extension(&BOXPLOT_INTEGER_DATA_EXTENSION)?;
+    }
+    if value_is_logical_numeric(x) {
+        enable_boxplot_extension(&BOXPLOT_LOGICAL_DATA_EXTENSION)?;
+    }
+
+    let mut idx = 1usize;
+    if args.get(idx).is_some_and(|value| !is_option_name(value)) {
+        let group = &args[idx];
+        if value_contains_integer(group) {
+            enable_boxplot_extension(&BOXPLOT_INTEGER_GROUP_EXTENSION)?;
+        }
+        if value_contains_logical(group) {
+            enable_boxplot_extension(&BOXPLOT_LOGICAL_GROUP_EXTENSION)?;
+        }
+        idx += 1;
+    }
+    while idx + 1 < args.len() {
+        let name = keyword_of(&args[idx]);
+        let value = &args[idx + 1];
+        if name.as_deref() == Some("colorgroup") {
+            if value_contains_integer(value) {
+                enable_boxplot_extension(&BOXPLOT_INTEGER_GROUP_EXTENSION)?;
+            }
+            if value_contains_logical(value) {
+                enable_boxplot_extension(&BOXPLOT_LOGICAL_GROUP_EXTENSION)?;
+            }
+        } else {
+            if value_is_integer_numeric(value) {
+                enable_boxplot_extension(&BOXPLOT_INTEGER_OPTION_EXTENSION)?;
+            }
+            if value_is_logical_numeric(value) {
+                enable_boxplot_extension(&BOXPLOT_LOGICAL_OPTION_EXTENSION)?;
+            }
+        }
+        idx += 2;
+    }
+    if args.iter().any(value_contains_gpu) {
+        enable_boxplot_extension(&BOXPLOT_GPU_INPUT_EXTENSION)?;
+    }
+    Ok(())
+}
+
 #[runtime_builtin(
     name = "boxplot",
     category = "stats/summary",
@@ -245,10 +451,13 @@ fn map_plot_error(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(boxplot_type),
     descriptor(crate::builtins::stats::summary::boxplot::BOXPLOT_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::boxplot::BOXPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::boxplot::BOXPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::boxplot"
 )]
 pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (axes_target, args) = split_leading_axes_handle(args, NAME).map_err(map_plot_error)?;
+    ensure_boxplot_extensions_enabled(&args)?;
     let mut args = gather_values(args).await?;
     if args.is_empty() {
         return Err(invalid("boxplot: expected numeric data"));
@@ -590,35 +799,53 @@ fn grouped_series(
     }
     let mut first_seen = Vec::<String>::new();
     let mut text_groups = HashMap::<String, Vec<f64>>::new();
-    let mut numeric_groups = BTreeMap::<OrderedF64, (String, Vec<f64>)>::new();
-    let numeric_order = labels
+    let mut floating_groups = BTreeMap::<OrderedF64, (String, Vec<f64>)>::new();
+    let mut integer_groups = BTreeMap::<i128, (String, Vec<f64>)>::new();
+    let floating_order = labels
         .iter()
         .flatten()
-        .all(|label| label.parse::<f64>().is_ok_and(|value| value.is_finite()));
+        .all(|label| matches!(label, GroupLabel::Floating(_)));
+    let integer_order = labels
+        .iter()
+        .flatten()
+        .all(|label| matches!(label, GroupLabel::Integer(_)));
 
     for (idx, maybe_label) in labels.into_iter().enumerate() {
         let Some(label) = maybe_label else {
             continue;
         };
-        if numeric_order {
-            let value = label
-                .parse::<f64>()
-                .map_err(|_| invalid("boxplot: invalid numeric group label"))?;
-            numeric_groups
+        if floating_order {
+            let GroupLabel::Floating(value) = label else {
+                unreachable!("floating group classification checked above");
+            };
+            let text = number_label(&value);
+            floating_groups
                 .entry(OrderedF64(value))
-                .or_insert_with(|| (label.clone(), Vec::new()))
+                .or_insert_with(|| (text, Vec::new()))
+                .1
+                .push(values[idx]);
+        } else if integer_order {
+            let GroupLabel::Integer(value) = label else {
+                unreachable!("integer group classification checked above");
+            };
+            integer_groups
+                .entry(value)
+                .or_insert_with(|| (value.to_string(), Vec::new()))
                 .1
                 .push(values[idx]);
         } else {
-            if !text_groups.contains_key(&label) {
-                first_seen.push(label.clone());
+            let text = label.text();
+            if !text_groups.contains_key(&text) {
+                first_seen.push(text.clone());
             }
-            text_groups.entry(label).or_default().push(values[idx]);
+            text_groups.entry(text).or_default().push(values[idx]);
         }
     }
 
-    let groups = if numeric_order {
-        numeric_groups.into_values().collect::<Vec<_>>()
+    let groups = if floating_order {
+        floating_groups.into_values().collect::<Vec<_>>()
+    } else if integer_order {
+        integer_groups.into_values().collect::<Vec<_>>()
     } else {
         first_seen
             .into_iter()
@@ -1009,12 +1236,16 @@ fn text_vector(value: &Value, label: &str) -> BuiltinResult<Vec<String>> {
             .iter()
             .map(|value| value_text_preserve_case(value, label))
             .collect(),
-        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64(tensor)
-            .iter()
-            .map(number_label)
-            .collect()),
+        Value::Tensor(tensor) => (0..tensor::tensor_element_len(tensor))
+            .map(|index| {
+                tensor
+                    .numeric_value_at(index)
+                    .map(numeric_scalar_label)
+                    .ok_or_else(|| invalid(format!("boxplot: {label} storage is malformed")))
+            })
+            .collect(),
         Value::Num(n) => Ok(vec![number_label(n)]),
-        Value::Int(i) => Ok(vec![number_label(&i.to_f64())]),
+        Value::Int(i) => Ok(vec![int_group_key(i).to_string()]),
         _ => Err(invalid(format!("boxplot: {label} must be a text vector"))),
     }
 }
@@ -1219,29 +1450,78 @@ fn color_char(ch: char) -> Option<Vec4> {
     }
 }
 
-fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<String>>> {
+#[derive(Clone, Debug)]
+enum GroupLabel {
+    Floating(f64),
+    Integer(i128),
+    Text(String),
+}
+
+impl GroupLabel {
+    fn text(&self) -> String {
+        match self {
+            Self::Floating(value) => number_label(value),
+            Self::Integer(value) => value.to_string(),
+            Self::Text(value) => value.clone(),
+        }
+    }
+}
+
+fn int_group_key(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
+}
+
+fn numeric_group_label(value: NumericScalar) -> Option<GroupLabel> {
+    match value {
+        NumericScalar::F64(value) => value.is_finite().then_some(GroupLabel::Floating(value)),
+        NumericScalar::F32(value) => value
+            .is_finite()
+            .then_some(GroupLabel::Floating(f64::from(value))),
+        NumericScalar::I8(value) => Some(GroupLabel::Integer(i128::from(value))),
+        NumericScalar::I16(value) => Some(GroupLabel::Integer(i128::from(value))),
+        NumericScalar::I32(value) => Some(GroupLabel::Integer(i128::from(value))),
+        NumericScalar::I64(value) => Some(GroupLabel::Integer(i128::from(value))),
+        NumericScalar::U8(value) => Some(GroupLabel::Integer(i128::from(value))),
+        NumericScalar::U16(value) => Some(GroupLabel::Integer(i128::from(value))),
+        NumericScalar::U32(value) => Some(GroupLabel::Integer(i128::from(value))),
+        NumericScalar::U64(value) => Some(GroupLabel::Integer(i128::from(value))),
+    }
+}
+
+fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<GroupLabel>>> {
     match value {
         Value::Cell(cell) => group_labels_from_cell(cell, expected_len),
         Value::Object(object) if object.is_class("categorical") => (0..expected_len)
             .map(|row| {
                 let label = crate::builtins::table::categorical_label_at(object, row)
                     .ok_or_else(|| invalid("boxplot: invalid categorical grouping variable"))?;
-                Ok(missing_text_label(&label).then_some(label))
+                Ok(missing_text_label(&label).then_some(GroupLabel::Text(label)))
             })
             .collect(),
-        Value::String(text) if expected_len == 1 => Ok(vec![Some(text.clone())]),
+        Value::String(text) if expected_len == 1 => Ok(vec![Some(GroupLabel::Text(text.clone()))]),
         Value::StringArray(array) if array.data.len() == expected_len => Ok(array
             .data
             .iter()
-            .map(|text| missing_text_label(text).then_some(text.clone()))
+            .map(|text| missing_text_label(text).then(|| GroupLabel::Text(text.clone())))
             .collect()),
         Value::CharArray(array) if array.rows == expected_len => Ok(char_rows(array)
             .into_iter()
-            .map(|text| missing_text_label(&text).then_some(text))
+            .map(|text| missing_text_label(&text).then(|| GroupLabel::Text(text)))
             .collect()),
         Value::CharArray(array) if array.rows == 1 && expected_len == 1 => {
             let text: String = array.data.iter().collect();
-            Ok(vec![missing_text_label(&text).then_some(text)])
+            Ok(vec![
+                missing_text_label(&text).then_some(GroupLabel::Text(text))
+            ])
         }
         _ => {
             let tensor = tensor::value_into_tensor_for(NAME, value.clone()).map_err(|err| {
@@ -1254,9 +1534,8 @@ fn group_labels(value: &Value, expected_len: usize) -> BuiltinResult<Vec<Option<
                     "boxplot: grouping variable length must match the number of X elements",
                 ));
             }
-            Ok(tensor::tensor_values_f64(&tensor)
-                .iter()
-                .map(|value| value.is_finite().then(|| number_label(value)))
+            Ok((0..expected_len)
+                .map(|index| tensor.numeric_value_at(index).and_then(numeric_group_label))
                 .collect())
         }
     }
@@ -1275,7 +1554,7 @@ fn validate_group_like(tensor: &Tensor, value: &Value) -> BuiltinResult<()> {
 fn group_labels_from_cell(
     cell: &CellArray,
     expected_len: usize,
-) -> BuiltinResult<Vec<Option<String>>> {
+) -> BuiltinResult<Vec<Option<GroupLabel>>> {
     if cell.data.len() == expected_len {
         let scalar_labels = cell
             .data
@@ -1302,35 +1581,36 @@ fn group_labels_from_cell(
         let mut missing = false;
         for variable in &variables {
             match &variable[row] {
-                Some(label) => parts.push(label.clone()),
+                Some(label) => parts.push(label.text()),
                 None => {
                     missing = true;
                     break;
                 }
             }
         }
-        labels.push((!missing).then(|| parts.join(",")));
+        labels.push((!missing).then(|| GroupLabel::Text(parts.join(","))));
     }
     Ok(labels)
 }
 
-fn scalar_group_label(value: &Value) -> BuiltinResult<Option<String>> {
+fn scalar_group_label(value: &Value) -> BuiltinResult<Option<GroupLabel>> {
     match value {
-        Value::String(text) => Ok(missing_text_label(text).then_some(text.clone())),
+        Value::String(text) => Ok(missing_text_label(text).then(|| GroupLabel::Text(text.clone()))),
         Value::StringArray(array) if array.data.len() == 1 => {
             let text = array.data[0].clone();
-            Ok(missing_text_label(&text).then_some(text))
+            Ok(missing_text_label(&text).then_some(GroupLabel::Text(text)))
         }
         Value::CharArray(array) if array.rows == 1 => {
             let text: String = array.data.iter().collect();
-            Ok(missing_text_label(&text).then_some(text))
+            Ok(missing_text_label(&text).then_some(GroupLabel::Text(text)))
         }
-        Value::Num(n) => Ok(n.is_finite().then(|| number_label(n))),
-        Value::Int(i) => Ok(Some(number_label(&i.to_f64()))),
-        Value::Bool(b) => Ok(Some(if *b { "true" } else { "false" }.to_string())),
+        Value::Num(value) => Ok(value.is_finite().then_some(GroupLabel::Floating(*value))),
+        Value::Int(value) => Ok(Some(GroupLabel::Integer(int_group_key(value)))),
+        Value::Bool(value) => Ok(Some(GroupLabel::Text(
+            if *value { "true" } else { "false" }.to_string(),
+        ))),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            let value = tensor::tensor_value_f64(tensor, 0);
-            Ok(value.is_finite().then(|| number_label(&value)))
+            Ok(tensor.numeric_value_at(0).and_then(numeric_group_label))
         }
         _ => Err(invalid("boxplot: cell grouping labels must be scalar")),
     }
@@ -1368,6 +1648,21 @@ fn number_label(value: &f64) -> String {
     }
 }
 
+fn numeric_scalar_label(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => number_label(&value),
+        NumericScalar::F32(value) => number_label(&f64::from(value)),
+        NumericScalar::I8(value) => value.to_string(),
+        NumericScalar::I16(value) => value.to_string(),
+        NumericScalar::I32(value) => value.to_string(),
+        NumericScalar::I64(value) => value.to_string(),
+        NumericScalar::U8(value) => value.to_string(),
+        NumericScalar::U16(value) => value.to_string(),
+        NumericScalar::U32(value) => value.to_string(),
+        NumericScalar::U64(value) => value.to_string(),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct OrderedF64(f64);
 
@@ -1389,7 +1684,8 @@ impl Ord for OrderedF64 {
 mod tests {
     use super::*;
     use crate::builtins::plotting::{clone_figure, current_figure_handle};
-    use runmat_builtins::IntegerStorage;
+    use futures::executor::block_on;
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage, LogicalArray};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).expect("tensor"))
@@ -1398,6 +1694,205 @@ mod tests {
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn descriptor_declares_integer_forms_and_extensions() {
+        let builtin = builtin_function_by_name("boxplot").expect("registered boxplot");
+        assert_eq!(builtin.extensions, &BOXPLOT_EXTENSIONS);
+        assert_eq!(
+            builtin
+                .integer_capabilities
+                .iter()
+                .map(|capability| capability.form)
+                .collect::<Vec<_>>(),
+            BOXPLOT_INTEGER_CAPABILITIES
+                .iter()
+                .map(|capability| capability.form)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn extensions_are_independently_mode_gated() {
+        let data = || tensor(vec![1.0, 2.0], vec![2, 1]);
+        let integer_data = || int_tensor(IntegerStorage::I16(vec![1, 2]), vec![2, 1]);
+        let logical_data = || {
+            Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![2, 1]).expect("logical data"))
+        };
+        let integer_group = || int_tensor(IntegerStorage::U16(vec![1, 2]), vec![2, 1]);
+        let logical_group = || {
+            Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![2, 1]).expect("logical group"))
+        };
+        let cases = [
+            (
+                vec![integer_data()],
+                BOXPLOT_INTEGER_DATA_EXTENSION.error_identifier,
+            ),
+            (
+                vec![logical_data()],
+                BOXPLOT_LOGICAL_DATA_EXTENSION.error_identifier,
+            ),
+            (
+                vec![data(), integer_group()],
+                BOXPLOT_INTEGER_GROUP_EXTENSION.error_identifier,
+            ),
+            (
+                vec![data(), logical_group()],
+                BOXPLOT_LOGICAL_GROUP_EXTENSION.error_identifier,
+            ),
+            (
+                vec![data(), Value::from("Whisker"), Value::Int(IntValue::U8(1))],
+                BOXPLOT_INTEGER_OPTION_EXTENSION.error_identifier,
+            ),
+            (
+                vec![data(), Value::from("Whisker"), Value::Bool(true)],
+                BOXPLOT_LOGICAL_OPTION_EXTENSION.error_identifier,
+            ),
+        ];
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (args, identifier) in cases {
+            let error =
+                ensure_boxplot_extensions_enabled(&args).expect_err("strict mode must reject");
+            assert_eq!(error.identifier(), identifier);
+        }
+    }
+
+    #[test]
+    fn documented_single_data_groups_and_options_need_no_extension() {
+        let single = |values: Vec<f32>, shape: Vec<usize>| {
+            Value::Tensor(Tensor::from_f32(values, shape).expect("single tensor"))
+        };
+        let args = vec![
+            single(vec![1.0, 2.0], vec![2, 1]),
+            single(vec![2.0, 1.0], vec![2, 1]),
+            Value::from("Whisker"),
+            single(vec![1.0], vec![1, 1]),
+        ];
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        ensure_boxplot_extensions_enabled(&args).expect("documented single forms");
+    }
+
+    #[test]
+    fn all_integer_sample_classes_cross_the_explicit_statistics_boundary() {
+        let cases = [
+            (IntegerStorage::I8(vec![-1, 3]), 1.0),
+            (IntegerStorage::I16(vec![-1, 3]), 1.0),
+            (IntegerStorage::I32(vec![-1, 3]), 1.0),
+            (IntegerStorage::I64(vec![-1, 3]), 1.0),
+            (IntegerStorage::U8(vec![1, 3]), 2.0),
+            (IntegerStorage::U16(vec![1, 3]), 2.0),
+            (IntegerStorage::U32(vec![1, 3]), 2.0),
+            (IntegerStorage::U64(vec![1, 3]), 2.0),
+        ];
+        for (storage, expected_median) in cases {
+            let boxes = build_box_stats(
+                int_tensor(storage, vec![2, 1]),
+                None,
+                &BoxplotOptions::default(),
+            )
+            .expect("integer box statistics");
+            assert_eq!(boxes.len(), 1);
+            assert_eq!(boxes[0].median, expected_median);
+        }
+    }
+
+    #[test]
+    fn all_integer_group_and_numeric_option_classes_are_covered() {
+        let cases = [
+            (IntegerStorage::I8(vec![2, 1]), IntValue::I8(1)),
+            (IntegerStorage::I16(vec![2, 1]), IntValue::I16(1)),
+            (IntegerStorage::I32(vec![2, 1]), IntValue::I32(1)),
+            (IntegerStorage::I64(vec![2, 1]), IntValue::I64(1)),
+            (IntegerStorage::U8(vec![2, 1]), IntValue::U8(1)),
+            (IntegerStorage::U16(vec![2, 1]), IntValue::U16(1)),
+            (IntegerStorage::U32(vec![2, 1]), IntValue::U32(1)),
+            (IntegerStorage::U64(vec![2, 1]), IntValue::U64(1)),
+        ];
+        for (groups, option) in cases {
+            let boxes = build_box_stats(
+                tensor(vec![20.0, 10.0], vec![2, 1]),
+                Some(int_tensor(groups, vec![2, 1])),
+                &BoxplotOptions::default(),
+            )
+            .expect("integer groups");
+            assert_eq!(
+                boxes
+                    .iter()
+                    .map(|box_stats| box_stats.label.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["1", "2"]
+            );
+            let options = BoxplotOptions::parse(vec![Value::from("Whisker"), Value::Int(option)])
+                .expect("integer numeric option");
+            assert_eq!(options.whisker, 1.0);
+        }
+    }
+
+    #[test]
+    fn integer_group_identity_and_labels_remain_exact_above_flintmax() {
+        let wide = 9_007_199_254_740_993_u64;
+        let boxes = build_box_stats(
+            tensor(vec![10.0, 20.0, 30.0], vec![3, 1]),
+            Some(int_tensor(
+                IntegerStorage::U64(vec![wide + 1, wide, wide + 1]),
+                vec![3, 1],
+            )),
+            &BoxplotOptions::default(),
+        )
+        .expect("wide integer grouping");
+        assert_eq!(boxes.len(), 2);
+        assert_eq!(boxes[0].label, wide.to_string());
+        assert_eq!(boxes[0].median, 20.0);
+        assert_eq!(boxes[1].label, (wide + 1).to_string());
+        assert_eq!(boxes[1].median, 20.0);
+    }
+
+    #[test]
+    fn integer_labels_preserve_exact_text() {
+        let wide = 9_007_199_254_740_993_u64;
+        assert_eq!(
+            text_vector(
+                &int_tensor(IntegerStorage::U64(vec![wide]), vec![1, 1]),
+                "Labels",
+            )
+            .expect("integer labels"),
+            vec![wide.to_string()]
+        );
+    }
+
+    #[test]
+    fn gpu_input_extension_rejects_before_gather_and_admits_host_rendering() {
+        use runmat_accelerate_api::HostTensorView;
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
+            crate::builtins::plotting::reset_plot_state();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0],
+                    shape: &[2, 1],
+                })
+                .expect("resident data");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(boxplot_builtin(vec![Value::GpuTensor(handle.clone())]))
+                    .expect_err("strict mode rejects resident input");
+                assert_eq!(
+                    error.identifier(),
+                    BOXPLOT_GPU_INPUT_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let _outputs = crate::output_count::push_output_count(Some(0));
+                assert_eq!(
+                    block_on(boxplot_builtin(vec![Value::GpuTensor(handle)]))
+                        .expect("RunMat resident input"),
+                    Value::OutputList(Vec::new())
+                );
+            }
+        });
     }
 
     #[test]
@@ -1506,10 +2001,11 @@ mod tests {
     fn scalar_group_label_reads_typed_integer_storage_without_double_mirror() {
         let tensor = Tensor::new_integer(IntegerStorage::U16(vec![42]), vec![1, 1]).unwrap();
 
-        assert_eq!(
-            scalar_group_label(&Value::Tensor(tensor)).unwrap(),
-            Some("42".to_string())
-        );
+        let Some(GroupLabel::Integer(value)) = scalar_group_label(&Value::Tensor(tensor)).unwrap()
+        else {
+            panic!("expected exact integer label");
+        };
+        assert_eq!(value, 42);
     }
 
     #[test]
