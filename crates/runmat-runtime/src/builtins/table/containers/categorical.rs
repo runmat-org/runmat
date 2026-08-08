@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::table::display::trim_float;
 use runmat_builtins::NumericScalar;
 
 pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -8,13 +9,10 @@ pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         .unwrap_or_else(|| Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap()));
     let parsed = parse_categorical_args(&args[1..])?;
     let labels = categorical_labels(&source)?;
-    let category_plan = categorical_category_plan(&labels, parsed.valueset, parsed.catnames)?;
+    let category_plan =
+        categorical_category_plan(&source, &labels, parsed.valueset.as_ref(), parsed.catnames)?;
     let mut codes = Vec::with_capacity(labels.len());
     for label in labels {
-        if label.is_empty() {
-            codes.push(f64::NAN);
-            continue;
-        }
         if let Some(idx) = category_plan
             .lookup
             .iter()
@@ -47,7 +45,7 @@ pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         .insert("Ordinal".to_string(), Value::Bool(parsed.ordinal));
     object.properties.insert(
         "Protected".to_string(),
-        Value::Bool(parsed.protected.unwrap_or(parsed.ordinal)),
+        Value::Bool(parsed.ordinal || parsed.protected.unwrap_or(false)),
     );
     Ok(Value::Object(object))
 }
@@ -313,7 +311,7 @@ pub(in crate::builtins::table) fn value_shape_or_column(
 
 #[derive(Default)]
 struct CategoricalArgs {
-    valueset: Option<Vec<String>>,
+    valueset: Option<Value>,
     catnames: Option<Vec<String>>,
     ordinal: bool,
     protected: Option<bool>,
@@ -323,11 +321,11 @@ fn parse_categorical_args(args: &[Value]) -> BuiltinResult<CategoricalArgs> {
     let mut parsed = CategoricalArgs::default();
     let mut idx = 0usize;
     if idx < args.len() && !is_categorical_option_pair(args, idx) {
-        parsed.valueset = Some(categorical_labels(&args[idx])?);
+        parsed.valueset = Some(args[idx].clone());
         idx += 1;
     }
     if idx < args.len() && !is_categorical_option_pair(args, idx) {
-        parsed.catnames = Some(categorical_labels(&args[idx])?);
+        parsed.catnames = Some(categorical_category_names(&args[idx])?);
         idx += 1;
     }
     while idx < args.len() {
@@ -338,9 +336,9 @@ fn parse_categorical_args(args: &[Value]) -> BuiltinResult<CategoricalArgs> {
         }
         let option_name = scalar_text(&args[idx], "categorical option")?;
         if option_name.eq_ignore_ascii_case("Ordinal") {
-            parsed.ordinal = bool_scalar(&args[idx + 1], "Ordinal")?;
+            parsed.ordinal = categorical_bool_scalar(&args[idx + 1], "Ordinal")?;
         } else if option_name.eq_ignore_ascii_case("Protected") {
-            parsed.protected = Some(bool_scalar(&args[idx + 1], "Protected")?);
+            parsed.protected = Some(categorical_bool_scalar(&args[idx + 1], "Protected")?);
         } else {
             return Err(invalid_argument(format!(
                 "categorical: unsupported option '{option_name}'"
@@ -349,6 +347,25 @@ fn parse_categorical_args(args: &[Value]) -> BuiltinResult<CategoricalArgs> {
         idx += 2;
     }
     Ok(parsed)
+}
+
+fn categorical_category_names(value: &Value) -> BuiltinResult<Vec<String>> {
+    match value {
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => categorical_labels(value),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .map(|value| match value {
+                Value::String(_) | Value::CharArray(_) => cell_scalar_label(value),
+                _ => Err(invalid_argument(
+                    "categorical: category names must be a string array or cell array of character vectors",
+                )),
+            })
+            .collect(),
+        _ => Err(invalid_argument(
+            "categorical: category names must be a string array or cell array of character vectors",
+        )),
+    }
 }
 
 fn is_categorical_option_pair(args: &[Value], idx: usize) -> bool {
@@ -362,8 +379,48 @@ fn is_categorical_option_pair(args: &[Value], idx: usize) -> bool {
         return false;
     }
     args.get(idx + 1)
-        .map(|value| bool_scalar(value, &name).is_ok())
+        .map(|value| categorical_bool_scalar(value, &name).is_ok())
         .unwrap_or(false)
+}
+
+fn categorical_bool_scalar(value: &Value, context: &str) -> BuiltinResult<bool> {
+    match value {
+        Value::Bool(flag) => Ok(*flag),
+        Value::Int(value) => match value.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid_argument(format!(
+                "categorical: {context} must be logical or numeric 0 or 1"
+            ))),
+        },
+        Value::Num(value) if *value == 0.0 => Ok(false),
+        Value::Num(value) if *value == 1.0 => Ok(true),
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor
+            .numeric_value_at(0)
+            .and_then(categorical_numeric_flag)
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "categorical: {context} must be logical or numeric 0 or 1"
+                ))
+            }),
+        _ => Err(invalid_argument(format!(
+            "categorical: {context} must be logical or numeric 0 or 1"
+        ))),
+    }
+}
+
+fn categorical_numeric_flag(value: NumericScalar) -> Option<bool> {
+    match value {
+        NumericScalar::F64(0.0) | NumericScalar::F32(0.0) => Some(false),
+        NumericScalar::F64(1.0) | NumericScalar::F32(1.0) => Some(true),
+        value if value.into_int_value().and_then(|value| value.try_to_u64()) == Some(0) => {
+            Some(false)
+        }
+        value if value.into_int_value().and_then(|value| value.try_to_u64()) == Some(1) => {
+            Some(true)
+        }
+        _ => None,
+    }
 }
 
 struct CategoryPlan {
@@ -373,37 +430,54 @@ struct CategoryPlan {
 }
 
 fn categorical_category_plan(
+    source: &Value,
     labels: &[String],
-    valueset: Option<Vec<String>>,
+    valueset: Option<&Value>,
     catnames: Option<Vec<String>>,
 ) -> BuiltinResult<CategoryPlan> {
+    let source_dtype = categorical_numeric_dtype(source);
+    if let Some(valueset) = valueset {
+        let valueset_dtype = categorical_numeric_dtype(valueset);
+        match (source_dtype, valueset_dtype) {
+            (Some(source_dtype), Some(valueset_dtype)) if source_dtype != valueset_dtype => {
+                return Err(invalid_argument(
+                    "categorical: numeric valueset must have the same class as A",
+                ));
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                return Err(invalid_argument(
+                    "categorical: valueset must have the same class as A",
+                ));
+            }
+            _ => {}
+        }
+    }
+    let valueset_labels = valueset.map(categorical_labels).transpose()?;
     match (valueset, catnames) {
         (None, None) => {
-            let mut categories = labels
+            let mut lookup = labels
                 .iter()
                 .filter(|label| !label.is_empty())
                 .cloned()
                 .collect::<Vec<_>>();
-            categories.sort();
-            categories.dedup();
+            sort_categorical_values(&mut lookup, source_dtype)?;
+            lookup.dedup();
+            let categories = default_category_names(&lookup, source_dtype)?;
             let codes = (0..categories.len()).collect();
             Ok(CategoryPlan {
-                lookup: categories.clone(),
+                lookup,
                 codes,
                 categories,
             })
         }
-        (Some(valueset), None) => {
-            ensure_unique_valueset(&valueset)?;
-            let categories = unique_nonempty(valueset.clone())?;
+        (Some(_), None) => {
+            let valueset = valueset_labels.expect("valueset labels");
+            ensure_unique_valueset(&valueset, false)?;
+            let categories = default_category_names(&valueset, source_dtype)?;
             let codes = valueset
                 .iter()
-                .map(|label| {
-                    categories
-                        .iter()
-                        .position(|category| category == label)
-                        .unwrap_or(0)
-                })
+                .enumerate()
+                .map(|(index, _)| index)
                 .collect();
             Ok(CategoryPlan {
                 lookup: valueset,
@@ -411,13 +485,14 @@ fn categorical_category_plan(
                 categories,
             })
         }
-        (Some(valueset), Some(catnames)) => {
+        (Some(_), Some(catnames)) => {
+            let valueset = valueset_labels.expect("valueset labels");
             if valueset.len() != catnames.len() {
                 return Err(invalid_argument(
                     "categorical: valueset and category names must have the same number of elements",
                 ));
             }
-            ensure_unique_valueset(&valueset)?;
+            ensure_unique_valueset(&valueset, true)?;
             if catnames.iter().any(|label| label.is_empty()) {
                 return Err(invalid_argument(
                     "categorical: category names cannot be empty or missing",
@@ -445,10 +520,10 @@ fn categorical_category_plan(
     }
 }
 
-fn ensure_unique_valueset(valueset: &[String]) -> BuiltinResult<()> {
+fn ensure_unique_valueset(valueset: &[String], allow_missing: bool) -> BuiltinResult<()> {
     let mut seen = HashSet::new();
     for label in valueset {
-        if label.is_empty() {
+        if label.is_empty() && !allow_missing {
             return Err(invalid_argument(
                 "categorical: categories cannot be empty or missing",
             ));
@@ -478,7 +553,84 @@ fn unique_nonempty(labels: Vec<String>) -> BuiltinResult<Vec<String>> {
 }
 
 fn normalize_category_label(value: &str) -> String {
-    value.to_string()
+    value.trim().to_string()
+}
+
+fn categorical_numeric_dtype(value: &Value) -> Option<runmat_builtins::NumericDType> {
+    match value {
+        Value::Num(_) => Some(runmat_builtins::NumericDType::F64),
+        Value::Int(value) => Some(NumericScalar::from(value.clone()).numeric_dtype()),
+        Value::Tensor(tensor) => Some(tensor.numeric_dtype()),
+        _ => None,
+    }
+}
+
+fn sort_categorical_values(
+    labels: &mut [String],
+    dtype: Option<runmat_builtins::NumericDType>,
+) -> BuiltinResult<()> {
+    use runmat_builtins::NumericDType;
+    match dtype {
+        Some(NumericDType::I8 | NumericDType::I16 | NumericDType::I32 | NumericDType::I64) => {
+            labels.sort_by_key(|label| label.parse::<i128>().unwrap_or_default());
+        }
+        Some(NumericDType::U8 | NumericDType::U16 | NumericDType::U32 | NumericDType::U64) => {
+            labels.sort_by_key(|label| label.parse::<u128>().unwrap_or_default());
+        }
+        Some(NumericDType::F32 | NumericDType::F64) => {
+            labels.sort_by(|left, right| {
+                let left = left.parse::<f64>().unwrap_or(f64::NAN);
+                let right = right.parse::<f64>().unwrap_or(f64::NAN);
+                left.total_cmp(&right)
+            });
+        }
+        None => labels.sort(),
+    }
+    Ok(())
+}
+
+fn default_category_names(
+    lookup: &[String],
+    dtype: Option<runmat_builtins::NumericDType>,
+) -> BuiltinResult<Vec<String>> {
+    let categories = if dtype.is_some() {
+        lookup
+            .iter()
+            .map(|label| {
+                label
+                    .parse::<f64>()
+                    .map(format_five_significant)
+                    .unwrap_or_else(|_| label.clone())
+            })
+            .collect::<Vec<_>>()
+    } else {
+        lookup.to_vec()
+    };
+    let mut seen = HashSet::new();
+    if categories.iter().any(|category| !seen.insert(category)) {
+        return Err(invalid_argument(
+            "categorical: numeric values are too closely spaced to create unique default category names; specify category names",
+        ));
+    }
+    Ok(categories)
+}
+
+fn format_five_significant(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let exponent = value.abs().log10().floor() as i32;
+    if !(-4..=4).contains(&exponent) {
+        let formatted = format!("{value:.4e}");
+        let (mantissa, exponent) = formatted.split_once('e').unwrap_or((&formatted, "0"));
+        let exponent = exponent.parse::<i32>().unwrap_or_default();
+        return format!("{}e{:+}", trim_float(mantissa.to_string()), exponent);
+    }
+    let decimals = usize::try_from(4 - exponent).unwrap_or_default();
+    trim_float(format!("{value:.decimals$}"))
 }
 
 fn categorical_numeric_label(value: NumericScalar) -> String {

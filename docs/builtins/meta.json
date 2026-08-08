@@ -14983,6 +14983,140 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "categorical-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "categorical with an interactive resident GPU argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CategoricalGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = categorical(integer_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric input accepts every real integer class and maps exact source values to categorical codes without a binary64 intermediary."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Exact integer values determine sorted categories and one-based categorical codes; the result is a host categorical metadata object rather than an integer array."
+        },
+        {
+          "form": "C = categorical(integer_A, integer_valueset, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric input accepts every real integer class."
+            },
+            {
+              "name": "valueset",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A documented numeric valueset must use the same integer class as A, contain unique values, and is matched through exact native storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "A and valueset retain their exact common integer class for uniqueness, ordering, and membership; category names are object metadata."
+        },
+        {
+          "form": "C = categorical(A, ..., \"Ordinal\" or \"Protected\", integer_flag)",
+          "inputs": [
+            {
+              "name": "Ordinal or Protected",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented flags accept a scalar numeric zero or one; other integer values reject rather than being coerced by generic truthiness."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Every integer class is accepted only at exact scalar values zero and one, matching the documented numeric flag domain."
+        },
+        {
+          "form": "C = categorical(gpuArray(integer_argument), ...)",
+          "inputs": [
+            {
+              "name": "resident argument",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Interactive resident numeric input is not a documented gpuArray form; RunMat mode gates it before exact gather into the host categorical constructor."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat mode gathers resident integer arguments exactly after the compatibility gate and returns a host categorical metadata object."
+        }
       ]
     },
     {

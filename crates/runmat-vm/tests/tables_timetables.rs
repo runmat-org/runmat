@@ -164,3 +164,27 @@ fn categorical_dictionary_and_selector_surface_executes_from_scripts() {
         .iter()
         .any(|value| matches!(value, Value::Object(object) if object.class_name == "dictionary")));
 }
+
+#[test]
+fn categorical_compiled_surface_preserves_exact_integer_identity_and_flags() {
+    let vars = execute_source(
+        "base = uint64(9007199254740992); C = categorical(base + uint64([1 2]), base + uint64([2 1]), {'two','one'}, 'Ordinal', uint8(1)); tf = isordinal(C);",
+    )
+    .expect("compiled categorical integer construction");
+    assert!(has_bool(&vars, true));
+    let object = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Object(object) if object.class_name == "categorical" => Some(object),
+            _ => None,
+        })
+        .expect("categorical object");
+    match object.properties.get("Codes").expect("codes") {
+        Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![2.0, 1.0]),
+        other => panic!("expected categorical codes, got {other:?}"),
+    }
+    match object.properties.get("Categories").expect("categories") {
+        Value::StringArray(categories) => assert_eq!(categories.data, vec!["two", "one"]),
+        other => panic!("expected categorical names, got {other:?}"),
+    }
+}

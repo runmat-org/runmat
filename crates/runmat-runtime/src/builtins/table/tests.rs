@@ -2775,8 +2775,12 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         panic!("expected whitespace categorical");
     };
     match whitespace.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec![" a", "a", "a "]),
+        Value::StringArray(array) => assert_eq!(array.data, vec!["a"]),
         other => panic!("expected whitespace categories, got {other:?}"),
+    }
+    match whitespace.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0, 1.0]),
+        other => panic!("expected whitespace codes, got {other:?}"),
     }
 
     let duplicate_valueset = block_on(categorical_builtin(vec![
@@ -2785,6 +2789,59 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
     ]));
     assert!(duplicate_valueset.is_err());
+
+    let merged_names = block_on(categorical_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        Value::StringArray(
+            StringArray::new(vec!["same".into(), "same".into()], vec![1, 2]).unwrap(),
+        ),
+    ]))
+    .unwrap();
+    let Value::Object(merged_names) = merged_names else {
+        panic!("expected merged categorical");
+    };
+    match merged_names.properties.get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data, vec!["same"]),
+        other => panic!("expected merged categories, got {other:?}"),
+    }
+    match merged_names.properties.get("Codes").unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0]),
+        other => panic!("expected merged codes, got {other:?}"),
+    }
+
+    let rounded = block_on(categorical_builtin(vec![Value::Tensor(
+        Tensor::new(vec![1.0, 1.234_567_89], vec![1, 2]).unwrap(),
+    )]))
+    .unwrap();
+    let Value::Object(rounded) = rounded else {
+        panic!("expected rounded numeric categories");
+    };
+    match rounded.properties.get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data, vec!["1", "1.2346"]),
+        other => panic!("expected rounded categories, got {other:?}"),
+    }
+
+    assert!(block_on(categorical_builtin(vec![Value::Tensor(
+        Tensor::new(vec![1.0, 1.000_01], vec![1, 2]).unwrap(),
+    )]))
+    .is_err());
+
+    let protected_ordinal = block_on(categorical_builtin(vec![
+        Value::from("low"),
+        Value::from("Ordinal"),
+        Value::Bool(true),
+        Value::from("Protected"),
+        Value::Bool(false),
+    ]))
+    .unwrap();
+    let Value::Object(protected_ordinal) = protected_ordinal else {
+        panic!("expected protected ordinal categorical");
+    };
+    assert_eq!(
+        protected_ordinal.properties.get("Protected"),
+        Some(&Value::Bool(true))
+    );
 
     let low_high = block_on(ordinal_builtin(vec![
         Value::from("low"),
@@ -2818,6 +2875,251 @@ fn categorical_compatibility_edges_match_matlab_surface() {
     ]))
     .unwrap();
     assert!(block_on(crate::call_builtin_async("eq", &[low_high, extra_category])).is_err());
+}
+
+#[test]
+fn categorical_integer_constructor_surface_is_exact_for_every_class() {
+    let cases = [
+        (
+            IntegerStorage::I8(vec![-2, 10]),
+            IntegerStorage::I8(vec![10, -2]),
+        ),
+        (
+            IntegerStorage::I16(vec![-2, 10]),
+            IntegerStorage::I16(vec![10, -2]),
+        ),
+        (
+            IntegerStorage::I32(vec![-2, 10]),
+            IntegerStorage::I32(vec![10, -2]),
+        ),
+        (
+            IntegerStorage::I64(vec![-2, 10]),
+            IntegerStorage::I64(vec![10, -2]),
+        ),
+        (
+            IntegerStorage::U8(vec![2, 10]),
+            IntegerStorage::U8(vec![10, 2]),
+        ),
+        (
+            IntegerStorage::U16(vec![2, 10]),
+            IntegerStorage::U16(vec![10, 2]),
+        ),
+        (
+            IntegerStorage::U32(vec![2, 10]),
+            IntegerStorage::U32(vec![10, 2]),
+        ),
+        (
+            IntegerStorage::U64(vec![2, 10]),
+            IntegerStorage::U64(vec![10, 2]),
+        ),
+    ];
+    for (source, valueset) in cases {
+        let source = Value::Tensor(Tensor::new_integer(source, vec![1, 2]).unwrap());
+        let valueset = Value::Tensor(Tensor::new_integer(valueset, vec![1, 2]).unwrap());
+        let Value::Object(result) = block_on(categorical_builtin(vec![
+            source,
+            valueset,
+            Value::StringArray(
+                StringArray::new(vec!["ten".into(), "small".into()], vec![1, 2]).unwrap(),
+            ),
+        ]))
+        .unwrap() else {
+            panic!("expected categorical object");
+        };
+        match result.properties.get("Codes").unwrap() {
+            Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![2.0, 1.0]),
+            other => panic!("expected categorical codes, got {other:?}"),
+        }
+    }
+
+    let source = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap(),
+    );
+    let valueset = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .unwrap(),
+    );
+    let Value::Object(wide) = block_on(categorical_builtin(vec![
+        source.clone(),
+        valueset,
+        Value::StringArray(
+            StringArray::new(vec!["maximum".into(), "flint-plus-one".into()], vec![1, 2]).unwrap(),
+        ),
+    ]))
+    .unwrap() else {
+        panic!("expected wide categorical object");
+    };
+    match wide.properties.get("Codes").unwrap() {
+        Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![2.0, 1.0]),
+        other => panic!("expected wide categorical codes, got {other:?}"),
+    }
+
+    let mismatched = block_on(categorical_builtin(vec![
+        source,
+        Value::Tensor(Tensor::new_integer(IntegerStorage::I64(vec![1, 2]), vec![1, 2]).unwrap()),
+    ]));
+    assert!(mismatched.is_err());
+}
+
+#[test]
+fn categorical_integer_flags_accept_only_exact_zero_or_one() {
+    let flags = [
+        (
+            runmat_builtins::IntValue::I8(0),
+            runmat_builtins::IntValue::I8(1),
+            runmat_builtins::IntValue::I8(2),
+        ),
+        (
+            runmat_builtins::IntValue::I16(0),
+            runmat_builtins::IntValue::I16(1),
+            runmat_builtins::IntValue::I16(2),
+        ),
+        (
+            runmat_builtins::IntValue::I32(0),
+            runmat_builtins::IntValue::I32(1),
+            runmat_builtins::IntValue::I32(2),
+        ),
+        (
+            runmat_builtins::IntValue::I64(0),
+            runmat_builtins::IntValue::I64(1),
+            runmat_builtins::IntValue::I64(2),
+        ),
+        (
+            runmat_builtins::IntValue::U8(0),
+            runmat_builtins::IntValue::U8(1),
+            runmat_builtins::IntValue::U8(2),
+        ),
+        (
+            runmat_builtins::IntValue::U16(0),
+            runmat_builtins::IntValue::U16(1),
+            runmat_builtins::IntValue::U16(2),
+        ),
+        (
+            runmat_builtins::IntValue::U32(0),
+            runmat_builtins::IntValue::U32(1),
+            runmat_builtins::IntValue::U32(2),
+        ),
+        (
+            runmat_builtins::IntValue::U64(0),
+            runmat_builtins::IntValue::U64(1),
+            runmat_builtins::IntValue::U64(2),
+        ),
+    ];
+    for (zero, one, two) in flags {
+        let Value::Object(nominal) = block_on(categorical_builtin(vec![
+            Value::from("x"),
+            Value::from("Ordinal"),
+            Value::Int(zero),
+        ]))
+        .unwrap() else {
+            panic!("expected nominal categorical");
+        };
+        assert_eq!(nominal.properties.get("Ordinal"), Some(&Value::Bool(false)));
+
+        let Value::Object(ordinal) = block_on(categorical_builtin(vec![
+            Value::from("x"),
+            Value::from("Ordinal"),
+            Value::Int(one),
+        ]))
+        .unwrap() else {
+            panic!("expected ordinal categorical");
+        };
+        assert_eq!(ordinal.properties.get("Ordinal"), Some(&Value::Bool(true)));
+        assert!(block_on(categorical_builtin(vec![
+            Value::from("x"),
+            Value::from("Protected"),
+            Value::Int(two),
+        ]))
+        .is_err());
+    }
+}
+
+#[test]
+fn categorical_resident_integer_input_is_mode_gated_and_gathered_exactly() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(categorical_builtin(vec![Value::GpuTensor(handle.clone())]))
+                .expect_err("MATLAB mode must reject resident categorical input before gather");
+            assert_eq!(
+                error.identifier(),
+                CATEGORICAL_GPU_INPUT_EXTENSION.error_identifier
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let Value::Object(result) =
+                block_on(categorical_builtin(vec![Value::GpuTensor(handle)])).unwrap()
+            else {
+                panic!("expected resident categorical object");
+            };
+            match result.properties.get("Codes").unwrap() {
+                Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![1.0, 2.0]),
+                other => panic!("expected categorical codes, got {other:?}"),
+            }
+
+            let flag = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+            let flag_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &flag).unwrap();
+            let Value::Object(ordinal) = block_on(categorical_builtin(vec![
+                Value::from("x"),
+                Value::from("Ordinal"),
+                Value::GpuTensor(flag_handle),
+            ]))
+            .unwrap() else {
+                panic!("expected resident-flag categorical object");
+            };
+            assert_eq!(ordinal.properties.get("Ordinal"), Some(&Value::Bool(true)));
+        }
+    });
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn categorical_wgpu_gathers_every_resident_integer_class_exactly() {
+    let _guard = crate::builtins::common::test_support::accel_test_lock();
+    if !register_wgpu_provider_available() {
+        return;
+    }
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+    for storage in [
+        IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+        IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+        IntegerStorage::U8(vec![0, u8::MAX]),
+        IntegerStorage::U16(vec![0, u16::MAX]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+    ] {
+        let tensor = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+        let Value::Object(result) =
+            block_on(categorical_builtin(vec![Value::GpuTensor(handle)])).unwrap()
+        else {
+            panic!("expected categorical object");
+        };
+        match result.properties.get("Codes").unwrap() {
+            Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![1.0, 2.0]),
+            other => panic!("expected categorical codes, got {other:?}"),
+        }
+    }
 }
 
 #[test]

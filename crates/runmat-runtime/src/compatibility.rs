@@ -305,6 +305,7 @@ mod tests {
                 ("cat", "cat-complex-integer-input"),
                 ("cat", "cat-like-prototype"),
                 ("cat", "cat-resident-dimension"),
+                ("categorical", "categorical-gpu-input"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
