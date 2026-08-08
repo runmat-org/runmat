@@ -2,9 +2,13 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, NumericStorage,
+    ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -75,6 +79,25 @@ const CEIL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     inputs: &CEIL_INPUTS_X,
     outputs: &CEIL_OUTPUT,
 }];
+const CEIL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every real integer class is already integral, so ceil preserves its exact class, shape, and values without floating conversion, including inside table and timetable variables.",
+    }];
+pub const CEIL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = ceil(X) with real integer X, including integer table or timetable variables",
+        inputs: &CEIL_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host integer storage is returned unchanged; resident integer storage is an exact identity operation that retains the original owning-provider handle.",
+    }];
 const CEIL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CEIL.INVALID_INPUT",
     identifier: Some("RunMat:ceil:InvalidInput"),
@@ -125,6 +148,7 @@ fn builtin_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::rounding::ceil::CEIL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::rounding::ceil::CEIL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::rounding::ceil"
 )]
 async fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -137,6 +161,15 @@ async fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => ceil_gpu(handle).await,
+        Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {
+            ceil_table(object).await
+        }
+        other => ceil_host_value(other),
+    }
+}
+
+fn ceil_host_value(value: Value) -> BuiltinResult<Value> {
+    match value {
         Value::Complex(re, im) => Ok(Value::Complex(apply_ceil_scalar(re), apply_ceil_scalar(im))),
         Value::ComplexTensor(ct) => ceil_complex_tensor(ct),
         Value::CharArray(ca) => ceil_char_array(ca),
@@ -151,6 +184,28 @@ async fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         )),
         other => ceil_numeric(other),
     }
+}
+
+async fn ceil_table(object: ObjectInstance) -> BuiltinResult<Value> {
+    let variables = crate::builtins::table::table_variables(&object)
+        .map_err(|err| builtin_error_with_detail(&CEIL_ERROR_INVALID_INPUT, err.message))?;
+    let mut rounded = StructValue::new();
+    for (name, value) in variables.fields {
+        crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+        let value = match value {
+            Value::GpuTensor(handle) => ceil_gpu(handle).await?,
+            Value::Object(_) => {
+                return Err(builtin_error_with_detail(
+                    &CEIL_ERROR_INVALID_INPUT,
+                    format!("table variable {name} does not support ceil"),
+                ))
+            }
+            other => ceil_host_value(other)?,
+        };
+        rounded.insert(name, value);
+    }
+    crate::builtins::table::table_replace_variables_like(&object, rounded)
+        .map_err(|err| builtin_error_with_detail(&CEIL_ERROR_INTERNAL, err.message))
 }
 
 fn ceil_numeric(value: Value) -> BuiltinResult<Value> {
@@ -182,12 +237,28 @@ fn ceil_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn ceil_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let data: Vec<(f64, f64)> = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| (apply_ceil_scalar(re), apply_ceil_scalar(im)))
-        .collect();
-    let tensor = ComplexTensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(re, im)| (apply_ceil_scalar(re), apply_ceil_scalar(im)))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(re, im)| (re.ceil(), im.ceil()))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(builtin_error_with_detail(
+                &CEIL_ERROR_INVALID_INPUT,
+                "operations involving complex numbers with integer types are not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&CEIL_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
@@ -203,13 +274,22 @@ fn ceil_char_array(ca: CharArray) -> BuiltinResult<Value> {
 }
 
 async fn ceil_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        return Ok(gpu_helpers::resident_gpu_value(handle));
+    }
+    let provider = runmat_accelerate_api::provider_for_handle(&handle);
+    if let Some(provider) = provider.as_ref() {
         if let Ok(out) = provider.unary_ceil(&handle).await {
-            return Ok(Value::GpuTensor(out));
+            return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let ceiled = ceil_tensor(tensor)?;
+    if let Some(provider) = provider {
+        let uploaded = gpu_helpers::upload_tensor(provider, &ceiled)
+            .map_err(|err| builtin_error_with_detail(&CEIL_ERROR_INTERNAL, err))?;
+        return Ok(gpu_helpers::resident_gpu_value(uploaded));
+    }
     Ok(tensor::tensor_into_value(ceiled))
 }
 
@@ -262,6 +342,22 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert_eq!(labels, vec!["Y = ceil(X)"]);
+        assert_eq!(CEIL_INTEGER_CAPABILITIES.len(), 1);
+        let capability = &CEIL_INTEGER_CAPABILITIES[0];
+        assert_eq!(capability.inputs[0].classes.len(), 8);
+        assert_eq!(
+            capability.inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            capability.computation_domain,
+            BuiltinIntegerComputationDomain::ExactInteger
+        );
+        assert_eq!(
+            capability.output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+        assert_eq!(capability.backend, BuiltinIntegerBackendRule::HostAndGpu);
     }
 
     #[test]
@@ -329,6 +425,22 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn ceil_complex_tensor_preserves_native_single_storage() {
+        let input = ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(vec![(1.2, -2.3), (-0.1, 4.0)]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let Value::ComplexTensor(output) = ceil_complex_tensor(input).unwrap() else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            output.into_complex_storage(),
+            ComplexStorage::F32(vec![(2.0, -2.0), (-0.0, 4.0)])
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ceil_char_array_to_tensor() {
@@ -388,6 +500,37 @@ pub(crate) mod tests {
                 );
             }
             other => panic!("expected typed integer tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ceil_table_preserves_every_integer_variable_class() {
+        let columns = vec![
+            Tensor::new_integer(IntegerStorage::I8(vec![-3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I16(vec![-3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I32(vec![-3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U8(vec![3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U32(vec![3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![2, 1]).unwrap(),
+        ];
+        let names = (0..columns.len())
+            .map(|index| format!("V{index}"))
+            .collect::<Vec<_>>();
+        let expected = columns.clone();
+        let input = crate::builtins::table::table_from_columns(
+            names,
+            columns.into_iter().map(Value::Tensor).collect(),
+        )
+        .unwrap();
+        let output = block_on(super::ceil_builtin(input, Vec::new())).unwrap();
+        let Value::Object(output) = output else {
+            panic!("expected table output");
+        };
+        let variables = crate::builtins::table::table_variables(&output).unwrap();
+        for (value, expected) in variables.fields.values().zip(expected) {
+            assert_eq!(value, &Value::Tensor(expected));
         }
     }
 
@@ -485,6 +628,40 @@ pub(crate) mod tests {
                 assert_eq!(gt.materialize_f64(), vec![c]);
             }
             other => panic!("unexpected comparison {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn ceil_wgpu_preserves_all_integer_handles_and_exact_storage() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+        let inputs = vec![
+            Tensor::new_integer(IntegerStorage::I8(vec![i8::MIN, i8::MAX]), vec![1, 2]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I16(vec![i16::MIN, i16::MAX]), vec![1, 2]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I32(vec![i32::MIN, i32::MAX]), vec![1, 2]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U8(vec![0, u8::MAX]), vec![1, 2]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U16(vec![0, u16::MAX]), vec![1, 2]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U32(vec![0, u32::MAX]), vec![1, 2]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2]).unwrap(),
+        ];
+        for input in inputs {
+            let expected = input.clone();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            let buffer_id = handle.buffer_id;
+            let Value::GpuTensor(output) = block_on(super::ceil_gpu(handle)).unwrap() else {
+                panic!("expected resident integer output");
+            };
+            assert_eq!(output.buffer_id, buffer_id, "integer ceil must be identity");
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather");
+            assert_eq!(gathered, expected);
         }
     }
 }

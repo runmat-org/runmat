@@ -602,6 +602,7 @@ mod tests {
             "cat",
             "cdf",
             "cdfplot",
+            "ceil",
         ] {
             let builtin = registered
                 .iter()

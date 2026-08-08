@@ -15687,104 +15687,6 @@
               "description": "Rounded output values."
             }
           ]
-        },
-        {
-          "label": "Y = ceil(X, N)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric, logical, char, or complex input."
-            },
-            {
-              "name": "N",
-              "ty": "NumericScalar",
-              "arity": "Optional",
-              "default": "0",
-              "description": "Digits for decimal-place rounding."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Rounded output values."
-            }
-          ]
-        },
-        {
-          "label": "Y = ceil(X, N, mode)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric, logical, char, or complex input."
-            },
-            {
-              "name": "N",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Digits argument."
-            },
-            {
-              "name": "mode",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"decimals\"",
-              "description": "Rounding mode ('decimals' or 'significant')."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Rounded output values."
-            }
-          ]
-        },
-        {
-          "label": "Y = ceil(X, \"like\", prototype)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric, logical, char, or complex input."
-            },
-            {
-              "name": "likeKeyword",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"like\"",
-              "description": "Output-template keyword."
-            },
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Output prototype (numeric or gpuArray)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Rounded output values."
-            }
-          ]
         }
       ],
       "errors": [
@@ -15801,28 +15703,39 @@
           "message": "ceil: invalid argument"
         },
         {
-          "code": "RM.CEIL.INVALID_DIGITS",
-          "identifier": "RunMat:ceil:InvalidDigits",
-          "when": "N is not an integer scalar or violates significant-digit constraints.",
-          "message": "ceil: invalid digits argument"
-        },
-        {
-          "code": "RM.CEIL.INVALID_MODE",
-          "identifier": "RunMat:ceil:InvalidMode",
-          "when": "mode is not a supported text token.",
-          "message": "ceil: invalid mode"
-        },
-        {
-          "code": "RM.CEIL.INVALID_LIKE",
-          "identifier": "RunMat:ceil:InvalidLike",
-          "when": "like/prototype arguments are invalid or unsupported.",
-          "message": "ceil: invalid like prototype"
-        },
-        {
           "code": "RM.CEIL.INTERNAL",
           "identifier": "RunMat:ceil:Internal",
           "when": "Internal tensor conversion/allocation/provider interaction failed.",
           "message": "ceil: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = ceil(X) with real integer X, including integer table or timetable variables",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every real integer class is already integral, so ceil preserves its exact class, shape, and values without floating conversion, including inside table and timetable variables."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host integer storage is returned unchanged; resident integer storage is an exact identity operation that retains the original owning-provider handle."
         }
       ]
     },

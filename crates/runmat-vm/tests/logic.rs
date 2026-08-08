@@ -610,6 +610,26 @@ fn typed_complex_integer_rounding_operations_are_rejected_before_f64_coercion() 
 }
 
 #[test]
+fn ceil_preserves_all_integer_classes_through_compiled_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let values = if constructor.starts_with('u') {
+            "[0 3 4]"
+        } else {
+            "[-3 0 4]"
+        };
+        let source = format!("x = {constructor}({values}); y = ceil(x);");
+        let vars = execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: compiled ceil failed: {error}"));
+        assert_eq!(
+            vars[1], vars[0],
+            "{constructor} ceil must preserve class and bits"
+        );
+    }
+}
+
+#[test]
 fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
     let err = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",
