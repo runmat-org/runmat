@@ -523,6 +523,24 @@ fn ecdf_and_cdfplot_surface_executes_from_scripts() {
 }
 
 #[test]
+fn cdfplot_integer_extensions_execute_from_compiled_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "[h1,s1] = cdfplot(int8([-3;1])); [h2,s2] = cdfplot(int16([-3;1])); [h3,s3] = cdfplot(int32([-3;1])); [h4,s4] = cdfplot(int64([-3;1])); [h5,s5] = cdfplot(uint8([1;3])); [h6,s6] = cdfplot(uint16([1;3])); [h7,s7] = cdfplot(uint32([1;3])); [h8,s8] = cdfplot(uint64([1;3])); signed_mean = s1.mean+s2.mean+s3.mean+s4.mean; unsigned_mean = s5.mean+s6.mean+s7.mean+s8.mean;",
+    )
+    .expect("compiled integer cdfplot");
+    assert!(has_num(&vars, -4.0));
+    assert!(has_num(&vars, 8.0));
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(value, Value::Num(handle) if *handle > 0.0))
+            .count()
+            >= 8
+    );
+}
+
+#[test]
 fn boxplot_surface_executes_from_scripts() {
     let _plot_guard = disable_interactive_plots_for_test();
     let vars = execute_source(

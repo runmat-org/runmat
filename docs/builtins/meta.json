@@ -15519,11 +15519,11 @@
           "label": "cdfplot(x)",
           "inputs": [
             {
-              "name": "y",
-              "ty": "Any",
+              "name": "x",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sample data vector."
+              "description": "Single- or double-precision sample-data vector."
             }
           ],
           "outputs": []
@@ -15539,11 +15539,11 @@
               "description": "Target axes handle."
             },
             {
-              "name": "y",
-              "ty": "Any",
+              "name": "x",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sample data vector."
+              "description": "Single- or double-precision sample-data vector."
             }
           ],
           "outputs": []
@@ -15552,11 +15552,11 @@
           "label": "h = cdfplot(___)",
           "inputs": [
             {
-              "name": "y",
-              "ty": "Any",
+              "name": "x",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sample data vector."
+              "description": "Single- or double-precision sample-data vector."
             }
           ],
           "outputs": [
@@ -15573,11 +15573,11 @@
           "label": "[h, stats] = cdfplot(___)",
           "inputs": [
             {
-              "name": "y",
-              "ty": "Any",
+              "name": "x",
+              "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Sample data vector."
+              "description": "Single- or double-precision sample-data vector."
             }
           ],
           "outputs": [
@@ -15610,6 +15610,55 @@
           "identifier": "RunMat:cdfplot:Internal",
           "when": "RunMat cannot construct summary statistics or plots.",
           "message": "cdfplot: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cdfplot-integer-input",
+          "mode": "RunMatOnly",
+          "description": "cdfplot with typed-integer sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CdfplotIntegerInputExtension"
+        },
+        {
+          "id": "cdfplot-logical-input",
+          "mode": "RunMatOnly",
+          "description": "cdfplot with logical sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CdfplotLogicalInputExtension"
+        },
+        {
+          "id": "cdfplot-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "cdfplot with gpuArray sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CdfplotGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "cdfplot(x) or cdfplot(ax, x) with dense integer sample data and any documented output form",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Dense typed-integer sample data is gated before provider access and must lie within the contiguous exact binary64 integer range at the explicit statistics and plotting boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only visualization form; admitted integer observations cross one deliberate binary64 boundary, and outputs are a host graphics handle plus a structure of host double statistics."
         }
       ]
     },

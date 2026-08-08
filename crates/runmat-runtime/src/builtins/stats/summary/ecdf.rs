@@ -3,9 +3,13 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ResolveContext, StructValue, Tensor, Type, Value,
+    IntValue, NumericScalar, ResolveContext, StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle};
@@ -76,6 +80,14 @@ const PARAM_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Sample data vector.",
 };
 
+const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "x",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Single- or double-precision sample-data vector.",
+};
+
 const PARAM_AX: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "ax",
     ty: BuiltinParamType::AxesHandle,
@@ -96,6 +108,8 @@ const INPUT_Y: [BuiltinParamDescriptor; 1] = [PARAM_Y];
 const INPUT_Y_OPTIONS: [BuiltinParamDescriptor; 2] = [PARAM_Y, PARAM_OPTIONS];
 const INPUT_AX_Y: [BuiltinParamDescriptor; 2] = [PARAM_AX, PARAM_Y];
 const INPUT_AX_Y_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_AX, PARAM_Y, PARAM_OPTIONS];
+const CDFPLOT_INPUT_X: [BuiltinParamDescriptor; 1] = [PARAM_X];
+const CDFPLOT_INPUT_AX_X: [BuiltinParamDescriptor; 2] = [PARAM_AX, PARAM_X];
 const OUTPUT_F_X: [BuiltinParamDescriptor; 2] = [OUTPUT_F, OUTPUT_X];
 const OUTPUT_F_X_BOUNDS: [BuiltinParamDescriptor; 4] = [OUTPUT_F, OUTPUT_X, OUTPUT_FLO, OUTPUT_FUP];
 const OUTPUT_H_ONLY: [BuiltinParamDescriptor; 1] = [OUTPUT_HANDLE];
@@ -142,22 +156,22 @@ const ECDF_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
 const CDFPLOT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "cdfplot(x)",
-        inputs: &INPUT_Y,
+        inputs: &CDFPLOT_INPUT_X,
         outputs: &[],
     },
     BuiltinSignatureDescriptor {
         label: "cdfplot(ax, x)",
-        inputs: &INPUT_AX_Y,
+        inputs: &CDFPLOT_INPUT_AX_X,
         outputs: &[],
     },
     BuiltinSignatureDescriptor {
         label: "h = cdfplot(___)",
-        inputs: &INPUT_Y,
+        inputs: &CDFPLOT_INPUT_X,
         outputs: &OUTPUT_H_ONLY,
     },
     BuiltinSignatureDescriptor {
         label: "[h, stats] = cdfplot(___)",
-        inputs: &INPUT_Y,
+        inputs: &CDFPLOT_INPUT_X,
         outputs: &OUTPUT_H_STATS,
     },
 ];
@@ -201,6 +215,54 @@ const ECDF_ERRORS: [BuiltinErrorDescriptor; 3] =
     [ERROR_INVALID_ARGUMENT, ERROR_UNSUPPORTED, ERROR_INTERNAL];
 const CDFPLOT_ERRORS: [BuiltinErrorDescriptor; 2] =
     [CDFPLOT_ERROR_INVALID_ARGUMENT, CDFPLOT_ERROR_INTERNAL];
+
+const CDFPLOT_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cdfplot-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cdfplot with typed-integer sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CdfplotIntegerInputExtension"),
+};
+
+const CDFPLOT_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cdfplot-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cdfplot with logical sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CdfplotLogicalInputExtension"),
+};
+
+const CDFPLOT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cdfplot-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cdfplot with gpuArray sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CdfplotGpuInputExtension"),
+};
+
+pub const CDFPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    CDFPLOT_INTEGER_INPUT_EXTENSION,
+    CDFPLOT_LOGICAL_INPUT_EXTENSION,
+    CDFPLOT_GPU_INPUT_EXTENSION,
+];
+
+const CDFPLOT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Dense typed-integer sample data is gated before provider access and must lie within the contiguous exact binary64 integer range at the explicit statistics and plotting boundary.",
+    }];
+
+pub const CDFPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "cdfplot(x) or cdfplot(ax, x) with dense integer sample data and any documented output form",
+        inputs: &CDFPLOT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only visualization form; admitted integer observations cross one deliberate binary64 boundary, and outputs are a host graphics handle plus a structure of host double statistics.",
+    }];
 
 pub const ECDF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ECDF_SIGNATURES,
@@ -405,21 +467,29 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     suppress_auto_output = true,
     type_resolver(ecdf_type),
     descriptor(crate::builtins::stats::summary::ecdf::CDFPLOT_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::ecdf::CDFPLOT_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::ecdf::CDFPLOT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::ecdf"
 )]
 pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (axes_target, args) = split_leading_axes_handle(args, CDFPLOT_NAME)
         .map_err(|err| map_error(CDFPLOT_NAME, err))?;
-    let mut args = gather_values(args).await?;
     if args.len() != 1 {
         return Err(invalid_argument(
             CDFPLOT_NAME,
             "cdfplot: expected exactly one numeric vector after optional axes handle",
         ));
     }
-    let data = numeric_vector(&args[0], CDFPLOT_NAME)?;
+    ensure_cdfplot_extensions_enabled(&args[0])?;
+    let args = gather_values(args).await?;
+    ensure_exact_cdfplot_integer_boundary(&args[0])?;
+    let data = cdfplot_numeric_vector(&args[0])?;
     let stats = cdfplot_stats(&data)?;
-    let eval = evaluate_ecdf(args.remove(0), Options::default())?;
+    let eval_input = Value::Tensor(
+        Tensor::new(data.clone(), vec![data.len(), 1])
+            .map_err(|err| internal_error(CDFPLOT_NAME, format!("cdfplot: {err}")))?,
+    );
+    let eval = evaluate_ecdf(eval_input, Options::default())?;
     apply_axes_target(axes_target, CDFPLOT_NAME).map_err(|err| map_error(CDFPLOT_NAME, err))?;
     let handle = plot_ecdf_line(CDFPLOT_NAME, &eval)?;
 
@@ -431,6 +501,131 @@ pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             vec![Value::Num(handle), Value::Struct(stats)],
         )),
         None => Ok(Value::Num(handle)),
+    }
+}
+
+fn ensure_cdfplot_extensions_enabled(value: &Value) -> BuiltinResult<()> {
+    if is_typed_integer_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CDFPLOT_INTEGER_INPUT_EXTENSION,
+            CDFPLOT_NAME,
+        )?;
+    }
+    if is_logical_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CDFPLOT_LOGICAL_INPUT_EXTENSION,
+            CDFPLOT_NAME,
+        )?;
+    }
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CDFPLOT_GPU_INPUT_EXTENSION,
+            CDFPLOT_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn cdfplot_numeric_vector(value: &Value) -> BuiltinResult<Vec<f64>> {
+    match value {
+        Value::Tensor(tensor) => {
+            ensure_cdfplot_vector_shape(tensor.rows(), tensor.cols())?;
+            Ok(tensor::tensor_values_f64(tensor))
+        }
+        Value::Int(value) => Ok(vec![value.to_f64()]),
+        Value::Num(value) => Ok(vec![*value]),
+        Value::Bool(value) => Ok(vec![if *value { 1.0 } else { 0.0 }]),
+        Value::LogicalArray(array) => {
+            let rows = array.shape.first().copied().unwrap_or(1);
+            let cols = array.shape.get(1).copied().unwrap_or(1);
+            ensure_cdfplot_vector_shape(rows, cols)?;
+            Ok(array
+                .data
+                .iter()
+                .map(|value| if *value == 0 { 0.0 } else { 1.0 })
+                .collect())
+        }
+        _ => numeric_vector(value, CDFPLOT_NAME),
+    }
+}
+
+fn ensure_cdfplot_vector_shape(rows: usize, cols: usize) -> BuiltinResult<()> {
+    if rows > 1 && cols > 1 {
+        return Err(invalid_argument(
+            CDFPLOT_NAME,
+            format!("cdfplot: expected a vector, got {rows}x{cols} matrix"),
+        ));
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::SparseTensor(tensor) if tensor.is_logical())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn ensure_exact_cdfplot_integer_boundary(value: &Value) -> BuiltinResult<()> {
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    let in_range = |value: i128| (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&value);
+    match value {
+        Value::Int(value) if !in_range(int_value_i128(value)) => {
+            return Err(cdfplot_inexact_integer_error())
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            for index in 0..tensor.len() {
+                if tensor
+                    .numeric_value_at(index)
+                    .and_then(numeric_scalar_i128)
+                    .is_some_and(|value| !in_range(value))
+                {
+                    return Err(cdfplot_inexact_integer_error());
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn cdfplot_inexact_integer_error() -> RuntimeError {
+    invalid_argument(
+        CDFPLOT_NAME,
+        "cdfplot: integer sample values must lie within the contiguous exact binary64 integer range",
+    )
+}
+
+fn int_value_i128(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
+}
+
+fn numeric_scalar_i128(value: NumericScalar) -> Option<i128> {
+    match value {
+        NumericScalar::I8(value) => Some(i128::from(value)),
+        NumericScalar::I16(value) => Some(i128::from(value)),
+        NumericScalar::I32(value) => Some(i128::from(value)),
+        NumericScalar::I64(value) => Some(i128::from(value)),
+        NumericScalar::U8(value) => Some(i128::from(value)),
+        NumericScalar::U16(value) => Some(i128::from(value)),
+        NumericScalar::U32(value) => Some(i128::from(value)),
+        NumericScalar::U64(value) => Some(i128::from(value)),
+        NumericScalar::F32(_) | NumericScalar::F64(_) => None,
     }
 }
 
@@ -1136,7 +1331,7 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage, LogicalArray};
 
     fn tensor(data: Vec<f64>) -> Value {
         Value::Tensor(Tensor::new(data.clone(), vec![data.len(), 1]).unwrap())
@@ -1145,6 +1340,20 @@ mod tests {
     fn int_tensor(storage: IntegerStorage, len: usize) -> Value {
         let tensor = Tensor::new_integer(storage, vec![len, 1]).unwrap();
         Value::Tensor(tensor)
+    }
+
+    fn all_integer_storages(values: (i64, u64)) -> [IntegerStorage; 8] {
+        let (signed, unsigned) = values;
+        [
+            IntegerStorage::I8(vec![signed as i8]),
+            IntegerStorage::I16(vec![signed as i16]),
+            IntegerStorage::I32(vec![signed as i32]),
+            IntegerStorage::I64(vec![signed]),
+            IntegerStorage::U8(vec![unsigned as u8]),
+            IntegerStorage::U16(vec![unsigned as u16]),
+            IntegerStorage::U32(vec![unsigned as u32]),
+            IntegerStorage::U64(vec![unsigned]),
+        ]
     }
 
     fn output_tensors(value: Value) -> Vec<Tensor> {
@@ -1344,5 +1553,177 @@ mod tests {
         assert!(matches!(stats.fields.get("max"), Some(Value::Num(3.0))));
         assert!(matches!(stats.fields.get("mean"), Some(Value::Num(2.0))));
         assert!(matches!(stats.fields.get("median"), Some(Value::Num(2.0))));
+    }
+
+    #[test]
+    fn cdfplot_descriptor_classifies_integer_and_runtime_extensions() {
+        let builtin = builtin_function_by_name(CDFPLOT_NAME).expect("registered cdfplot");
+        assert_eq!(builtin.extensions, &CDFPLOT_EXTENSIONS);
+        assert_eq!(
+            builtin
+                .integer_capabilities
+                .iter()
+                .map(|capability| capability.form)
+                .collect::<Vec<_>>(),
+            CDFPLOT_INTEGER_CAPABILITIES
+                .iter()
+                .map(|capability| capability.form)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(builtin.integer_capabilities[0].inputs[0].classes.len(), 8);
+        assert_eq!(CDFPLOT_DESCRIPTOR.signatures[0].inputs[0].name, "x");
+        assert_eq!(
+            CDFPLOT_DESCRIPTOR.signatures[0].inputs[0].ty,
+            BuiltinParamType::NumericArray
+        );
+    }
+
+    #[test]
+    fn cdfplot_admits_all_integer_classes_at_explicit_double_boundary() {
+        let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        for storage in all_integer_storages((-3, 3)) {
+            crate::builtins::plotting::reset_plot_state();
+            let value =
+                block_on(cdfplot_builtin(vec![int_tensor(storage, 1)])).expect("integer cdfplot");
+            let Value::OutputList(outputs) = value else {
+                panic!("expected output list");
+            };
+            assert!(matches!(outputs[0], Value::Num(handle) if handle > 0.0));
+            let Value::Struct(stats) = &outputs[1] else {
+                panic!("expected stats structure");
+            };
+            assert!(
+                matches!(stats.fields.get("mean"), Some(Value::Num(value)) if value.abs() == 3.0)
+            );
+        }
+        crate::builtins::plotting::reset_plot_state();
+        let logical = Value::LogicalArray(
+            LogicalArray::new(vec![0, 1], vec![2, 1]).expect("logical sample data"),
+        );
+        let value = block_on(cdfplot_builtin(vec![logical])).expect("logical cdfplot");
+        let Value::OutputList(outputs) = value else {
+            panic!("expected output list");
+        };
+        let Value::Struct(stats) = &outputs[1] else {
+            panic!("expected stats structure");
+        };
+        assert!(matches!(stats.fields.get("mean"), Some(Value::Num(0.5))));
+    }
+
+    #[test]
+    fn cdfplot_strict_mode_rejects_integer_logical_and_gpu_extensions() {
+        let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = block_on(cdfplot_builtin(vec![int_tensor(
+            IntegerStorage::I16(vec![1]),
+            1,
+        )]))
+        .expect_err("integer input must be gated");
+        assert_eq!(
+            integer.identifier(),
+            CDFPLOT_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let logical = block_on(cdfplot_builtin(vec![Value::Bool(true)]))
+            .expect_err("logical input must be gated");
+        assert_eq!(
+            logical.identifier(),
+            CDFPLOT_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
+        let single = Value::Tensor(
+            Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).expect("single sample data"),
+        );
+        let documented = block_on(cdfplot_builtin(vec![single])).expect("documented single input");
+        assert!(matches!(documented, Value::Num(handle) if handle > 0.0));
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let integer_value = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1])
+                .expect("integer input");
+            let integer_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &integer_value)
+                    .expect("resident integer input");
+            let integer_gpu = block_on(cdfplot_builtin(vec![Value::GpuTensor(integer_handle)]))
+                .expect_err("resident integer type must be gated before gather");
+            assert_eq!(
+                integer_gpu.identifier(),
+                CDFPLOT_INTEGER_INPUT_EXTENSION.error_identifier
+            );
+            let value = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("double input");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &value)
+                .expect("resident input");
+            let gpu = block_on(cdfplot_builtin(vec![Value::GpuTensor(handle)]))
+                .expect_err("gpu input must be gated before gather");
+            assert_eq!(
+                gpu.identifier(),
+                CDFPLOT_GPU_INPUT_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
+    fn cdfplot_rejects_wide_integer_before_lossy_plotting() {
+        let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(cdfplot_builtin(vec![int_tensor(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            1,
+        )]))
+        .expect_err("wide integer must not be rounded");
+        assert!(error.message().contains("exact binary64 integer range"));
+    }
+
+    #[test]
+    fn cdfplot_resident_integer_fallback_returns_host_outputs() {
+        let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let value = Tensor::new_integer(IntegerStorage::U32(vec![1, 3]), vec![2, 1])
+                .expect("integer input");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &value)
+                .expect("resident integer input");
+            let result = block_on(cdfplot_builtin(vec![Value::GpuTensor(handle)]))
+                .expect("resident integer cdfplot");
+            let Value::OutputList(outputs) = result else {
+                panic!("expected host outputs");
+            };
+            assert!(matches!(outputs[0], Value::Num(handle) if handle > 0.0));
+            let Value::Struct(stats) = &outputs[1] else {
+                panic!("expected stats structure");
+            };
+            assert!(matches!(stats.fields.get("mean"), Some(Value::Num(2.0))));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn cdfplot_wgpu_integer_fallback_returns_host_outputs_for_all_classes() {
+        let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
+        let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        for storage in all_integer_storages((2, 2)) {
+            crate::builtins::plotting::reset_plot_state();
+            let value = Tensor::new_integer(storage, vec![1, 1]).expect("integer input");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &value)
+                .expect("resident integer input");
+            let result = block_on(cdfplot_builtin(vec![Value::GpuTensor(handle)]))
+                .expect("wgpu integer cdfplot");
+            let Value::OutputList(outputs) = result else {
+                panic!("expected host outputs");
+            };
+            assert!(matches!(outputs[0], Value::Num(handle) if handle > 0.0));
+            let Value::Struct(stats) = &outputs[1] else {
+                panic!("expected stats structure");
+            };
+            assert!(matches!(stats.fields.get("mean"), Some(Value::Num(2.0))));
+        }
     }
 }

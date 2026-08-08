@@ -254,6 +254,9 @@ mod tests {
                 ("cdf", "cdf-integer-parameters"),
                 ("cdf", "cdf-integer-x"),
                 ("cdf", "cdf-logical-input"),
+                ("cdfplot", "cdfplot-gpu-input"),
+                ("cdfplot", "cdfplot-integer-input"),
+                ("cdfplot", "cdfplot-logical-input"),
                 ("binornd", "binornd-integer-probability"),
                 ("binornd", "binornd-integer-size"),
                 ("binornd", "binornd-integer-trials"),
@@ -597,6 +600,8 @@ mod tests {
             "butter",
             "buttord",
             "cat",
+            "cdf",
+            "cdfplot",
         ] {
             let builtin = registered
                 .iter()
