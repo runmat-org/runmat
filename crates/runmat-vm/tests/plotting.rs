@@ -969,6 +969,32 @@ fn axis_compiled_dispatch_accepts_integer_limits_query_and_visibility() {
 }
 
 #[test]
+fn caxis_compiled_dispatch_gates_integer_limits_and_returns_double_state() {
+    let _guard = disable_interactive_plots_for_test();
+    {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+        let error = execute_source("caxis(uint8([1 2]));")
+            .expect_err("MATLAB mode must reject typed integer caxis limits");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:ClimIntegerLimitsExtension")
+        );
+    }
+    {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let values =
+            execute_source("caxis(uint64([9007199254740993 9007199254740995])); limits = caxis();")
+                .expect("RunMat mode integer caxis limits");
+        assert!(values.iter().any(|value| matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                    && tensor.len() == 2
+        )));
+    }
+}
+
+#[test]
 fn axes_parent_property_targets_figure_and_updates_current_axes() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

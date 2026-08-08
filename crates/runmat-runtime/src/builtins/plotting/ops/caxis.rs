@@ -1,6 +1,7 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -75,6 +76,12 @@ pub const CAXIS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CAXIS_ERRORS,
 };
 
+pub const CAXIS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::AliasOf,
+    canonical_builtin: Some("clim"),
+    notes: "Current public documentation identifies caxis as the legacy name for clim; both names share the same RunMat-only typed-integer limit extension and host-double graphics-state boundary.",
+};
+
 #[runtime_builtin(
     name = "caxis",
     category = "plotting",
@@ -83,6 +90,8 @@ pub const CAXIS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::caxis::CAXIS_DESCRIPTOR),
+    extensions(crate::builtins::plotting::clim::CLIM_EXTENSIONS),
+    integer_audit(crate::builtins::plotting::caxis::CAXIS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::plotting::caxis"
 )]
 pub fn caxis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -94,7 +103,7 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     #[test]
     fn caxis_descriptor_signatures_cover_core_forms() {
@@ -135,5 +144,61 @@ mod tests {
         let err = caxis_builtin(vec![Value::String("badmode".into())]).unwrap_err();
         assert!(err.message.contains("caxis"));
         assert!(!err.message.contains("clim"));
+    }
+
+    #[test]
+    fn caxis_is_audited_as_the_clim_integer_alias() {
+        assert_eq!(CAXIS_INTEGER_AUDIT.kind, BuiltinIntegerAuditKind::AliasOf);
+        assert_eq!(CAXIS_INTEGER_AUDIT.canonical_builtin, Some("clim"));
+    }
+
+    #[test]
+    fn caxis_integer_limits_are_mode_gated_for_every_class() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        for storage in [
+            IntegerStorage::I8(vec![-1, 2]),
+            IntegerStorage::I16(vec![-1, 2]),
+            IntegerStorage::I32(vec![-1, 2]),
+            IntegerStorage::I64(vec![-1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![1, 2]),
+        ] {
+            let limits = Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).unwrap());
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = caxis_builtin(vec![limits.clone()])
+                    .expect_err("MATLAB mode must reject typed integer color limits");
+                assert_eq!(
+                    error.identifier(),
+                    super::super::clim::CLIM_INTEGER_LIMITS_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                let result = caxis_builtin(vec![limits]).unwrap();
+                let tensor = Tensor::try_from(&result).unwrap();
+                assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            }
+        }
+    }
+
+    #[test]
+    fn caxis_rejects_equal_limits_and_undocumented_tight_mode() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        assert!(caxis_builtin(vec![Value::Tensor(
+            Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()
+        )])
+        .is_err());
+        assert!(caxis_builtin(vec![Value::String("tight".into())]).is_err());
     }
 }

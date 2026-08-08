@@ -306,6 +306,8 @@ mod tests {
                 ("cat", "cat-like-prototype"),
                 ("cat", "cat-resident-dimension"),
                 ("categorical", "categorical-gpu-input"),
+                ("caxis", "clim-integer-limits"),
+                ("clim", "clim-integer-limits"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -700,6 +702,7 @@ mod tests {
                 "append",
                 "argsort",
                 "cancel",
+                "caxis",
                 "onCleanup",
             ]
         );

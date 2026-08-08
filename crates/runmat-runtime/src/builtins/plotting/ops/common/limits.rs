@@ -54,10 +54,10 @@ pub fn limits_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<
             format!("{builtin}: limits must be finite"),
         ));
     }
-    if hi < lo {
+    if hi <= lo {
         return Err(plotting_error(
             builtin,
-            format!("{builtin}: limits must be increasing"),
+            format!("{builtin}: lower limit must be less than upper limit"),
         ));
     }
     Ok((lo, hi))

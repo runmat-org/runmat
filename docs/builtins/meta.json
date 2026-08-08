@@ -15193,7 +15193,20 @@
           "when": "Internal plotting state update fails.",
           "message": "caxis: internal operation failed"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "clim-integer-limits",
+          "mode": "RunMatOnly",
+          "description": "clim/caxis with typed integer limits is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClimIntegerLimitsExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "AliasOf",
+        "canonical_builtin": "clim",
+        "notes": "Current public documentation identifies caxis as the legacy name for clim; both names share the same RunMat-only typed-integer limit extension and host-double graphics-state boundary."
+      }
     },
     {
       "name": "cd",
@@ -17500,6 +17513,43 @@
           "identifier": "RunMat:clim:Internal",
           "when": "Internal plotting state update fails.",
           "message": "clim: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "clim-integer-limits",
+          "mode": "RunMatOnly",
+          "description": "clim/caxis with typed integer limits is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClimIntegerLimitsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "clim(integer_limits)",
+          "inputs": [
+            {
+              "name": "limits",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Current public limits accept only single or double; RunMat mode admits every integer class before one explicit host f64 graphics-state conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The two-element vector is shape- and order-validated from authoritative integer storage, then stored and queried as double host graphics metadata."
         }
       ]
     },
