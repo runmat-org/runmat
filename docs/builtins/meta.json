@@ -15332,11 +15332,74 @@
               "description": "Sample data or evaluation points."
             },
             {
-              "name": "NameValue",
+              "name": "A...D",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options."
+              "description": "Named-distribution parameters, followed optionally by \"upper\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values."
+            }
+          ]
+        },
+        {
+          "label": "p = cdf(pd, x, \"upper\")",
+          "inputs": [
+            {
+              "name": "pd",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "ProbabilityDistribution object returned by fitdist."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "y",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution function values."
+            }
+          ]
+        },
+        {
+          "label": "p = cdf(distname, x, params, \"upper\")",
+          "inputs": [
+            {
+              "name": "distname",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Distribution name."
+            },
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Sample data or evaluation points."
+            },
+            {
+              "name": "A...D",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Named-distribution parameters, followed optionally by \"upper\"."
             }
           ],
           "outputs": [
@@ -15368,6 +15431,82 @@
           "identifier": "RunMat:fitdist:Internal",
           "when": "RunMat cannot construct distribution outputs.",
           "message": "fitdist: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cdf-integer-x",
+          "mode": "RunMatOnly",
+          "description": "cdf with typed-integer evaluation points is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CdfIntegerXExtension"
+        },
+        {
+          "id": "cdf-integer-parameters",
+          "mode": "RunMatOnly",
+          "description": "cdf with typed-integer distribution parameters is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CdfIntegerParametersExtension"
+        },
+        {
+          "id": "cdf-logical-input",
+          "mode": "RunMatOnly",
+          "description": "cdf with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CdfLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = cdf(pd, x) or cdf(name, x, A...) with integer x",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer evaluation points are gated before provider access and enter the floating CDF boundary without an integer compatibility mirror."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed-integer x values produce double probabilities unless a named-form single parameter makes the result single; resident fallback restores output to the first owning provider."
+        },
+        {
+          "form": "p = cdf(name, x, A...) with integer distribution parameters",
+          "inputs": [
+            {
+              "name": "A...D",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer named-distribution parameters are independently gated and must be exactly representable at the floating CDF boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only typed-integer parameters preserve authoritative storage through admission and scalar expansion, then cross an exact binary64 boundary for evaluation."
         }
       ]
     },

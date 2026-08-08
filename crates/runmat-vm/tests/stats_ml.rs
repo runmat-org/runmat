@@ -656,6 +656,19 @@ fn binocdf_integer_extensions_cover_every_class_and_preserve_single_output() {
 }
 
 #[test]
+fn cdf_integer_extensions_cover_every_class_broadcast_upper_and_single_output() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "x = [cdf('Normal',int8(1),0,1) cdf('Normal',int16(1),0,1) cdf('Normal',int32(1),0,1) cdf('Normal',int64(1),0,1) cdf('Normal',uint8(1),0,1) cdf('Normal',uint16(1),0,1) cdf('Normal',uint32(1),0,1) cdf('Normal',uint64(1),0,1)]; a = [cdf('Poisson',0,int8(1)) cdf('Poisson',0,int16(1)) cdf('Poisson',0,int32(1)) cdf('Poisson',0,int64(1)) cdf('Poisson',0,uint8(1)) cdf('Poisson',0,uint16(1)) cdf('Poisson',0,uint32(1)) cdf('Poisson',0,uint64(1))]; u = cdf('Normal',single([0;2]),[0;1],1,'upper'); score = numel(x) + numel(a) + numel(u); upper0 = u(1); integer_class = class(x); single_class = class(u);",
+    )
+    .expect("cdf integer extension script");
+    assert!(has_num(&vars, 18.0));
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_string(&vars, "double"));
+    assert!(has_string(&vars, "single"));
+}
+
+#[test]
 fn binornd_integer_extensions_cover_every_class_input_position_and_single_output() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(

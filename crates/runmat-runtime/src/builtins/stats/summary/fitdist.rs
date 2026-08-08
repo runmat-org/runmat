@@ -1,16 +1,21 @@
 //! Fitted probability distribution objects and object-aware distribution methods.
 
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    NumericDType, NumericScalar, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::elementwise::gammaln::gammaln_nonnegative_scalar;
 use crate::builtins::stats::summary::distribution_math;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -86,6 +91,14 @@ const INPUT_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Name-value options.",
 };
 
+const INPUT_CDF_PARAMS: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A...D",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Named-distribution parameters, followed optionally by \"upper\".",
+};
+
 const INPUT_SZ: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "sz",
     ty: BuiltinParamType::Any,
@@ -100,7 +113,7 @@ const FITDIST_OUTPUTS: [BuiltinParamDescriptor; 1] = [OUTPUT_PD];
 const PDF_INPUTS: [BuiltinParamDescriptor; 2] = [INPUT_PD, INPUT_X];
 const PDF_NAME_INPUTS: [BuiltinParamDescriptor; 3] = [INPUT_DIST, INPUT_X, INPUT_OPTIONS];
 const CDF_INPUTS: [BuiltinParamDescriptor; 2] = [INPUT_PD, INPUT_X];
-const CDF_NAME_INPUTS: [BuiltinParamDescriptor; 3] = [INPUT_DIST, INPUT_X, INPUT_OPTIONS];
+const CDF_NAME_INPUTS: [BuiltinParamDescriptor; 3] = [INPUT_DIST, INPUT_X, INPUT_CDF_PARAMS];
 const ICDF_INPUTS: [BuiltinParamDescriptor; 2] = [INPUT_PD, INPUT_P];
 const RANDOM_INPUTS: [BuiltinParamDescriptor; 1] = [INPUT_PD];
 const RANDOM_INPUTS_SIZE: [BuiltinParamDescriptor; 2] = [INPUT_PD, INPUT_SZ];
@@ -134,7 +147,7 @@ const PDF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
-const CDF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const CDF_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "p = cdf(pd, x)",
         inputs: &CDF_INPUTS,
@@ -144,6 +157,84 @@ const CDF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         label: "p = cdf(distname, x, params)",
         inputs: &CDF_NAME_INPUTS,
         outputs: &DIST_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = cdf(pd, x, \"upper\")",
+        inputs: &CDF_INPUTS,
+        outputs: &DIST_OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = cdf(distname, x, params, \"upper\")",
+        inputs: &CDF_NAME_INPUTS,
+        outputs: &DIST_OUTPUTS,
+    },
+];
+
+const CDF_INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cdf-integer-x",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cdf with typed-integer evaluation points is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CdfIntegerXExtension"),
+};
+
+const CDF_INTEGER_PARAMETER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cdf-integer-parameters",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cdf with typed-integer distribution parameters is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CdfIntegerParametersExtension"),
+};
+
+const CDF_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cdf-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cdf with logical numeric inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CdfLogicalInputExtension"),
+};
+
+pub const CDF_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    CDF_INTEGER_X_EXTENSION,
+    CDF_INTEGER_PARAMETER_EXTENSION,
+    CDF_LOGICAL_INPUT_EXTENSION,
+];
+
+const CDF_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer evaluation points are gated before provider access and enter the floating CDF boundary without an integer compatibility mirror.",
+    }];
+
+const CDF_INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A...D",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer named-distribution parameters are independently gated and must be exactly representable at the floating CDF boundary.",
+    }];
+
+pub const CDF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = cdf(pd, x) or cdf(name, x, A...) with integer x",
+        inputs: &CDF_INTEGER_X_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only typed-integer x values produce double probabilities unless a named-form single parameter makes the result single; resident fallback restores output to the first owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = cdf(name, x, A...) with integer distribution parameters",
+        inputs: &CDF_INTEGER_PARAMETER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only typed-integer parameters preserve authoritative storage through admission and scalar expansion, then cross an exact binary64 boundary for evaluation.",
     },
 ];
 
@@ -397,6 +488,8 @@ pub(crate) async fn pdf_builtin(
     keywords = "cdf,fitdist,probability distribution,cumulative,statistics",
     type_resolver(distribution_eval_type),
     descriptor(crate::builtins::stats::summary::fitdist::CDF_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::fitdist::CDF_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::fitdist::CDF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::fitdist"
 )]
 pub(crate) async fn cdf_builtin(
@@ -404,8 +497,258 @@ pub(crate) async fn cdf_builtin(
     x: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    evaluate_distribution_or_name(CDF_NAME, distribution, x, rest, DistributionEvaluation::Cdf)
+    evaluate_cdf(distribution, x, rest).await
+}
+
+#[derive(Clone, Copy)]
+enum CdfOutputPrecision {
+    Double,
+    Single,
+}
+
+async fn evaluate_cdf(
+    distribution: Value,
+    input: Value,
+    mut rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let upper = rest
+        .last()
+        .and_then(keyword_of)
+        .is_some_and(|keyword| keyword.eq_ignore_ascii_case("upper"));
+    if upper {
+        rest.pop();
+    }
+
+    if matches!(distribution, Value::Object(_)) {
+        if !rest.is_empty() {
+            return Err(invalid_for(
+                CDF_NAME,
+                "cdf: fitted distribution object form accepts only x and optional 'upper'",
+            ));
+        }
+        ensure_cdf_extensions(&input, &[])?;
+        let precision = cdf_output_precision(&[&input]);
+        let gpu_source = first_gpu_source(&[&input]);
+        let fit = distribution_from_value(&distribution)?;
+        let x = cdf_value_to_tensor(input).await?;
+        ensure_exact_cdf_integer_boundary(&x, "x")?;
+        let shape = x.shape.clone();
+        let data = tensor::tensor_into_values_f64(x)
+            .into_iter()
+            .map(|value| cdf_scalar_with_tail(&fit, value, upper))
+            .collect();
+        return finish_cdf(shape, data, precision, gpu_source);
+    }
+
+    let kind = parse_distribution_name_for(CDF_NAME, &distribution)?;
+    ensure_cdf_extensions(&input, &rest)?;
+    let mut original_inputs = Vec::with_capacity(rest.len() + 1);
+    original_inputs.push(&input);
+    original_inputs.extend(rest.iter());
+    let precision = cdf_output_precision(&original_inputs);
+    let gpu_source = first_gpu_source(&original_inputs);
+    let x = cdf_value_to_tensor(input).await?;
+    ensure_exact_cdf_integer_boundary(&x, "x")?;
+    let parameters = parse_cdf_parameter_tensors(kind, rest).await?;
+    for (index, parameter) in parameters.iter().enumerate() {
+        ensure_exact_cdf_integer_boundary(parameter, kind.parameter_names()[index])?;
+    }
+    let mut tensors = Vec::with_capacity(parameters.len() + 1);
+    tensors.push(&x);
+    tensors.extend(parameters.iter());
+    let (mut values, shape) = broadcast_tensors_for(CDF_NAME, &tensors)?;
+    let x_values = values.remove(0);
+    let mut data = Vec::with_capacity(x_values.len());
+    for index in 0..x_values.len() {
+        let fit = FittedDistribution {
+            kind,
+            parameters: values.iter().map(|parameter| parameter[index]).collect(),
+            nlogl: f64::NAN,
+            observations: f64::NAN,
+        };
+        data.push(cdf_scalar_with_tail(&fit, x_values[index], upper));
+    }
+    finish_cdf(shape, data, precision, gpu_source)
+}
+
+fn ensure_cdf_extensions(input: &Value, parameters: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer_value(input) {
+        crate::compatibility::ensure_builtin_extension_enabled(&CDF_INTEGER_X_EXTENSION, CDF_NAME)?;
+    }
+    if parameters.iter().any(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CDF_INTEGER_PARAMETER_EXTENSION,
+            CDF_NAME,
+        )?;
+    }
+    if is_logical_value(input) || parameters.iter().any(is_logical_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CDF_LOGICAL_INPUT_EXTENSION,
+            CDF_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn is_single_value(value: &Value) -> bool {
+    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(value, Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F32))
+}
+
+fn cdf_output_precision(inputs: &[&Value]) -> CdfOutputPrecision {
+    if inputs.iter().any(|value| is_single_value(value)) {
+        CdfOutputPrecision::Single
+    } else {
+        CdfOutputPrecision::Double
+    }
+}
+
+fn first_gpu_source(inputs: &[&Value]) -> Option<GpuTensorHandle> {
+    inputs.iter().find_map(|value| match value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    })
+}
+
+async fn cdf_value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
+    let gathered = gather_if_needed_async(&value)
         .await
+        .map_err(|err| invalid_for(CDF_NAME, format!("cdf: {err}")))?;
+    tensor::value_into_tensor_for(CDF_NAME, gathered)
+        .map_err(|_| invalid_for(CDF_NAME, "cdf: expected numeric input"))
+}
+
+async fn parse_cdf_parameter_tensors(
+    kind: DistributionKind,
+    rest: Vec<Value>,
+) -> BuiltinResult<Vec<Tensor>> {
+    match kind {
+        DistributionKind::Normal | DistributionKind::Lognormal => match rest.as_slice() {
+            [] => Ok(vec![scalar_tensor(0.0), scalar_tensor(1.0)]),
+            [mu] => Ok(vec![
+                cdf_value_to_tensor(mu.clone()).await?,
+                scalar_tensor(1.0),
+            ]),
+            [mu, sigma] => Ok(vec![
+                cdf_value_to_tensor(mu.clone()).await?,
+                cdf_value_to_tensor(sigma.clone()).await?,
+            ]),
+            _ => Err(invalid_for(
+                CDF_NAME,
+                format!(
+                    "cdf: {} distribution expects x, x and mu, or x, mu, sigma",
+                    kind.canonical_name()
+                ),
+            )),
+        },
+        DistributionKind::Exponential | DistributionKind::Poisson => {
+            if rest.len() != 1 {
+                return Err(invalid_for(
+                    CDF_NAME,
+                    format!(
+                        "cdf: {} distribution expects one parameter",
+                        kind.canonical_name()
+                    ),
+                ));
+            }
+            Ok(vec![cdf_value_to_tensor(rest[0].clone()).await?])
+        }
+        DistributionKind::Gamma | DistributionKind::Weibull => {
+            if rest.len() != 2 {
+                return Err(invalid_for(
+                    CDF_NAME,
+                    format!(
+                        "cdf: {} distribution expects two parameters",
+                        kind.canonical_name()
+                    ),
+                ));
+            }
+            Ok(vec![
+                cdf_value_to_tensor(rest[0].clone()).await?,
+                cdf_value_to_tensor(rest[1].clone()).await?,
+            ])
+        }
+    }
+}
+
+fn ensure_exact_cdf_integer_boundary(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    for index in 0..tensor.len() {
+        let exact = match tensor.numeric_value_at(index) {
+            Some(NumericScalar::I8(value)) => i128::from(value),
+            Some(NumericScalar::I16(value)) => i128::from(value),
+            Some(NumericScalar::I32(value)) => i128::from(value),
+            Some(NumericScalar::I64(value)) => i128::from(value),
+            Some(NumericScalar::U8(value)) => i128::from(value),
+            Some(NumericScalar::U16(value)) => i128::from(value),
+            Some(NumericScalar::U32(value)) => i128::from(value),
+            Some(NumericScalar::U64(value)) => i128::from(value),
+            _ => continue,
+        };
+        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+            return Err(invalid_for(
+                CDF_NAME,
+                format!("cdf: integer {name} values must be exactly representable as double"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn finish_cdf(
+    shape: Vec<usize>,
+    data: Vec<f64>,
+    precision: CdfOutputPrecision,
+    gpu_source: Option<GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let tensor = match precision {
+        CdfOutputPrecision::Double => Tensor::new(data, shape),
+        CdfOutputPrecision::Single => {
+            Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
+        }
+    }
+    .map_err(|err| internal_for(CDF_NAME, format!("cdf: {err}")))?;
+    if let Some(source) = gpu_source {
+        let provider = runmat_accelerate_api::provider_for_handle(&source)
+            .or_else(runmat_accelerate_api::provider)
+            .ok_or_else(|| {
+                invalid_for(
+                    CDF_NAME,
+                    "cdf: no acceleration provider registered for GPU output",
+                )
+            })?;
+        let handle = gpu_helpers::upload_tensor(provider, &tensor)
+            .map_err(|err| invalid_for(CDF_NAME, format!("cdf: {err}")))?;
+        runmat_accelerate_api::set_handle_precision(
+            &handle,
+            match precision {
+                CdfOutputPrecision::Double => ProviderPrecision::F64,
+                CdfOutputPrecision::Single => ProviderPrecision::F32,
+            },
+        );
+        return Ok(gpu_helpers::resident_gpu_value(handle));
+    }
+    match precision {
+        CdfOutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),
+        CdfOutputPrecision::Single => Ok(Value::Tensor(tensor)),
+    }
 }
 
 #[runtime_builtin(
@@ -441,7 +784,6 @@ pub(crate) async fn icdf_probability_distribution(
 #[derive(Clone, Copy)]
 enum DistributionEvaluation {
     Pdf,
-    Cdf,
     Icdf,
 }
 
@@ -454,7 +796,6 @@ async fn evaluate_distribution(
     let x = value_to_tensor(
         match mode {
             DistributionEvaluation::Pdf => PDF_NAME,
-            DistributionEvaluation::Cdf => CDF_NAME,
             DistributionEvaluation::Icdf => "icdf",
         },
         input,
@@ -465,14 +806,12 @@ async fn evaluate_distribution(
         .into_iter()
         .map(|value| match mode {
             DistributionEvaluation::Pdf => pdf_scalar(&fit, value),
-            DistributionEvaluation::Cdf => cdf_scalar(&fit, value),
             DistributionEvaluation::Icdf => icdf_scalar(&fit, value),
         })
         .collect::<Vec<_>>();
     finish_for(
         match mode {
             DistributionEvaluation::Pdf => PDF_NAME,
-            DistributionEvaluation::Cdf => CDF_NAME,
             DistributionEvaluation::Icdf => "icdf",
         },
         shape,
@@ -511,7 +850,6 @@ async fn evaluate_distribution_or_name(
         .into_iter()
         .map(|value| match mode {
             DistributionEvaluation::Pdf => pdf_scalar(&fit, value),
-            DistributionEvaluation::Cdf => cdf_scalar(&fit, value),
             DistributionEvaluation::Icdf => icdf_scalar(&fit, value),
         })
         .collect::<Vec<_>>();
@@ -1175,7 +1513,7 @@ fn pdf_scalar_raw(kind: DistributionKind, params: &[f64], x: f64) -> f64 {
     }
 }
 
-fn cdf_scalar(fit: &FittedDistribution, x: f64) -> f64 {
+fn cdf_scalar_with_tail(fit: &FittedDistribution, x: f64, upper: bool) -> f64 {
     if x.is_nan() {
         return f64::NAN;
     }
@@ -1183,27 +1521,48 @@ fn cdf_scalar(fit: &FittedDistribution, x: f64) -> f64 {
         DistributionKind::Normal => {
             let [mu, sigma] = two(&fit.parameters);
             if sigma <= 0.0 {
-                if x < mu {
-                    0.0
+                let lower = if x < mu { 0.0 } else { 1.0 };
+                if upper {
+                    1.0 - lower
                 } else {
-                    1.0
+                    lower
                 }
+            } else if upper {
+                distribution_math::standard_normal_cdf((mu - x) / sigma)
             } else {
                 distribution_math::standard_normal_cdf((x - mu) / sigma)
             }
         }
         DistributionKind::Exponential => {
             let mu = fit.parameters[0];
-            if x < 0.0 || mu <= 0.0 {
-                0.0
+            if mu <= 0.0 {
+                if upper {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else if x < 0.0 {
+                if upper {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else if upper {
+                (-x / mu).exp()
             } else {
-                1.0 - (-x / mu).exp()
+                -(-x / mu).exp_m1()
             }
         }
         DistributionKind::Lognormal => {
             let [mu, sigma] = two(&fit.parameters);
             if x <= 0.0 || sigma <= 0.0 {
-                0.0
+                if upper {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else if upper {
+                distribution_math::standard_normal_cdf((mu - x.ln()) / sigma)
             } else {
                 distribution_math::standard_normal_cdf((x.ln() - mu) / sigma)
             }
@@ -1211,7 +1570,13 @@ fn cdf_scalar(fit: &FittedDistribution, x: f64) -> f64 {
         DistributionKind::Gamma => {
             let [shape, scale] = two(&fit.parameters);
             if x <= 0.0 || shape <= 0.0 || scale <= 0.0 {
-                0.0
+                if upper {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else if upper {
+                distribution_math::regularized_gamma_q(shape, x / scale)
             } else {
                 distribution_math::regularized_gamma_p(shape, x / scale)
             }
@@ -1219,17 +1584,33 @@ fn cdf_scalar(fit: &FittedDistribution, x: f64) -> f64 {
         DistributionKind::Weibull => {
             let [scale, shape] = two(&fit.parameters);
             if x < 0.0 || scale <= 0.0 || shape <= 0.0 {
-                0.0
+                if upper {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else if upper {
+                (-(x / scale).powf(shape)).exp()
             } else {
-                1.0 - (-(x / scale).powf(shape)).exp()
+                -(-(x / scale).powf(shape)).exp_m1()
             }
         }
         DistributionKind::Poisson => {
             let lambda = fit.parameters[0];
             if x < 0.0 {
-                0.0
+                if upper {
+                    1.0
+                } else {
+                    0.0
+                }
             } else if lambda == 0.0 {
-                1.0
+                if upper {
+                    0.0
+                } else {
+                    1.0
+                }
+            } else if upper {
+                distribution_math::regularized_gamma_p(x.floor() + 1.0, lambda)
             } else {
                 distribution_math::regularized_gamma_q(x.floor() + 1.0, lambda)
             }
@@ -1442,6 +1823,19 @@ mod tests {
         Value::Tensor(tensor)
     }
 
+    fn all_cdf_integer_storages(value: i8) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(vec![value]),
+            IntegerStorage::I16(vec![i16::from(value)]),
+            IntegerStorage::I32(vec![i32::from(value)]),
+            IntegerStorage::I64(vec![i64::from(value)]),
+            IntegerStorage::U8(vec![value as u8]),
+            IntegerStorage::U16(vec![value as u16]),
+            IntegerStorage::U32(vec![value as u32]),
+            IntegerStorage::U64(vec![value as u64]),
+        ]
+    }
+
     #[test]
     fn fitdist_broadcast_indexing_appends_trailing_singletons() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1483,6 +1877,14 @@ mod tests {
 
         let p = block_on(cdf_builtin(pd.clone(), Value::Num(2.0), Vec::new())).unwrap();
         assert_eq!(p, Value::Num(0.5));
+
+        let upper = block_on(cdf_builtin(
+            pd.clone(),
+            Value::Num(10.0),
+            vec![Value::String("upper".into())],
+        ))
+        .unwrap();
+        assert!(matches!(upper, Value::Num(value) if value > 0.0 && value < 1.0e-20));
 
         let x = block_on(icdf_probability_distribution(pd, Value::Num(0.5))).unwrap();
         assert_eq!(x, Value::Num(2.0));
@@ -1688,6 +2090,211 @@ mod tests {
         match samples {
             Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cdf_classifies_all_integer_input_positions_as_runmat_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_cdf_integer_storages(1) {
+            let x = block_on(cdf_builtin(
+                Value::String("Normal".into()),
+                mirrorless_int_tensor(storage.clone(), vec![1, 1]),
+                vec![Value::Num(0.0), Value::Num(1.0)],
+            ))
+            .expect("integer x");
+            assert!(
+                matches!(x, Value::Num(value) if (value - 0.841_344_746_068_543).abs() < 1.0e-12)
+            );
+
+            let parameter = block_on(cdf_builtin(
+                Value::String("Poisson".into()),
+                Value::Num(0.0),
+                vec![mirrorless_int_tensor(storage, vec![1, 1])],
+            ))
+            .expect("integer parameter");
+            assert!(
+                matches!(parameter, Value::Num(value) if (value - (-1.0_f64).exp()).abs() < 1.0e-12)
+            );
+        }
+
+        let pd = block_on(fitdist_builtin(
+            vec_tensor(&[0.0, 1.0, 2.0]),
+            Value::String("Normal".into()),
+            Vec::new(),
+        ))
+        .expect("fitted normal");
+        let object_x = block_on(cdf_builtin(
+            pd,
+            mirrorless_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+            Vec::new(),
+        ))
+        .expect("integer object evaluation point");
+        assert_eq!(object_x, Value::Num(0.5));
+    }
+
+    #[test]
+    fn cdf_compatibility_mode_rejects_integer_and_logical_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer_x = block_on(cdf_builtin(
+            Value::String("Normal".into()),
+            mirrorless_int_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]),
+            vec![Value::Num(0.0), Value::Num(1.0)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            integer_x.identifier(),
+            Some("RunMat:compatibility:CdfIntegerXExtension")
+        );
+        let pd = block_on(fitdist_builtin(
+            vec_tensor(&[0.0, 1.0, 2.0]),
+            Value::String("Normal".into()),
+            Vec::new(),
+        ))
+        .expect("fitted normal");
+        let object_integer_x = block_on(cdf_builtin(
+            pd,
+            mirrorless_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            object_integer_x.identifier(),
+            Some("RunMat:compatibility:CdfIntegerXExtension")
+        );
+        let integer_parameter = block_on(cdf_builtin(
+            Value::String("Poisson".into()),
+            Value::Num(0.0),
+            vec![mirrorless_int_tensor(
+                IntegerStorage::U16(vec![1]),
+                vec![1, 1],
+            )],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            integer_parameter.identifier(),
+            Some("RunMat:compatibility:CdfIntegerParametersExtension")
+        );
+        let logical = block_on(cdf_builtin(
+            Value::String("Normal".into()),
+            Value::Bool(true),
+            vec![Value::Num(0.0), Value::Num(1.0)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            logical.identifier(),
+            Some("RunMat:compatibility:CdfLogicalInputExtension")
+        );
+    }
+
+    #[test]
+    fn cdf_broadcasts_parameters_supports_upper_and_preserves_single() {
+        let result = block_on(cdf_builtin(
+            Value::String("Normal".into()),
+            Value::Tensor(Tensor::from_f32(vec![0.0, 2.0], vec![2, 1]).unwrap()),
+            vec![
+                Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+                Value::Num(1.0),
+                Value::String("upper".into()),
+            ],
+        ))
+        .expect("broadcast upper cdf");
+        let Value::Tensor(result) = result else {
+            panic!("single output must retain its class");
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(result.shape, vec![2, 1]);
+        let values = result.materialize_f64();
+        assert!((values[0] - 0.5).abs() < f64::from(f32::EPSILON));
+        assert!((values[1] - 0.158_655_253_931_457).abs() < f64::from(f32::EPSILON));
+
+        let tail = block_on(cdf_builtin(
+            Value::String("Exponential".into()),
+            Value::Num(1000.0),
+            vec![Value::Num(1.0), Value::String("upper".into())],
+        ))
+        .expect("upper tail");
+        assert_eq!(tail, Value::Num(0.0));
+    }
+
+    #[test]
+    fn cdf_rejects_inexact_wide_integers() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(cdf_builtin(
+            Value::String("Normal".into()),
+            mirrorless_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
+            vec![Value::Num(0.0), Value::Num(1.0)],
+        ))
+        .unwrap_err();
+        assert!(error.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn cdf_gpu_fallback_preserves_residency_precision_and_guard_order() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single input");
+            let handle = gpu_helpers::upload_tensor(provider, &single).expect("single upload");
+            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
+            let result = block_on(cdf_builtin(
+                Value::String("Normal".into()),
+                Value::GpuTensor(handle),
+                vec![Value::Num(0.0), Value::Num(1.0)],
+            ))
+            .expect("resident cdf");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(result_handle),
+                Some(ProviderPrecision::F32)
+            );
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+
+            let integer =
+                Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).expect("integer x");
+            let handle = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(cdf_builtin(
+                Value::String("Normal".into()),
+                Value::GpuTensor(handle),
+                vec![Value::Num(0.0), Value::Num(1.0)],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:CdfIntegerXExtension")
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn cdf_wgpu_fallback_preserves_residency_for_all_integer_classes() {
+        use crate::builtins::common::test_support;
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_cdf_integer_storages(1) {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer x");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let result = block_on(cdf_builtin(
+                Value::String("Normal".into()),
+                Value::GpuTensor(handle),
+                vec![Value::Num(0.0), Value::Num(1.0)],
+            ))
+            .expect("resident integer cdf");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("gather result");
+            assert!((gathered.materialize_f64()[0] - 0.841_344_746_068_543).abs() < 1.0e-12);
         }
     }
 }
