@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Order selection is scalar host-side analysis. GPU-resident frequency inputs are gathered automatically."
+    "notes": "Order selection is scalar host-side analysis. Typed-integer, logical, and resident inputs are mode-gated RunMat extensions; outputs are host floating values."
   },
   "fusion": {
     "elementwise": false,
@@ -33,7 +33,8 @@
     "Scalar `Wp` and `Ws` select lowpass when `Wp < Ws` and highpass when `Wp > Ws`.",
     "Two-element edge vectors select bandpass when the stopband encloses the passband and bandstop when the passband encloses the stopband.",
     "Digital inputs must be finite, positive, and less than 1. Analog inputs must be finite and positive.",
-    "`Rs` must be greater than `Rp`, and both values are specified in decibels."
+    "`Rs` must be greater than `Rp`, and both values are specified in decibels.",
+    "All eight typed-integer classes are accepted in RunMat mode for frequency and attenuation roles when values lie within the exact-integer binary64 range."
   ],
   "examples": [
     {

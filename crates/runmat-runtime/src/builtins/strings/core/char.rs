@@ -1,7 +1,11 @@
 //! MATLAB-compatible `char` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray, Tensor,
     Value,
@@ -29,8 +33,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Conversion always runs on the CPU; GPU tensors are gathered before building the result.",
+    notes: "Conversion always runs on the CPU. Interactive resident numeric input is undocumented and therefore mode-gated before the gather fallback; output is host character data.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::char")]
@@ -46,6 +49,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "char";
 const CHAR_SPARSE_DENSE_ELEMENT_LIMIT: usize = 10_000_000;
+
+pub(crate) const CHAR_RESIDENT_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "char-resident-numeric-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "char with interactive resident numeric input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CharResidentNumericInputExtension"),
+    };
+pub(crate) const CHAR_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "char-logical-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "char with logical input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CharLogicalInputExtension"),
+    };
+
+pub const CHAR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    CHAR_LOGICAL_INPUT_EXTENSION,
+    CHAR_RESIDENT_NUMERIC_EXTENSION,
+];
 
 const CHAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -99,8 +122,8 @@ const CHAR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
 const CHAR_ERROR_INVALID_CODEPOINT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CHAR.INVALID_CODEPOINT",
     identifier: Some("RunMat:char:InvalidCodePoint"),
-    when: "Numeric input is not a finite integer Unicode code point.",
-    message: "char: numeric inputs must be finite Unicode code points",
+    when: "Numeric input cannot be represented by RunMat's scalar-value character storage.",
+    message: "char: numeric input cannot be represented as a RunMat character",
 };
 
 const CHAR_ERROR_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -130,6 +153,26 @@ pub const CHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &CHAR_ERRORS,
 };
+
+const CHAR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "All eight integer classes are documented numeric-code inputs. Floating values truncate toward zero and all numeric codes clamp to the UTF-16 code-unit interval 0..65535.",
+}];
+
+pub const CHAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "C = char(integer_X) or char(X1, ..., XN)",
+        inputs: &CHAR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host integer values are decoded exactly, then clamped to 0..65535. RunMat CharArray stores Rust Unicode scalar values, so isolated UTF-16 surrogate code units U+D800..U+DFFF cannot yet be represented and produce an explicit error. Interactive resident numeric input is a mode-gated RunMat extension before gather.",
+    }];
 
 fn char_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     char_error_with_message(error.message, error)
@@ -162,6 +205,8 @@ fn remap_char_flow(err: RuntimeError) -> RuntimeError {
     accel = "conversion",
     type_resolver(string_array_type),
     descriptor(crate::builtins::strings::core::char::CHAR_DESCRIPTOR),
+    extensions(crate::builtins::strings::core::char::CHAR_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::core::char::CHAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::char"
 )]
 async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -175,6 +220,20 @@ async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut max_width = 0usize;
 
     for arg in rest {
+        if matches!(&arg, Value::Bool(_) | Value::LogicalArray(_))
+            || matches!(&arg, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CHAR_LOGICAL_INPUT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if matches!(&arg, Value::GpuTensor(_)) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CHAR_RESIDENT_NUMERIC_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
         let gathered = gather_if_needed_async(&arg)
             .await
             .map_err(remap_char_flow)?;
@@ -401,71 +460,41 @@ fn number_to_char(value: f64) -> BuiltinResult<char> {
             &CHAR_ERROR_INVALID_CODEPOINT,
         ));
     }
-    let rounded = value.round();
-    if (value - rounded).abs() > 1e-9 {
-        return Err(char_error_with_message(
-            format!("char: numeric inputs must be integers in the Unicode range (got {value})"),
-            &CHAR_ERROR_INVALID_CODEPOINT,
-        ));
-    }
-    if rounded < 0.0 {
-        return Err(char_error_with_message(
-            format!("char: negative code points are invalid (got {rounded})"),
-            &CHAR_ERROR_INVALID_CODEPOINT,
-        ));
-    }
-    if rounded > 0x10FFFF as f64 {
-        return Err(char_error_with_message(
-            format!("char: code point {} exceeds Unicode range", rounded as u64),
-            &CHAR_ERROR_INVALID_CODEPOINT,
-        ));
-    }
-    let code = rounded as u32;
-    char::from_u32(code).ok_or_else(|| {
-        char_error_with_message(
-            format!("char: invalid code point {code}"),
-            &CHAR_ERROR_INVALID_CODEPOINT,
-        )
-    })
+    let code_unit = value.trunc().clamp(0.0, u16::MAX as f64) as u16;
+    utf16_code_unit_to_char(code_unit)
 }
 
 fn integer_value_to_char(value: &IntValue) -> BuiltinResult<char> {
-    let code = match value {
-        IntValue::I8(value) => signed_integer_to_codepoint(*value as i128)?,
-        IntValue::I16(value) => signed_integer_to_codepoint(*value as i128)?,
-        IntValue::I32(value) => signed_integer_to_codepoint(*value as i128)?,
-        IntValue::I64(value) => signed_integer_to_codepoint(*value as i128)?,
-        IntValue::U8(value) => unsigned_integer_to_codepoint(*value as u128)?,
-        IntValue::U16(value) => unsigned_integer_to_codepoint(*value as u128)?,
-        IntValue::U32(value) => unsigned_integer_to_codepoint(*value as u128)?,
-        IntValue::U64(value) => unsigned_integer_to_codepoint(*value as u128)?,
+    let code_unit = match value {
+        IntValue::I8(value) => signed_integer_to_code_unit(*value as i128),
+        IntValue::I16(value) => signed_integer_to_code_unit(*value as i128),
+        IntValue::I32(value) => signed_integer_to_code_unit(*value as i128),
+        IntValue::I64(value) => signed_integer_to_code_unit(*value as i128),
+        IntValue::U8(value) => unsigned_integer_to_code_unit(*value as u128),
+        IntValue::U16(value) => unsigned_integer_to_code_unit(*value as u128),
+        IntValue::U32(value) => unsigned_integer_to_code_unit(*value as u128),
+        IntValue::U64(value) => unsigned_integer_to_code_unit(*value as u128),
     };
-    char::from_u32(code).ok_or_else(|| {
+    utf16_code_unit_to_char(code_unit)
+}
+
+fn utf16_code_unit_to_char(code_unit: u16) -> BuiltinResult<char> {
+    char::from_u32(u32::from(code_unit)).ok_or_else(|| {
         char_error_with_message(
-            format!("char: invalid code point {code}"),
+            format!(
+                "char: UTF-16 surrogate code unit U+{code_unit:04X} cannot be represented by the current RunMat CharArray scalar-value storage"
+            ),
             &CHAR_ERROR_INVALID_CODEPOINT,
         )
     })
 }
 
-fn signed_integer_to_codepoint(value: i128) -> BuiltinResult<u32> {
-    if value < 0 {
-        return Err(char_error_with_message(
-            format!("char: negative code points are invalid (got {value})"),
-            &CHAR_ERROR_INVALID_CODEPOINT,
-        ));
-    }
-    unsigned_integer_to_codepoint(value as u128)
+fn signed_integer_to_code_unit(value: i128) -> u16 {
+    value.clamp(0, u16::MAX as i128) as u16
 }
 
-fn unsigned_integer_to_codepoint(value: u128) -> BuiltinResult<u32> {
-    if value > 0x10FFFF {
-        return Err(char_error_with_message(
-            format!("char: code point {value} exceeds Unicode range"),
-            &CHAR_ERROR_INVALID_CODEPOINT,
-        ));
-    }
-    Ok(value as u32)
+fn unsigned_integer_to_code_unit(value: u128) -> u16 {
+    value.min(u16::MAX as u128) as u16
 }
 
 fn ensure_two_dimensional(shape: &[usize], context: &str) -> BuiltinResult<()> {
@@ -575,7 +604,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_typed_integer_tensor_reads_exact_storage_without_mirror() {
-        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![82, 0x10FFFF]), vec![1, 2])
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![82, u64::MAX]), vec![1, 2])
             .expect("typed tensor");
 
         let result = char_builtin(vec![Value::Tensor(tensor)]).expect("char");
@@ -583,36 +612,57 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['R', char::from_u32(0x10FFFF).unwrap()]);
+                assert_eq!(ca.data, vec!['R', '\u{FFFF}']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn char_rejects_negative_typed_integer_storage_without_mirror() {
-        let tensor =
-            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed tensor");
-
-        let err = error_message(char_builtin(vec![Value::Tensor(tensor)]).expect_err("char"));
-        assert!(
-            err.contains("negative code points"),
-            "unexpected error text: {err}"
-        );
+    fn char_reads_every_integer_tensor_storage_class() {
+        for storage in [
+            IntegerStorage::I8(vec![65]),
+            IntegerStorage::I16(vec![65]),
+            IntegerStorage::I32(vec![65]),
+            IntegerStorage::I64(vec![65]),
+            IntegerStorage::U8(vec![65]),
+            IntegerStorage::U16(vec![65]),
+            IntegerStorage::U32(vec![65]),
+            IntegerStorage::U64(vec![65]),
+        ] {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
+            let Value::CharArray(array) = char_builtin(vec![Value::Tensor(tensor)]).expect("char")
+            else {
+                panic!("expected char array");
+            };
+            assert_eq!(array.data, vec!['A']);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn char_rejects_out_of_range_uint64_storage_without_mirror() {
+    fn char_clamps_negative_typed_integer_storage_without_mirror() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("typed tensor");
+
+        let Value::CharArray(array) = char_builtin(vec![Value::Tensor(tensor)]).expect("char")
+        else {
+            panic!("expected char array");
+        };
+        assert_eq!(array.data, vec!['\0']);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn char_clamps_out_of_range_uint64_storage_without_mirror() {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0x110000]), vec![1, 1])
             .expect("typed tensor");
 
-        let err = error_message(char_builtin(vec![Value::Tensor(tensor)]).expect_err("char"));
-        assert!(
-            err.contains("exceeds Unicode range"),
-            "unexpected error text: {err}"
-        );
+        let Value::CharArray(array) = char_builtin(vec![Value::Tensor(tensor)]).expect("char")
+        else {
+            panic!("expected char array");
+        };
+        assert_eq!(array.data, vec!['\u{FFFF}']);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -680,6 +730,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_gpu_tensor_round_trip() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![82.0, 85.0, 78.0], vec![1, 3]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
@@ -701,10 +752,50 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn char_rejects_non_integer_numeric() {
-        let err =
-            error_message(char_builtin(vec![Value::Num(65.5)]).expect_err("non-integer numeric"));
-        assert!(err.contains("integers"), "unexpected error message: {err}");
+    fn char_truncates_floating_numeric_toward_zero() {
+        let Value::CharArray(array) = char_builtin(vec![Value::Num(65.9)]).expect("char") else {
+            panic!("expected char array");
+        };
+        assert_eq!(array.data, vec!['A']);
+    }
+
+    #[test]
+    fn char_supports_all_integer_classes_and_reports_surrogate_gap() {
+        let values = [
+            IntValue::I8(65),
+            IntValue::I16(65),
+            IntValue::I32(65),
+            IntValue::I64(65),
+            IntValue::U8(65),
+            IntValue::U16(65),
+            IntValue::U32(65),
+            IntValue::U64(65),
+        ];
+        for value in values {
+            let Value::CharArray(array) = char_builtin(vec![Value::Int(value)]).expect("char")
+            else {
+                panic!("expected char array");
+            };
+            assert_eq!(array.data, vec!['A']);
+        }
+
+        let err = char_builtin(vec![Value::Int(IntValue::U16(0xD800))])
+            .expect_err("surrogate is not a Rust char");
+        assert_eq!(err.identifier(), Some("RunMat:char:InvalidCodePoint"));
+        assert!(err.message().contains("surrogate code unit"));
+    }
+
+    #[test]
+    fn char_logical_extension_is_ordered_and_mode_gated_before_conversion() {
+        assert_eq!(CHAR_EXTENSIONS[0].id, "char-logical-input");
+        assert_eq!(CHAR_EXTENSIONS[1].id, "char-resident-numeric-input");
+
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = char_builtin(vec![Value::Bool(true)]).expect_err("logical extension gate");
+        assert_eq!(
+            err.identifier(),
+            CHAR_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -778,6 +869,7 @@ pub(crate) mod tests {
             register_wgpu_provider, WgpuProviderOptions,
         };
 
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ = register_wgpu_provider(WgpuProviderOptions::default());
 
         let tensor = Tensor::new(vec![82.0, 85.0, 78.0], vec![1, 3]).unwrap();

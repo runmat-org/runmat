@@ -1,9 +1,12 @@
 //! MATLAB-compatible `cell2struct` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, StructValue, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, StringArray, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -38,8 +41,8 @@ const INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "dim",
         ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1"),
         description: "Dimension whose entries correspond to field names.",
     },
 ];
@@ -73,6 +76,45 @@ pub const CELL2STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const CELL2STRUCT_PAYLOAD_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "C payload",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer payload values are structural data and pass through without conversion, including resident handles nested in C.",
+    }];
+const CELL2STRUCT_DIM_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "dim",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "All eight integer scalar classes and an exact positive integral double are accepted; dim defaults to 1.",
+}];
+
+pub const CELL2STRUCT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = cell2struct(C, fields, dim) with integer payload",
+        inputs: &CELL2STRUCT_PAYLOAD_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Payloads are cloned exactly into fields without eager gather. RunMat currently represents nonscalar struct arrays as cells of scalar structs; that representation mismatch is separate from payload preservation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "S = cell2struct(C, fields, integer_dim)",
+        inputs: &CELL2STRUCT_DIM_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "dim is decoded exactly from authoritative integer storage and must be positive and representable as usize.",
+    },
+];
+
 #[runtime_builtin(
     name = "cell2struct",
     category = "cells/core",
@@ -80,9 +122,19 @@ pub const CELL2STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "cell2struct,cell,struct,conversion",
     accel = "gather",
     descriptor(crate::builtins::cells::core::cell2struct::CELL2STRUCT_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::cells::core::cell2struct::CELL2STRUCT_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::cells::core::cell2struct"
 )]
-fn cell2struct_builtin(cells: Value, fields: Value, dim: Value) -> BuiltinResult<Value> {
+fn cell2struct_builtin(cells: Value, fields: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(error(
+            &ERROR_INVALID_INPUT,
+            "cell2struct: expected C, fields, and optional dim",
+        ));
+    }
+    let dim = rest.first().cloned().unwrap_or(Value::Num(1.0));
     let Value::Cell(cells) = cells else {
         return Err(error(
             &ERROR_INVALID_INPUT,
@@ -291,6 +343,16 @@ fn error(desc: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
+    use runmat_builtins::{IntValue, Tensor};
+
+    fn cell2struct_builtin(cells: Value, fields: Value, dim: Value) -> BuiltinResult<Value> {
+        super::cell2struct_builtin(cells, fields, vec![dim])
+    }
+
+    fn cell2struct_default(cells: Value, fields: Value) -> BuiltinResult<Value> {
+        super::cell2struct_builtin(cells, fields, Vec::new())
+    }
 
     #[test]
     fn scalar_struct_from_row_cell() {
@@ -303,6 +365,102 @@ mod tests {
         };
         assert_eq!(st.fields.get("id"), Some(&Value::Num(1.0)));
         assert_eq!(st.fields.get("name"), Some(&Value::from("Ada")));
+    }
+
+    #[test]
+    fn default_dimension_is_one_and_payload_is_exact() {
+        let cells = CellArray::new(
+            vec![
+                Value::Int(IntValue::U64(u64::MAX)),
+                Value::Int(IntValue::I64(i64::MIN)),
+            ],
+            2,
+            1,
+        )
+        .unwrap();
+        let fields = CellArray::new(vec![Value::from("hi"), Value::from("lo")], 2, 1).unwrap();
+        let Value::Struct(st) =
+            cell2struct_default(Value::Cell(cells), Value::Cell(fields)).unwrap()
+        else {
+            panic!("expected scalar struct");
+        };
+        assert_eq!(
+            st.fields.get("hi"),
+            Some(&Value::Int(IntValue::U64(u64::MAX)))
+        );
+        assert_eq!(
+            st.fields.get("lo"),
+            Some(&Value::Int(IntValue::I64(i64::MIN)))
+        );
+    }
+
+    #[test]
+    fn every_integer_dim_class_is_accepted_exactly() {
+        let dims = [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ];
+        for dim in dims {
+            let cells = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
+            let fields = CellArray::new(vec![Value::from("id")], 1, 1).unwrap();
+            assert!(matches!(
+                cell2struct_builtin(Value::Cell(cells), Value::Cell(fields), Value::Int(dim))
+                    .unwrap(),
+                Value::Struct(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn every_integer_payload_class_passes_through_exactly() {
+        for payload in [
+            IntValue::I8(-7),
+            IntValue::I16(-7),
+            IntValue::I32(-7),
+            IntValue::I64(-7),
+            IntValue::U8(7),
+            IntValue::U16(7),
+            IntValue::U32(7),
+            IntValue::U64(7),
+        ] {
+            let cells = CellArray::new(vec![Value::Int(payload.clone())], 1, 1).unwrap();
+            let fields = CellArray::new(vec![Value::from("value")], 1, 1).unwrap();
+            let Value::Struct(st) =
+                cell2struct_default(Value::Cell(cells), Value::Cell(fields)).unwrap()
+            else {
+                panic!("expected scalar struct");
+            };
+            assert_eq!(st.fields.get("value"), Some(&Value::Int(payload)));
+        }
+    }
+
+    #[test]
+    fn resident_payload_handle_passes_through_without_gather() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![7.0], vec![1, 1]).unwrap();
+            let data = tensor.materialize_f64();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).unwrap();
+            let cells = CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).unwrap();
+            let fields = CellArray::new(vec![Value::from("resident")], 1, 1).unwrap();
+            let Value::Struct(st) =
+                cell2struct_default(Value::Cell(cells), Value::Cell(fields)).unwrap()
+            else {
+                panic!("expected struct");
+            };
+            assert!(
+                matches!(st.fields.get("resident"), Some(Value::GpuTensor(actual)) if actual == &handle)
+            );
+        });
     }
 
     #[test]

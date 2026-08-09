@@ -3536,6 +3536,79 @@ fn cellfun_str2func_local_semantic_callback_executes() {
 }
 
 #[test]
+fn cellfun_compiled_identity_preserves_all_integer_classes_and_wide_values() {
+    let vars = execute_source(
+        "a = cellfun(@(x) x, {int8(-128), int8(127)}); b = cellfun(@(x) x, {int16(-32768), int16(32767)}); c = cellfun(@(x) x, {int32(-2147483648), int32(2147483647)}); d = cellfun(@(x) x, {int64(-7), int64(9)}); e = cellfun(@(x) x, {uint8(0), uint8(255)}); f = cellfun(@(x) x, {uint16(0), uint16(65535)}); g = cellfun(@(x) x, {uint32(0), uint32(4294967295)}); base = uint64(9007199254740992); h = cellfun(@(x) x, {base + uint64(1), base + uint64(2)});",
+    );
+    for expected in [
+        runmat_builtins::IntegerStorage::I8(vec![-128, 127]),
+        runmat_builtins::IntegerStorage::I16(vec![-32768, 32767]),
+        runmat_builtins::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        runmat_builtins::IntegerStorage::I64(vec![-7, 9]),
+        runmat_builtins::IntegerStorage::U8(vec![0, 255]),
+        runmat_builtins::IntegerStorage::U16(vec![0, 65535]),
+        runmat_builtins::IntegerStorage::U32(vec![0, u32::MAX]),
+        runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            vars.iter().any(|value| {
+                matches!(
+                    value,
+                    runmat_builtins::Value::Tensor(tensor)
+                        if tensor.integer_storage() == Some(&expected)
+                )
+            }),
+            "missing compiled cellfun storage {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn compiled_cell_container_integer_cohort_preserves_native_storage() {
+    let vars = execute_source(
+        "wide = uint64(9007199254740992) + uint64(1); a = cell2mat({wide, wide + uint64(1)}); s = cell2struct({wide}, {'value'}, uint8(1)); b = s.value; t = cell2table({uint16(7); uint16(9)}); c = t.Var1; text = char(uint16([65, 66]));",
+    );
+    for expected in [
+        runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+        runmat_builtins::IntegerStorage::U16(vec![7, 9]),
+    ] {
+        assert!(vars.iter().any(|value| {
+            matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.integer_storage() == Some(&expected))
+        }));
+    }
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_builtins::Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993))
+    )));
+    assert!(vars.iter().any(
+        |value| matches!(value, runmat_builtins::Value::CharArray(chars) if chars.data == vec!['A', 'B'])
+    ));
+}
+
+#[test]
+fn compiled_cellstr_rejects_integer_before_conversion() {
+    let err = execute_source_result("x = cellstr(uint8(65));").expect_err("integer cellstr");
+    assert_eq!(err.identifier(), Some("RunMat:cellstr:InvalidInput"));
+}
+
+#[test]
+fn compiled_numeric_integer_cohort_executes_in_runmat_mode() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "[n, wn] = cheb2ord(uint8(10), uint8(20), uint8(1), uint8(40), 's'); p = chi2cdf(uint16(3), uint16(5)); r = chol(uint16([4, 2; 2, 3])); sample = uint8([0; 3]); training = uint8([0; 1; 2; 3]); base = uint64(9007199254740992); group = [base + uint64(1); base + uint64(1); base + uint64(2); base + uint64(2)]; labels = classify(sample, training, group);",
+    );
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, runmat_builtins::Value::Num(number) if (*number - 5.0).abs() < 1.0e-12)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, runmat_builtins::Value::Num(number) if (*number - 0.300_014_164_121_372).abs() < 1.0e-12)));
+    assert!(vars.iter().any(|value| {
+        matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.integer_storage() == Some(&runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994])))
+    }));
+}
+
+#[test]
 fn arrayfun_str2func_local_semantic_callback_executes() {
     let vars = execute_source(
         "function y = inc(x); y = x + 1; end; xs = [1, 2]; ys = arrayfun(str2func('inc'), xs); total = sum(ys);",

@@ -16035,6 +16035,35 @@
           "when": "Internal cell2mat allocation or conversion failed.",
           "message": "cell2mat: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = cell2mat(C) for real integer cell contents",
+          "inputs": [
+            {
+              "name": "C contents",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "All eight integer classes are documented cell contents. Since R2025a, unlike integer classes may be concatenated; scalar double contents may coexist except with int64 or uint64."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Same-class contents remain exact. For mixed integer classes the leftmost nonempty integer class selects the output class and later contents saturate into it. Scalar doubles use the same assignment conversion except with int64/uint64. Resident contents currently gather to a host result; resident output preservation remains an explicit compatibility gap."
+        }
       ]
     },
     {
@@ -16062,8 +16091,8 @@
             {
               "name": "dim",
               "ty": "IntegerScalar",
-              "arity": "Required",
-              "default": null,
+              "arity": "Optional",
+              "default": "1",
               "description": "Dimension whose entries correspond to field names."
             }
           ],
@@ -16091,6 +16120,62 @@
           "when": "The number of field names does not match the selected cell dimension.",
           "message": "cell2struct: field count does not match selected dimension"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = cell2struct(C, fields, dim) with integer payload",
+          "inputs": [
+            {
+              "name": "C payload",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer payload values are structural data and pass through without conversion, including resident handles nested in C."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Payloads are cloned exactly into fields without eager gather. RunMat currently represents nonscalar struct arrays as cells of scalar structs; that representation mismatch is separate from payload preservation."
+        },
+        {
+          "form": "S = cell2struct(C, fields, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer scalar classes and an exact positive integral double are accepted; dim defaults to 1."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "dim is decoded exactly from authoritative integer storage and must be positive and representable as usize."
+        }
       ]
     },
     {
@@ -16099,30 +16184,30 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(A, ...)",
+          "label": "T = cell2table(C, Name, Value, ...)",
           "inputs": [
             {
-              "name": "A",
+              "name": "C",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
+              "description": "Two-dimensional cell array whose columns become table variables."
             },
             {
-              "name": "args",
+              "name": "Name,Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options or conversion arguments."
+              "description": "VariableNames and RowNames options."
             }
           ],
           "outputs": [
             {
-              "name": "out",
+              "name": "T",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Result value."
+              "description": "Table result."
             }
           ]
         }
@@ -16145,18 +16230,35 @@
           "identifier": "RunMat:table:InvalidVariable",
           "when": "A table variable name or value is invalid.",
           "message": "table: invalid variable"
-        },
+        }
+      ],
+      "integer_capabilities": [
         {
-          "code": "RM.READTABLE.IO",
-          "identifier": "RunMat:readtable:IOError",
-          "when": "readtable cannot open or read the requested file.",
-          "message": "readtable: file read failed"
-        },
-        {
-          "code": "RM.READTABLE.UNSUPPORTED_FILE",
-          "identifier": "RunMat:readtable:UnsupportedFileType",
-          "when": "readtable receives a file type outside the text or spreadsheet import backends.",
-          "message": "readtable: unsupported file type"
+          "form": "T = cell2table(C, Name,Value...) with integer cell contents",
+          "inputs": [
+            {
+              "name": "C contents",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "All eight integer classes may occur in cell contents. Compatible one-row values in a column are vertically concatenated into an integer table variable; scalar doubles may coexist except with int64 or uint64."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Homogeneous same-class integer columns preserve exact authoritative storage. Mixed integer columns use the leftmost integer class and saturating assignment; scalar doubles use that conversion except with int64/uint64. Incompatible columns remain cells. Nested resident objects are preserved without eager gather; resident numeric arrays are currently incompatible rather than concatenated into a resident variable."
         }
       ]
     },
@@ -16247,10 +16349,10 @@
             },
             {
               "name": "tf",
-              "ty": "LogicalArray",
+              "ty": "Any",
               "arity": "Required",
               "default": "true",
-              "description": "Whether callback outputs must be scalar-uniform."
+              "description": "Logical scalar, or legacy double scalar 0 or 1, selecting uniform output."
             }
           ],
           "outputs": [
@@ -16331,10 +16433,10 @@
             },
             {
               "name": "tf",
-              "ty": "LogicalArray",
+              "ty": "Any",
               "arity": "Required",
               "default": "true",
-              "description": "Whether callback outputs must be scalar-uniform."
+              "description": "Logical scalar, or legacy double scalar 0 or 1, selecting uniform output."
             },
             {
               "name": "ErrorHandler",
@@ -16393,6 +16495,80 @@
           "when": "Internal allocation or struct materialization fails.",
           "message": "cellfun: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = cellfun(func, C...) with integer cell contents",
+          "inputs": [
+            {
+              "name": "integer values stored in C",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer cell contents are passed to func in their authoritative native class after any required residency gather."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "cellfun performs structural extraction only. The callback determines arithmetic, overflow, and result class; UniformOutput=false preserves each returned value and its residency."
+        },
+        {
+          "form": "integer_Y = cellfun(func_returning_integer, C...) with UniformOutput=true",
+          "inputs": [
+            {
+              "name": "func or ErrorHandler scalar result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Uniform output requires the same scalar integer class on every invocation and concatenates the results without conversion through double."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Same-class scalar callback results are collected in authoritative native integer storage. Mixed integer classes, and mixtures of integer with noninteger results, reject the uniform-output contract."
+        },
+        {
+          "form": "Y = cellfun(func, C..., \"UniformOutput\", typed_integer)",
+          "inputs": [
+            {
+              "name": "UniformOutput",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The public control accepts logical true or false and legacy double 1 or 0; typed-integer controls are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "All eight typed-integer scalar and tensor control classes reject rather than being coerced to logical."
+        }
       ]
     },
     {
@@ -16441,7 +16617,11 @@
           "when": "Internal conversion or allocation failed.",
           "message": "cellstr: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "cellstr has no documented numeric or integer input form; all eight integer classes are rejected as non-text inputs before any resident-provider lookup."
+      }
     },
     {
       "name": "char",
@@ -16514,8 +16694,8 @@
         {
           "code": "RM.CHAR.INVALID_CODEPOINT",
           "identifier": "RunMat:char:InvalidCodePoint",
-          "when": "Numeric input is not a finite integer Unicode code point.",
-          "message": "char: numeric inputs must be finite Unicode code points"
+          "when": "Numeric input cannot be represented by RunMat's scalar-value character storage.",
+          "message": "char: numeric input cannot be represented as a RunMat character"
         },
         {
           "code": "RM.CHAR.INVALID_DIMENSION",
@@ -16529,6 +16709,49 @@
           "when": "Internal character array construction failed.",
           "message": "char: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "char-logical-input",
+          "mode": "RunMatOnly",
+          "description": "char with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CharLogicalInputExtension"
+        },
+        {
+          "id": "char-resident-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "char with interactive resident numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CharResidentNumericInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = char(integer_X) or char(X1, ..., XN)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented numeric-code inputs. Floating values truncate toward zero and all numeric codes clamp to the UTF-16 code-unit interval 0..65535."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Host integer values are decoded exactly, then clamped to 0..65535. RunMat CharArray stores Rust Unicode scalar values, so isolated UTF-16 surrogate code units U+D800..U+DFFF cannot yet be represented and produce an explicit error. Interactive resident numeric input is a mode-gated RunMat extension before gather."
+        }
       ]
     },
     {
@@ -16536,6 +16759,48 @@
       "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
+        {
+          "label": "n = cheb2ord(Wp, Ws, Rp, Rs)",
+          "inputs": [
+            {
+              "name": "Wp",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Passband edge or two-element passband edge vector."
+            },
+            {
+              "name": "Ws",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Stopband edge or two-element stopband edge vector."
+            },
+            {
+              "name": "Rp",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum passband ripple in dB."
+            },
+            {
+              "name": "Rs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum stopband attenuation in dB."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum Chebyshev Type II filter order."
+            }
+          ]
+        },
         {
           "label": "[n, Wn] = cheb2ord(Wp, Ws, Rp, Rs)",
           "inputs": [
@@ -16582,6 +16847,55 @@
               "arity": "Required",
               "default": null,
               "description": "Natural cutoff frequency or frequency pair for Chebyshev Type II design."
+            }
+          ]
+        },
+        {
+          "label": "n = cheb2ord(Wp, Ws, Rp, Rs, 's')",
+          "inputs": [
+            {
+              "name": "Wp",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog passband edge or edge pair in rad/s."
+            },
+            {
+              "name": "Ws",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog stopband edge or edge pair in rad/s."
+            },
+            {
+              "name": "Rp",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Maximum passband ripple in dB."
+            },
+            {
+              "name": "Rs",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum stopband attenuation in dB."
+            },
+            {
+              "name": "s",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Analog-design selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "n",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum Chebyshev Type II filter order."
             }
           ]
         },
@@ -16679,6 +16993,120 @@
           "when": "Output tensor construction fails internally.",
           "message": "cheb2ord: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "cheb2ord-integer-frequency",
+          "mode": "RunMatOnly",
+          "description": "cheb2ord with typed-integer passband or stopband frequencies is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Cheb2ordIntegerFrequencyExtension"
+        },
+        {
+          "id": "cheb2ord-integer-attenuation",
+          "mode": "RunMatOnly",
+          "description": "cheb2ord with typed-integer ripple or attenuation values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Cheb2ordIntegerAttenuationExtension"
+        },
+        {
+          "id": "cheb2ord-logical-input",
+          "mode": "RunMatOnly",
+          "description": "cheb2ord with logical numeric inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Cheb2ordLogicalInputExtension"
+        },
+        {
+          "id": "cheb2ord-resident-input",
+          "mode": "RunMatOnly",
+          "description": "cheb2ord with interactive resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Cheb2ordResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[n, Wn] = cheb2ord(integer_Wp, integer_Ws, Rp, Rs, ...)",
+          "inputs": [
+            {
+              "name": "Wp",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer passband edges are outside the documented single/double domain and enter a checked double computation boundary only in RunMat mode."
+            },
+            {
+              "name": "Ws",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer stopband edges are outside the documented single/double domain and enter a checked double computation boundary only in RunMat mode."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer frequency edges are validated from authoritative storage before deliberate double filter-order computation; interactive resident input is independently gated."
+        },
+        {
+          "form": "[n, Wn] = cheb2ord(Wp, Ws, integer_Rp, integer_Rs, ...)",
+          "inputs": [
+            {
+              "name": "Rp",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer ripple is a RunMat-only control and must be exactly representable at the double computation boundary."
+            },
+            {
+              "name": "Rs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer attenuation is a RunMat-only control and must be exactly representable at the double computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer ripple and attenuation controls are range-checked exactly before deliberate double filter-order computation."
+        }
       ]
     },
     {
@@ -16730,6 +17158,13 @@
               "arity": "Required",
               "default": null,
               "description": "Degrees of freedom parameter."
+            },
+            {
+              "name": "tail",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"upper\"",
+              "description": "Upper-tail selector (`\"upper\"`)."
             }
           ],
           "outputs": [
@@ -16755,6 +17190,82 @@
           "identifier": "RunMat:chi2cdf:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "normal distribution: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "chi2cdf-integer-x",
+          "mode": "RunMatOnly",
+          "description": "chi2cdf with typed-integer evaluation points is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Chi2cdfIntegerXExtension"
+        },
+        {
+          "id": "chi2cdf-integer-degrees-of-freedom",
+          "mode": "RunMatOnly",
+          "description": "chi2cdf with typed-integer degrees of freedom is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Chi2cdfIntegerDegreesOfFreedomExtension"
+        },
+        {
+          "id": "chi2cdf-logical-input",
+          "mode": "RunMatOnly",
+          "description": "chi2cdf with logical numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Chi2cdfLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = chi2cdf(integer_x, nu, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer evaluation points are outside the documented single/double input domain and cross a checked floating boundary only in RunMat mode."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "RunMat-only integer x is checked for exact binary64 representation before CDF evaluation; documented single input selects single output and documented resident calls return to the owning provider."
+        },
+        {
+          "form": "p = chi2cdf(x, integer_nu, ...)",
+          "inputs": [
+            {
+              "name": "nu",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer degrees of freedom are outside the documented single/double input domain and cross a checked floating boundary only in RunMat mode."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "RunMat-only integer nu is checked for exact binary64 representation before CDF evaluation; documented single input selects single output and documented resident calls return to the owning provider."
         }
       ]
     },
@@ -16900,6 +17411,49 @@
           "identifier": "RunMat:chol:Internal",
           "when": "Runtime cannot materialize Cholesky outputs.",
           "message": "chol: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "chol-integer-input",
+          "mode": "RunMatOnly",
+          "description": "chol with a typed-integer input matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CholIntegerInputExtension"
+        },
+        {
+          "id": "chol-logical-input",
+          "mode": "RunMatOnly",
+          "description": "chol with a logical input matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CholLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = chol(integer_A,...) and [R,p] = chol(integer_A,...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented matrix classes are single and double. RunMat mode admits all eight real integer classes after an exact binary64-boundary check."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer matrices enter the binary64 Cholesky computation only after compatibility and exactness checks. Resident integer input bypasses the floating provider hook, gathers exactly, and restores a double factor to the owning provider when possible."
         }
       ]
     },
@@ -17330,6 +17884,154 @@
           "identifier": "RunMat:classify:Internal",
           "when": "RunMat cannot construct classification outputs.",
           "message": "classify: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "classify-integer-sample",
+          "mode": "RunMatOnly",
+          "description": "classify with typed-integer sample observations is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClassifyIntegerSampleExtension"
+        },
+        {
+          "id": "classify-integer-training",
+          "mode": "RunMatOnly",
+          "description": "classify with typed-integer training observations is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClassifyIntegerTrainingExtension"
+        },
+        {
+          "id": "classify-integer-group",
+          "mode": "RunMatOnly",
+          "description": "classify with typed-integer group labels is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClassifyIntegerGroupExtension"
+        },
+        {
+          "id": "classify-integer-prior",
+          "mode": "RunMatOnly",
+          "description": "classify with typed-integer prior probabilities is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClassifyIntegerPriorExtension"
+        },
+        {
+          "id": "classify-logical-predictor",
+          "mode": "RunMatOnly",
+          "description": "classify with logical sample or training observations is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClassifyLogicalPredictorExtension"
+        },
+        {
+          "id": "classify-resident-input",
+          "mode": "RunMatOnly",
+          "description": "classify with GPU-resident inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClassifyResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "class = classify(integer_sample,training,group,...)",
+          "inputs": [
+            {
+              "name": "sample",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented predictor storage is single or double. RunMat mode accepts all eight integer classes at an exact binary64 statistical boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer sample observations enter the binary64 discriminant computation after compatibility and exactness checks."
+        },
+        {
+          "form": "class = classify(sample,integer_training,group,...)",
+          "inputs": [
+            {
+              "name": "training",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented predictor storage is single or double. RunMat mode accepts all eight integer classes at an exact binary64 statistical boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer training observations enter the binary64 discriminant computation after compatibility and exactness checks."
+        },
+        {
+          "form": "class = classify(sample,training,integer_group,...)",
+          "inputs": [
+            {
+              "name": "group",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat preserves exact integer label identity, ordering, and predicted output class; the documented numeric group-label classes are single and double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer group labels remain authoritative exact scalars and predicted labels reconstruct in the same integer class, including values above flintmax."
+        },
+        {
+          "form": "class = classify(sample,training,group,type,integer_prior)",
+          "inputs": [
+            {
+              "name": "prior",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode accepts typed-integer prior probability vectors, including the prob field of structured priors, after exact binary64-boundary validation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer prior probabilities enter normalization only after compatibility and exact binary64-boundary checks."
         }
       ]
     },

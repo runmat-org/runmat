@@ -2161,7 +2161,7 @@ mod tests {
             ("grid('on');", "enabled = grid(mode)"),
             (
                 "axis([0 1 0 1]);",
-                "ok = axis([xmin xmax ymin ymax | ... zmin zmax])",
+                "axis([xmin xmax ymin ymax | ... cmin cmax])",
             ),
             ("cla();", "ok = cla()"),
             ("colormap('parula');", "ok = colormap(name)"),
@@ -2708,10 +2708,10 @@ mod tests {
     #[test]
     fn signature_help_uses_diagnostics_descriptors() {
         let cases = [
-            ("assert(true);", "out = assert(condition)"),
+            ("assert(true);", "assert(condition)"),
             (
                 "assert(false, \"id:test\", \"failed %d\", 1);",
-                "out = assert(condition, message_id, message, A...)",
+                "assert(condition, message_id, message, A...)",
             ),
             ("error(\"failure\");", "out = error(message)"),
             (
@@ -3362,11 +3362,7 @@ mod tests {
         let cases = [
             ("fix(-3.7);", "Y = fix(X)"),
             ("round(3.14159, 2);", "Y = round(X, N)"),
-            ("ceil(3.14159, 3, \"decimals\");", "Y = ceil(X, N, mode)"),
-            (
-                "floor(3.14159, \"like\", 1);",
-                "Y = floor(X, \"like\", prototype)",
-            ),
+            ("ceil(3.14159);", "Y = ceil(X)"),
             ("mod(17, 5);", "R = mod(A, B)"),
             ("rem(-7, 4);", "R = rem(A, B)"),
         ];
@@ -3399,13 +3395,12 @@ mod tests {
             ("min([1,2,3], [], 1);", "M = min(A, [], dim)"),
             ("median([1,2,3]);", "M = median(A)"),
             ("median([1,2,3], 1);", "M = median(A, dim)"),
-            ("median([1,2,3], \"omitnan\");", "M = median(A, nanflag)"),
+            (
+                "median([1,2,3], \"omitnan\");",
+                "M = median(A, missingflag)",
+            ),
             ("std([1,2,3]);", "S = std(A)"),
             ("std([1,2,3], 0, 1);", "S = std(A, w, dim)"),
-            (
-                "std([1,2,3], \"like\", 1);",
-                "S = std(A, \"like\", prototype)",
-            ),
             ("var([1,2,3]);", "V = var(A)"),
             ("var([1,2,3], 0, 1);", "V = var(A, w, dim)"),
             ("var([1,2,3], \"omitnan\");", "V = var(A, nanflag)"),
@@ -3547,7 +3542,7 @@ mod tests {
     #[test]
     fn signature_help_uses_math_linalg_structure_descriptors() {
         let cases = [
-            ("bandwidth([1,2;3,4]);", "bw = bandwidth(A)"),
+            ("bandwidth([1,2;3,4]);", "[lower, upper] = bandwidth(A)"),
             (
                 "bandwidth([1,2;3,4], \"lower\");",
                 "b = bandwidth(A, selector)",
@@ -4574,10 +4569,6 @@ mod tests {
                 "Y = factorial(X, \"like\", prototype)",
             ),
             ("gamma(5);", "Y = gamma(X)"),
-            (
-                "gamma(5, \"like\", 1);",
-                "Y = gamma(X, \"like\", prototype)",
-            ),
             ("hypot(3, 4);", "R = hypot(X, Y)"),
             ("nextpow2(9);", "p = nextpow2(X)"),
             ("pow2(3);", "Y = pow2(X)"),

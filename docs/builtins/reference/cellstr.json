@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the host. GPU-resident inputs are gathered automatically and the result is always a host cell array."
+    "notes": "Runs entirely on the host. A top-level resident tensor rejects before provider access; resident numeric values nested in a cell are gathered recursively and then rejected as non-text. The result is always a host cell array."
   },
   "fusion": {
     "elementwise": false,
@@ -36,6 +36,7 @@
     "Empty character arrays result in empty cell arrays (for example, `0 × n` char arrays map to `0 × 1` cells). Empty strings become `\"\"` character vectors stored in single-cell outputs.",
     "Missing string scalars are rendered as the literal `'<missing>'`, matching MATLAB's textual representation.",
     "Inputs that are not text (numeric tensors, logical arrays, structs, GPU tensors, etc.) raise a MATLAB-compatible usage error.",
+    "Integer input is explicitly not applicable: scalar and tensor values from all eight integer classes are rejected before any provider lookup or conversion.",
     "Cell elements must already be text. Any numeric, logical, or GPU value inside the cell raises an error so that downstream code never sees non-text rows."
   ],
   "examples": [
@@ -123,8 +124,8 @@
     "label": "`crates/runmat-runtime/src/builtins/cells/core/cellstr.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cellstr.rs"
   },
-  "gpu_residency": "No. `cellstr` executes on the host. If the input originates from the GPU (for example, a cell array whose elements were gathered lazily), RunMat performs the gather automatically before formatting the text. The output always resides on the CPU heap, mirroring MATLAB where cell arrays of text are CPU-managed containers.",
+  "gpu_residency": "No. `cellstr` executes on the host and has no resident text representation. Top-level resident tensors reject before provider access. A resident numeric value nested in a cell is gathered by recursive container handling, then rejected because cell elements must be text. The output always resides on the CPU heap.",
   "gpu_behavior": [
-    "`cellstr` is a host-only builtin. If the input or any nested cell elements contain GPU tensors, RunMat gathers them to the host before conversion (including nested elements inside cell arrays). The resulting cell array is always allocated in host memory. No provider hooks are required at this stage, but the GPU metadata keeps the runtime aware that residency does not propagate past this builtin."
+    "`cellstr` is a host-only builtin. Top-level GPU tensors reject without gather. Recursive cell-container handling gathers a nested GPU tensor before text validation, after which the numeric value rejects; no resident text value is converted. Successful results are always allocated in host memory."
   ]
 }

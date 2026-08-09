@@ -1,9 +1,10 @@
 //! MATLAB-compatible `cellstr` builtin implemented for the modern RunMat runtime.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
+    StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -73,6 +74,13 @@ pub const CELLSTR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CELLSTR_ERRORS,
 };
 
+pub const CELLSTR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "cellstr has no documented numeric or integer input form; all eight integer classes are rejected as non-text inputs before any resident-provider lookup.",
+    };
+
 const CELLSTR_INPUT_NOT_TEXT_TEXT: &str =
     "cellstr: input must be a character array, string array, or cell array of character vectors";
 const CELLSTR_CELL_CONTENT_NOT_TEXT_TEXT: &str =
@@ -91,7 +99,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Host-only text conversion. Inputs originating on the GPU are gathered before processing, and the output is always a host cell array.",
+    notes: "Host-only text conversion. Current resident tensors are numeric/logical rather than text containers and are rejected before provider lookup; the output is always a host cell array.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::cells::core::cellstr")]
@@ -125,9 +133,16 @@ fn cellstr_error_with_message(
     accel = "gather",
     type_resolver(cellstr_type),
     descriptor(crate::builtins::cells::core::cellstr::CELLSTR_DESCRIPTOR),
+    integer_audit(crate::builtins::cells::core::cellstr::CELLSTR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::cells::core::cellstr"
 )]
 async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    if matches!(value, Value::GpuTensor(_)) {
+        return Err(cellstr_error_with_message(
+            CELLSTR_INPUT_NOT_TEXT_TEXT,
+            &CELLSTR_ERROR_INVALID_INPUT,
+        ));
+    }
     let host = gather_if_needed_async(&value).await?;
     match host {
         Value::CharArray(ca) => cellstr_from_char_array(ca),
@@ -457,6 +472,28 @@ pub(crate) mod tests {
             .expect_err("expected error")
             .to_string();
         assert!(err.contains("input must be"));
+    }
+
+    #[test]
+    fn integer_surface_is_explicitly_not_applicable_and_all_classes_reject() {
+        assert_eq!(
+            CELLSTR_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        let values = [
+            runmat_builtins::IntValue::I8(1),
+            runmat_builtins::IntValue::I16(1),
+            runmat_builtins::IntValue::I32(1),
+            runmat_builtins::IntValue::I64(1),
+            runmat_builtins::IntValue::U8(1),
+            runmat_builtins::IntValue::U16(1),
+            runmat_builtins::IntValue::U32(1),
+            runmat_builtins::IntValue::U64(1),
+        ];
+        for value in values {
+            let err = cellstr_builtin(Value::Int(value)).expect_err("integer must reject");
+            assert_eq!(err.identifier(), Some("RunMat:cellstr:InvalidInput"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

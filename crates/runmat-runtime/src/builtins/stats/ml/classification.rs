@@ -4,7 +4,11 @@ use std::cmp::Ordering;
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, LogicalArray, NumericDType, NumericScalar, NumericStorage,
     ResolveContext, StringArray, StructValue, Tensor, Type, Value,
@@ -164,6 +168,130 @@ pub const CLASSIFY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CLASSIFY_ERRORS,
 };
 
+const CLASSIFY_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "classify-integer-sample",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "classify with typed-integer sample observations is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ClassifyIntegerSampleExtension"),
+};
+const CLASSIFY_INTEGER_TRAINING_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "classify-integer-training",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "classify with typed-integer training observations is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ClassifyIntegerTrainingExtension"),
+    };
+const CLASSIFY_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "classify-integer-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "classify with typed-integer group labels is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ClassifyIntegerGroupExtension"),
+};
+const CLASSIFY_INTEGER_PRIOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "classify-integer-prior",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "classify with typed-integer prior probabilities is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ClassifyIntegerPriorExtension"),
+};
+const CLASSIFY_LOGICAL_PREDICTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "classify-logical-predictor",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "classify with logical sample or training observations is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ClassifyLogicalPredictorExtension"),
+    };
+const CLASSIFY_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "classify-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "classify with GPU-resident inputs is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ClassifyResidentInputExtension"),
+};
+
+pub const CLASSIFY_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    CLASSIFY_INTEGER_SAMPLE_EXTENSION,
+    CLASSIFY_INTEGER_TRAINING_EXTENSION,
+    CLASSIFY_INTEGER_GROUP_EXTENSION,
+    CLASSIFY_INTEGER_PRIOR_EXTENSION,
+    CLASSIFY_LOGICAL_PREDICTOR_EXTENSION,
+    CLASSIFY_RESIDENT_INPUT_EXTENSION,
+];
+
+const CLASSIFY_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sample",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented predictor storage is single or double. RunMat mode accepts all eight integer classes at an exact binary64 statistical boundary.",
+    }];
+const CLASSIFY_INTEGER_TRAINING_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "training",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented predictor storage is single or double. RunMat mode accepts all eight integer classes at an exact binary64 statistical boundary.",
+    }];
+const CLASSIFY_INTEGER_GROUP_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "group",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat preserves exact integer label identity, ordering, and predicted output class; the documented numeric group-label classes are single and double.",
+    }];
+const CLASSIFY_INTEGER_PRIOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "prior",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode accepts typed-integer prior probability vectors, including the prob field of structured priors, after exact binary64-boundary validation.",
+    }];
+
+pub const CLASSIFY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "class = classify(integer_sample,training,group,...)",
+        inputs: &CLASSIFY_INTEGER_SAMPLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer sample observations enter the binary64 discriminant computation after compatibility and exactness checks.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "class = classify(sample,integer_training,group,...)",
+        inputs: &CLASSIFY_INTEGER_TRAINING_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer training observations enter the binary64 discriminant computation after compatibility and exactness checks.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "class = classify(sample,training,integer_group,...)",
+        inputs: &CLASSIFY_INTEGER_GROUP_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer group labels remain authoritative exact scalars and predicted labels reconstruct in the same integer class, including values above flintmax.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "class = classify(sample,training,group,type,integer_prior)",
+        inputs: &CLASSIFY_INTEGER_PRIOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer prior probabilities enter normalization only after compatibility and exact binary64-boundary checks.",
+    },
+];
+
 fn classify_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -284,6 +412,10 @@ struct PredictionResult {
     keywords = "classify,discriminant analysis,lda,qda,classification,statistics,machine learning",
     type_resolver(classify_type),
     descriptor(crate::builtins::stats::ml::classification::CLASSIFY_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::classification::CLASSIFY_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::stats::ml::classification::CLASSIFY_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::stats::ml::classification"
 )]
 async fn classify_builtin(
@@ -299,6 +431,12 @@ async fn classify_builtin(
     if matches!(requested_outputs, Some(count) if count > 5) {
         return Err(invalid_argument("classify: too many output arguments"));
     }
+    if rest.len() > 2 {
+        return Err(invalid_argument(
+            "classify: accepts at most type and prior arguments",
+        ));
+    }
+    ensure_compatibility_extensions(&sample, &training, &group, &rest)?;
     let sample = gathered(sample).await?;
     let training = gathered(training).await?;
     let group = gathered(group).await?;
@@ -312,6 +450,74 @@ async fn classify_builtin(
         )),
         None => Ok(result[0].clone()),
     }
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn prior_struct_field<'a>(value: &'a Value, lower: &str, upper: &str) -> Option<&'a Value> {
+    let Value::Struct(prior) = value else {
+        return None;
+    };
+    prior.fields.get(lower).or_else(|| prior.fields.get(upper))
+}
+
+fn ensure_compatibility_extensions(
+    sample: &Value,
+    training: &Value,
+    group: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    for (value, extension) in [
+        (sample, &CLASSIFY_INTEGER_SAMPLE_EXTENSION),
+        (training, &CLASSIFY_INTEGER_TRAINING_EXTENSION),
+        (group, &CLASSIFY_INTEGER_GROUP_EXTENSION),
+    ] {
+        if is_typed_integer_value(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(extension, CLASSIFY_NAME)?;
+        }
+    }
+    if is_logical_value(sample) || is_logical_value(training) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CLASSIFY_LOGICAL_PREDICTOR_EXTENSION,
+            CLASSIFY_NAME,
+        )?;
+    }
+    if let Some(prior) = rest.get(1) {
+        if is_typed_integer_value(prior)
+            || prior_struct_field(prior, "prob", "Prob").is_some_and(is_typed_integer_value)
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CLASSIFY_INTEGER_PRIOR_EXTENSION,
+                CLASSIFY_NAME,
+            )?;
+        }
+        if prior_struct_field(prior, "group", "Group").is_some_and(is_typed_integer_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CLASSIFY_INTEGER_GROUP_EXTENSION,
+                CLASSIFY_NAME,
+            )?;
+        }
+    }
+    if [sample, training, group]
+        .into_iter()
+        .chain(rest.iter())
+        .any(crate::dispatcher::value_contains_gpu)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CLASSIFY_RESIDENT_INPUT_EXTENSION,
+            CLASSIFY_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 async fn gathered(value: Value) -> BuiltinResult<Value> {
@@ -399,6 +605,7 @@ fn numeric_matrix(value: Value, name: &str) -> BuiltinResult<FloatingMatrix> {
             "classify: {name} must be a 2-D numeric matrix"
         )));
     }
+    ensure_exact_integer_tensor_boundary(&tensor, name)?;
     Ok(FloatingMatrix {
         values: tensor.materialize_f64(),
         rows: tensor.rows,
@@ -938,14 +1145,51 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
                     "classify: {name} must be a vector"
                 )));
             }
+            ensure_exact_integer_tensor_boundary(tensor, name)?;
             Ok(tensor::tensor_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![*value]),
-        Value::Int(value) => Ok(vec![value.to_f64()]),
+        Value::Int(value) => {
+            ensure_exact_integer_scalar_boundary(NumericScalar::from(value.clone()), name)?;
+            Ok(vec![value.to_f64()])
+        }
         other => Err(invalid_argument(format!(
             "classify: {name} must be a numeric vector, got {other:?}"
         ))),
     }
+}
+
+fn ensure_exact_integer_tensor_boundary(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    for index in 0..tensor.len() {
+        if let Some(value) = tensor.numeric_value_at(index) {
+            ensure_exact_integer_scalar_boundary(value, name)?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_exact_integer_scalar_boundary(value: NumericScalar, name: &str) -> BuiltinResult<()> {
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    let integer = match value {
+        NumericScalar::I8(value) => Some(i128::from(value)),
+        NumericScalar::I16(value) => Some(i128::from(value)),
+        NumericScalar::I32(value) => Some(i128::from(value)),
+        NumericScalar::I64(value) => Some(i128::from(value)),
+        NumericScalar::U8(value) => Some(i128::from(value)),
+        NumericScalar::U16(value) => Some(i128::from(value)),
+        NumericScalar::U32(value) => Some(i128::from(value)),
+        NumericScalar::U64(value) => Some(i128::from(value)),
+        NumericScalar::F32(_) | NumericScalar::F64(_) => None,
+    };
+    if integer.is_some_and(|value| !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&value)) {
+        return Err(invalid_argument(format!(
+            "classify: {name} integer values must be exactly representable as double"
+        )));
+    }
+    Ok(())
 }
 
 fn unique_labels(labels: &[ClassLabel], kind: LabelKind) -> Vec<ClassLabel> {
@@ -1179,7 +1423,7 @@ fn canonical(text: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, NumericStorage};
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage, NumericStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1201,6 +1445,42 @@ mod tests {
     fn with_outputs<T>(count: usize, f: impl FnOnce() -> T) -> T {
         let _guard = crate::output_count::push_output_count(Some(count));
         f()
+    }
+
+    fn valid_floating_inputs() -> (Value, Value, Value) {
+        (
+            tensor(vec![0.2, 2.2], vec![2, 1]),
+            tensor(vec![0.0, 0.5, 2.0, 2.5], vec![4, 1]),
+            tensor(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]),
+        )
+    }
+
+    fn all_integer_storages(values: &[i8]) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(values.to_vec()),
+            IntegerStorage::I16(values.iter().map(|value| i16::from(*value)).collect()),
+            IntegerStorage::I32(values.iter().map(|value| i32::from(*value)).collect()),
+            IntegerStorage::I64(values.iter().map(|value| i64::from(*value)).collect()),
+            IntegerStorage::U8(values.iter().map(|value| *value as u8).collect()),
+            IntegerStorage::U16(values.iter().map(|value| *value as u16).collect()),
+            IntegerStorage::U32(values.iter().map(|value| *value as u32).collect()),
+            IntegerStorage::U64(values.iter().map(|value| *value as u64).collect()),
+        ]
+    }
+
+    #[test]
+    fn classify_registers_independent_integer_extensions_and_capabilities() {
+        let builtin = builtin_function_by_name(CLASSIFY_NAME).expect("classify builtin");
+        assert_eq!(builtin.extensions.len(), 6);
+        assert_eq!(builtin.integer_capabilities.len(), 4);
+        assert!(builtin
+            .integer_capabilities
+            .iter()
+            .all(|capability| capability.inputs[0].classes.len() == 8));
+        assert_eq!(
+            builtin.integer_capabilities[2].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
     }
 
     #[test]
@@ -1237,6 +1517,7 @@ mod tests {
 
     #[test]
     fn classify_accepts_typed_integer_numeric_inputs_and_groups() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         with_outputs(2, || {
             let values = classify(
                 int_tensor(IntegerStorage::I16(vec![0, 2]), vec![2, 1]),
@@ -1257,6 +1538,7 @@ mod tests {
 
     #[test]
     fn classify_preserves_native_single_and_wide_integer_group_labels() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         with_outputs(1, || {
             let values = classify(
                 tensor(vec![0.0, 3.0], vec![2, 1]),
@@ -1299,6 +1581,259 @@ mod tests {
                 NumericStorage::U64(vec![lower, upper])
             );
         });
+    }
+
+    #[test]
+    fn classify_preserves_all_integer_group_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_storages(&[1, 1, 2, 2]) {
+            let expected_dtype = storage.numeric_dtype();
+            with_outputs(1, || {
+                let (sample, training, _) = valid_floating_inputs();
+                let values = classify(
+                    sample,
+                    training,
+                    int_tensor(storage, vec![4, 1]),
+                    Vec::new(),
+                );
+                let Value::Tensor(labels) = &values[0] else {
+                    panic!("integer labels");
+                };
+                assert_eq!(labels.numeric_dtype(), expected_dtype);
+                assert_eq!(tensor::tensor_value_f64(labels, 0), 1.0);
+                assert_eq!(tensor::tensor_value_f64(labels, 1), 2.0);
+            });
+        }
+    }
+
+    #[test]
+    fn classify_executes_all_integer_predictor_and_prior_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for ((sample, training), prior) in all_integer_storages(&[0, 2])
+            .into_iter()
+            .zip(all_integer_storages(&[0, 1, 2, 3]))
+            .zip(all_integer_storages(&[1, 1]))
+        {
+            with_outputs(1, || {
+                let values = classify(
+                    int_tensor(sample, vec![2, 1]),
+                    int_tensor(training, vec![4, 1]),
+                    tensor(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]),
+                    vec![Value::from("linear"), int_tensor(prior, vec![2, 1])],
+                );
+                assert_eq!(values.len(), 1);
+            });
+        }
+    }
+
+    #[test]
+    fn classify_integer_roles_are_independently_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let cases = [
+            (
+                int_tensor(IntegerStorage::U8(vec![0, 2]), vec![2, 1]),
+                tensor(vec![0.0, 0.5, 2.0, 2.5], vec![4, 1]),
+                tensor(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]),
+                Vec::new(),
+                CLASSIFY_INTEGER_SAMPLE_EXTENSION.error_identifier,
+            ),
+            (
+                tensor(vec![0.2, 2.2], vec![2, 1]),
+                int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
+                tensor(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]),
+                Vec::new(),
+                CLASSIFY_INTEGER_TRAINING_EXTENSION.error_identifier,
+            ),
+            (
+                tensor(vec![0.2, 2.2], vec![2, 1]),
+                tensor(vec![0.0, 0.5, 2.0, 2.5], vec![4, 1]),
+                int_tensor(IntegerStorage::U32(vec![1, 1, 2, 2]), vec![4, 1]),
+                Vec::new(),
+                CLASSIFY_INTEGER_GROUP_EXTENSION.error_identifier,
+            ),
+            (
+                tensor(vec![0.2, 2.2], vec![2, 1]),
+                tensor(vec![0.0, 0.5, 2.0, 2.5], vec![4, 1]),
+                tensor(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]),
+                vec![
+                    Value::from("linear"),
+                    int_tensor(IntegerStorage::U16(vec![1, 1]), vec![2, 1]),
+                ],
+                CLASSIFY_INTEGER_PRIOR_EXTENSION.error_identifier,
+            ),
+        ];
+        for (sample, training, group, rest, identifier) in cases {
+            let err = block_on(classify_builtin(sample, training, group, rest))
+                .expect_err("integer role must be gated");
+            assert_eq!(err.identifier(), identifier);
+        }
+    }
+
+    #[test]
+    fn classify_logical_numeric_roles_are_independently_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let (sample, training, group) = valid_floating_inputs();
+        let logical_sample =
+            Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![2, 1]).expect("logical sample"));
+        let err = block_on(classify_builtin(
+            logical_sample,
+            training.clone(),
+            group.clone(),
+            Vec::new(),
+        ))
+        .expect_err("logical sample must be gated");
+        assert_eq!(
+            err.identifier(),
+            CLASSIFY_LOGICAL_PREDICTOR_EXTENSION.error_identifier
+        );
+
+        let logical_training = Value::LogicalArray(
+            LogicalArray::new(vec![0, 0, 1, 1], vec![4, 1]).expect("logical training"),
+        );
+        let err = block_on(classify_builtin(
+            sample.clone(),
+            logical_training,
+            group.clone(),
+            Vec::new(),
+        ))
+        .expect_err("logical training must be gated");
+        assert_eq!(
+            err.identifier(),
+            CLASSIFY_LOGICAL_PREDICTOR_EXTENSION.error_identifier
+        );
+
+        let err = block_on(classify_builtin(
+            sample,
+            training,
+            group,
+            vec![Value::from("linear"), Value::Bool(true)],
+        ))
+        .expect_err("logical prior must reject");
+        assert_eq!(err.identifier(), Some("RunMat:classify:InvalidArgument"));
+    }
+
+    #[test]
+    fn classify_guards_wide_integer_floating_boundaries_but_not_labels() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = (1_u64 << 53) + 1;
+        let (sample, training, group) = valid_floating_inputs();
+        let err = block_on(classify_builtin(
+            int_tensor(IntegerStorage::U64(vec![0, wide]), vec![2, 1]),
+            training.clone(),
+            group.clone(),
+            Vec::new(),
+        ))
+        .expect_err("wide sample must reject");
+        assert!(err.message().contains("sample integer values"));
+
+        let err = block_on(classify_builtin(
+            sample.clone(),
+            int_tensor(IntegerStorage::U64(vec![0, 1, 2, wide]), vec![4, 1]),
+            group.clone(),
+            Vec::new(),
+        ))
+        .expect_err("wide training must reject");
+        assert!(err.message().contains("training integer values"));
+
+        let err = block_on(classify_builtin(
+            sample,
+            training,
+            group,
+            vec![
+                Value::from("linear"),
+                int_tensor(IntegerStorage::U64(vec![1, wide]), vec![2, 1]),
+            ],
+        ))
+        .expect_err("wide prior must reject");
+        assert!(err.message().contains("prior integer values"));
+    }
+
+    #[test]
+    fn classify_resident_integer_gate_precedes_gather() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let sample = Tensor::new_integer(IntegerStorage::U8(vec![0, 2]), vec![2, 1])
+                .expect("integer sample");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &sample)
+                .expect("integer upload");
+            let (_, training, group) = valid_floating_inputs();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = block_on(classify_builtin(
+                Value::GpuTensor(handle.clone()),
+                training,
+                group,
+                Vec::new(),
+            ))
+            .expect_err("resident integer sample must gate before gather");
+            assert_eq!(
+                err.identifier(),
+                CLASSIFY_INTEGER_SAMPLE_EXTENSION.error_identifier
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(runmat_accelerate_api::IntegerElementType::U8)
+            );
+            let floating = Tensor::new(vec![0.2, 2.2], vec![2, 1]).expect("floating sample");
+            let floating_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &floating)
+                    .expect("floating upload");
+            let (_, training, group) = valid_floating_inputs();
+            let err = block_on(classify_builtin(
+                Value::GpuTensor(floating_handle.clone()),
+                training,
+                group,
+                Vec::new(),
+            ))
+            .expect_err("resident floating input must be independently gated");
+            assert_eq!(
+                err.identifier(),
+                CLASSIFY_RESIDENT_INPUT_EXTENSION.error_identifier
+            );
+            let logical_source = Tensor::new(vec![0.0, 1.0], vec![2, 1]).expect("logical sample");
+            let logical_handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &logical_source)
+                    .expect("logical upload");
+            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+            let (_, training, group) = valid_floating_inputs();
+            let err = block_on(classify_builtin(
+                Value::GpuTensor(logical_handle.clone()),
+                training,
+                group,
+                Vec::new(),
+            ))
+            .expect_err("resident logical sample must gate by type before residency");
+            assert_eq!(
+                err.identifier(),
+                CLASSIFY_LOGICAL_PREDICTOR_EXTENSION.error_identifier
+            );
+            let _ = provider.free(&handle);
+            let _ = provider.free(&floating_handle);
+            let _ = provider.free(&logical_handle);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn classify_wgpu_integer_sample_uses_checked_host_fallback() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("wgpu provider");
+        let sample = Tensor::new_integer(IntegerStorage::U8(vec![0, 3]), vec![2, 1]).unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &sample)
+            .expect("integer upload");
+        let (_, training, group) = valid_floating_inputs();
+        let result = block_on(classify_builtin(
+            Value::GpuTensor(handle),
+            training,
+            group,
+            Vec::new(),
+        ))
+        .expect("classify");
+        let Value::Tensor(labels) = result else {
+            panic!("expected host label tensor");
+        };
+        assert_eq!(labels.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[test]

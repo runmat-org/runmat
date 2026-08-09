@@ -1,9 +1,13 @@
 //! MATLAB-compatible `cellfun` builtin with host execution semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Closure, ComplexTensor, LogicalArray, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, Closure, ComplexTensor, IntValue, IntegerStorage,
+    LogicalArray, NumericScalar, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -47,6 +51,66 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "cellfun";
+
+const CELLFUN_INTEGER_CELL_CONTENTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer values stored in C",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer cell contents are passed to func in their authoritative native class after any required residency gather.",
+    }];
+
+const CELLFUN_INTEGER_CALLBACK_RESULT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "func or ErrorHandler scalar result",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "Uniform output requires the same scalar integer class on every invocation and concatenates the results without conversion through double.",
+    }];
+
+const CELLFUN_REJECTED_INTEGER_UNIFORM_OUTPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "UniformOutput",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The public control accepts logical true or false and legacy double 1 or 0; typed-integer controls are rejected.",
+    }];
+
+pub const CELLFUN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = cellfun(func, C...) with integer cell contents",
+        inputs: &CELLFUN_INTEGER_CELL_CONTENTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "cellfun performs structural extraction only. The callback determines arithmetic, overflow, and result class; UniformOutput=false preserves each returned value and its residency.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "integer_Y = cellfun(func_returning_integer, C...) with UniformOutput=true",
+        inputs: &CELLFUN_INTEGER_CALLBACK_RESULT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Same-class scalar callback results are collected in authoritative native integer storage. Mixed integer classes, and mixtures of integer with noninteger results, reject the uniform-output contract.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = cellfun(func, C..., \"UniformOutput\", typed_integer)",
+        inputs: &CELLFUN_REJECTED_INTEGER_UNIFORM_OUTPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "All eight typed-integer scalar and tensor control classes reject rather than being coerced to logical.",
+    },
+];
 
 const CELLFUN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -114,10 +178,10 @@ const CELLFUN_SIG_UNIFORM_OUTPUT_INPUTS: [BuiltinParamDescriptor; 4] = [
     },
     BuiltinParamDescriptor {
         name: "tf",
-        ty: BuiltinParamType::LogicalArray,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: Some("true"),
-        description: "Whether callback outputs must be scalar-uniform.",
+        description: "Logical scalar, or legacy double scalar 0 or 1, selecting uniform output.",
     },
 ];
 
@@ -176,10 +240,10 @@ const CELLFUN_SIG_BOTH_OPTIONS_INPUTS: [BuiltinParamDescriptor; 6] = [
     },
     BuiltinParamDescriptor {
         name: "tf",
-        ty: BuiltinParamType::LogicalArray,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: Some("true"),
-        description: "Whether callback outputs must be scalar-uniform.",
+        description: "Logical scalar, or legacy double scalar 0 or 1, selecting uniform output.",
     },
     BuiltinParamDescriptor {
         name: "ErrorHandler",
@@ -294,6 +358,7 @@ fn cellfun_error_with_message(
     accel = "host",
     type_resolver(cellfun_type),
     descriptor(crate::builtins::cells::core::cellfun::CELLFUN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::cells::core::cellfun::CELLFUN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
 async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -492,8 +557,7 @@ async fn execute_cell(
             }
         };
 
-        let host_value = gather_if_needed_async(&result).await?;
-        outputs.push(host_value);
+        outputs.push(result);
     }
 
     make_cell_with_shape(outputs, shape.to_vec())
@@ -537,35 +601,28 @@ async fn prepare_extra_args(extra_args: &[Value]) -> BuiltinResult<Vec<Value>> {
 fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(b),
-        Value::Num(n) => Ok(n != 0.0),
-        Value::Int(iv) => Ok(iv.to_f64() != 0.0),
-        Value::String(s) => parse_bool_string(&s).ok_or_else(|| {
-            cellfun_error_with_message(
-                "cellfun: UniformOutput must be logical true or false",
-                &CELLFUN_ERROR_UNIFORM_OUTPUT,
-            )
-        }),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let s: String = ca.data.iter().collect();
-            parse_bool_string(&s).ok_or_else(|| {
-                cellfun_error_with_message(
-                    "cellfun: UniformOutput must be logical true or false",
+        Value::LogicalArray(logical) if logical.len() == 1 => Ok(logical.data[0] != 0),
+        Value::Num(0.0) => Ok(false),
+        Value::Num(1.0) => Ok(true),
+        Value::Tensor(tensor)
+            if tensor.len() == 1
+                && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 =>
+        {
+            match tensor.numeric_value_at(0) {
+                Some(NumericScalar::F64(0.0)) => Ok(false),
+                Some(NumericScalar::F64(1.0)) => Ok(true),
+                _ => Err(cellfun_error_with_message(
+                    "cellfun: UniformOutput must be a logical scalar or double scalar 0 or 1",
                     &CELLFUN_ERROR_UNIFORM_OUTPUT,
-                )
-            })
+                )),
+            }
         }
         other => Err(cellfun_error_with_message(
-            format!("cellfun: UniformOutput must be logical true or false, got {other:?}"),
+            format!(
+                "cellfun: UniformOutput must be a logical scalar or double scalar 0 or 1, got {other:?}"
+            ),
             &CELLFUN_ERROR_UNIFORM_OUTPUT,
         )),
-    }
-}
-
-fn parse_bool_string(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "true" | "on" => Some(true),
-        "false" | "off" => Some(false),
-        _ => None,
     }
 }
 
@@ -890,8 +947,19 @@ impl SpecialCallable {
 enum UniformCollector {
     Pending,
     Double(Vec<f64>),
+    Integer {
+        prototype: IntegerStorage,
+        values: Vec<IntValue>,
+    },
     Logical(Vec<u8>),
     Complex(Vec<(f64, f64)>),
+}
+
+fn heterogeneous_uniform_output() -> RuntimeError {
+    cellfun_error_with_message(
+        "cellfun: callback outputs with UniformOutput=true must have the same data type on every invocation",
+        &CELLFUN_ERROR_UNIFORM_OUTPUT,
+    )
 }
 
 impl UniformCollector {
@@ -904,6 +972,13 @@ impl UniformCollector {
                 }
                 ClassifiedValue::Double(d) => {
                     *self = UniformCollector::Double(vec![d]);
+                    Ok(())
+                }
+                ClassifiedValue::Integer(value) => {
+                    *self = UniformCollector::Integer {
+                        prototype: IntegerStorage::from_scalar(value.clone()),
+                        values: vec![value],
+                    };
                     Ok(())
                 }
                 ClassifiedValue::Complex(c) => {
@@ -925,6 +1000,7 @@ impl UniformCollector {
                     *self = UniformCollector::Double(data);
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_uniform_output()),
                 ClassifiedValue::Complex(c) => {
                     let mut data: Vec<(f64, f64)> = bits
                         .iter()
@@ -944,6 +1020,7 @@ impl UniformCollector {
                     data.push(d);
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_uniform_output()),
                 ClassifiedValue::Complex(c) => {
                     let promoted: Vec<(f64, f64)> = data.iter().map(|&v| (v, 0.0)).collect();
                     let mut complex = promoted;
@@ -951,6 +1028,18 @@ impl UniformCollector {
                     *self = UniformCollector::Complex(complex);
                     Ok(())
                 }
+            },
+            UniformCollector::Integer { prototype, values } => match classify_value(value)? {
+                ClassifiedValue::Integer(value) => {
+                    if IntegerStorage::from_scalar(value.clone()).numeric_dtype()
+                        != prototype.numeric_dtype()
+                    {
+                        return Err(heterogeneous_uniform_output());
+                    }
+                    values.push(value);
+                    Ok(())
+                }
+                _ => Err(heterogeneous_uniform_output()),
             },
             UniformCollector::Complex(data) => match classify_value(value)? {
                 ClassifiedValue::Logical(b) => {
@@ -961,6 +1050,7 @@ impl UniformCollector {
                     data.push((d, 0.0));
                     Ok(())
                 }
+                ClassifiedValue::Integer(_) => Err(heterogeneous_uniform_output()),
                 ClassifiedValue::Complex(c) => {
                     data.push(c);
                     Ok(())
@@ -985,6 +1075,15 @@ impl UniformCollector {
                 })?;
                 Ok(Value::Tensor(tensor))
             }
+            UniformCollector::Integer { prototype, values } => {
+                let storage = prototype.from_same_class_values(values).map_err(|e| {
+                    cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL)
+                })?;
+                let tensor = Tensor::new_integer(storage, shape.to_vec()).map_err(|e| {
+                    cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL)
+                })?;
+                Ok(Value::Tensor(tensor))
+            }
             UniformCollector::Logical(bits) => {
                 let logical = LogicalArray::new(bits, shape.to_vec()).map_err(|e| {
                     cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL)
@@ -1004,6 +1103,7 @@ impl UniformCollector {
 enum ClassifiedValue {
     Logical(bool),
     Double(f64),
+    Integer(IntValue),
     Complex((f64, f64)),
 }
 
@@ -1011,14 +1111,26 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
     match value {
         Value::Bool(b) => Ok(ClassifiedValue::Logical(*b)),
         Value::Num(n) => Ok(ClassifiedValue::Double(*n)),
-        Value::Int(iv) => Ok(ClassifiedValue::Double(iv.to_f64())),
+        Value::Int(iv) => Ok(ClassifiedValue::Integer(iv.clone())),
         Value::Complex(re, im) => Ok(ClassifiedValue::Complex((*re, *im))),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            let value = t
-                .integer_storage()
-                .and_then(|storage| storage.value_at(0))
-                .map_or_else(|| tensor::tensor_value_f64(t, 0), |value| value.to_f64());
-            Ok(ClassifiedValue::Double(value))
+            match t.numeric_value_at(0).ok_or_else(|| {
+                cellfun_error_with_message(
+                    "cellfun: scalar tensor has no numeric storage value",
+                    &CELLFUN_ERROR_INTERNAL,
+                )
+            })? {
+                NumericScalar::F64(value) => Ok(ClassifiedValue::Double(value)),
+                NumericScalar::F32(value) => Ok(ClassifiedValue::Double(value as f64)),
+                value => Ok(ClassifiedValue::Integer(
+                    value.into_int_value().ok_or_else(|| {
+                        cellfun_error_with_message(
+                            "cellfun: integer scalar classification failed",
+                            &CELLFUN_ERROR_INTERNAL,
+                        )
+                    })?,
+                )),
+            }
         }
         Value::LogicalArray(la) if la.data.len() == 1 => {
             Ok(ClassifiedValue::Logical(la.data[0] != 0))
@@ -1057,11 +1169,172 @@ pub(crate) mod tests {
                 .expect("integer tensor");
 
         match classify_value(&Value::Tensor(tensor)).expect("classify") {
-            ClassifiedValue::Double(value) => {
-                assert_eq!(value, 9_007_199_254_740_993_u64 as f64);
+            ClassifiedValue::Integer(value) => {
+                assert_eq!(value, IntValue::U64(9_007_199_254_740_993));
             }
-            _ => panic!("expected double classification"),
+            _ => panic!("expected integer classification"),
         }
+    }
+
+    #[test]
+    fn uniform_collector_preserves_every_integer_class_and_wide_values() {
+        let cases = [
+            (
+                IntValue::I8(i8::MIN),
+                IntValue::I8(i8::MAX),
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            ),
+            (
+                IntValue::I16(i16::MIN),
+                IntValue::I16(i16::MAX),
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            ),
+            (
+                IntValue::I32(i32::MIN),
+                IntValue::I32(i32::MAX),
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            ),
+            (
+                IntValue::I64(i64::MIN),
+                IntValue::I64(i64::MAX),
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            ),
+            (
+                IntValue::U8(0),
+                IntValue::U8(u8::MAX),
+                IntegerStorage::U8(vec![0, u8::MAX]),
+            ),
+            (
+                IntValue::U16(0),
+                IntValue::U16(u16::MAX),
+                IntegerStorage::U16(vec![0, u16::MAX]),
+            ),
+            (
+                IntValue::U32(0),
+                IntValue::U32(u32::MAX),
+                IntegerStorage::U32(vec![0, u32::MAX]),
+            ),
+            (
+                IntValue::U64(9_007_199_254_740_993),
+                IntValue::U64(u64::MAX),
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            ),
+        ];
+
+        for (first, second, expected) in cases {
+            let mut collector = UniformCollector::Pending;
+            collector.push(&Value::Int(first)).expect("first value");
+            collector.push(&Value::Int(second)).expect("second value");
+            let Value::Tensor(output) = collector.finish(&[1, 2]).expect("finish") else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn uniform_collector_rejects_mixed_integer_classes_and_integer_double_mix() {
+        let mut mixed_integer = UniformCollector::Pending;
+        mixed_integer
+            .push(&Value::Int(IntValue::I8(1)))
+            .expect("first value");
+        let error = mixed_integer
+            .push(&Value::Int(IntValue::I16(2)))
+            .expect_err("mixed integer classes must reject");
+        assert_eq!(error.identifier(), Some("RunMat:cellfun:UniformOutput"));
+
+        let mut integer_double = UniformCollector::Pending;
+        integer_double
+            .push(&Value::Int(IntValue::U64(9_007_199_254_740_993)))
+            .expect("first value");
+        let error = integer_double
+            .push(&Value::Num(1.0))
+            .expect_err("integer/double mix must reject");
+        assert_eq!(error.identifier(), Some("RunMat:cellfun:UniformOutput"));
+    }
+
+    #[test]
+    fn cellfun_identity_preserves_all_integer_classes_in_uniform_output() {
+        for storage in [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ] {
+            let values = storage
+                .exact_values()
+                .into_iter()
+                .map(Value::Int)
+                .collect::<Vec<_>>();
+            let cell = crate::make_cell(values, 1, 2).expect("cell");
+            let result = cellfun_builtin(Value::String("@__cellfun_identity".into()), vec![cell])
+                .expect("cellfun identity");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(output.integer_storage(), Some(&storage));
+        }
+    }
+
+    #[test]
+    fn uniform_output_false_preserves_callback_result_residency() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                    .expect("tensor");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload");
+            let returned_handle = handle.clone();
+            let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+                Arc::new(move |function, _args, requested_outputs| {
+                    assert_eq!(function, 392);
+                    assert_eq!(requested_outputs, 1);
+                    let output = Value::GpuTensor(returned_handle.clone());
+                    Box::pin(async move { Ok(output) })
+                }),
+            ));
+            let input = crate::make_cell(vec![Value::Num(1.0)], 1, 1).expect("cell");
+            let result = cellfun_builtin(
+                Value::BoundFunctionHandle {
+                    name: "resident_result".into(),
+                    function: 392,
+                },
+                vec![
+                    input,
+                    Value::String("UniformOutput".into()),
+                    Value::Bool(false),
+                ],
+            )
+            .expect("cellfun");
+            let Value::Cell(output) = result else {
+                panic!("expected cell output");
+            };
+            assert_eq!(output.data, vec![Value::GpuTensor(handle.clone())]);
+            let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn metadata_documents_integer_input_and_uniform_result_forms() {
+        assert_eq!(CELLFUN_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(CELLFUN_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(
+            CELLFUN_INTEGER_CAPABILITIES[1].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+        assert_eq!(
+            CELLFUN_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            CELLFUN_INTEGER_CAPABILITIES[2].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Rejected
+        );
+        assert!(CELLFUN_INTEGER_CAPABILITIES[2].inputs[0].classes.is_empty());
     }
 
     #[test]
@@ -1560,22 +1833,73 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn cellfun_uniformoutput_accepts_char_flags() {
-        let strings =
-            crate::make_cell(vec![Value::String("Ada".into())], 1, 1).expect("cell creation");
-        let result = cellfun_builtin(
-            Value::String("@upper".into()),
-            vec![
-                strings,
-                Value::CharArray(runmat_builtins::CharArray::new_row("UniformOutput")),
-                Value::CharArray(runmat_builtins::CharArray::new_row("off")),
-            ],
-        )
-        .expect("cellfun upper char flag");
-        assert!(
-            matches!(result, Value::Cell(_)),
-            "expected cell array result when UniformOutput is 'off'"
-        );
+    fn cellfun_uniformoutput_accepts_logical_and_legacy_double_zero_or_one() {
+        for (control, expected) in [
+            (Value::Bool(false), false),
+            (Value::Bool(true), true),
+            (
+                Value::LogicalArray(LogicalArray::new(vec![0], vec![1, 1]).unwrap()),
+                false,
+            ),
+            (
+                Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+                true,
+            ),
+            (Value::Num(0.0), false),
+            (Value::Num(1.0), true),
+            (
+                Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+                false,
+            ),
+            (
+                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+                true,
+            ),
+        ] {
+            assert_eq!(parse_uniform_output(control).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn cellfun_uniformoutput_rejects_typed_integer_controls_for_every_class() {
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ] {
+            for control in [
+                Value::Int(storage.value_at(0).expect("scalar")),
+                Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).expect("tensor")),
+            ] {
+                let error = parse_uniform_output(control)
+                    .expect_err("typed-integer UniformOutput must reject");
+                assert_eq!(error.identifier(), Some("RunMat:cellfun:UniformOutput"));
+            }
+        }
+    }
+
+    #[test]
+    fn cellfun_uniformoutput_rejects_other_numeric_and_text_values() {
+        for control in [
+            Value::Num(-1.0),
+            Value::Num(2.0),
+            Value::Num(f64::NAN),
+            Value::Num(f64::INFINITY),
+            Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
+            Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap()),
+            Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap()),
+            Value::String("off".into()),
+            Value::CharArray(runmat_builtins::CharArray::new_row("false")),
+        ] {
+            let error = parse_uniform_output(control)
+                .expect_err("unsupported UniformOutput control must reject");
+            assert_eq!(error.identifier(), Some("RunMat:cellfun:UniformOutput"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

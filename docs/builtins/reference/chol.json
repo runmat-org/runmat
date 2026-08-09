@@ -14,6 +14,7 @@
     "elementwise": false,
     "reduction": false,
     "precisions": [
+      "f32",
       "f64"
     ],
     "broadcasting": "none",
@@ -36,7 +37,10 @@
     "Two outputs (`[R, p] = chol(A)`): Returns the factor `R` and a flag `p`. When `p > 0`, `R` contains the partial factorization up to the `(p-1)`-th column.",
     "Lower form (`chol(A, 'lower')`): Returns a lower-triangular factor `L` such that `L * L' = A`. The two-output variant `[L, p] = chol(A, 'lower')` follows the same failure semantics.",
     "The option `'upper'` is accepted for completeness and matches the default behaviour.",
-    "Real logical inputs are promoted to double precision. Complex inputs must be Hermitian positive definite (HPD); the factor preserves complex values.",
+    "Typed-integer and logical matrices are mode-gated RunMat extensions. Integer values from all eight classes must lie within the exact-integer binary64 range and produce a double factor.",
+    "Single input preserves single output. Complex inputs must be Hermitian positive definite (HPD), and the factor preserves complex values.",
+    "Only the selected upper or lower triangle determines the factorization; values in the opposite triangle are ignored.",
+    "Sparse input and the public third-output form remain general runtime gaps.",
     "Scalar and `0×0` inputs are supported. `chol([])` returns an empty matrix with `p = 0`."
   ],
   "examples": [

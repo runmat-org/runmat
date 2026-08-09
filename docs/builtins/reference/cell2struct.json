@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host container conversion."
+    "notes": "Container conversion is structural. Nested resident values pass through unchanged and are not gathered."
   },
   "fusion": {
     "elementwise": false,
@@ -25,6 +25,8 @@
   "behaviors": [
     "`fields` may be a string scalar, string array, character matrix, character vector, or cell array of text scalars.",
     "The selected dimension must have the same extent as the number of field names.",
+    "The dimension defaults to 1 and accepts exact positive scalar values from all eight integer classes.",
+    "Integer payloads remain exact values in their original class, including wide `int64` and `uint64` values.",
     "When the remaining dimensions contain a single element, the result is a scalar struct.",
     "Larger remaining dimensions are represented as a RunMat struct-array cell container."
   ],

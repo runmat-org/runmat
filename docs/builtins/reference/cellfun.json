@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "cellfun executes on the host. GPU-resident elements are gathered automatically before the callback is invoked."
+    "notes": "Callback dispatch is host-controlled. With `UniformOutput`, false, callback result values retain their residency; uniform packed output is materialized by the host collector."
   },
   "fusion": {
     "elementwise": false,
@@ -32,9 +32,11 @@
     "All cell array inputs must share the same size. Extra arguments that are **not** cell arrays are treated as constants and forwarded to every invocation.",
     "The callback may be supplied as a function handle (`@sin`), an anonymous function, or one of MATLAB's short string identifiers (for example `'isempty'` or `'isclass'`).",
     "With `'UniformOutput', true` (default) the callback must return scalars (numeric, logical, or complex). The results are packed into an array that mirrors the cell array shape. Mixed real/complex outputs automatically promote to complex.",
+    "Uniform typed-integer scalar results preserve the exact class and native storage for all eight integer classes; mixed integer classes and integer/double mixtures are rejected.",
+    "`UniformOutput` accepts logical scalars or legacy double scalars exactly equal to 0 or 1. Typed-integer, single-precision, text, and other numeric control values are rejected.",
     "With `'UniformOutput', false` the callback may return arbitrary values; RunMat stores them in a new cell array that matches the input dimensions.",
     "`'ErrorHandler', handler` intercepts runtime errors. When the callback throws, RunMat calls `handler(errStruct, cellValue1, cellValue2, ..., extraArg1, extraArg2, ...)`. The structure contains the fields `identifier`, `message`, `index` (1-based linear index), and `indices` (1×N vector of subscripts). The handler's return value is inserted into the result.",
-    "GPU values inside the cells are gathered to host memory before the callback runs so that uniform outputs can be materialised in CPU tensors today."
+    "The public multiple-callback-output form remains a general runtime gap; the current callback path requests one result per cell."
   ],
   "examples": [
     {
@@ -88,7 +90,7 @@
     },
     {
       "question": "Are GPU arrays supported?",
-      "answer": "Yes. Inputs that live on the GPU are automatically gathered before the callback executes so the function can operate on host values. The final result is host-resident today."
+      "answer": "Inputs that live on the GPU are gathered before the callback executes. Uniform packed output is host-resident; with `'UniformOutput', false`, a GPU value returned by the callback remains resident inside the result cell."
     },
     {
       "question": "How are errors reported to `'ErrorHandler'`?",
@@ -162,7 +164,7 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs"
   },
   "gpu_behavior": [
-    "`cellfun` itself is a host operation. RunMat gathers GPU-resident inputs before calling the callback and stores the outputs on the host. This guarantees deterministic behaviour even when the callback returns GPU arrays. Future acceleration hooks can elide the gather step when providers support nested callbacks, but no provider work is required for correctness today."
+    "`cellfun` itself is host-controlled. RunMat gathers GPU-resident inputs before calling the callback. Uniform packed output is materialized on the host, while `'UniformOutput', false` stores callback results in cells without gathering a returned GPU value."
   ],
   "syntax": {
     "example": {
