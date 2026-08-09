@@ -411,19 +411,9 @@ fn typed_complex_integer_dot_is_rejected_before_f64_coercion() {
 }
 
 #[test]
-fn typed_complex_integer_cross_is_rejected_before_f64_coercion() {
-    for operation in ["cross(z, z)", "cross(z, [1 2 3])", "cross([1 2 3], z)"] {
-        let source = format!(
-            "z = complex(uint64([9223372036854775808 2 3]), uint64([1 2 3])); out = {operation};"
-        );
-        let err = execute_source(&source).expect_err("cross must reject typed complex integers");
-        assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ),
-            "unexpected cross error: {err}"
-        );
-    }
+fn typed_complex_integer_cross_uses_runmat_double_extension() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source("a = complex(int16([1 0 0]), int16([1 0 0])); b = complex(uint16([0 1 0]), uint16([0 1 0])); c = cross(a,b); if ~strcmp(class(c),'double') || ~isequal(size(c),[1 3]) || isreal(c) || real(c(3)) ~= 0 || imag(c(3)) ~= 2; error('typed complex cross mismatch'); end;").expect("typed complex cross");
 }
 
 #[test]
@@ -521,11 +511,6 @@ fn typed_complex_integer_polynomial_and_convolution_operations_are_rejected_befo
         ("polyint indexed scalar constant", "polyint([1 2], z(1, 1))"),
         ("polyval coefficients", "polyval(z(1, :), [1 2])"),
         ("polyval points", "polyval([1 2], z(1, :))"),
-        ("conv left", "conv(z(1, :), [1 2])"),
-        ("conv right", "conv([1 2], z(1, :))"),
-        ("conv2 left", "conv2(z, [1 2; 3 4])"),
-        ("conv2 right", "conv2([1 2; 3 4], z)"),
-        ("conv2 separable signal", "conv2([1 2], [3 4], z)"),
         ("deconv numerator", "deconv(z(1, :), [1 2])"),
         ("deconv denominator", "deconv([1 2], z(1, :))"),
     ];
@@ -542,6 +527,11 @@ fn typed_complex_integer_polynomial_and_convolution_operations_are_rejected_befo
             "{name} returned an unexpected error: {err}"
         );
     }
+}
+
+#[test]
+fn typed_integer_conv_and_conv2_cross_to_documented_double_outputs() {
+    execute_source("a = uint64([9007199254740993 2]); b = int16([1 2]); c = conv(a,b); if ~strcmp(class(c),'double') || ~isequal(size(c),[1 3]); error('integer conv mismatch'); end; m = uint32([1 2;3 4]); k = int8([1 0;0 -1]); d = conv2(m,k,'same'); if ~strcmp(class(d),'double') || ~isequal(size(d),[2 2]); error('integer conv2 mismatch'); end; z = complex(int16([1 2]),int16([1 -1])); q = conv(z,int8(2)); if ~strcmp(class(q),'double') || real(q(1)) ~= 2 || imag(q(1)) ~= 2; error('complex integer conv mismatch'); end;").expect("typed integer convolution script");
 }
 
 #[test]

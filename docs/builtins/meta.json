@@ -22353,14 +22353,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z rows."
+              "description": "X coordinate vector matching Z columns or coordinate matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z columns."
+              "description": "Y coordinate vector matching Z rows or coordinate matrix matching Z."
             },
             {
               "name": "Z",
@@ -22388,14 +22388,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z rows."
+              "description": "X coordinate vector matching Z columns or coordinate matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z columns."
+              "description": "Y coordinate vector matching Z rows or coordinate matrix matching Z."
             },
             {
               "name": "Z",
@@ -22430,14 +22430,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z rows."
+              "description": "X coordinate vector matching Z columns or coordinate matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z columns."
+              "description": "Y coordinate vector matching Z rows or coordinate matrix matching Z."
             },
             {
               "name": "Z",
@@ -22470,6 +22470,34 @@
               "description": "Handle to filled contour plot."
             }
           ]
+        },
+        {
+          "label": "h = contourf(ax, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes object."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Any supported filled-contour data, level, line-specification, and property arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to filled contour plot."
+            }
+          ]
         }
       ],
       "errors": [
@@ -22484,6 +22512,446 @@
           "identifier": "RunMat:contourf:Internal",
           "when": "Internal filled-contour render preparation fails unexpectedly.",
           "message": "contourf: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "contour-integer-line-color",
+          "mode": "RunMatOnly",
+          "description": "contour with a typed-integer RGB line color is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContourIntegerLineColorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = contourf(integer_Z)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative integer heights are validated exactly and then cross the client filled-contour boundary; resident integer grids gather through their owning provider instead of entering the floating WGPU path."
+        },
+        {
+          "form": "h = contourf(integer_Z, integer_N)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."
+            },
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A scalar integer selects a positive bounded contour-level count through exact structural validation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Z crosses the graphics boundary after exact validation while N remains exact through positive allocation-bound validation."
+        },
+        {
+          "form": "h = contourf(integer_Z, integer_V)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."
+            },
+            {
+              "name": "V",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented integer level vector is checked for exact monotonic order before graphics conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer level order and height distinctness are established before client graphics conversion."
+        },
+        {
+          "form": "h = contourf(integer_X, integer_Y, integer_Z)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly for shape, orientation, and strict monotonicity."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly for shape, orientation, and strict monotonicity."
+            },
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinate shape, matrix orientation, monotonicity, and height distinctness are checked from authoritative integer storage before filled-contour conversion."
+        },
+        {
+          "form": "h = contourf(integer_X, integer_Y, integer_Z, integer_N)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly before graphics conversion."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly before graphics conversion."
+            },
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."
+            },
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A scalar integer selects a positive bounded contour-level count through exact structural validation."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinates and heights cross the graphics boundary after exact validation; N is a bounded structural count."
+        },
+        {
+          "form": "h = contourf(integer_X, integer_Y, integer_Z, integer_V)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly before graphics conversion."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly before graphics conversion."
+            },
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."
+            },
+            {
+              "name": "V",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented integer level vector is checked for exact monotonic order before graphics conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinate and level order are exact before the explicit client graphics conversion; resident integer inputs gather."
+        },
+        {
+          "form": "h = contourf(..., 'LevelList', integer_levels)",
+          "inputs": [
+            {
+              "name": "LevelList",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented property accepts every built-in integer class as an exact monotonically increasing level vector."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "LevelList is ordered from authoritative integer storage and then crosses the floating contour-level boundary."
+        },
+        {
+          "form": "h = contourf(..., 'LevelStep', integer_step)",
+          "inputs": [
+            {
+              "name": "LevelStep",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented property accepts every built-in integer class as a positive scalar spacing."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "LevelStep is validated as one positive scalar and then crosses the f32 graphics-property boundary."
+        },
+        {
+          "form": "h = contourf(..., 'LineWidth', integer_width)",
+          "inputs": [
+            {
+              "name": "LineWidth",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A positive scalar integer line width crosses the explicit graphics-property boundary after scalar validation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "LineWidth is validated as one positive scalar and then crosses the f32 graphics-property boundary."
+        },
+        {
+          "form": "h = contourf(..., 'LineColor', integer_rgb)",
+          "inputs": [
+            {
+              "name": "LineColor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode admits a typed-integer RGB triplet only when every exact component is 0 or 1."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The shared RunMat-only integer RGB gate precedes owning-provider gather; exact 0/1 validation follows gather and precedes f32 conversion."
         }
       ]
     },
@@ -22598,6 +23066,51 @@
           "identifier": "RunMat:conv:BuildComplexOutput",
           "when": "Output complex tensor allocation fails.",
           "message": "conv: failed to build complex tensor"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "w = conv(integer_u, integer_v, shape?)",
+          "inputs": [
+            {
+              "name": "u",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight real or complex integer classes are documented; values cross the explicit floating convolution boundary before multiplication and accumulation."
+            },
+            {
+              "name": "v",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Mixed integer classes are documented and independently converted to the selected floating output domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The output is single when either numeric input is single and double otherwise; integer and logical inputs never produce an integer result. Full orientation follows the R2026a both-columns rule, while same/valid follow u. Resident integer inputs gather exactly through their owning provider before floating convolution and the floating result is restored to that provider."
         }
       ]
     },
@@ -22801,6 +23314,110 @@
           "identifier": "RunMat:conv2:BuildComplexOutput",
           "when": "Output complex tensor allocation fails.",
           "message": "conv2: failed to build complex tensor"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = conv2(integer_A, integer_B, shape?)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight real or complex integer classes are documented and cross the floating convolution boundary before arithmetic."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Mixed integer classes are documented and converted independently to the selected floating output domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The output is single when any numeric input is single and double otherwise. Integer inputs never produce an integer result; resident integers gather exactly before the direct convolution boundary."
+        },
+        {
+          "form": "C = conv2(integer_u, integer_v, integer_A, shape?)",
+          "inputs": [
+            {
+              "name": "u",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The separable column kernel accepts all eight real or complex integer classes."
+            },
+            {
+              "name": "v",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The separable row kernel accepts all eight real or complex integer classes."
+            },
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The signal matrix accepts all eight real or complex integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The separable form applies the same single-dominant floating output rule across all three numeric arguments and preserves documented full/same/valid shapes."
         }
       ]
     },
@@ -23266,7 +23883,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Destination axes or figure handle."
+              "description": "Destination axes handle compatible with the plot child."
             }
           ],
           "outputs": [
@@ -23292,6 +23909,88 @@
           "identifier": "RunMat:copyobj:Internal",
           "when": "Internal graphics state lookup or copy registration fails.",
           "message": "copyobj: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "copyobj-integer-handle-aliases",
+          "mode": "RunMatOnly",
+          "description": "copyobj with typed-integer numeric graphics-handle aliases is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CopyobjIntegerHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "hnew = copyobj(integer_h, parent)",
+          "inputs": [
+            {
+              "name": "h",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode treats exactly representable nonnegative host integers as aliases for its numeric graphics-handle representation; the public contract accepts graphics objects, not integer arrays."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "A separately gated RunMat alias reads authoritative host integer storage, rejects values that cannot be represented exactly by RunMat's f64 graphics registry, validates every source before mutation, and returns fresh host graphics handles."
+        },
+        {
+          "form": "hnew = copyobj(h, integer_parent)",
+          "inputs": [
+            {
+              "name": "parent",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode treats exactly representable nonnegative host integers as aliases for numeric axes handles; resident numeric arrays are not graphics objects."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "A separately gated RunMat alias resolves authoritative host integers as axes parents before any copy is made; output handles follow the controlling source/parent shape."
+        },
+        {
+          "form": "copyobj(resident_integer_handle_alias, ...)",
+          "inputs": [
+            {
+              "name": "resident h or parent",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident integer arrays are numeric data rather than graphics objects and reject without provider gather."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "GPU-resident numeric arrays are not graphics-object handles; copyobj performs no provider dispatch or implicit gather."
         }
       ]
     },
@@ -24270,6 +24969,61 @@
           "when": "Internal tensor conversion/allocation/provider flow failed.",
           "message": "cos: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "cos-integer-input",
+          "mode": "RunMatOnly",
+          "description": "cos with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosIntegerInputExtension"
+        },
+        {
+          "id": "cos-logical-input",
+          "mode": "RunMatOnly",
+          "description": "cos with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosLogicalInputExtension"
+        },
+        {
+          "id": "cos-character-input",
+          "mode": "RunMatOnly",
+          "description": "cos with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosCharacterInputExtension"
+        },
+        {
+          "id": "cos-like-output",
+          "mode": "RunMatOnly",
+          "description": "cos with a like output prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosLikeOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = cos(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are admitted only when exactly representable at the binary64 transcendental boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode checks authoritative integer storage before conversion; host output is double and resident fallback returns through the owning provider."
+        }
       ]
     },
     {
@@ -24312,6 +25066,55 @@
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "cosd: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "cosd-integer-input",
+          "mode": "RunMatOnly",
+          "description": "cosd with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosdIntegerInputExtension"
+        },
+        {
+          "id": "cosd-logical-input",
+          "mode": "RunMatOnly",
+          "description": "cosd with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosdLogicalInputExtension"
+        },
+        {
+          "id": "cosd-character-input",
+          "mode": "RunMatOnly",
+          "description": "cosd with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosdCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = cosd(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes require exact binary64 representability before degree reduction."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode validates native integer storage before the floating degree boundary; the output is double and resident fallback is restored to the owner."
+        }
       ]
     },
     {
@@ -24353,6 +25156,55 @@
           "identifier": "RunMat:cosh:Internal",
           "when": "Internal gather/conversion/allocation/provider flow failed.",
           "message": "cosh: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cosh-integer-input",
+          "mode": "RunMatOnly",
+          "description": "cosh with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CoshIntegerInputExtension"
+        },
+        {
+          "id": "cosh-logical-input",
+          "mode": "RunMatOnly",
+          "description": "cosh with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CoshLogicalInputExtension"
+        },
+        {
+          "id": "cosh-character-input",
+          "mode": "RunMatOnly",
+          "description": "cosh with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CoshCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = cosh(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes require exact binary64 representability before hyperbolic evaluation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode validates native integer storage before conversion; large finite inputs may naturally overflow to Inf and resident fallback returns through the owner."
         }
       ]
     },
@@ -24522,6 +25374,77 @@
           "when": "Matrix inputs have different numbers of columns.",
           "message": "cosineSimilarity: matrix dimensions are not compatible"
         }
+      ],
+      "extensions": [
+        {
+          "id": "cosine-similarity-integer-matrix",
+          "mode": "RunMatOnly",
+          "description": "cosineSimilarity with typed-integer matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosineSimilarityIntegerMatrixExtension"
+        },
+        {
+          "id": "cosine-similarity-single-matrix",
+          "mode": "RunMatOnly",
+          "description": "cosineSimilarity with single matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosineSimilaritySingleMatrixExtension"
+        },
+        {
+          "id": "cosine-similarity-logical-matrix",
+          "mode": "RunMatOnly",
+          "description": "cosineSimilarity with logical matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosineSimilarityLogicalMatrixExtension"
+        },
+        {
+          "id": "cosine-similarity-resident-input",
+          "mode": "RunMatOnly",
+          "description": "cosineSimilarity with resident matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CosineSimilarityResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "similarities = cosineSimilarity(integer_M1, integer_M2?)",
+          "inputs": [
+            {
+              "name": "M1",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Real or typed-complex integer matrix values must be exactly representable at the binary64 norm and inner-product boundary."
+            },
+            {
+              "name": "M2",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The optional second matrix follows the same exact binary64 boundary and column-count rule."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat mode validates authoritative integer components before double norm/dot evaluation; real output is host sparse double, while complex output remains a dense complex-double representation gap."
+        }
       ]
     },
     {
@@ -24563,6 +25486,55 @@
           "identifier": "RunMat:cospi:Internal",
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "cospi: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cospi-integer-input",
+          "mode": "RunMatOnly",
+          "description": "cospi with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CospiIntegerInputExtension"
+        },
+        {
+          "id": "cospi-logical-input",
+          "mode": "RunMatOnly",
+          "description": "cospi with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CospiLogicalInputExtension"
+        },
+        {
+          "id": "cospi-character-input",
+          "mode": "RunMatOnly",
+          "description": "cospi with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CospiCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = cospi(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are evaluated from authoritative storage, so integer parity remains exact even above flintmax."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat mode computes exact +/-1 directly from integer parity without binary64 conversion; resident integer inputs gather exactly and restore double output to the owner."
         }
       ]
     },
@@ -25180,6 +26152,127 @@
           "identifier": "RunMat:cross:Internal",
           "when": "Runtime cannot materialize cross outputs.",
           "message": "cross: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cross-integer-a",
+          "mode": "RunMatOnly",
+          "description": "cross with a typed-integer A operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CrossIntegerAExtension"
+        },
+        {
+          "id": "cross-integer-b",
+          "mode": "RunMatOnly",
+          "description": "cross with a typed-integer B operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CrossIntegerBExtension"
+        },
+        {
+          "id": "cross-logical-a",
+          "mode": "RunMatOnly",
+          "description": "cross with a logical A operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CrossLogicalAExtension"
+        },
+        {
+          "id": "cross-logical-b",
+          "mode": "RunMatOnly",
+          "description": "cross with a logical B operand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CrossLogicalBExtension"
+        },
+        {
+          "id": "cross-integer-dim",
+          "mode": "RunMatOnly",
+          "description": "cross with a typed-integer dim argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CrossIntegerDimExtension"
+        },
+        {
+          "id": "cross-logical-dim",
+          "mode": "RunMatOnly",
+          "description": "cross with a logical dim argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CrossLogicalDimExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = cross(integer_A, B, dim?)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Rejected",
+              "notes": "MATLAB documents only single and double data operands; RunMat mode admits every real or complex integer class at an explicit floating boundary, with single output when the other data operand is single and double otherwise."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer data crosses a floating boundary. The result is single when either data operand is single and double otherwise; matching shapes and the length-three operating dimension are preserved. Resident integer inputs gather exactly before conversion and eligible results return to the owning provider."
+        },
+        {
+          "form": "C = cross(A, integer_B, dim?)",
+          "inputs": [
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Rejected",
+              "notes": "The independently gated B operand accepts every real or complex integer class in RunMat mode."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The B role has the same independently gated RunMat-only floating-boundary behavior and single-dominant output-class rule."
+        },
+        {
+          "form": "C = cross(A, B, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public cross reference documents a positive-integer scalar dim but does not list typed integer classes. RunMat mode accepts every typed integer class exactly; an ordinary double-valued integer scalar remains documented behavior."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "dim controls traversal only; floating data output preserves the supported input precision and residency path."
         }
       ]
     },

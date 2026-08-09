@@ -2870,7 +2870,7 @@ fn apply_conv_mode_real(
             if len_a == 0 {
                 return Vec::new();
             }
-            let start = if len_b == 0 { 0 } else { (len_b - 1) / 2 };
+            let start = if len_b == 0 { 0 } else { len_b / 2 };
             let end = (start + len_a).min(full.len());
             if start >= end {
                 Vec::new()
@@ -2879,6 +2879,9 @@ fn apply_conv_mode_real(
             }
         }
         ProviderConvMode::Valid => {
+            if len_b == 0 {
+                return vec![0.0; len_a];
+            }
             if len_a < len_b {
                 Vec::new()
             } else {
@@ -2915,12 +2918,11 @@ fn conv2d_full_real(
             }
             for kc in 0..kernel_cols {
                 let out_c = sc + kc;
-                let kcol = kernel_cols - 1 - kc;
                 for kr in 0..kernel_rows {
                     let out_r = sr + kr;
-                    let krow = kernel_rows - 1 - kr;
-                    // Convolution flips the kernel (rotate 180°).
-                    let kval = kernel[kcol * kernel_rows + krow];
+                    // The output-index sum already implements the convolution
+                    // formula; reversing the kernel here would compute correlation.
+                    let kval = kernel[kc * kernel_rows + kr];
                     out[out_c * full_rows + out_r] += aval * kval;
                 }
             }
@@ -2975,8 +2977,8 @@ fn apply_conv2_mode_real_2d(
             if a_rows == 0 || a_cols == 0 {
                 return (Vec::new(), a_rows, a_cols);
             }
-            let row_start = if b_rows == 0 { 0 } else { (b_rows - 1) / 2 };
-            let col_start = if b_cols == 0 { 0 } else { (b_cols - 1) / 2 };
+            let row_start = b_rows / 2;
+            let col_start = b_cols / 2;
             slice_matrix_real(
                 full,
                 full_rows,
@@ -7379,9 +7381,18 @@ impl AccelProvider for InProcessProvider {
         let signal_len: usize = signal.shape.iter().copied().product();
         let kernel_len: usize = kernel.shape.iter().copied().product();
 
-        if signal_len == 0 || kernel_len == 0 {
+        if signal_len == 0 {
             let shape = conv1d_output_shape(0, options.orientation);
             return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+        if kernel_len == 0 {
+            let data = if matches!(options.mode, ProviderConvMode::Valid) {
+                vec![0.0; signal_len]
+            } else {
+                Vec::new()
+            };
+            let shape = conv1d_output_shape(data.len(), options.orientation);
+            return Ok(self.allocate_tensor(data, shape));
         }
 
         if matches!(options.mode, ProviderConvMode::Valid) && signal_len < kernel_len {
@@ -10179,6 +10190,66 @@ mod tests {
         IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
     };
     use runmat_builtins::{IntValue, IntegerStorage};
+
+    #[test]
+    fn conv1d_valid_empty_kernel_returns_signal_length_zeros() {
+        let provider = InProcessProvider::new();
+        let signal = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0],
+                shape: &[3, 1],
+            })
+            .unwrap();
+        let kernel = provider
+            .upload(&HostTensorView {
+                data: &[],
+                shape: &[0, 1],
+            })
+            .unwrap();
+        let output = provider
+            .conv1d(
+                &signal,
+                &kernel,
+                ProviderConv1dOptions {
+                    mode: ProviderConvMode::Valid,
+                    orientation: ProviderConvOrientation::Column,
+                },
+            )
+            .unwrap();
+        let output = block_on(provider.download(&output)).unwrap();
+        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.data, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn conv1d_same_even_kernel_uses_matlab_alignment() {
+        let provider = InProcessProvider::new();
+        let signal = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0],
+                shape: &[1, 5],
+            })
+            .unwrap();
+        let kernel = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[1, 4],
+            })
+            .unwrap();
+        let output = provider
+            .conv1d(
+                &signal,
+                &kernel,
+                ProviderConv1dOptions {
+                    mode: ProviderConvMode::Same,
+                    orientation: ProviderConvOrientation::Row,
+                },
+            )
+            .unwrap();
+        let output = block_on(provider.download(&output)).unwrap();
+        assert_eq!(output.shape, vec![1, 5]);
+        assert_eq!(output.data, vec![10.0, 20.0, 30.0, 34.0, 31.0]);
+    }
 
     #[test]
     fn simple_provider_broadcast_canonicalizes_one_dimensional_row_shorthand() {

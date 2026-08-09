@@ -76,9 +76,13 @@ pub fn handle_from_integer(value: &IntValue, ctx: &str) -> BuiltinResult<FigureH
 /// Plotting currently represents object handles as f64, so only integers that f64 can carry
 /// exactly are accepted here.
 pub fn numeric_handle_from_integer(value: &IntValue) -> Option<f64> {
-    const MAX_EXACT_F64_INTEGER: u64 = 1 << 53;
     let raw = value.try_to_u64()?;
-    (raw <= MAX_EXACT_F64_INTEGER).then_some(raw as f64)
+    if raw == 0 {
+        return Some(0.0);
+    }
+    let significant_bits = u64::BITS - raw.leading_zeros();
+    let discarded_bits = significant_bits.saturating_sub(f64::MANTISSA_DIGITS);
+    (raw.trailing_zeros() >= discarded_bits).then_some(raw as f64)
 }
 
 pub fn numeric_handle_scalar(value: &Value) -> Option<f64> {

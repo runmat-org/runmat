@@ -3,12 +3,17 @@
 //! Implements 3-element vector cross products for row vectors, column vectors,
 //! matrices of vectors, and higher-rank tensors. GPU inputs dispatch to a
 //! provider-side `cross` hook when available and otherwise fall back to the
-//! host implementation with result re-upload for real-valued outputs.
+//! host implementation with result re-upload when the owning provider can
+//! preserve the documented floating class and complexity.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -119,6 +124,59 @@ pub const CROSS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CROSS_ERRORS,
 };
 
+pub const CROSS_INTEGER_A_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cross-integer-a",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cross with a typed-integer A operand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CrossIntegerAExtension"),
+};
+pub const CROSS_INTEGER_B_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cross-integer-b",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cross with a typed-integer B operand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CrossIntegerBExtension"),
+};
+pub const CROSS_LOGICAL_A_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cross-logical-a",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cross with a logical A operand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CrossLogicalAExtension"),
+};
+pub const CROSS_LOGICAL_B_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cross-logical-b",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cross with a logical B operand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CrossLogicalBExtension"),
+};
+pub const CROSS_INTEGER_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cross-integer-dim",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cross with a typed-integer dim argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CrossIntegerDimExtension"),
+};
+pub const CROSS_LOGICAL_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cross-logical-dim",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cross with a logical dim argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CrossLogicalDimExtension"),
+};
+pub const CROSS_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    CROSS_INTEGER_A_EXTENSION,
+    CROSS_INTEGER_B_EXTENSION,
+    CROSS_LOGICAL_A_EXTENSION,
+    CROSS_LOGICAL_B_EXTENSION,
+    CROSS_INTEGER_DIM_EXTENSION,
+    CROSS_LOGICAL_DIM_EXTENSION,
+];
+const CROSS_INTEGER_A_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Rejected, notes: "MATLAB documents only single and double data operands; RunMat mode admits every real or complex integer class at an explicit floating boundary, with single output when the other data operand is single and double otherwise." }];
+const CROSS_INTEGER_B_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Rejected, notes: "The independently gated B operand accepts every real or complex integer class in RunMat mode." }];
+const CROSS_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "dim", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The public cross reference documents a positive-integer scalar dim but does not list typed integer classes. RunMat mode accepts every typed integer class exactly; an ordinary double-valued integer scalar remains documented behavior." }];
+pub const CROSS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor { form: "C = cross(integer_A, B, dim?)", inputs: &CROSS_INTEGER_A_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only integer data crosses a floating boundary. The result is single when either data operand is single and double otherwise; matching shapes and the length-three operating dimension are preserved. Resident integer inputs gather exactly before conversion and eligible results return to the owning provider." },
+    BuiltinIntegerCapabilityDescriptor { form: "C = cross(A, integer_B, dim?)", inputs: &CROSS_INTEGER_B_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The B role has the same independently gated RunMat-only floating-boundary behavior and single-dominant output-class rule." },
+    BuiltinIntegerCapabilityDescriptor { form: "C = cross(A, B, integer_dim)", inputs: &CROSS_INTEGER_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "dim controls traversal only; floating data output preserves the supported input precision and residency path." },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::cross")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "cross",
@@ -132,7 +190,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Dispatches to a provider-side cross implementation when available; otherwise gathers inputs, evaluates on the host, and re-uploads real-valued outputs.",
+    notes: "Dispatches same-provider, same-device real floating inputs to a provider-side cross implementation only when the returned handle has the required precision, real storage, input device, and provider ownership; otherwise gathers inputs, evaluates on the host, and re-uploads only when the owner can preserve class and complexity.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::ops::cross")]
@@ -173,9 +231,70 @@ fn cross_internal_error(message: impl Into<String>) -> RuntimeError {
     cross_error_with_message(message, &CROSS_ERROR_INTERNAL)
 }
 
+fn is_typed_integer_operand(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || crate::builtins::common::validation::is_typed_complex_integer(value)
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_logical_operand(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn ensure_cross_data_extensions(lhs: &Value, rhs: &Value) -> BuiltinResult<()> {
+    if is_typed_integer_operand(lhs) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CROSS_INTEGER_A_EXTENSION,
+            CROSS_NAME,
+        )?;
+    }
+    if is_typed_integer_operand(rhs) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CROSS_INTEGER_B_EXTENSION,
+            CROSS_NAME,
+        )?;
+    }
+    if is_logical_operand(lhs) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CROSS_LOGICAL_A_EXTENSION,
+            CROSS_NAME,
+        )?;
+    }
+    if is_logical_operand(rhs) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CROSS_LOGICAL_B_EXTENSION,
+            CROSS_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_cross_dimension_extension(dim: &Value) -> BuiltinResult<()> {
+    if is_typed_integer_operand(dim) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CROSS_INTEGER_DIM_EXTENSION,
+            CROSS_NAME,
+        )?;
+    }
+    if is_logical_operand(dim) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CROSS_LOGICAL_DIM_EXTENSION,
+            CROSS_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(_) | Value::Num(_) | Value::Tensor(_) | Value::LogicalArray(_) => {
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Bool(_)
+        | Value::Tensor(_)
+        | Value::LogicalArray(_)
+        | Value::GpuTensor(_) => {
             let dim = tensor::dimension_from_value_async(value, CROSS_NAME, false)
                 .await
                 .map_err(cross_invalid_argument)?;
@@ -220,6 +339,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "cross,vector product,3d vector,gpu,linear algebra",
     accel = "custom",
     type_resolver(cross_type),
+    extensions(CROSS_EXTENSIONS),
+    integer_capabilities(CROSS_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::linalg::ops::cross::CROSS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::cross"
 )]
@@ -227,19 +348,62 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
     if rest.len() > 1 {
         return Err(cross_invalid_argument("cross: too many input arguments"));
     }
-    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, CROSS_NAME)?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, CROSS_NAME)?;
+    ensure_cross_data_extensions(&lhs, &rhs)?;
     let dim = match rest.first() {
-        Some(value) => Some(parse_dimension_arg(value).await?),
+        Some(value) => {
+            let dim = parse_dimension_arg(value).await?;
+            ensure_cross_dimension_extension(value)?;
+            Some(dim)
+        }
         None => None,
     };
+    let owner = match (&lhs, &rhs) {
+        (Value::GpuTensor(handle), _) | (_, Value::GpuTensor(handle)) => Some(handle.clone()),
+        _ => None,
+    };
+    let single_output = value_uses_single(&lhs) || value_uses_single(&rhs);
+    let complex_output = value_is_complex(&lhs) || value_is_complex(&rhs);
 
     if let (Value::GpuTensor(lhs_handle), Value::GpuTensor(rhs_handle)) = (&lhs, &rhs) {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            match provider.cross(lhs_handle, rhs_handle, dim) {
-                Ok(handle) => return Ok(Value::GpuTensor(handle)),
-                Err(err) => {
-                    log::trace!("cross: provider cross fallback triggered: {err}");
+        let requires_floating_boundary = runmat_accelerate_api::handle_integer_type(lhs_handle)
+            .is_some()
+            || runmat_accelerate_api::handle_integer_type(rhs_handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(lhs_handle)
+            || runmat_accelerate_api::handle_is_logical(rhs_handle);
+        if !requires_floating_boundary
+            && !complex_output
+            && lhs_handle.device_id == rhs_handle.device_id
+        {
+            if let (Some(provider), Some(rhs_provider)) = (
+                runmat_accelerate_api::provider_for_handle(lhs_handle),
+                runmat_accelerate_api::provider_for_handle(rhs_handle),
+            ) {
+                if !std::ptr::eq(provider, rhs_provider) {
+                    // Mixed-owner handles must gather independently.
+                } else {
+                    let expected = if single_output {
+                        runmat_accelerate_api::ProviderPrecision::F32
+                    } else {
+                        runmat_accelerate_api::ProviderPrecision::F64
+                    };
+                    match provider.cross(lhs_handle, rhs_handle, dim) {
+                        Ok(handle)
+                            if native_result_matches_provider(
+                                &handle,
+                                lhs_handle.device_id,
+                                provider,
+                                expected,
+                            ) =>
+                        {
+                            return Ok(Value::GpuTensor(handle));
+                        }
+                        Ok(handle) => {
+                            free_rejected_native_handle(&handle, provider);
+                        }
+                        Err(err) => {
+                            log::trace!("cross: provider cross fallback triggered: {err}");
+                        }
+                    }
                 }
             }
         }
@@ -260,25 +424,70 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
     let value = if has_complex {
         let lhs_complex = value_into_complex_tensor(lhs_host)?;
         let rhs_complex = value_into_complex_tensor(rhs_host)?;
-        let result = cross_complex_tensor(&lhs_complex, &rhs_complex, dim)?;
+        let result = cross_complex_tensor(&lhs_complex, &rhs_complex, dim, single_output)?;
         complex_tensor_into_value(result)
     } else {
         let lhs_tensor =
             tensor::value_into_tensor_for(CROSS_NAME, lhs_host).map_err(cross_invalid_input)?;
         let rhs_tensor =
             tensor::value_into_tensor_for(CROSS_NAME, rhs_host).map_err(cross_invalid_input)?;
-        let result = cross_real_tensor(&lhs_tensor, &rhs_tensor, dim)?;
+        let result = cross_real_tensor(&lhs_tensor, &rhs_tensor, dim, single_output)?;
         if lhs_gpu || rhs_gpu {
-            return promote_real_result_to_gpu(result);
+            return promote_real_result_to_gpu(result, owner.as_ref(), single_output);
         }
         tensor::tensor_into_value(result)
     };
 
+    if let (Some(owner), Value::ComplexTensor(tensor)) = (owner.as_ref(), &value) {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(owner) {
+            let expected = if single_output {
+                runmat_accelerate_api::ProviderPrecision::F32
+            } else {
+                runmat_accelerate_api::ProviderPrecision::F64
+            };
+            if provider.precision() != expected {
+                return Ok(value);
+            }
+            return gpu_helpers::upload_complex_tensor(provider, tensor)
+                .map(gpu_helpers::complex_gpu_value);
+        }
+    }
     Ok(value)
+}
+
+fn native_result_matches_provider(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    input_device: u32,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    expected_precision: runmat_accelerate_api::ProviderPrecision,
+) -> bool {
+    handle.device_id == input_device
+        && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
+        && runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn free_rejected_native_handle(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) {
+    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
+    if let Err(err) = owner.free(handle) {
+        log::trace!("cross: failed to free rejected provider result: {err}");
+    }
 }
 
 fn value_is_complex(value: &Value) -> bool {
     matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_storage(handle) == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
+}
+
+fn value_uses_single(value: &Value) -> bool {
+    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_precision(handle) == Some(runmat_accelerate_api::ProviderPrecision::F32))
 }
 
 fn value_into_complex_tensor(value: Value) -> BuiltinResult<ComplexTensor> {
@@ -328,10 +537,20 @@ pub fn cross_host_real_for_provider(
     b: &Tensor,
     dim: Option<usize>,
 ) -> BuiltinResult<Tensor> {
-    cross_real_tensor(a, b, dim)
+    cross_real_tensor(
+        a,
+        b,
+        dim,
+        a.numeric_dtype() == NumericDType::F32 || b.numeric_dtype() == NumericDType::F32,
+    )
 }
 
-fn cross_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<Tensor> {
+fn cross_real_tensor(
+    a: &Tensor,
+    b: &Tensor,
+    dim: Option<usize>,
+    single_output: bool,
+) -> BuiltinResult<Tensor> {
     ensure_same_size(a, b)?;
 
     let shape = canonical_shape_tensor(a);
@@ -358,19 +577,34 @@ fn cross_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResul
             let b2 = b_values[idx2];
             let b3 = b_values[idx3];
 
-            output[idx1] = a2 * b3 - a3 * b2;
-            output[idx2] = a3 * b1 - a1 * b3;
-            output[idx3] = a1 * b2 - a2 * b1;
+            if single_output {
+                output[idx1] = f64::from((a2 as f32) * (b3 as f32) - (a3 as f32) * (b2 as f32));
+                output[idx2] = f64::from((a3 as f32) * (b1 as f32) - (a1 as f32) * (b3 as f32));
+                output[idx3] = f64::from((a1 as f32) * (b2 as f32) - (a2 as f32) * (b1 as f32));
+            } else {
+                output[idx1] = a2 * b3 - a3 * b2;
+                output[idx2] = a3 * b1 - a1 * b3;
+                output[idx3] = a1 * b2 - a2 * b1;
+            }
         }
     }
 
-    Tensor::new(output, shape).map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
+    if single_output {
+        Tensor::from_f32(
+            output.into_iter().map(|value| value as f32).collect(),
+            shape,
+        )
+        .map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
+    } else {
+        Tensor::new(output, shape).map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
+    }
 }
 
 fn cross_complex_tensor(
     a: &ComplexTensor,
     b: &ComplexTensor,
     dim: Option<usize>,
+    single_output: bool,
 ) -> BuiltinResult<ComplexTensor> {
     ensure_same_size_complex(a, b)?;
 
@@ -396,13 +630,29 @@ fn cross_complex_tensor(
             let b2 = b.materialize_f64()[idx2];
             let b3 = b.materialize_f64()[idx3];
 
-            output[idx1] = complex_sub(complex_mul(a2, b3), complex_mul(a3, b2));
-            output[idx2] = complex_sub(complex_mul(a3, b1), complex_mul(a1, b3));
-            output[idx3] = complex_sub(complex_mul(a1, b2), complex_mul(a2, b1));
+            if single_output {
+                output[idx1] = complex_sub_f32(complex_mul_f32(a2, b3), complex_mul_f32(a3, b2));
+                output[idx2] = complex_sub_f32(complex_mul_f32(a3, b1), complex_mul_f32(a1, b3));
+                output[idx3] = complex_sub_f32(complex_mul_f32(a1, b2), complex_mul_f32(a2, b1));
+            } else {
+                output[idx1] = complex_sub(complex_mul(a2, b3), complex_mul(a3, b2));
+                output[idx2] = complex_sub(complex_mul(a3, b1), complex_mul(a1, b3));
+                output[idx3] = complex_sub(complex_mul(a1, b2), complex_mul(a2, b1));
+            }
         }
     }
 
-    ComplexTensor::new(output, shape)
+    let storage = if single_output {
+        ComplexStorage::F32(
+            output
+                .into_iter()
+                .map(|(re, im)| (re as f32, im as f32))
+                .collect(),
+        )
+    } else {
+        ComplexStorage::F64(output)
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
 }
 
@@ -412,6 +662,16 @@ fn complex_mul(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
 
 fn complex_sub(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
     (lhs.0 - rhs.0, lhs.1 - rhs.1)
+}
+
+fn complex_mul_f32(lhs: (f64, f64), rhs: (f64, f64)) -> (f32, f32) {
+    let lhs = (lhs.0 as f32, lhs.1 as f32);
+    let rhs = (rhs.0 as f32, rhs.1 as f32);
+    (lhs.0 * rhs.0 - lhs.1 * rhs.1, lhs.0 * rhs.1 + lhs.1 * rhs.0)
+}
+
+fn complex_sub_f32(lhs: (f32, f32), rhs: (f32, f32)) -> (f64, f64) {
+    (f64::from(lhs.0 - rhs.0), f64::from(lhs.1 - rhs.1))
 }
 
 fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
@@ -481,11 +741,23 @@ fn dim_product(dims: &[usize]) -> usize {
         .expect("cross: internal dimension overflow")
 }
 
-fn promote_real_result_to_gpu(tensor: Tensor) -> BuiltinResult<Value> {
-    let provider = match runmat_accelerate_api::provider() {
+fn promote_real_result_to_gpu(
+    tensor: Tensor,
+    owner: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    single_output: bool,
+) -> BuiltinResult<Value> {
+    let provider = match owner.and_then(runmat_accelerate_api::provider_for_handle) {
         Some(provider) => provider,
         None => return Ok(tensor::tensor_into_value(tensor)),
     };
+    let expected = if single_output {
+        runmat_accelerate_api::ProviderPrecision::F32
+    } else {
+        runmat_accelerate_api::ProviderPrecision::F64
+    };
+    if provider.precision() != expected {
+        return Ok(tensor::tensor_into_value(tensor));
+    }
     match gpu_helpers::upload_tensor(provider, &tensor) {
         Ok(handle) => Ok(Value::GpuTensor(handle)),
         Err(_) => Ok(tensor::tensor_into_value(tensor)),
@@ -497,9 +769,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
     use runmat_builtins::{
-        IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext, Type,
+        ComplexStorage, IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext, Type,
     };
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -563,6 +835,8 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"C = cross(A, B)"));
         assert!(labels.contains(&"C = cross(A, B, dim)"));
+        assert_eq!(CROSS_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(CROSS_EXTENSIONS.len(), 6);
     }
 
     #[test]
@@ -613,7 +887,7 @@ pub(crate) mod tests {
         let value = cross_builtin(
             Value::Tensor(lhs),
             Value::Tensor(rhs),
-            vec![Value::Int(IntValue::I32(2))],
+            vec![Value::Num(2.0)],
         )
         .expect("cross");
         match value {
@@ -627,6 +901,7 @@ pub(crate) mod tests {
 
     #[test]
     fn cross_reads_typed_integer_tensors_and_dimension_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 1, 0, 0]), vec![2, 3])
             .expect("lhs");
         let rhs = Tensor::new_integer(IntegerStorage::U16(vec![0, 0, 1, 0, 0, 1]), vec![2, 3])
@@ -650,6 +925,7 @@ pub(crate) mod tests {
 
     #[test]
     fn cross_uses_integer_storage_length_when_mirrors_are_empty() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).expect("lhs");
         let rhs = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 0]), vec![1, 3]).expect("rhs");
 
@@ -662,6 +938,192 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cross_runmat_extension_accepts_all_eight_integer_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let cases = [
+            IntegerStorage::I8(vec![1, 0, 0]),
+            IntegerStorage::I16(vec![1, 0, 0]),
+            IntegerStorage::I32(vec![1, 0, 0]),
+            IntegerStorage::I64(vec![1, 0, 0]),
+            IntegerStorage::U8(vec![1, 0, 0]),
+            IntegerStorage::U16(vec![1, 0, 0]),
+            IntegerStorage::U32(vec![1, 0, 0]),
+            IntegerStorage::U64(vec![1, 0, 0]),
+        ];
+        for storage in cases {
+            let lhs = Tensor::new_integer(storage, vec![1, 3]).unwrap();
+            let rhs = Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap();
+            let Value::Tensor(output) =
+                cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
+            else {
+                panic!("tensor")
+            };
+            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(output.materialize_f64(), vec![0.0, 0.0, 1.0]);
+        }
+    }
+
+    #[test]
+    fn cross_integer_roles_are_independently_gated() {
+        let integer = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0]), vec![1, 3]).unwrap(),
+        );
+        let floating = Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap());
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let left = cross_builtin(integer.clone(), floating.clone(), Vec::new()).unwrap_err();
+        assert_eq!(
+            left.identifier(),
+            CROSS_INTEGER_A_EXTENSION.error_identifier
+        );
+        let right = cross_builtin(floating, integer, Vec::new()).unwrap_err();
+        assert_eq!(
+            right.identifier(),
+            CROSS_INTEGER_B_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn cross_typed_integer_dimension_is_a_gated_extension() {
+        let lhs = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap());
+        let rhs = Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap());
+        let dim = Value::Int(IntValue::U8(2));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = cross_builtin(lhs, rhs, vec![dim]).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            CROSS_INTEGER_DIM_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn cross_malformed_typed_dimension_fails_before_extension_gate() {
+        let lhs = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap());
+        let rhs = Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap());
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = cross_builtin(lhs, rhs, vec![Value::Int(IntValue::U8(0))]).unwrap_err();
+        assert_eq!(error.identifier(), CROSS_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(error.message().contains("dimension must be >= 1"));
+    }
+
+    #[test]
+    fn cross_logical_dimension_is_a_gated_extension() {
+        let lhs = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![3, 1]).unwrap());
+        let rhs = Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.0], vec![3, 1]).unwrap());
+        let dim = Value::Bool(true);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = cross_builtin(lhs, rhs, vec![dim]).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            CROSS_LOGICAL_DIM_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn cross_logical_scalar_dimension_runs_when_extension_is_enabled() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let lhs = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![3, 1]).unwrap());
+        let rhs = Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.0], vec![3, 1]).unwrap());
+        let Value::Tensor(output) =
+            cross_builtin(lhs, rhs, vec![Value::Bool(true)]).expect("logical dim extension")
+        else {
+            panic!("tensor")
+        };
+        assert_eq!(output.materialize_f64(), vec![0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn cross_resident_typed_integer_dimension_gathers_exactly() {
+        test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let dim = Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).unwrap();
+            let dim = gpu_helpers::upload_tensor(provider, &dim).unwrap();
+            let lhs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
+            let rhs = Tensor::new(vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0], vec![2, 3]).unwrap();
+            let Value::Tensor(output) = cross_builtin(
+                Value::Tensor(lhs),
+                Value::Tensor(rhs),
+                vec![Value::GpuTensor(dim)],
+            )
+            .unwrap() else {
+                panic!("host tensor")
+            };
+            assert_eq!(output.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        });
+    }
+
+    #[test]
+    fn cross_logical_roles_are_independently_gated() {
+        let logical = Value::LogicalArray(LogicalArray::new(vec![1, 0, 0], vec![1, 3]).unwrap());
+        let floating = Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap());
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let left = cross_builtin(logical.clone(), floating.clone(), Vec::new()).unwrap_err();
+        assert_eq!(
+            left.identifier(),
+            CROSS_LOGICAL_A_EXTENSION.error_identifier
+        );
+        let right = cross_builtin(floating, logical, Vec::new()).unwrap_err();
+        assert_eq!(
+            right.identifier(),
+            CROSS_LOGICAL_B_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn cross_typed_complex_integer_returns_complex_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let lhs = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 0, 0]),
+            IntegerStorage::I16(vec![1, 0, 0]),
+        )
+        .unwrap();
+        let rhs = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::U16(vec![0, 1, 0]),
+            IntegerStorage::U16(vec![0, 1, 0]),
+        )
+        .unwrap();
+        let lhs = ComplexTensor::from_complex_storage(
+            runmat_builtins::ComplexStorage::Integer(lhs),
+            vec![1, 3],
+        )
+        .unwrap();
+        let rhs = ComplexTensor::from_complex_storage(
+            runmat_builtins::ComplexStorage::Integer(rhs),
+            vec![1, 3],
+        )
+        .unwrap();
+        let Value::ComplexTensor(output) = cross_builtin(
+            Value::ComplexTensor(lhs),
+            Value::ComplexTensor(rhs),
+            Vec::new(),
+        )
+        .expect("complex integer cross") else {
+            panic!("complex tensor")
+        };
+        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(output.materialize_f64()[2], (0.0, 2.0));
+    }
+
+    #[test]
+    fn cross_resident_integer_extension_gathers_and_restores_double() {
+        test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let lhs = Tensor::new_integer(IntegerStorage::I64(vec![1, 0, 0]), vec![1, 3]).unwrap();
+            let rhs = Tensor::new_integer(IntegerStorage::U64(vec![0, 1, 0]), vec![1, 3]).unwrap();
+            let lhs = gpu_helpers::upload_tensor(provider, &lhs).unwrap();
+            let rhs = gpu_helpers::upload_tensor(provider, &rhs).unwrap();
+            let Value::GpuTensor(output) =
+                cross_builtin(Value::GpuTensor(lhs), Value::GpuTensor(rhs), Vec::new()).unwrap()
+            else {
+                panic!("resident output")
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
+            let gathered = test_support::gather(Value::GpuTensor(output)).unwrap();
+            assert_eq!(gathered.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 1.0]);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -703,9 +1165,158 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn cross_complex_single_retains_class_and_explicit_complexity() {
+        let lhs = ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]),
+            vec![1, 3],
+        )
+        .unwrap();
+        let rhs = ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 0.0)]),
+            vec![1, 3],
+        )
+        .unwrap();
+        let Value::ComplexTensor(output) = cross_builtin(
+            Value::ComplexTensor(lhs),
+            Value::ComplexTensor(rhs),
+            Vec::new(),
+        )
+        .unwrap() else {
+            panic!("explicitly complex tensor")
+        };
+        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(
+            output.materialize_f64(),
+            vec![(0.0, 0.0), (0.0, 0.0), (1.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn cross_resident_complex_gathers_computes_and_restores() {
+        test_support::with_test_provider(|provider| {
+            let lhs =
+                ComplexTensor::new(vec![(1.0, 1.0), (0.0, 0.0), (0.0, 0.0)], vec![1, 3]).unwrap();
+            let rhs =
+                ComplexTensor::new(vec![(0.0, 0.0), (1.0, -2.0), (0.0, 0.0)], vec![1, 3]).unwrap();
+            let lhs = gpu_helpers::upload_complex_tensor(provider, &lhs).unwrap();
+            let rhs = gpu_helpers::upload_complex_tensor(provider, &rhs).unwrap();
+            let Value::GpuTensor(output) =
+                cross_builtin(Value::GpuTensor(lhs), Value::GpuTensor(rhs), Vec::new()).unwrap()
+            else {
+                panic!("resident complex output")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let Value::ComplexTensor(gathered) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output))).unwrap()
+            else {
+                panic!("complex tensor")
+            };
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![(0.0, 0.0), (0.0, 0.0), (3.0, -1.0)]
+            );
+        });
+    }
+
+    #[test]
+    fn cross_mixed_provider_inputs_gather_independently() {
+        let _guard = test_support::accel_test_lock();
+        let provider_a: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let provider_b: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        unsafe {
+            runmat_accelerate_api::register_provider(provider_a);
+            runmat_accelerate_api::register_provider(provider_b);
+        }
+        let lhs = provider_a
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0, 0.0],
+                shape: &[1, 3],
+            })
+            .unwrap();
+        let rhs = provider_b
+            .upload(&HostTensorView {
+                data: &[0.0, 1.0, 0.0],
+                shape: &[1, 3],
+            })
+            .unwrap();
+        let Value::GpuTensor(output) =
+            cross_builtin(Value::GpuTensor(lhs), Value::GpuTensor(rhs), Vec::new()).unwrap()
+        else {
+            panic!("owner-restored output")
+        };
+        assert_eq!(output.device_id, provider_a.device_id());
+        let gathered = block_on(provider_a.download(&output)).unwrap();
+        assert_eq!(gathered.data, vec![0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn cross_rejects_native_output_with_wrong_single_precision() {
+        test_support::with_test_provider(|provider| {
+            let lhs = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 0.0, 0.0],
+                    shape: &[1, 3],
+                })
+                .unwrap();
+            let rhs = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0, 0.0],
+                    shape: &[1, 3],
+                })
+                .unwrap();
+            runmat_accelerate_api::set_handle_precision(
+                &lhs,
+                runmat_accelerate_api::ProviderPrecision::F32,
+            );
+            let Value::Tensor(output) =
+                cross_builtin(Value::GpuTensor(lhs), Value::GpuTensor(rhs), Vec::new()).unwrap()
+            else {
+                panic!("class-preserving host fallback")
+            };
+            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+            assert_eq!(output.materialize_f64(), vec![0.0, 0.0, 1.0]);
+        });
+    }
+
+    #[test]
+    fn cross_rejects_native_result_owned_by_another_provider() {
+        let _guard = test_support::accel_test_lock();
+        let provider_a: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let provider_b: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        unsafe {
+            runmat_accelerate_api::register_provider(provider_a);
+            runmat_accelerate_api::register_provider(provider_b);
+        }
+        let wrong_owner = provider_b
+            .upload(&HostTensorView {
+                data: &[1.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        assert!(!native_result_matches_provider(
+            &wrong_owner,
+            provider_a.device_id(),
+            provider_a,
+            runmat_accelerate_api::ProviderPrecision::F64,
+        ));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cross_promotes_logical_inputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let lhs = LogicalArray::new(vec![1, 0, 0], vec![1, 3]).unwrap();
         let rhs = Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap();
         let value =
@@ -750,7 +1361,7 @@ pub(crate) mod tests {
             cross_builtin(
                 Value::Tensor(lhs),
                 Value::Tensor(rhs),
-                vec![Value::Int(IntValue::I32(3))],
+                vec![Value::Num(3.0)],
             )
             .expect_err("expected rank error"),
         );
@@ -769,7 +1380,7 @@ pub(crate) mod tests {
             cross_builtin(
                 Value::Tensor(lhs),
                 Value::Tensor(rhs),
-                vec![Value::Int(IntValue::I32(1))],
+                vec![Value::Num(1.0)],
             )
             .expect_err("expected length error"),
         );
@@ -785,7 +1396,7 @@ pub(crate) mod tests {
             cross_builtin(
                 Value::Tensor(lhs),
                 Value::Tensor(rhs),
-                vec![Value::Int(IntValue::I32(0))],
+                vec![Value::Num(0.0)],
             )
             .expect_err("expected dimension error"),
         );
@@ -843,6 +1454,30 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn cross_frees_rejected_native_result_before_fallback() {
+        test_support::with_rejecting_native_result_provider(|provider| {
+            let lhs = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 0.0, 0.0],
+                    shape: &[1, 3],
+                })
+                .unwrap();
+            let rhs = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0, 0.0],
+                    shape: &[1, 3],
+                })
+                .unwrap();
+            let result = cross_builtin(Value::GpuTensor(lhs), Value::GpuTensor(rhs), Vec::new())
+                .expect("cross fallback");
+            let result = test_support::gather(result).expect("gather fallback");
+            assert_eq!(result.shape, vec![1, 3]);
+            assert_eq!(result.materialize_f64(), vec![0.0, 0.0, 1.0]);
+            assert_eq!(provider.free_count(), 1);
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
@@ -852,7 +1487,7 @@ pub(crate) mod tests {
         );
         let lhs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
         let rhs = Tensor::new(vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0], vec![2, 3]).unwrap();
-        let cpu = cross_real_tensor(&lhs, &rhs, Some(2)).expect("cpu cross");
+        let cpu = cross_real_tensor(&lhs, &rhs, Some(2), false).expect("cpu cross");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_lhs = HostTensorView {
             data: &lhs.materialize_f64(),
@@ -867,7 +1502,7 @@ pub(crate) mod tests {
         let gpu_value = cross_builtin(
             Value::GpuTensor(gpu_lhs),
             Value::GpuTensor(gpu_rhs),
-            vec![Value::Int(IntValue::I32(2))],
+            vec![Value::Num(2.0)],
         )
         .expect("gpu cross");
         let gathered = test_support::gather(gpu_value).expect("gather");

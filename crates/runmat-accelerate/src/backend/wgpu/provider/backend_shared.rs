@@ -385,11 +385,7 @@ pub(super) fn conv1d_window(
     let (output_len, start_offset) = match mode {
         ProviderConvMode::Full => (full_len, 0usize),
         ProviderConvMode::Same => {
-            let start = if kernel_len == 0 {
-                0
-            } else {
-                (kernel_len - 1) / 2
-            };
+            let start = if kernel_len == 0 { 0 } else { kernel_len / 2 };
             let len = signal_len.min(full_len.saturating_sub(start));
             (len, start)
         }

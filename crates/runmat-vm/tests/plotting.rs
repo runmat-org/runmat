@@ -129,6 +129,32 @@ fn copyobj_dispatches_plot_child_copies() {
 }
 
 #[test]
+fn copyobj_dispatches_gated_integer_handle_aliases() {
+    let _guard = disable_interactive_plots_for_test();
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let input = "\
+        h = plot(1:3, [1 4 9]); \
+        ax2 = subplot(1,2,2); \
+        h2 = copyobj(uint64(h), uint64(ax2)); \
+        if ~isgraphics(h2); error('integer handle alias copy failed'); end; \
+        if get(h2, 'Parent') ~= ax2; error('integer parent alias mismatch'); end;";
+    execute_source(input).expect("execute copyobj integer alias script");
+}
+
+#[test]
+fn contourf_dispatches_integer_data_and_target_axes() {
+    let _guard = disable_interactive_plots_for_test();
+    let input = "\
+        ax = axes(); \
+        z = uint64([0 2; 1 3]); \
+        h = contourf(ax, z, uint16(3)); \
+        if ~isgraphics(h); error('contourf integer plot should return graphics'); end; \
+        if get(h, 'Parent') ~= ax; error('contourf target axes mismatch'); end; \
+        if ~strcmp(get(h, 'Type'), 'contour'); error('contourf type mismatch'); end;";
+    execute_source(input).expect("execute contourf integer target-axes script");
+}
+
+#[test]
 fn plot_accepts_multiseries_linespec_source_forms() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

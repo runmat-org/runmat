@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "The in-process provider and WGPU backend expose conv1d; other providers fall back to the host implementation when this hook is unavailable."
+    "notes": "Same-owner, same-device real floating inputs may use the provider conv1d hook when its result preserves the required f32/f64 class and belongs to the invoked provider/device. Other resident inputs gather through their owning providers; eligible real or complex floating results are restored only when the owner preserves the selected class. The provider ABI cannot represent typed complex-integer resident buffers."
   },
   "fusion": {
     "elementwise": false,
@@ -31,14 +31,15 @@
     "unit": "builtins::math::signal::conv::tests",
     "integration": "builtins::math::signal::conv::tests::conv_gpu_roundtrip_matches_cpu"
   },
-  "description": "`conv(a, b)` computes the one-dimensional linear convolution of vectors `a` and `b`. The default returns full convolution length, while `'same'` and `'valid'` select alternate output shapes following MATLAB semantics.",
+  "description": "`conv(a, b)` computes the one-dimensional linear convolution of vectors `a` and `b`. MATLAB documents all eight integer classes, logical, single, double, and complex inputs; any single input selects single output and every other combination returns double.",
   "behaviors": [
-    "Accepts real or complex scalars, vectors, or tensors that can be flattened column-major into a vector.",
-    "Keeps the orientation of the first input when returning row or column vectors (`'same'` and `'valid'` honour this rule).",
+    "Accepts real or complex row/column vectors from all documented numeric and logical classes. Integer inputs cross an explicit floating boundary and never produce integer output.",
+    "In R2026a, full output is a row unless both inputs are columns; `'same'` and `'valid'` retain the orientation of the first input.",
     "Supports the three MATLAB shape modes: `'full'` (default), `'same'`, and `'valid'`.",
-    "Returns empty outputs when either input is empty or when `'valid'` is requested with insufficient overlap.",
+    "Empty inputs normally return empty output. MATLAB's documented `'valid'` exception for an empty second vector returns a zero vector with the first input's length, orientation, class, and complexity.",
     "Logical inputs are promoted to double precision before the convolution.",
-    "GPU inputs are gathered automatically when the active provider lacks a native 1-D convolution kernel."
+    "Explicitly complex input produces complex output even when every resulting imaginary component is zero.",
+    "The public GPU-array surface is supported. A native hook is used only for same-owner, same-device real floating handles whose result has the required class; other supported resident values use class-preserving gather/restore fallback."
   ],
   "examples": [
     {
@@ -84,11 +85,11 @@
   "faqs": [
     {
       "question": "Does `conv` require row vectors?",
-      "answer": "No. `conv` accepts row vectors, column vectors, scalars, and tensors that can be flattened into a vector. The result preserves the orientation of the first input when that orientation is unambiguous."
+      "answer": "No. `conv` accepts row vectors, column vectors, and scalars. Genuine matrices and higher-dimensional arrays are rejected; use `conv2` or `convn` for those inputs. The result preserves the orientation of the first input when that orientation is unambiguous."
     },
     {
       "question": "What happens when one of the inputs is empty?",
-      "answer": "The result is an empty vector with an orientation derived from the non-empty input (or a `0×1` column vector when both inputs are empty), matching MATLAB's behaviour."
+      "answer": "The result is normally empty. For `conv(u, [], 'valid')`, MATLAB documents a special case: RunMat returns zeros with the same length and orientation as `u`, while preserving the selected floating class and explicit complexity."
     },
     {
       "question": "How is `'same'` computed?",
@@ -100,15 +101,15 @@
     },
     {
       "question": "Does `conv` support single precision?",
-      "answer": "The host path computes in double precision. Provider implementations choose their native precision: the in-process provider mirrors double results, while the WGPU backend emits either `f32` or `f64` kernels depending on device support. Providers without a `conv1d` hook gather inputs back to the CPU to maintain MATLAB-compatible answers."
+      "answer": "When either numeric input is single, the output is single. Otherwise integer, logical, and double inputs produce double output. Integer multiplication and accumulation therefore have floating overflow/rounding semantics rather than integer saturation."
     },
     {
       "question": "Will the result stay on the GPU?",
-      "answer": "Yes—provided the active provider exposes the `conv1d` hook (the in-process provider and WGPU backend do). Without that hook, RunMat gathers inputs, computes on the host, and returns a CPU tensor with the correct orientation."
+      "answer": "Same-owner, same-device real floating inputs remain resident when a provider's `conv1d` hook returns the required class. Other resident inputs gather through their own providers and eligible floating results return to the first owner. Typed complex integers work on the host, but the current provider ABI cannot encode typed complex-integer resident buffers."
     },
     {
       "question": "Can I convolve matrices or higher-dimensional arrays?",
-      "answer": "`conv` treats inputs as vectors using MATLAB column-major order. For multi-dimensional convolution use the dedicated `conv2` or `convn` builtins (planned)."
+      "answer": "MATLAB requires vectors. RunMat rejects genuine matrix inputs; use `conv2` or `convn` for multidimensional convolution."
     },
     {
       "question": "How do I convolve with an impulse (delta) kernel?",
@@ -124,6 +125,10 @@
     }
   ],
   "links": [
+    {
+      "label": "MATLAB conv documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/conv.html"
+    },
     {
       "label": "fft",
       "url": "./fft"

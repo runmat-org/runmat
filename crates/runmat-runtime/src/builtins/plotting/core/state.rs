@@ -4250,7 +4250,6 @@ where
 
 #[derive(Clone, Copy, Debug)]
 pub enum CopyParentTarget {
-    Figure(FigureHandle),
     Axes(FigureHandle, usize),
 }
 
@@ -4312,13 +4311,7 @@ pub fn copy_plot_child_to_parent(
             .cloned()
             .ok_or(FigureError::InvalidPlotObjectHandle)?;
 
-        let (target_figure, target_axes) = match target {
-            CopyParentTarget::Figure(figure) => {
-                let axes_index = get_state_mut(&mut reg, figure).active_axes;
-                (figure, axes_index)
-            }
-            CopyParentTarget::Axes(figure, axes_index) => (figure, axes_index),
-        };
+        let CopyParentTarget::Axes(target_figure, target_axes) = target;
 
         let (new_plot_index, figure_clone) = {
             let target_state = get_state_mut(&mut reg, target_figure);

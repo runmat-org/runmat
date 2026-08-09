@@ -15,10 +15,18 @@
     "reduction": false,
     "precisions": [
       "single",
-      "double"
+      "double",
+      "int8",
+      "int16",
+      "int32",
+      "int64",
+      "uint8",
+      "uint16",
+      "uint32",
+      "uint64"
     ],
     "broadcasting": "none",
-    "notes": "`contourf` uses the shared filled-contour pipeline and returns a contour-fill handle."
+    "notes": "Eligible floating `Z` grids can use RunMat's shared WGPU filled-contour path. Integer gpuArray coordinates, heights, levels, and scalar properties gather exactly through their owning provider before the client graphics boundary because the contour shaders consume floating buffers."
   },
   "fusion": {
     "elementwise": false,
@@ -30,13 +38,16 @@
   "tested": {
     "unit": "builtins::plotting::contourf::tests"
   },
-  "description": "`contourf` creates filled contour plots by coloring regions between contour levels. It returns a contour-fill handle and shares contour-level generation semantics with `contour` in MATLAB and RunMat.",
+  "description": "`contourf` creates filled contour plots by coloring regions between contour levels. RunMat returns an opaque contour-fill handle; MATLAB's contour-matrix first output and two-output `[M, c]` form remain graphics-representation gaps.",
   "behaviors": [
-    "`contourf(Z)` uses implicit axes, while `contourf(X, Y, Z)` accepts explicit coordinates.",
+    "`contourf(Z)` uses implicit axes, `contourf(X, Y, Z)` accepts strictly monotonic coordinate vectors or coordinate matrices that vary along opposite dimensions, and `contourf(ax, ...)` selects an existing axes target.",
+    "All eight built-in integer classes are documented for `X`, `Y`, `Z`, positional level counts/vectors, `LevelList`, and `LevelStep`; RunMat also accepts them for positive `LineWidth` values. Shape, distinctness, coordinate-matrix identity, ordering, count, and scalar constraints are checked from authoritative storage before floating graphics conversion.",
     "The returned value is a contour-fill handle in the plotting object system.",
-    "Level-list, level-count, and related contour workflows mirror the broader contour family semantics.",
+    "A scalar level is a positive bounded requested level count, a vector is an explicit monotonically increasing level list, and `[k k]` requests one level at `k`.",
     "`contourf` works naturally with `colorbar` and `colormap` because filled regions are fundamentally color-mapped scalar ranges.",
-    "Filled contours and optional line overlays are handled through the shared contour stack."
+    "The public compatibility surface accepts GPU arrays but executes on the client. Resident integer inputs therefore gather through their owning provider, while RunMat additionally accelerates eligible floating `Z` grids through its shared WGPU plotting context.",
+    "Typed-integer `LineColor` RGB triplets containing only exact 0/1 channels use the separately gated `contour-integer-line-color` RunMat extension.",
+    "The broader Contour property surface, contour labels, post-construction typed data mutation, and MATLAB contour-matrix/object output forms remain general graphics gaps."
   ],
   "examples": [
     {

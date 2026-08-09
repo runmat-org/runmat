@@ -296,6 +296,9 @@ impl Default for GpuTensorStorage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuTensorHandle {
     pub shape: Vec<usize>,
+    /// Stable provider/device namespace identifier. Distinct live provider
+    /// instances that can own handles must use distinct identifiers because
+    /// provider routing is keyed by this value.
     pub device_id: u32,
     pub buffer_id: u64,
 }
@@ -1450,6 +1453,9 @@ pub trait AccelProvider: Send + Sync {
 
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
+    /// Returns the stable identifier used to route this provider's handles.
+    /// Distinct concurrently registered provider instances must return distinct
+    /// identifiers; reusing an identifier would make handle ownership ambiguous.
     fn device_id(&self) -> u32 {
         0
     }
@@ -3426,6 +3432,8 @@ fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
 ///   (e.g., a `'static` singleton), as the runtime stores a raw reference globally.
 /// - Concurrent callers must ensure registration happens once or is properly
 ///   synchronized; this function does not enforce thread-safety for re-registration.
+/// - Distinct live provider instances that can own handles must not share a
+///   `device_id`; the handle registry uses that identifier as its ownership key.
 pub unsafe fn register_provider(p: &'static dyn AccelProvider) {
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = Some(p);
