@@ -3104,12 +3104,9 @@ mod tests {
         let cases = [
             (
                 "data.create(\"tmp/demo.data\", struct());",
-                "ds = data.create(path, schema, Name, Value, ...)",
+                "ds = data.create(path, schema)",
             ),
-            (
-                "data.open(\"tmp/demo.data\");",
-                "ds = data.open(path, Name, Value, ...)",
-            ),
+            ("data.open(\"tmp/demo.data\");", "ds = data.open(path)"),
             ("data.exists(\"tmp/demo.data\");", "tf = data.exists(path)"),
             ("data.inspect(\"tmp/demo.data\");", "S = data.inspect(path)"),
             ("Dataset.path(ds);", "path = Dataset.path(ds)"),
@@ -3128,9 +3125,9 @@ mod tests {
             ),
             (
                 "DataTransaction.commit(tx);",
-                "tf = DataTransaction.commit(tx, Name, Value, ...)",
+                "tf = DataTransaction.commit(tx, options)",
             ),
-            ("commit(tx);", "tf = commit(tx, Name, Value, ...)"),
+            ("commit(tx);", "tf = commit(tx, options)"),
             (
                 "DataTransaction.status(tx);",
                 "status = DataTransaction.status(tx)",

@@ -2,7 +2,7 @@
 title: "Datasets API"
 category: "Filesystem"
 section: "13.1"
-last_updated: "May 28, 2026"
+last_updated: "August 9, 2026"
 ---
 
 # Datasets API
@@ -37,6 +37,8 @@ This creates a `training.data` directory with two arrays:
 - `labels`, a `1000000 x 1` vector.
 
 The `dtype` field accepts `f64`, `f32`, and every built-in integer class: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`. Full and sliced reads preserve that declared class exactly. Writes and fills preserve exact values when the source class matches the declared dtype; unlike numeric classes are converted once through the declared dtype's ordinary numeric cast contract before storage. Complex numeric arrays are not currently supported.
+
+The `shape` and optional `chunk` fields accept scalar or vector dimensions in all eight integer classes, plus exactly integral `single` or `double` values within platform bounds. RunMat parses typed dimensions directly from authoritative integer storage, checks total shape multiplication before allocation, and rejects negative, fractional, out-of-range, or overflowing shape dimensions. Explicit chunk dimensions must be strictly positive and have the same rank as the array shape.
 
 The dataset can be opened later from the same path:
 
@@ -183,6 +185,8 @@ Path-level operations manage whole datasets.
 | `data.export(path, "data", targetPath)` | Copy a dataset to another path. |
 
 `data.import` and `data.export` currently support RunMat's `"data"` format.
+
+These namespace functions use exactly the positional signatures shown above; they do not reserve trailing name-value arguments. Their path and format arguments are textual rather than numeric, while copying, moving, importing, and exporting a dataset preserves its stored integer payload bytes and declared dtype. Dataset lifecycle work is filesystem-provider I/O and does not dispatch through an acceleration provider.
 
 ## Common Methods
 

@@ -606,6 +606,7 @@ mod tests {
             "cdfplot",
             "ceil",
             "cell",
+            "data.create",
         ] {
             let builtin = registered
                 .iter()
@@ -715,6 +716,16 @@ mod tests {
                 "argsort",
                 "cancel",
                 "caxis",
+                "commit",
+                "data.copy",
+                "data.delete",
+                "data.exists",
+                "data.export",
+                "data.import",
+                "data.inspect",
+                "data.list",
+                "data.move",
+                "data.open",
                 "onCleanup",
             ]
         );

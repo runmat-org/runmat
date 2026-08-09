@@ -27,9 +27,9 @@ use crate::data::{
     array_object, data_error, dataset_object, dataset_root, ensure_manifest_sequence,
     get_object_prop, manifest_path, manifest_version_token, now_rfc3339, parse_schema,
     parse_string, read_array_payload_async, read_manifest_async, remove_tx, sha256_hex, start_tx,
-    transaction_object, with_tx, with_tx_mut, write_array_payload_async, write_manifest_async,
-    DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry, DataManifest,
-    PendingCreateArray, PendingFill, PendingResize, PendingWrite, TxnStatus,
+    transaction_object, validate_chunk_shape, with_tx, with_tx_mut, write_array_payload_async,
+    write_manifest_async, DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry,
+    DataManifest, PendingCreateArray, PendingFill, PendingResize, PendingWrite, TxnStatus,
 };
 use crate::{make_cell, BuiltinResult};
 
@@ -159,7 +159,7 @@ const OUT_TENSOR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Numeric tensor result.",
 }];
 
-const IN_PATH_SCHEMA_REST: [BuiltinParamDescriptor; 3] = [
+const IN_PATH_SCHEMA: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "path",
         ty: BuiltinParamType::StringScalar,
@@ -174,33 +174,17 @@ const IN_PATH_SCHEMA_REST: [BuiltinParamDescriptor; 3] = [
         default: None,
         description: "Dataset schema struct.",
     },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reserved name/value options.",
-    },
 ];
 
-const IN_PATH_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "path",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dataset path (.data).",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reserved name/value options.",
-    },
-];
+const IN_PATH: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "path",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Dataset path (.data).",
+}];
 
-const IN_FROM_TO_REST: [BuiltinParamDescriptor; 3] = [
+const IN_FROM_TO: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "fromPath",
         ty: BuiltinParamType::StringScalar,
@@ -215,16 +199,33 @@ const IN_FROM_TO_REST: [BuiltinParamDescriptor; 3] = [
         default: None,
         description: "Destination dataset path.",
     },
+];
+
+const IN_PATH_FORMAT_SOURCE: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
         default: None,
-        description: "Reserved name/value options.",
+        description: "Dataset path (.data).",
+    },
+    BuiltinParamDescriptor {
+        name: "format",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format token (currently 'data').",
+    },
+    BuiltinParamDescriptor {
+        name: "sourcePath",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Source dataset path.",
     },
 ];
 
-const IN_PATH_FORMAT_TARGET_REST: [BuiltinParamDescriptor; 4] = [
+const IN_PATH_FORMAT_TARGET: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "path",
         ty: BuiltinParamType::StringScalar,
@@ -246,31 +247,15 @@ const IN_PATH_FORMAT_TARGET_REST: [BuiltinParamDescriptor; 4] = [
         default: None,
         description: "Target dataset path.",
     },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reserved name/value options.",
-    },
 ];
 
-const IN_PREFIX_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "prefix",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Filesystem prefix to scan for datasets.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reserved name/value options.",
-    },
-];
+const IN_PREFIX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prefix",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Filesystem prefix to scan for datasets.",
+}];
 
 const IN_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
@@ -650,7 +635,7 @@ const IN_TX_ARRAY_META: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const IN_TX_COMMIT_REST: [BuiltinParamDescriptor; 2] = [
+const IN_TX_COMMIT_OPTIONS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "tx",
         ty: BuiltinParamType::Any,
@@ -661,9 +646,9 @@ const IN_TX_COMMIT_REST: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "options",
         ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
+        arity: BuiltinParamArity::Optional,
         default: None,
-        description: "Commit options (e.g. if_manifest).",
+        description: "Optional struct containing an if_manifest version token.",
     },
 ];
 
@@ -686,73 +671,109 @@ macro_rules! one_sig_descriptor {
 one_sig_descriptor!(
     DATA_CREATE_DESCRIPTOR,
     DATA_CREATE_SIGS,
-    "ds = data.create(path, schema, Name, Value, ...)",
-    &IN_PATH_SCHEMA_REST,
+    "ds = data.create(path, schema)",
+    &IN_PATH_SCHEMA,
     &OUT_DATASET
 );
 one_sig_descriptor!(
     DATA_OPEN_DESCRIPTOR,
     DATA_OPEN_SIGS,
-    "ds = data.open(path, Name, Value, ...)",
-    &IN_PATH_REST,
+    "ds = data.open(path)",
+    &IN_PATH,
     &OUT_DATASET
 );
 one_sig_descriptor!(
     DATA_EXISTS_DESCRIPTOR,
     DATA_EXISTS_SIGS,
     "tf = data.exists(path)",
-    &IN_PATH_REST,
+    &IN_PATH,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_DELETE_DESCRIPTOR,
     DATA_DELETE_SIGS,
-    "tf = data.delete(path, Name, Value, ...)",
-    &IN_PATH_REST,
+    "tf = data.delete(path)",
+    &IN_PATH,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_COPY_DESCRIPTOR,
     DATA_COPY_SIGS,
-    "tf = data.copy(fromPath, toPath, Name, Value, ...)",
-    &IN_FROM_TO_REST,
+    "tf = data.copy(fromPath, toPath)",
+    &IN_FROM_TO,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_MOVE_DESCRIPTOR,
     DATA_MOVE_SIGS,
-    "tf = data.move(fromPath, toPath, Name, Value, ...)",
-    &IN_FROM_TO_REST,
+    "tf = data.move(fromPath, toPath)",
+    &IN_FROM_TO,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_IMPORT_DESCRIPTOR,
     DATA_IMPORT_SIGS,
-    "ds = data.import(path, format, sourcePath, Name, Value, ...)",
-    &IN_PATH_FORMAT_TARGET_REST,
+    "ds = data.import(path, format, sourcePath)",
+    &IN_PATH_FORMAT_SOURCE,
     &OUT_DATASET
 );
 one_sig_descriptor!(
     DATA_EXPORT_DESCRIPTOR,
     DATA_EXPORT_SIGS,
-    "tf = data.export(path, format, targetPath, Name, Value, ...)",
-    &IN_PATH_FORMAT_TARGET_REST,
+    "tf = data.export(path, format, targetPath)",
+    &IN_PATH_FORMAT_TARGET,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     DATA_LIST_DESCRIPTOR,
     DATA_LIST_SIGS,
-    "C = data.list(prefix, Name, Value, ...)",
-    &IN_PREFIX_REST,
+    "C = data.list(prefix)",
+    &IN_PREFIX,
     &OUT_CELL
 );
 one_sig_descriptor!(
     DATA_INSPECT_DESCRIPTOR,
     DATA_INSPECT_SIGS,
     "S = data.inspect(path)",
-    &IN_PATH_REST,
+    &IN_PATH,
     &OUT_STRUCT
 );
+
+const DATA_CREATE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "schema.arrays.*.shape",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Array shapes accept scalar or vector dimensions in every integer class, or exactly integral floating values, within nonnegative platform and checked total-element bounds.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "schema.arrays.*.chunk",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Optional chunk shapes accept scalar or vector dimensions in every integer class, or exactly integral floating values; dimensions must be positive, platform-bounded, and rank-matched to the array shape.",
+    },
+];
+
+pub const DATA_CREATE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ds = data.create(path, struct_with_integer_shape_and_chunk)",
+        inputs: &DATA_CREATE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Schema dimensions are parsed directly from authoritative typed storage; the host/filesystem constructor allocates zero-filled storage in each array's declared dtype and returns a Dataset object.",
+    }];
+
+const DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form.",
+    };
 
 one_sig_descriptor!(
     DATASET_PATH_DESCRIPTOR,
@@ -1103,7 +1124,7 @@ const DATAARRAY_RESIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform bounds.",
+        notes: "Shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds.",
     }];
 pub const DATAARRAY_RESIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
@@ -1111,7 +1132,7 @@ pub const DATAARRAY_RESIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescri
         inputs: &DATAARRAY_RESIZE_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "The exact shape is validated against platform bounds, persisted as metadata, and used to recreate zero-filled storage in the array's declared dtype.",
@@ -1218,7 +1239,7 @@ const DATATX_RESIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Queued shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform bounds.",
+        notes: "Queued shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds.",
     }];
 pub const DATATX_RESIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
@@ -1226,7 +1247,7 @@ pub const DATATX_RESIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescripto
         inputs: &DATATX_RESIZE_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "The exact shape is validated when queued, retained as platform-sized metadata, and applied at commit by recreating zero-filled storage in the array's declared dtype.",
@@ -1266,14 +1287,14 @@ const DATATX_CREATE_ARRAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The schema shape accepts all eight integer classes or exactly integral floating values within nonnegative platform bounds.",
+        notes: "The schema shape accepts all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds.",
     },
     BuiltinIntegerInputCapability {
         name: "meta.chunk",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The optional chunk shape accepts all eight integer classes or exactly integral floating values within nonnegative platform bounds.",
+        notes: "The optional chunk shape accepts all eight integer classes or exactly integral floating values; dimensions must be positive, platform-bounded, and rank-matched to meta.shape.",
     },
 ];
 pub const DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
@@ -1282,7 +1303,7 @@ pub const DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDes
         inputs: &DATATX_CREATE_ARRAY_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "Exact shape and chunk dimensions are validated when queued, retained as platform-sized metadata, and used at commit to create storage in the schema's declared dtype.",
@@ -1347,15 +1368,15 @@ one_sig_descriptor!(
 one_sig_descriptor!(
     DATATX_COMMIT_DESCRIPTOR,
     DATATX_COMMIT_SIGS,
-    "tf = DataTransaction.commit(tx, Name, Value, ...)",
-    &IN_TX_COMMIT_REST,
+    "tf = DataTransaction.commit(tx, options)",
+    &IN_TX_COMMIT_OPTIONS,
     &OUT_BOOL
 );
 one_sig_descriptor!(
     COMMIT_ALIAS_DESCRIPTOR,
     COMMIT_ALIAS_SIGS,
-    "tf = commit(tx, Name, Value, ...)",
-    &IN_TX_COMMIT_REST,
+    "tf = commit(tx, options)",
+    &IN_TX_COMMIT_OPTIONS,
     &OUT_BOOL
 );
 one_sig_descriptor!(
@@ -1381,20 +1402,17 @@ one_sig_descriptor!(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
     descriptor(crate::builtins::io::data::DATA_CREATE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::data::DATA_CREATE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_create_builtin(
-    path: Value,
-    schema: Value,
-    _rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.create path")?;
     let root = dataset_root(&path);
     let schema = parse_schema(&schema)?;
     let now = now_rfc3339();
     let mut arrays = BTreeMap::new();
     for (name, mut meta) in schema.arrays {
-        let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone());
+        let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
         let (payload_path, chunk_index_path) =
             write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
         meta.data_path = make_rel_data_path(&root, &payload_path)?;
@@ -1424,9 +1442,10 @@ async fn data_create_builtin(
     keywords = "data,dataset,open,persistence",
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
     descriptor(crate::builtins::io::data::DATA_OPEN_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_open_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn data_open_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.open path")?;
     let root = dataset_root(&path);
     let manifest = read_manifest_async(&root).await?;
@@ -1442,6 +1461,7 @@ async fn data_open_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Valu
     keywords = "data,dataset,exists",
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_EXISTS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
@@ -1461,9 +1481,10 @@ async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_DELETE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_delete_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn data_delete_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.delete path")?;
     let root = dataset_root(&path);
     runmat_filesystem::remove_dir_all_async(&root)
@@ -1485,13 +1506,10 @@ async fn data_delete_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Va
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_COPY_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_copy_builtin(
-    from_path: Value,
-    to_path: Value,
-    _rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.copy fromPath")?;
     let to = parse_string(&to_path, "data.copy toPath")?;
     copy_dir_recursive(&dataset_root(&from), &dataset_root(&to)).await?;
@@ -1506,13 +1524,10 @@ async fn data_copy_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_MOVE_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_move_builtin(
-    from_path: Value,
-    to_path: Value,
-    _rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+async fn data_move_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.move fromPath")?;
     let to = parse_string(&to_path, "data.move toPath")?;
     runmat_filesystem::rename_async(dataset_root(&from), dataset_root(&to))
@@ -1533,13 +1548,13 @@ async fn data_move_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
     descriptor(crate::builtins::io::data::DATA_IMPORT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_import_builtin(
     path: Value,
     format: Value,
     source_path: Value,
-    _rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.import path")?;
     let format = parse_string(&format, "data.import format")?;
@@ -1562,13 +1577,13 @@ async fn data_import_builtin(
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::DATA_EXPORT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_export_builtin(
     path: Value,
     format: Value,
     target_path: Value,
-    _rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.export path")?;
     let format = parse_string(&format, "data.export format")?;
@@ -1589,9 +1604,10 @@ async fn data_export_builtin(
     keywords = "data,dataset,list",
     type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
     descriptor(crate::builtins::io::data::DATA_LIST_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
-async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
     let prefix = parse_string(&path_prefix, "data.list prefix")?;
     let root = PathBuf::from(prefix);
     let entries = runmat_filesystem::read_dir_async(&root)
@@ -1629,6 +1645,7 @@ async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResu
     keywords = "data,dataset,inspect,schema",
     type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
     descriptor(crate::builtins::io::data::DATA_INSPECT_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
@@ -2080,7 +2097,7 @@ async fn data_array_resize_builtin(
         .get_mut(&name)
         .ok_or_else(|| data_error(format!("DataArray.resize: array '{name}' not found")))?;
     meta.shape = shape.clone();
-    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone());
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
     let (payload_path, chunk_index_path) =
         write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(&root, &payload_path)?;
@@ -2353,6 +2370,20 @@ async fn data_tx_create_array_builtin(
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let options = match rest.as_slice() {
+        [] => None,
+        [Value::Struct(options)] => Some(options),
+        [_] => {
+            return Err(data_error(
+                "DataTransaction.commit: options must be a scalar struct",
+            ))
+        }
+        _ => {
+            return Err(data_error(
+                "DataTransaction.commit: expected at most one options struct",
+            ))
+        }
+    };
     let tx_id = tx_id_from_object(&base, "DataTransaction.commit")?;
     let (dataset_path, base_sequence, writes, resizes, fills, create_arrays, delete_arrays, attrs) =
         with_tx(&tx_id, |tx| {
@@ -2383,7 +2414,7 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
     let root = dataset_root(&dataset_path);
     let mut manifest = read_manifest_async(&root).await?;
     ensure_manifest_sequence(base_sequence, &manifest)?;
-    if let Some(Value::Struct(options)) = rest.first() {
+    if let Some(options) = options {
         if let Some(expected) = options.fields.get("if_manifest") {
             let expected = parse_string(expected, "DataTransaction.commit if_manifest")?;
             let actual = manifest_version_token(&manifest);
@@ -2463,14 +2494,12 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
     descriptor(crate::builtins::io::data::COMMIT_ALIAS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::data::DATATX_LIFECYCLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     match &base {
         Value::Object(obj) if obj.class_name == "DataTransaction" => {
-            data_tx_commit_builtin(base, rest).await
-        }
-        Value::HandleObject(handle) if handle.class_name == "DataTransaction" => {
             data_tx_commit_builtin(base, rest).await
         }
         _ => Err(data_error(
@@ -2633,7 +2662,7 @@ async fn create_array_in_manifest(
             "DataTransaction.create_array: array '{array_name}' already exists"
         )));
     }
-    let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone());
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
     let (payload_path, chunk_index_path) =
         write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
@@ -2653,7 +2682,7 @@ async fn resize_array_in_manifest(
         .get_mut(array_name)
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
     meta.shape = shape.clone();
-    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone());
+    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
     let (payload_path, chunk_index_path) =
         write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
@@ -2746,6 +2775,7 @@ fn parse_array_meta(array_name: &str, meta: &Value) -> BuiltinResult<DataArrayMe
         .map(parse_shape_from_value)
         .transpose()?
         .unwrap_or_else(|| default_chunk_shape(&shape));
+    validate_chunk_shape(&shape, &chunk_shape)?;
     let codec = meta_struct
         .fields
         .get("codec")
@@ -2765,7 +2795,7 @@ fn parse_array_meta(array_name: &str, meta: &Value) -> BuiltinResult<DataArrayMe
 
 fn default_chunk_shape(shape: &[usize]) -> Vec<usize> {
     if shape.is_empty() {
-        return vec![1024];
+        return Vec::new();
     }
     let mut out = shape.to_vec();
     if out.len() == 1 {
@@ -3093,7 +3123,7 @@ fn read_slice_payload(
         .iter()
         .map(|r| r.end.saturating_sub(r.start))
         .collect();
-    let mut out_values = crate::data::DataArrayValues::zeros(&payload.dtype, 0);
+    let mut out_values = crate::data::DataArrayValues::zeros(&payload.dtype, 0)?;
     let mut out_index = vec![0usize; out_shape.len()];
     loop {
         let source_index: Vec<usize> = out_index
@@ -3461,7 +3491,7 @@ async fn load_or_init_chunk(
         shape: chunk_extent.to_vec(),
         data_path: chunk_rel_path(array_name, &object_id),
     };
-    let payload = DataArrayPayload::zeros(dtype.to_string(), chunk_extent.to_vec());
+    let payload = DataArrayPayload::zeros(dtype.to_string(), chunk_extent.to_vec())?;
     Ok((chunk_index.chunks.len(), false, entry, payload))
 }
 
@@ -3679,7 +3709,7 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(data_labels.contains(&"ds = data.create(path, schema, Name, Value, ...)"));
+        assert!(data_labels.contains(&"ds = data.create(path, schema)"));
 
         let read_labels: Vec<&str> = DATAARRAY_READ_DESCRIPTOR
             .signatures
@@ -3701,8 +3731,9 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(tx_labels.contains(&"tf = DataTransaction.commit(tx, Name, Value, ...)"));
+        assert!(tx_labels.contains(&"tf = DataTransaction.commit(tx, options)"));
 
+        assert_eq!(DATA_CREATE_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATAARRAY_READ_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATAARRAY_WRITE_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATAARRAY_RESIZE_INTEGER_CAPABILITIES.len(), 1);
@@ -3718,6 +3749,7 @@ mod tests {
         assert_eq!(DATATX_FILL_INTEGER_CAPABILITIES.len(), 1);
         assert_eq!(DATATX_CREATE_ARRAY_INTEGER_CAPABILITIES.len(), 1);
         for capability in [
+            &DATA_CREATE_INTEGER_CAPABILITIES[0],
             &DATAARRAY_READ_INTEGER_CAPABILITIES[0],
             &DATAARRAY_WRITE_INTEGER_CAPABILITIES[0],
             &DATAARRAY_RESIZE_INTEGER_CAPABILITIES[0],
@@ -3737,6 +3769,230 @@ mod tests {
             assert!(capability.inputs.iter().all(|input| input.classes
                 == crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES));
         }
+    }
+
+    #[test]
+    fn data_create_uses_exact_all_class_schema_controls_and_integer_payloads() {
+        let _serial = serial_test_guard();
+        let _provider = native_provider_guard();
+        let cases = vec![
+            (
+                "int8",
+                IntegerStorage::I8(vec![2, 3]),
+                IntegerStorage::I8(vec![1, 3]),
+                IntegerStorage::I8(vec![0; 6]),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![2, 3]),
+                IntegerStorage::I16(vec![1, 3]),
+                IntegerStorage::I16(vec![0; 6]),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![2, 3]),
+                IntegerStorage::I32(vec![1, 3]),
+                IntegerStorage::I32(vec![0; 6]),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![2, 3]),
+                IntegerStorage::I64(vec![1, 3]),
+                IntegerStorage::I64(vec![0; 6]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![2, 3]),
+                IntegerStorage::U8(vec![1, 3]),
+                IntegerStorage::U8(vec![0; 6]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![2, 3]),
+                IntegerStorage::U16(vec![1, 3]),
+                IntegerStorage::U16(vec![0; 6]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![2, 3]),
+                IntegerStorage::U32(vec![1, 3]),
+                IntegerStorage::U32(vec![0; 6]),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![2, 3]),
+                IntegerStorage::U64(vec![1, 3]),
+                IntegerStorage::U64(vec![0; 6]),
+            ),
+        ];
+
+        for (dtype, shape, chunk, expected) in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir
+                .path()
+                .join(format!("schema-{dtype}.data"))
+                .to_string_lossy()
+                .to_string();
+            let mut meta = StructValue::new();
+            meta.fields
+                .insert("dtype".to_string(), Value::String(dtype.to_string()));
+            meta.fields.insert(
+                "shape".to_string(),
+                Value::Tensor(Tensor::new_integer(shape, vec![1, 2]).expect("shape")),
+            );
+            meta.fields.insert(
+                "chunk".to_string(),
+                Value::Tensor(Tensor::new_integer(chunk, vec![1, 2]).expect("chunk")),
+            );
+            let mut arrays = StructValue::new();
+            arrays
+                .fields
+                .insert("samples".to_string(), Value::Struct(meta));
+            let mut schema = StructValue::new();
+            schema
+                .fields
+                .insert("arrays".to_string(), Value::Struct(arrays));
+
+            let dataset =
+                call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+                    .unwrap_or_else(|error| panic!("{dtype}: create failed: {error}"));
+            let array = call_builtin(
+                "Dataset.array",
+                &[dataset, Value::String("samples".to_string())],
+            )
+            .expect("array handle");
+            let Value::Tensor(values) =
+                call_builtin("DataArray.read", &[array]).expect("read zeros")
+            else {
+                panic!("{dtype}: expected tensor");
+            };
+            assert_eq!(values.shape, vec![2, 3], "{dtype}");
+            assert_eq!(values.integer_storage(), Some(&expected), "{dtype}");
+        }
+    }
+
+    #[test]
+    fn data_namespace_lifecycle_rejects_integer_arguments_and_unsupported_extras() {
+        let integer_values = [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ];
+        for integer in integer_values {
+            let value = Value::Int(integer);
+            for (name, args) in [
+                (
+                    "data.create",
+                    vec![value.clone(), Value::Struct(StructValue::new())],
+                ),
+                ("data.open", vec![value.clone()]),
+                ("data.exists", vec![value.clone()]),
+                ("data.delete", vec![value.clone()]),
+                ("data.inspect", vec![value.clone()]),
+                ("data.list", vec![value.clone()]),
+                (
+                    "data.copy",
+                    vec![value.clone(), Value::String("to.data".to_string())],
+                ),
+                (
+                    "data.copy",
+                    vec![Value::String("from.data".to_string()), value.clone()],
+                ),
+                (
+                    "data.move",
+                    vec![value.clone(), Value::String("to.data".to_string())],
+                ),
+                (
+                    "data.move",
+                    vec![Value::String("from.data".to_string()), value.clone()],
+                ),
+                (
+                    "data.import",
+                    vec![
+                        value.clone(),
+                        Value::String("data".to_string()),
+                        Value::String("source.data".to_string()),
+                    ],
+                ),
+                (
+                    "data.import",
+                    vec![
+                        Value::String("path.data".to_string()),
+                        value.clone(),
+                        Value::String("source.data".to_string()),
+                    ],
+                ),
+                (
+                    "data.import",
+                    vec![
+                        Value::String("path.data".to_string()),
+                        Value::String("data".to_string()),
+                        value.clone(),
+                    ],
+                ),
+                (
+                    "data.export",
+                    vec![
+                        value.clone(),
+                        Value::String("data".to_string()),
+                        Value::String("target.data".to_string()),
+                    ],
+                ),
+                (
+                    "data.export",
+                    vec![
+                        Value::String("path.data".to_string()),
+                        value.clone(),
+                        Value::String("target.data".to_string()),
+                    ],
+                ),
+                (
+                    "data.export",
+                    vec![
+                        Value::String("path.data".to_string()),
+                        Value::String("data".to_string()),
+                        value.clone(),
+                    ],
+                ),
+                ("commit", vec![value]),
+            ] {
+                let error = call_builtin(name, &args).expect_err("expected integer rejection");
+                assert!(!error.message().is_empty(), "{name}");
+            }
+        }
+
+        let error = call_builtin(
+            "data.exists",
+            &[
+                Value::String("missing.data".to_string()),
+                Value::Int(IntValue::U8(1)),
+            ],
+        )
+        .expect_err("fixed documented arity must reject extras");
+        assert!(!error.message().is_empty());
+
+        let error = call_builtin(
+            "DataTransaction.commit",
+            &[Value::Int(IntValue::U8(1)), Value::Int(IntValue::U8(1))],
+        )
+        .expect_err("commit options must be a struct");
+        assert!(error.message().contains("options must be a scalar struct"));
+
+        let error = call_builtin(
+            "DataTransaction.commit",
+            &[
+                Value::Int(IntValue::U8(1)),
+                Value::Struct(StructValue::new()),
+                Value::Struct(StructValue::new()),
+            ],
+        )
+        .expect_err("commit must reject more than one options struct");
+        assert!(error.message().contains("at most one options struct"));
     }
 
     #[test]
@@ -3794,15 +4050,8 @@ mod tests {
         schema
             .fields
             .insert("arrays".to_string(), Value::Struct(arrays));
-        let ds = call_builtin(
-            "data.create",
-            &[
-                Value::String(path),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
-        )
-        .expect("create dataset");
+        let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+            .expect("create dataset");
         let cases = [
             ("int8", IntValue::I8(i8::MIN), IntValue::I64(i8::MIN as i64)),
             (
@@ -4278,11 +4527,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(runmat_builtins::CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
 
@@ -4332,11 +4577,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -4403,11 +4644,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -4493,11 +4730,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -4592,11 +4825,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -4688,11 +4917,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
         let arr = call_builtin(
@@ -4777,11 +5002,7 @@ mod tests {
 
         let ds = call_builtin(
             "data.create",
-            &[
-                Value::String(path.clone()),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
+            &[Value::String(path.clone()), Value::Struct(schema)],
         )
         .expect("create dataset");
 
@@ -4826,16 +5047,10 @@ mod tests {
             &[tx.clone(), Value::String("base".to_string())],
         )
         .expect("delete array in tx");
-        call_builtin("DataTransaction.commit", &[tx]).expect("commit tx");
+        call_builtin("commit", &[tx, Value::Struct(StructValue::new())])
+            .expect("commit tx through alias options form");
 
-        let ds = call_builtin(
-            "data.open",
-            &[
-                Value::String(path),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
-        )
-        .expect("open dataset");
+        let ds = call_builtin("data.open", &[Value::String(path)]).expect("open dataset");
         let has_base = call_builtin(
             "Dataset.has_array",
             &[ds.clone(), Value::String("base".to_string())],
@@ -4957,15 +5172,8 @@ mod tests {
             schema
                 .fields
                 .insert("arrays".to_string(), Value::Struct(arrays));
-            let ds = call_builtin(
-                "data.create",
-                &[
-                    Value::String(path),
-                    Value::Struct(schema),
-                    Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-                ],
-            )
-            .expect("create dataset");
+            let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+                .expect("create dataset");
             let tx = call_builtin("Dataset.begin", &[ds.clone()]).expect("begin transaction");
 
             let mut meta = StructValue::new();
@@ -5141,15 +5349,8 @@ mod tests {
                 .fields
                 .insert("arrays".to_string(), Value::Struct(arrays));
 
-            let ds = call_builtin(
-                "data.create",
-                &[
-                    Value::String(path),
-                    Value::Struct(schema),
-                    Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-                ],
-            )
-            .expect("create dataset");
+            let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+                .expect("create dataset");
             let arr = call_builtin("Dataset.array", &[ds, Value::String("samples".to_string())])
                 .expect("array");
             let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
@@ -5204,15 +5405,8 @@ mod tests {
         schema
             .fields
             .insert("arrays".to_string(), Value::Struct(arrays));
-        let ds = call_builtin(
-            "data.create",
-            &[
-                Value::String(path),
-                Value::Struct(schema),
-                Value::Cell(CellArray::new(vec![], 1, 0).expect("cell")),
-            ],
-        )
-        .expect("create dataset");
+        let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
+            .expect("create dataset");
         let arr = call_builtin(
             "Dataset.array",
             &[ds.clone(), Value::String("samples".to_string())],

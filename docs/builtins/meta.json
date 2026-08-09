@@ -531,12 +531,12 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "Shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform bounds."
+              "notes": "Shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds."
             }
           ],
           "computation_domain": "Structural",
           "output_class": "Logical",
-          "overflow": "NotApplicable",
+          "overflow": "Error",
           "backend": "HostOnly",
           "overload": "StructuralParameter",
           "notes": "The exact shape is validated against platform bounds, persisted as metadata, and used to recreate zero-filled storage in the array's declared dtype."
@@ -788,7 +788,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = DataTransaction.commit(tx, Name, Value, ...)",
+          "label": "tf = DataTransaction.commit(tx, options)",
           "inputs": [
             {
               "name": "tx",
@@ -800,9 +800,9 @@
             {
               "name": "options",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Optional",
               "default": null,
-              "description": "Commit options (e.g. if_manifest)."
+              "description": "Optional struct containing an if_manifest version token."
             }
           ],
           "outputs": [
@@ -920,7 +920,7 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "The schema shape accepts all eight integer classes or exactly integral floating values within nonnegative platform bounds."
+              "notes": "The schema shape accepts all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds."
             },
             {
               "name": "meta.chunk",
@@ -936,12 +936,12 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "The optional chunk shape accepts all eight integer classes or exactly integral floating values within nonnegative platform bounds."
+              "notes": "The optional chunk shape accepts all eight integer classes or exactly integral floating values; dimensions must be positive, platform-bounded, and rank-matched to meta.shape."
             }
           ],
           "computation_domain": "Structural",
           "output_class": "Logical",
-          "overflow": "NotApplicable",
+          "overflow": "Error",
           "backend": "HostOnly",
           "overload": "StructuralParameter",
           "notes": "Exact shape and chunk dimensions are validated when queued, retained as platform-sized metadata, and used at commit to create storage in the schema's declared dtype."
@@ -1259,12 +1259,12 @@
               ],
               "availability": "Documented",
               "scalar_double": "Allowed",
-              "notes": "Queued shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform bounds."
+              "notes": "Queued shape scalars and vectors accept all eight integer classes or exactly integral floating values within nonnegative platform and checked total-element bounds."
             }
           ],
           "computation_domain": "Structural",
           "output_class": "Logical",
-          "overflow": "NotApplicable",
+          "overflow": "Error",
           "backend": "HostOnly",
           "overload": "StructuralParameter",
           "notes": "The exact shape is validated when queued, retained as platform-sized metadata, and applied at commit by recreating zero-filled storage in the array's declared dtype."
@@ -18239,7 +18239,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = commit(tx, Name, Value, ...)",
+          "label": "tf = commit(tx, options)",
           "inputs": [
             {
               "name": "tx",
@@ -18251,9 +18251,9 @@
             {
               "name": "options",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Optional",
               "default": null,
-              "description": "Commit options (e.g. if_manifest)."
+              "description": "Optional struct containing an if_manifest version token."
             }
           ],
           "outputs": [
@@ -18286,7 +18286,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "DataTransaction id, status, commit, abort, and delete-array operations accept a transaction receiver plus, where applicable, string metadata or an array name; they do not accept integer values or controls, return integer-class values, perform integer arithmetic, or expose an integer backend surface."
+      }
     },
     {
       "name": "complex",
@@ -27400,7 +27404,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = data.copy(fromPath, toPath, Name, Value, ...)",
+          "label": "tf = data.copy(fromPath, toPath)",
           "inputs": [
             {
               "name": "fromPath",
@@ -27415,13 +27419,6 @@
               "arity": "Required",
               "default": null,
               "description": "Destination dataset path."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27454,7 +27451,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "data.create",
@@ -27462,7 +27463,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "ds = data.create(path, schema, Name, Value, ...)",
+          "label": "ds = data.create(path, schema)",
           "inputs": [
             {
               "name": "path",
@@ -27477,13 +27478,6 @@
               "arity": "Required",
               "default": null,
               "description": "Dataset schema struct."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27516,6 +27510,51 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ds = data.create(path, struct_with_integer_shape_and_chunk)",
+          "inputs": [
+            {
+              "name": "schema.arrays.*.shape",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Array shapes accept scalar or vector dimensions in every integer class, or exactly integral floating values, within nonnegative platform and checked total-element bounds."
+            },
+            {
+              "name": "schema.arrays.*.chunk",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Optional chunk shapes accept scalar or vector dimensions in every integer class, or exactly integral floating values; dimensions must be positive, platform-bounded, and rank-matched to the array shape."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Schema dimensions are parsed directly from authoritative typed storage; the host/filesystem constructor allocates zero-filled storage in each array's declared dtype and returns a Dataset object."
+        }
       ]
     },
     {
@@ -27524,7 +27563,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = data.delete(path, Name, Value, ...)",
+          "label": "tf = data.delete(path)",
           "inputs": [
             {
               "name": "path",
@@ -27532,13 +27571,6 @@
               "arity": "Required",
               "default": null,
               "description": "Dataset path (.data)."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27571,7 +27603,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "data.exists",
@@ -27587,13 +27623,6 @@
               "arity": "Required",
               "default": null,
               "description": "Dataset path (.data)."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27626,7 +27655,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "data.export",
@@ -27634,7 +27667,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = data.export(path, format, targetPath, Name, Value, ...)",
+          "label": "tf = data.export(path, format, targetPath)",
           "inputs": [
             {
               "name": "path",
@@ -27656,13 +27689,6 @@
               "arity": "Required",
               "default": null,
               "description": "Target dataset path."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27695,7 +27721,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "data.import",
@@ -27703,7 +27733,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "ds = data.import(path, format, sourcePath, Name, Value, ...)",
+          "label": "ds = data.import(path, format, sourcePath)",
           "inputs": [
             {
               "name": "path",
@@ -27720,18 +27750,11 @@
               "description": "Format token (currently 'data')."
             },
             {
-              "name": "targetPath",
+              "name": "sourcePath",
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Target dataset path."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
+              "description": "Source dataset path."
             }
           ],
           "outputs": [
@@ -27764,7 +27787,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "data.inspect",
@@ -27780,13 +27807,6 @@
               "arity": "Required",
               "default": null,
               "description": "Dataset path (.data)."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27819,7 +27839,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "data.list",
@@ -27827,7 +27851,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "C = data.list(prefix, Name, Value, ...)",
+          "label": "C = data.list(prefix)",
           "inputs": [
             {
               "name": "prefix",
@@ -27835,13 +27859,6 @@
               "arity": "Required",
               "default": null,
               "description": "Filesystem prefix to scan for datasets."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27874,7 +27891,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "data.move",
@@ -27882,7 +27903,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "tf = data.move(fromPath, toPath, Name, Value, ...)",
+          "label": "tf = data.move(fromPath, toPath)",
           "inputs": [
             {
               "name": "fromPath",
@@ -27897,13 +27918,6 @@
               "arity": "Required",
               "default": null,
               "description": "Destination dataset path."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27936,7 +27950,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "data.open",
@@ -27944,7 +27962,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "ds = data.open(path, Name, Value, ...)",
+          "label": "ds = data.open(path)",
           "inputs": [
             {
               "name": "path",
@@ -27952,13 +27970,6 @@
               "arity": "Required",
               "default": null,
               "description": "Dataset path (.data)."
-            },
-            {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Reserved name/value options."
             }
           ],
           "outputs": [
@@ -27991,7 +28002,11 @@
           "when": "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
           "message": "data: internal operation failed"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form."
+      }
     },
     {
       "name": "dataTipTextRow",

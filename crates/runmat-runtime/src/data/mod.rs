@@ -156,11 +156,11 @@ impl<'de> Deserialize<'de> for DataArrayValues {
 }
 
 impl DataArrayValues {
-    pub fn zeros(dtype: &str, len: usize) -> Self {
+    pub fn zeros(dtype: &str, len: usize) -> BuiltinResult<Self> {
         if is_single_dtype(dtype) {
-            return Self::F32(vec![0.0; len]);
+            return Ok(Self::F32(vec![0.0; len]));
         }
-        match integer_dtype(dtype) {
+        Ok(match integer_dtype(dtype) {
             Some("int8") => Self::I8(vec![0; len]),
             Some("int16") => Self::I16(vec![0; len]),
             Some("int32") => Self::I32(vec![0; len]),
@@ -169,8 +169,9 @@ impl DataArrayValues {
             Some("uint16") => Self::U16(vec![0; len]),
             Some("uint32") => Self::U32(vec![0; len]),
             Some("uint64") => Self::U64(vec![0; len]),
-            _ => Self::F64(vec![0.0; len]),
-        }
+            None if is_double_dtype(dtype) => Self::F64(vec![0.0; len]),
+            _ => return Err(unsupported_data_dtype(dtype)),
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -281,8 +282,11 @@ impl DataArrayValues {
                     .collect(),
             ));
         }
-        let Some(target) = integer_target(dtype) else {
+        if is_double_dtype(dtype) {
             return Ok(Self::F64(self.to_f64_vec()));
+        }
+        let Some(target) = integer_target(dtype) else {
+            return Err(unsupported_data_dtype(dtype));
         };
         let mut values = Vec::with_capacity(self.len());
         for index in 0..self.len() {
@@ -385,6 +389,19 @@ fn is_single_dtype(dtype: &str) -> bool {
     )
 }
 
+fn is_double_dtype(dtype: &str) -> bool {
+    matches!(
+        dtype.to_ascii_lowercase().as_str(),
+        "double" | "f64" | "float64"
+    )
+}
+
+fn unsupported_data_dtype(dtype: &str) -> RuntimeError {
+    data_error(format!(
+        "unsupported data array dtype '{dtype}'; expected f64, f32, or a built-in integer class"
+    ))
+}
+
 fn integer_target(dtype: &str) -> Option<IntegerTarget> {
     match integer_dtype(dtype) {
         Some("int8") => Some(IntegerTarget::I8),
@@ -400,13 +417,13 @@ fn integer_target(dtype: &str) -> Option<IntegerTarget> {
 }
 
 impl DataArrayPayload {
-    pub fn zeros(dtype: String, shape: Vec<usize>) -> Self {
-        let values = DataArrayValues::zeros(&dtype, shape.iter().copied().product());
-        Self {
+    pub fn zeros(dtype: String, shape: Vec<usize>) -> BuiltinResult<Self> {
+        let values = DataArrayValues::zeros(&dtype, checked_shape_element_count(&shape)?)?;
+        Ok(Self {
             dtype,
             shape,
             values,
-        }
+        })
     }
 
     pub fn from_value(dtype: String, value: &Value) -> BuiltinResult<Self> {
@@ -424,8 +441,8 @@ impl DataArrayPayload {
             return Err(data_error("expected numeric scalar"));
         }
         let scalar = scalar.values.get(0)?;
-        let len = shape.iter().copied().product();
-        let mut values = DataArrayValues::zeros(&dtype, len);
+        let len = checked_shape_element_count(&shape)?;
+        let mut values = DataArrayValues::zeros(&dtype, len)?;
         for index in 0..len {
             values.set(index, scalar)?;
         }
@@ -448,6 +465,17 @@ impl DataArrayPayload {
             .map(Value::Tensor)
             .map_err(|err| data_error(format!("invalid data payload: {err}")))
     }
+}
+
+fn checked_shape_element_count(shape: &[usize]) -> BuiltinResult<usize> {
+    if shape.contains(&0) {
+        return Ok(0);
+    }
+    shape.iter().try_fold(1usize, |count, dimension| {
+        count
+            .checked_mul(*dimension)
+            .ok_or_else(|| data_error("data array shape exceeds platform element-count limits"))
+    })
 }
 
 fn data_values_from_value(value: &Value) -> BuiltinResult<(Vec<usize>, DataArrayValues)> {
@@ -868,7 +896,8 @@ async fn read_array_payload_chunked_slice_async(
         ))
     })?;
 
-    let mut values = DataArrayValues::zeros(&meta.dtype, slice_shape.iter().copied().product());
+    let mut values =
+        DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(slice_shape)?)?;
     for chunk in index.chunks {
         let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
         let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
@@ -948,7 +977,8 @@ async fn read_array_payload_chunked_async(
             index_path.display()
         ))
     })?;
-    let mut values = DataArrayValues::zeros(&meta.dtype, meta.shape.iter().copied().product());
+    let mut values =
+        DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(&meta.shape)?)?;
     for chunk in index.chunks {
         let chunk_path = root.join(&chunk.data_path);
         let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
@@ -1109,7 +1139,7 @@ fn collect_chunk_values(
     chunk_extent: &[usize],
 ) -> BuiltinResult<DataArrayValues> {
     let mut local = vec![0usize; chunk_extent.len()];
-    let mut values = DataArrayValues::zeros(&payload.dtype, 0);
+    let mut values = DataArrayValues::zeros(&payload.dtype, 0)?;
     loop {
         let mut global = Vec::with_capacity(chunk_extent.len());
         for dim in 0..chunk_extent.len() {
@@ -1214,7 +1244,7 @@ fn extract_slice_payload(
     start: &[usize],
     shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
-    let mut values = DataArrayValues::zeros(&payload.dtype, 0);
+    let mut values = DataArrayValues::zeros(&payload.dtype, 0)?;
     if shape.is_empty() {
         return Ok(DataArrayPayload {
             dtype: payload.dtype.clone(),
@@ -1308,6 +1338,7 @@ pub fn parse_schema(schema: &Value) -> BuiltinResult<DataSchema> {
             .map(parse_usize_vector)
             .transpose()?
             .unwrap_or_else(|| default_chunk_shape(&shape));
+        validate_chunk_shape(&shape, &chunk_shape)?;
         let codec = meta_struct
             .fields
             .get("codec")
@@ -1335,7 +1366,7 @@ pub fn parse_schema(schema: &Value) -> BuiltinResult<DataSchema> {
 
 fn default_chunk_shape(shape: &[usize]) -> Vec<usize> {
     if shape.is_empty() {
-        return vec![1024];
+        return Vec::new();
     }
     let mut out = shape.to_vec();
     if out.len() == 1 {
@@ -1348,6 +1379,20 @@ fn default_chunk_shape(shape: &[usize]) -> Vec<usize> {
         *dim = (*dim).clamp(1, 8);
     }
     out
+}
+
+pub fn validate_chunk_shape(shape: &[usize], chunk_shape: &[usize]) -> BuiltinResult<()> {
+    if chunk_shape.len() != shape.len() {
+        return Err(data_error(
+            "data array chunk shape must have the same rank as its array shape",
+        ));
+    }
+    if chunk_shape.contains(&0) {
+        return Err(data_error(
+            "data array chunk dimensions must be strictly positive",
+        ));
+    }
+    Ok(())
 }
 
 fn parse_usize_vector(value: &Value) -> BuiltinResult<Vec<usize>> {
@@ -1628,6 +1673,52 @@ mod tests {
         let input =
             Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("int16 dims");
         assert!(parse_usize_vector(&Value::Tensor(input)).is_err());
+    }
+
+    #[test]
+    fn payload_allocation_rejects_shape_product_overflow() {
+        let error = DataArrayPayload::zeros("uint64".to_string(), vec![usize::MAX, 2])
+            .expect_err("overflowing shape must reject before allocation");
+        assert!(error
+            .message()
+            .contains("shape exceeds platform element-count limits"));
+        let error = DataArrayPayload::filled(
+            "uint64".to_string(),
+            vec![usize::MAX, 2],
+            &Value::Int(IntValue::U64(1)),
+        )
+        .expect_err("overflowing filled shape must reject before allocation");
+        assert!(error
+            .message()
+            .contains("shape exceeds platform element-count limits"));
+        for shape in [
+            vec![0, usize::MAX, 2],
+            vec![usize::MAX, 0, 2],
+            vec![usize::MAX, 2, 0],
+        ] {
+            let payload = DataArrayPayload::zeros("uint64".to_string(), shape.clone())
+                .expect("a zero dimension makes the total element count zero");
+            assert_eq!(payload.shape, shape);
+            assert_eq!(payload.values.len(), 0);
+        }
+    }
+
+    #[test]
+    fn chunk_shape_requires_positive_rank_matched_dimensions() {
+        validate_chunk_shape(&[4, 5], &[2, 5]).expect("valid chunk shape");
+        assert!(validate_chunk_shape(&[4, 5], &[2]).is_err());
+        assert!(validate_chunk_shape(&[4, 5], &[2, 0]).is_err());
+        validate_chunk_shape(&[], &[]).expect("rank-zero metadata remains self-consistent");
+    }
+
+    #[test]
+    fn payload_rejects_unknown_dtype_instead_of_falling_back_to_f64() {
+        let error = DataArrayPayload::zeros("mystery".to_string(), vec![1, 1])
+            .expect_err("unknown dtype must reject");
+        assert!(error.message().contains("unsupported data array dtype"));
+        let error = DataArrayPayload::from_value("mystery".to_string(), &Value::Num(1.0))
+            .expect_err("unknown cast target must reject");
+        assert!(error.message().contains("unsupported data array dtype"));
     }
 
     #[test]
