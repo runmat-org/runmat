@@ -15938,6 +15938,49 @@
           "when": "Internal cell allocation or conversion failed.",
           "message": "cell: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "cell-like",
+          "mode": "RunMatOnly",
+          "description": "the cell \"like\" prototype selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CellLikeExtension"
+        },
+        {
+          "id": "cell-gpu-size",
+          "mode": "RunMatOnly",
+          "description": "resident GPU size controls for cell are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CellGpuSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = cell(n), cell(sz1, ..., szN), or cell(sz) with integer size controls",
+          "inputs": [
+            {
+              "name": "n_or_size_dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Square, variadic-dimension, and row-size-vector controls accept every integer class and are decoded from authoritative integer storage without binary64 conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Signed negative dimensions clamp to zero, oversized dimensions fail before allocation, and resident size controls use an independently mode-gated exact gather fallback; every cell allocated by a documented form contains a host 0-by-0 double array."
+        }
       ]
     },
     {

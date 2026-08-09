@@ -630,6 +630,33 @@ fn ceil_preserves_all_integer_classes_through_compiled_dispatch() {
 }
 
 #[test]
+fn cell_accepts_all_integer_size_classes_through_compiled_dispatch() {
+    for constructor in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        let source = format!("dims = {constructor}([2 3]); c = cell(dims);");
+        let vars = execute_source(&source)
+            .unwrap_or_else(|error| panic!("{constructor}: compiled cell failed: {error}"));
+        let Value::Cell(cell) = &vars[1] else {
+            panic!("{constructor}: expected cell output, got {:?}", vars[1]);
+        };
+        assert_eq!(cell.shape, vec![2, 3], "{constructor}: shape");
+        assert_eq!(cell.data.len(), 6, "{constructor}: element count");
+        assert!(cell.data.iter().all(|value| matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.shape == vec![0, 0]
+                    && tensor.numeric_dtype() == NumericDType::F64
+                    && tensor.len() == 0
+        )));
+    }
+
+    let vars = execute_source("dims = int64([-2 3 1 1]); c = cell(dims);")
+        .expect("compiled cell must clamp signed negative sizes and trim trailing singletons");
+    assert!(matches!(&vars[1], Value::Cell(cell) if cell.shape == vec![0, 3]));
+}
+
+#[test]
 fn typed_complex_integer_gpuarray_is_rejected_before_provider_dispatch() {
     let err = execute_source(
         "z = complex(uint64([9223372036854775808 18446744073709551615]), uint64([1 2])); g = gpuArray(z);",

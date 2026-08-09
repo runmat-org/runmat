@@ -257,6 +257,8 @@ mod tests {
                 ("cdfplot", "cdfplot-gpu-input"),
                 ("cdfplot", "cdfplot-integer-input"),
                 ("cdfplot", "cdfplot-logical-input"),
+                ("cell", "cell-gpu-size"),
+                ("cell", "cell-like"),
                 ("binornd", "binornd-integer-probability"),
                 ("binornd", "binornd-integer-size"),
                 ("binornd", "binornd-integer-trials"),
@@ -603,6 +605,7 @@ mod tests {
             "cdf",
             "cdfplot",
             "ceil",
+            "cell",
         ] {
             let builtin = registered
                 .iter()
