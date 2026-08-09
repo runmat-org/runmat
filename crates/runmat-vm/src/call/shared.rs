@@ -670,7 +670,7 @@ fn build_end_range_descriptor(
 fn normalize_object_numeric_selector(selector: &Value) -> Result<Value, RuntimeError> {
     match selector {
         Value::Num(n) => Ok(Value::Num(*n)),
-        Value::Int(i) => Ok(Value::Num(i.to_f64())),
+        Value::Int(i) => Ok(Value::Int(i.clone())),
         Value::Tensor(t) => Ok(Value::Tensor(t.clone())),
         Value::Bool(value) => Ok(Value::Bool(*value)),
         Value::LogicalArray(array) => Ok(Value::LogicalArray(array.clone())),
@@ -999,13 +999,23 @@ mod tests {
     use crate::bytecode::ArgSpec;
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, Access, ClassDef, HandleRef, MethodDef, Value};
+    use runmat_builtins::{
+        register_class, Access, ClassDef, HandleRef, IntValue, MethodDef, Value,
+    };
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn object_selector_preserves_exact_integer_scalar_class() {
+        let selector = Value::Int(IntValue::U64(u64::MAX));
+        let values = build_object_paren_selector_values(1, 0, 0, &[selector.clone()])
+            .expect("object selector");
+        assert_eq!(values, vec![selector]);
+    }
 
     macro_rules! build_object_paren_expr_selector_values_from_parts {
         (

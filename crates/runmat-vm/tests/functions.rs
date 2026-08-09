@@ -5780,9 +5780,17 @@ fn containers_map_dot_properties() {
         runmat_builtins::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "any",
         _ => false,
     }));
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n).abs() < 1e-9)));
+    assert!(vars.iter().any(|v| matches!(
+        v,
+        runmat_builtins::Value::Int(runmat_builtins::IntValue::U64(0))
+    )));
+}
+
+#[test]
+fn containers_map_preserves_wide_integer_keys_values_and_count() {
+    let _ = execute_source(
+        "m = containers.Map('KeyType','uint64','ValueType','uint64'); k = intmax('uint64'); m(k) = k-uint64(1); if m.Count ~= uint64(1) || m(k) ~= k-uint64(1) || ~isKey(m,k); error('integer Map mismatch'); end; ks = keys(m); vs = values(m,{k}); if ks{1} ~= k || vs{1} ~= k-uint64(1); error('integer Map collection mismatch'); end; remove(m,k); if isKey(m,k) || m.Count ~= uint64(0); error('integer Map removal mismatch'); end;",
+    );
 }
 
 #[test]

@@ -281,6 +281,15 @@ fn confusionmat_surface_executes_from_scripts() {
 }
 
 #[test]
+fn confusionmat_preserves_typed_integer_order_through_compiled_dispatch() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(
+        "hi = intmax('uint64'); truth = [hi-uint64(1); hi; hi]; predicted = [hi-uint64(1); hi-uint64(1); hi]; [C,ord] = confusionmat(truth,predicted); if ~strcmp(class(ord),'uint64') || ord(1) ~= hi-uint64(1) || ord(2) ~= hi || C(1,1) ~= 1 || C(2,1) ~= 1 || C(2,2) ~= 1; error('typed confusionmat mismatch'); end;",
+    )
+    .expect("typed integer confusionmat script");
+}
+
+#[test]
 fn perfcurve_surface_executes_from_scripts() {
     let vars = execute_source(
         "labels = [1; 0; 1; 0]; scores = [0.9; 0.8; 0.4; 0.1]; [X,Y,T,AUC,opt,suby,names] = perfcurve(labels, scores, 1); n = length(T); xl = X(end); yl = Y(end); [R,P] = perfcurve(labels, scores, 1, 'XCrit', 'reca', 'YCrit', 'prec', 'TVals', [0.8 0.4]); r2 = R(2); p1 = P(1);",

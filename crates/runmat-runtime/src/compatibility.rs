@@ -292,6 +292,36 @@ mod tests {
                 ("cond", "cond-integer-norm-selector"),
                 ("cond", "cond-logical-matrix"),
                 ("cond", "cond-logical-norm-selector"),
+                ("confusionmat", "confusionmat-integer-group"),
+                ("confusionmat", "confusionmat-integer-grouphat"),
+                ("confusionmat", "confusionmat-integer-order"),
+                ("confusionmat", "confusionmat-resident-input"),
+                ("conj", "conj-character-input"),
+                (
+                    "containers.Map",
+                    "containers-map-resident-constructor-input",
+                ),
+                (
+                    "containers.Map.isKey",
+                    "containers-map-resident-iskey-input",
+                ),
+                (
+                    "containers.Map.values",
+                    "containers-map-resident-values-input",
+                ),
+                (
+                    "containers.Map.remove",
+                    "containers-map-resident-remove-input",
+                ),
+                (
+                    "containers.Map.subsref",
+                    "containers-map-resident-subsref-input",
+                ),
+                (
+                    "containers.Map.subsasgn",
+                    "containers-map-resident-subsasgn-input",
+                ),
+                ("contour", "contour-integer-line-color"),
                 ("binornd", "binornd-integer-probability"),
                 ("binornd", "binornd-integer-size"),
                 ("binornd", "binornd-integer-trials"),
@@ -662,6 +692,16 @@ mod tests {
             "complex",
             "compose",
             "cond",
+            "confusionmat",
+            "conj",
+            "containers.Map",
+            "containers.Map.isKey",
+            "containers.Map.keys",
+            "containers.Map.remove",
+            "containers.Map.subsasgn",
+            "containers.Map.subsref",
+            "containers.Map.values",
+            "contour",
             "contains",
             "convertCharsToStrings",
             "convertContainedStringsToChars",
@@ -681,7 +721,12 @@ mod tests {
             );
             for capability in builtin.integer_capabilities {
                 assert!(!capability.form.is_empty(), "{name} form");
-                assert!(!capability.inputs.is_empty(), "{name} inputs");
+                assert!(
+                    !capability.inputs.is_empty()
+                        || capability.output_class
+                            != runmat_builtins::BuiltinIntegerOutputClassRule::NotApplicable,
+                    "{name} inputs or integer output"
+                );
                 assert!(!capability.notes.is_empty(), "{name} notes");
                 for input in capability.inputs {
                     assert!(!input.notes.is_empty(), "{name}:{} notes", input.name);

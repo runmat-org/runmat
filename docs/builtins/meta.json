@@ -19975,6 +19975,115 @@
           "when": "RunMat cannot allocate or construct confusion matrix outputs.",
           "message": "confusionmat: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "confusionmat-integer-group",
+          "mode": "RunMatOnly",
+          "description": "confusionmat with typed-integer group labels is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ConfusionmatIntegerGroupExtension"
+        },
+        {
+          "id": "confusionmat-integer-grouphat",
+          "mode": "RunMatOnly",
+          "description": "confusionmat with typed-integer grouphat labels is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ConfusionmatIntegerGrouphatExtension"
+        },
+        {
+          "id": "confusionmat-integer-order",
+          "mode": "RunMatOnly",
+          "description": "confusionmat with typed-integer Order labels is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ConfusionmatIntegerOrderExtension"
+        },
+        {
+          "id": "confusionmat-resident-input",
+          "mode": "RunMatOnly",
+          "description": "confusionmat with resident inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ConfusionmatResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = confusionmat(integer_group, grouphat)",
+          "inputs": [
+            {
+              "name": "group",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Rejected",
+              "notes": "Integer labels are exact and must use the same class as grouphat and Order."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat mode groups and sorts all eight integer classes exactly; C contains double counts."
+        },
+        {
+          "form": "C = confusionmat(group, integer_grouphat)",
+          "inputs": [
+            {
+              "name": "grouphat",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Rejected",
+              "notes": "Integer predicted labels are exact and must use the same class as group and Order."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "This role is independently gated before gather; integer label classes must match."
+        },
+        {
+          "form": "[C, order] = confusionmat(integer_group, integer_grouphat, 'Order', integer_order)",
+          "inputs": [
+            {
+              "name": "Order",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Rejected",
+              "notes": "Integer Order labels are deduplicated and matched without floating conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "C contains double counts; the optional order output retains the exact integer label class and values, including values above flintmax."
+        }
       ]
     },
     {
@@ -20016,6 +20125,70 @@
           "identifier": "RunMat:conj:Internal",
           "when": "Internal tensor conversion/allocation/provider interaction failed.",
           "message": "conj: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "conj-character-input",
+          "mode": "RunMatOnly",
+          "description": "conj with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ConjCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = conj(real_integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are exact identity inputs."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host inputs are returned unchanged; resident real integer inputs preserve the same exact handle and metadata."
+        },
+        {
+          "form": "Y = conj(complex_integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed complex integer storage retains its class; RunMat conservatively saturates imaginary-component negation while signed-minimum and unsigned endpoints remain evidence-open."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "EvidenceOpen",
+          "backend": "GpuRestricted",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host typed-complex integer storage uses the conservative resolved saturating-negation policy, but public evidence does not directly settle signed-minimum or unsigned-imaginary endpoints. The provider ABI does not currently represent typed complex integer resident buffers."
         }
       ]
     },
@@ -20066,7 +20239,7 @@
           ]
         },
         {
-          "label": "M = containers.Map(keys, values, Name, Value, ...)",
+          "label": "M = containers.Map(keys, values, 'UniformValues', isUniform)",
           "inputs": [
             {
               "name": "keys",
@@ -20083,11 +20256,18 @@
               "description": "Value container aligned with keys."
             },
             {
-              "name": "options",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "UniformValues",
+              "ty": "StringScalar",
+              "arity": "Required",
               "default": null,
-              "description": "Name/value options (KeyType, ValueType, UniformValues, ComparisonMethod)."
+              "description": "Literal UniformValues option name."
+            },
+            {
+              "name": "isUniform",
+              "ty": "LogicalArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Logical scalar selecting uniform-value validation."
             }
           ],
           "outputs": [
@@ -20101,14 +20281,14 @@
           ]
         },
         {
-          "label": "M = containers.Map(Name, Value, ...)",
+          "label": "M = containers.Map('KeyType', kType, 'ValueType', vType)",
           "inputs": [
             {
               "name": "options",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name/value options (KeyType, ValueType, UniformValues, ComparisonMethod)."
+              "description": "The required KeyType and ValueType name/value pairs, in either order."
             }
           ],
           "outputs": [
@@ -20140,6 +20320,116 @@
           "identifier": "RunMat:containers.Map:Internal",
           "when": "Map registry/storage operations fail unexpectedly.",
           "message": "containers.Map: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "containers-map-resident-constructor-input",
+          "mode": "RunMatOnly",
+          "description": "containers.Map gathering resident constructor keys or values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainersMapResidentConstructorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = containers.Map(integer_keySet, valueSet)",
+          "inputs": [
+            {
+              "name": "keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Public numeric Map keys are scalar single/double/int32/uint32/int64/uint64; these four integer key classes retain exact native identity."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "KeyType is inferred exactly for int32/uint32/int64/uint64; unsupported int8/uint8/int16/uint16 key arrays reject rather than alias through double."
+        },
+        {
+          "form": "M = containers.Map(keySet, integer_valueSet)",
+          "inputs": [
+            {
+              "name": "valueSet",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer class is a documented ValueType and is stored without a floating mirror."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Uniform constructor values infer their exact integer ValueType; ValueType='any' and explicit integer ValueType preserve or deliberately cast native storage."
+        },
+        {
+          "form": "M = containers.Map(resident_integer_keySet, valueSet)",
+          "inputs": [
+            {
+              "name": "resident keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident int32/uint32/int64/uint64 keys are a gated RunMat extension and gather before host Map lookup."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only resident keys gather after compatibility admission and before host key-type inference and exact identity storage."
+        },
+        {
+          "form": "M = containers.Map(keySet, resident_integer_valueSet)",
+          "inputs": [
+            {
+              "name": "resident valueSet or rhs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident integer values are a gated RunMat extension and gather before exact host storage or declared ValueType conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only resident values gather after compatibility admission; the resulting Map and all outputs remain host-resident."
         }
       ]
     },
@@ -20196,6 +20486,62 @@
           "when": "Map registry/storage operations fail unexpectedly.",
           "message": "containers.Map: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "containers-map-resident-iskey-input",
+          "mode": "RunMatOnly",
+          "description": "containers.Map.isKey gathering resident keys is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainersMapResidentIsKeyExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = containers.Map.isKey(M, integer_keySet)",
+          "inputs": [
+            {
+              "name": "keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Public numeric Map keys are scalar single/double/int32/uint32/int64/uint64; these four integer key classes retain exact native identity."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Scalar input returns scalar logical; a cell keySet returns a same-shape logical array with exact wide-key identity."
+        },
+        {
+          "form": "tf = containers.Map.isKey(M, resident_integer_keySet)",
+          "inputs": [
+            {
+              "name": "resident keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident int32/uint32/int64/uint64 keys are a gated RunMat extension and gather before host Map lookup."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat-only resident keys gather after compatibility admission; the logical result is host-resident and shape preserving."
+        }
       ]
     },
     {
@@ -20244,6 +20590,31 @@
           "when": "Map registry/storage operations fail unexpectedly.",
           "message": "containers.Map: internal operation failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "K = containers.Map.keys(M_with_integer_keys)",
+          "inputs": [
+            {
+              "name": "stored keys",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer keys are returned in their declared key class inside the output cell array."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The row cell contains exact typed scalar keys; the Map itself is host-resident."
+        }
       ]
     },
     {
@@ -20252,7 +20623,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "M = containers.Map.remove(M, keySet)",
+          "label": "containers.Map.remove(M, keySet)",
           "inputs": [
             {
               "name": "M",
@@ -20269,15 +20640,7 @@
               "description": "Key scalar or key collection to query/mutate."
             }
           ],
-          "outputs": [
-            {
-              "name": "M",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "containers.Map handle object."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -20298,6 +20661,62 @@
           "identifier": "RunMat:containers.Map:Internal",
           "when": "Map registry/storage operations fail unexpectedly.",
           "message": "containers.Map: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "containers-map-resident-remove-input",
+          "mode": "RunMatOnly",
+          "description": "containers.Map.remove gathering resident keys is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainersMapResidentRemoveExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "containers.Map.remove(M, integer_keySet)",
+          "inputs": [
+            {
+              "name": "keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Public numeric Map keys are scalar single/double/int32/uint32/int64/uint64; these four integer key classes retain exact native identity."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Removal mutates the host handle object and performs exact native key lookup."
+        },
+        {
+          "form": "containers.Map.remove(M, resident_integer_keySet)",
+          "inputs": [
+            {
+              "name": "resident keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident int32/uint32/int64/uint64 keys are a gated RunMat extension and gather before host Map lookup."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only resident keys gather after compatibility admission before the host handle is mutated."
         }
       ]
     },
@@ -20368,6 +20787,94 @@
           "when": "Map registry/storage operations fail unexpectedly.",
           "message": "containers.Map: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "containers-map-resident-subsasgn-input",
+          "mode": "RunMatOnly",
+          "description": "containers.Map.subsasgn gathering resident keys or rhs values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainersMapResidentSubsasgnExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "containers.Map.subsasgn(M, '()', integer_key, integer_rhs)",
+          "inputs": [
+            {
+              "name": "keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Public integer Map keys are int32/uint32/int64/uint64 and retain exact native identity."
+            },
+            {
+              "name": "rhs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All integer rhs classes are exact for ValueType='any' and their matching declared integer ValueType."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Exact key identity is independent of exact rhs storage; a declared integer ValueType applies MATLAB integer conversion before storage."
+        },
+        {
+          "form": "containers.Map.subsasgn(M, '()', resident_integer_key, resident_integer_rhs)",
+          "inputs": [
+            {
+              "name": "resident keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident integer keys are gated and gathered before host key normalization."
+            },
+            {
+              "name": "resident rhs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident integer rhs values are gated and gathered before host ValueType conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only resident assignment data gathers after compatibility admission and before host key normalization and rhs conversion."
+        }
       ]
     },
     {
@@ -20430,6 +20937,99 @@
           "when": "Map registry/storage operations fail unexpectedly.",
           "message": "containers.Map: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "containers-map-resident-subsref-input",
+          "mode": "RunMatOnly",
+          "description": "containers.Map.subsref gathering resident keys is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainersMapResidentSubsrefExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "count = containers.Map.subsref(M, '.', 'Count')",
+          "inputs": [],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The read-only Count property is a scalar uint64 and is derived from the host Map entry count without floating conversion."
+        },
+        {
+          "form": "value = containers.Map.subsref(M, '()', integer_key)",
+          "inputs": [
+            {
+              "name": "keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Public numeric Map keys are scalar single/double/int32/uint32/int64/uint64; these four integer key classes retain exact native identity."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The integer controls lookup only; output class is the stored value class."
+        },
+        {
+          "form": "integer_value = containers.Map.subsref(M_with_integer_value, '()', key)",
+          "inputs": [
+            {
+              "name": "stored values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer values pass through the host Map store and output cells with exact class and value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Lookup returns the exact stored integer scalar or array without floating conversion."
+        },
+        {
+          "form": "value = containers.Map.subsref(M, '()', resident_integer_key)",
+          "inputs": [
+            {
+              "name": "resident keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident int32/uint32/int64/uint64 keys are a gated RunMat extension and gather before host Map lookup."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only resident keys gather after compatibility admission; lookup returns the host-stored value."
+        }
       ]
     },
     {
@@ -20446,6 +21046,34 @@
               "arity": "Required",
               "default": null,
               "description": "containers.Map handle object."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "V",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Row cell array containing map values."
+            }
+          ]
+        },
+        {
+          "label": "V = containers.Map.values(M, keySet)",
+          "inputs": [
+            {
+              "name": "M",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "containers.Map handle object."
+            },
+            {
+              "name": "keySet",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Key scalar or key collection to query/mutate."
             }
           ],
           "outputs": [
@@ -20477,6 +21105,66 @@
           "identifier": "RunMat:containers.Map:Internal",
           "when": "Map registry/storage operations fail unexpectedly.",
           "message": "containers.Map: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "containers-map-resident-values-input",
+          "mode": "RunMatOnly",
+          "description": "containers.Map.values gathering resident selected keys is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainersMapResidentValuesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "V = containers.Map.values(M_with_integer_values, keySet?)",
+          "inputs": [
+            {
+              "name": "stored values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer values pass through the host Map store and output cells with exact class and value."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "All-values output is a row cell; selected-values output matches keySet cell shape and preserves each stored integer class."
+        },
+        {
+          "form": "V = containers.Map.values(M, resident_integer_keySet)",
+          "inputs": [
+            {
+              "name": "resident keySet",
+              "classes": [
+                "Int32",
+                "Uint32",
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident int32/uint32/int64/uint64 keys are a gated RunMat extension and gather before host Map lookup."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat-only resident selected keys gather after compatibility admission; the host cell output preserves keySet shape."
         }
       ]
     },
@@ -20847,14 +21535,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z rows."
+              "description": "X coordinate vector matching Z columns or meshgrid matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z columns."
+              "description": "Y coordinate vector matching Z rows or meshgrid matrix matching Z."
             },
             {
               "name": "Z",
@@ -20882,14 +21570,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z rows."
+              "description": "X coordinate vector matching Z columns or meshgrid matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z columns."
+              "description": "Y coordinate vector matching Z rows or meshgrid matrix matching Z."
             },
             {
               "name": "Z",
@@ -20924,14 +21612,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z rows."
+              "description": "X coordinate vector matching Z columns or meshgrid matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z columns."
+              "description": "Y coordinate vector matching Z rows or meshgrid matrix matching Z."
             },
             {
               "name": "Z",
@@ -20966,14 +21654,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z rows."
+              "description": "X coordinate vector matching Z columns or meshgrid matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z columns."
+              "description": "Y coordinate vector matching Z rows or meshgrid matrix matching Z."
             },
             {
               "name": "Z",
@@ -21015,14 +21703,14 @@
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "X axis vector/meshgrid matrix matching Z rows."
+              "description": "X coordinate vector matching Z columns or meshgrid matrix matching Z."
             },
             {
               "name": "Y",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Y axis vector/meshgrid matrix matching Z columns."
+              "description": "Y coordinate vector matching Z rows or meshgrid matrix matching Z."
             },
             {
               "name": "Z",
@@ -21055,6 +21743,34 @@
               "description": "Handle to contour line plot."
             }
           ]
+        },
+        {
+          "label": "h = contour(ax, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes object."
+            },
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Any supported contour data, level, line-specification, and property arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to contour line plot."
+            }
+          ]
         }
       ],
       "errors": [
@@ -21069,6 +21785,446 @@
           "identifier": "RunMat:contour:Internal",
           "when": "Internal contour render preparation fails unexpectedly.",
           "message": "contour: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "contour-integer-line-color",
+          "mode": "RunMatOnly",
+          "description": "contour with a typed-integer RGB line color is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContourIntegerLineColorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = contour(integer_Z)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative integer heights are validated exactly and then cross the client contour-geometry boundary; resident integer grids gather through their owning provider rather than entering the floating WGPU path."
+        },
+        {
+          "form": "h = contour(integer_Z, integer_N)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values."
+            },
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A scalar integer selects the requested positive contour level count after exact platform and allocation-bound validation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Z follows the floating contour boundary while N remains exact through positive platform/allocation validation; the output is an opaque contour handle."
+        },
+        {
+          "form": "h = contour(integer_Z, integer_V)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values."
+            },
+            {
+              "name": "V",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A documented integer level vector is validated for exact monotonic order before entering contour geometry."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact integer level order is checked before levels and heights cross the client graphics boundary; resident integer inputs gather from the owning provider."
+        },
+        {
+          "form": "h = contour(integer_X, integer_Y, integer_Z)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented x-coordinate vector or meshgrid matrix accepts every built-in integer class and is validated exactly for meshgrid structure and strict monotonicity."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented y-coordinate vector or meshgrid matrix accepts every built-in integer class and is validated exactly for meshgrid structure and strict monotonicity."
+            },
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinate shape, meshgrid identity, and monotonicity are established from authoritative integer storage before X, Y, and Z enter client contour geometry."
+        },
+        {
+          "form": "h = contour(integer_X, integer_Y, integer_Z, integer_N)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented x-coordinate vector or meshgrid matrix accepts every built-in integer class and is validated exactly for meshgrid structure and strict monotonicity."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented y-coordinate vector or meshgrid matrix accepts every built-in integer class and is validated exactly for meshgrid structure and strict monotonicity."
+            },
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values."
+            },
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A scalar integer selects the requested positive contour level count after exact platform and allocation-bound validation."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinates and heights cross the graphics boundary only after exact validation; N is a bounded structural count."
+        },
+        {
+          "form": "h = contour(integer_X, integer_Y, integer_Z, integer_V)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented x-coordinate vector or meshgrid matrix accepts every built-in integer class and is validated exactly for meshgrid structure and strict monotonicity."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented y-coordinate vector or meshgrid matrix accepts every built-in integer class and is validated exactly for meshgrid structure and strict monotonicity."
+            },
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values."
+            },
+            {
+              "name": "V",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A documented integer level vector is validated for exact monotonic order before entering contour geometry."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Coordinate and level ordering are exact before the explicit client graphics conversion; all resident integer inputs gather."
+        },
+        {
+          "form": "h = contour(..., 'LevelList', integer_levels)",
+          "inputs": [
+            {
+              "name": "LevelList",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented property accepts every built-in integer class as an exact monotonically increasing level vector."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "LevelList uses authoritative integer order and then the same floating contour-level boundary as positional V."
+        },
+        {
+          "form": "h = contour(..., 'LevelStep', integer_step)",
+          "inputs": [
+            {
+              "name": "LevelStep",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented property accepts every built-in integer class as a positive scalar spacing."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "LevelStep is read as one exact positive scalar and must remain finite at the f32 graphics-property boundary."
+        },
+        {
+          "form": "h = contour(..., 'LineWidth', integer_width)",
+          "inputs": [
+            {
+              "name": "LineWidth",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A positive scalar integer line width crosses the explicit graphics-property boundary after exact scalar validation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "LineWidth is read as one exact positive scalar and must remain finite at the f32 graphics-property boundary."
+        },
+        {
+          "form": "h = contour(..., 'LineColor', integer_rgb)",
+          "inputs": [
+            {
+              "name": "LineColor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode admits an integer RGB triplet only when every exact component is 0 or 1; the public color contract does not explicitly advertise integer RGB classes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The RunMat-only compatibility gate precedes provider gather; exact 0/1 component validation follows owning-provider gather but precedes f32 color conversion."
         }
       ]
     },

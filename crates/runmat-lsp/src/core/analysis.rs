@@ -4855,12 +4855,16 @@ mod tests {
             ("containers.Map.keys(m);", "K = containers.Map.keys(M)"),
             ("containers.Map.values(m);", "V = containers.Map.values(M)"),
             (
+                "containers.Map.values(m, {'a'});",
+                "V = containers.Map.values(M, keySet)",
+            ),
+            (
                 "containers.Map.isKey(m, \"a\");",
                 "tf = containers.Map.isKey(M, keySet)",
             ),
             (
                 "containers.Map.remove(m, \"a\");",
-                "M = containers.Map.remove(M, keySet)",
+                "containers.Map.remove(M, keySet)",
             ),
             (
                 "containers.Map.subsref(m, \"()\", {\"a\"});",
@@ -4883,6 +4887,20 @@ mod tests {
                 labels
             );
         }
+    }
+
+    #[test]
+    fn signature_help_uses_confusionmat_descriptor() {
+        let text = "confusionmat(group,grouphat);";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+        let labels: Vec<&str> = sig
+            .signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect();
+        assert!(labels.contains(&"[C,order] = confusionmat(___)"));
     }
 
     #[test]

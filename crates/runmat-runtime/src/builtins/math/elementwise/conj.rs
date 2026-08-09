@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor, Value,
 };
@@ -57,6 +61,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "conj";
 
+pub const CONJ_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "conj-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "conj with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ConjCharacterInputExtension"),
+};
+pub const CONJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [CONJ_CHARACTER_INPUT_EXTENSION];
+const CONJ_REAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes are exact identity inputs.",
+    }];
+const CONJ_COMPLEX_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Typed complex integer storage retains its class; RunMat conservatively saturates imaginary-component negation while signed-minimum and unsigned endpoints remain evidence-open." }];
+pub const CONJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "Y = conj(real_integer_X)", inputs: &CONJ_REAL_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Host inputs are returned unchanged; resident real integer inputs preserve the same exact handle and metadata." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = conj(complex_integer_X)", inputs: &CONJ_COMPLEX_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Host typed-complex integer storage uses the conservative resolved saturating-negation policy, but public evidence does not directly settle signed-minimum or unsigned-imaginary endpoints. The provider ABI does not currently represent typed complex integer resident buffers." },
+];
+
 const CONJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
@@ -96,6 +121,20 @@ pub const CONJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CONJ_ERRORS,
 };
 
+fn conj_type(
+    args: &[runmat_builtins::Type],
+    context: &runmat_builtins::ResolveContext,
+) -> runmat_builtins::Type {
+    match args.first() {
+        Some(runmat_builtins::Type::Int) => runmat_builtins::Type::Int,
+        Some(runmat_builtins::Type::Bool) => runmat_builtins::Type::Bool,
+        Some(runmat_builtins::Type::Logical { shape }) => runmat_builtins::Type::Logical {
+            shape: shape.clone(),
+        },
+        _ => numeric_unary_type(args, context),
+    }
+}
+
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -114,11 +153,19 @@ fn builtin_error_with_detail(
     summary = "Compute complex conjugates element-wise.",
     keywords = "conj,complex conjugate,complex,elementwise,gpu",
     accel = "unary",
-    type_resolver(numeric_unary_type),
+    type_resolver(conj_type),
+    extensions(CONJ_EXTENSIONS),
+    integer_capabilities(CONJ_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::elementwise::conj::CONJ_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::conj"
 )]
 async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CONJ_CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     match value {
         Value::GpuTensor(handle) => conj_gpu(handle).await,
         Value::Complex(re, im) => conj_complex_scalar(re, im),
@@ -128,11 +175,8 @@ async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
             &CONJ_ERROR_INVALID_INPUT,
             "expected numeric input",
         )),
-        x @ (Value::Tensor(_)
-        | Value::LogicalArray(_)
-        | Value::Num(_)
-        | Value::Int(_)
-        | Value::Bool(_)) => conj_real(x),
+        x @ (Value::LogicalArray(_) | Value::Bool(_)) => Ok(x),
+        x @ (Value::Tensor(_) | Value::Num(_) | Value::Int(_)) => conj_real(x),
         other => Err(builtin_error_with_detail(
             &CONJ_ERROR_INVALID_INPUT,
             format!(
@@ -144,15 +188,62 @@ async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn conj_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    let storage = runmat_accelerate_api::handle_storage(&handle);
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        if storage != runmat_accelerate_api::GpuTensorStorage::Real {
+            return Err(builtin_error_with_detail(
+                &CONJ_ERROR_INTERNAL,
+                "typed complex integer resident buffers are not supported by the provider ABI",
+            ));
+        }
+        return Ok(gpu_helpers::resident_gpu_value(handle));
+    }
+    if runmat_accelerate_api::handle_is_logical(&handle)
+        && storage == runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        return Ok(gpu_helpers::logical_gpu_value(handle));
+    }
+    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+        .or_else(runmat_accelerate_api::provider);
+    if let Some(provider) = provider {
         if let Ok(out) = provider.unary_conj(&handle).await {
-            return Ok(Value::GpuTensor(out));
+            return Ok(
+                if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
+                    gpu_helpers::complex_gpu_value(out)
+                } else {
+                    gpu_helpers::resident_gpu_value(out)
+                },
+            );
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err.to_string()))?;
-    Ok(tensor::tensor_into_value(conj_tensor(tensor)?))
+    let host = conj_host(gathered)?;
+    let Some(provider) = provider else {
+        return Ok(host);
+    };
+    match host {
+        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
+            .map(gpu_helpers::resident_gpu_value)
+            .map_err(|err| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, err)),
+        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
+            .map(gpu_helpers::complex_gpu_value),
+        other => Ok(other),
+    }
+}
+
+fn conj_host(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::Complex(re, im) => conj_complex_scalar(re, im),
+        Value::ComplexTensor(ct) => conj_complex_tensor(ct),
+        x @ (Value::LogicalArray(_) | Value::Bool(_)) => Ok(x),
+        x @ (Value::Tensor(_) | Value::Num(_) | Value::Int(_)) => conj_real(x),
+        other => Err(builtin_error_with_detail(
+            &CONJ_ERROR_INVALID_INPUT,
+            format!("unsupported gathered input {other:?}"),
+        )),
+    }
 }
 
 fn conj_real(value: Value) -> BuiltinResult<Value> {
@@ -261,7 +352,7 @@ pub(crate) mod tests {
 
     #[test]
     fn conj_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
+        let out = conj_type(
             &[Type::Tensor {
                 shape: Some(vec![Some(2), Some(3)]),
             }],
@@ -277,13 +368,35 @@ pub(crate) mod tests {
 
     #[test]
     fn conj_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
+        let out = conj_type(
             &[Type::Tensor {
                 shape: Some(vec![Some(1), Some(1)]),
             }],
             &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn conj_type_preserves_integer_and_logical_identity_types() {
+        assert_eq!(
+            conj_type(&[Type::Int], &ResolveContext::new(Vec::new())),
+            Type::Int
+        );
+        assert_eq!(
+            conj_type(&[Type::Bool], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
+        let logical = Type::Logical {
+            shape: Some(vec![Some(2), Some(3)]),
+        };
+        assert_eq!(
+            conj_type(
+                std::slice::from_ref(&logical),
+                &ResolveContext::new(Vec::new())
+            ),
+            logical
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -324,16 +437,16 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn conj_promotes_logical_to_double() {
+    fn conj_preserves_logical_class() {
         let logical =
             LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).expect("logical array construction");
         let result = conj_builtin(Value::LogicalArray(logical)).expect("conj");
         match result {
-            Value::Tensor(t) => {
+            Value::LogicalArray(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
+                assert_eq!(t.data, vec![0, 1, 1, 0]);
             }
-            other => panic!("expected tensor result, got {other:?}"),
+            other => panic!("expected logical result, got {other:?}"),
         }
     }
 
@@ -344,6 +457,27 @@ pub(crate) mod tests {
         match result {
             Value::Int(IntValue::I32(n)) => assert_eq!(n, 7),
             other => panic!("expected int32 scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn conj_real_integer_arrays_preserve_all_eight_classes_and_wide_values() {
+        let cases = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+        for storage in cases {
+            let input = Tensor::new_integer(storage.clone(), vec![1, 2]).unwrap();
+            let Value::Tensor(output) = conj_builtin(Value::Tensor(input)).expect("conj") else {
+                panic!("expected tensor");
+            };
+            assert_eq!(output.integer_storage(), Some(&storage));
         }
     }
 
@@ -474,6 +608,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conj_char_array_returns_double_codes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("Hi".chars().collect(), 1, 2).expect("char array");
         let result = conj_builtin(Value::CharArray(chars)).expect("conj");
         match result {
@@ -483,6 +618,16 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn conj_char_extension_is_compatibility_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = conj_builtin(Value::CharArray(CharArray::new_row("x"))).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            CONJ_CHARACTER_INPUT_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -508,6 +653,34 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
+        });
+    }
+
+    #[test]
+    fn conj_resident_integer_is_exact_identity() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                vec![2, 1],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let buffer_id = handle.buffer_id;
+            let result = conj_builtin(Value::GpuTensor(handle)).expect("conj");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected resident integer");
+            };
+            assert_eq!(output.buffer_id, buffer_id);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output)))
+                .expect("gather");
+            let Value::Tensor(gathered) = gathered else {
+                panic!("integer tensor");
+            };
+            assert_eq!(gathered.integer_storage(), tensor.integer_storage());
         });
     }
 
@@ -562,6 +735,37 @@ pub(crate) mod tests {
             }
             _ => panic!("unexpected shapes"),
         }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn conj_wgpu_preserves_wide_uint64_identity_handle() {
+        let _guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2, 1],
+        )
+        .unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+        let buffer_id = handle.buffer_id;
+        let Value::GpuTensor(output) = block_on(conj_gpu(handle)).expect("conj") else {
+            panic!("expected resident integer");
+        };
+        assert_eq!(output.buffer_id, buffer_id);
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&output),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        let gathered =
+            block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(output))).expect("gather");
+        let Value::Tensor(gathered) = gathered else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(gathered.integer_storage(), tensor.integer_storage());
     }
 
     #[cfg(feature = "wgpu")]

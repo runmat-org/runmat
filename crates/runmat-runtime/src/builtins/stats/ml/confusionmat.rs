@@ -3,10 +3,14 @@
 use std::{cmp::Ordering, collections::HashMap};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, ObjectInstance,
+    ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -15,6 +19,69 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const NAME: &str = "confusionmat";
 const MAX_CONFUSIONMAT_CELLS: usize = 25_000_000;
+
+pub const CONFUSIONMAT_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "confusionmat-integer-group",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "confusionmat with typed-integer group labels is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ConfusionmatIntegerGroupExtension"),
+    };
+pub const CONFUSIONMAT_INTEGER_GROUPHAT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "confusionmat-integer-grouphat",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "confusionmat with typed-integer grouphat labels is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ConfusionmatIntegerGrouphatExtension"),
+    };
+pub const CONFUSIONMAT_INTEGER_ORDER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "confusionmat-integer-order",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "confusionmat with typed-integer Order labels is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ConfusionmatIntegerOrderExtension"),
+    };
+pub const CONFUSIONMAT_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "confusionmat-resident-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "confusionmat with resident inputs is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ConfusionmatResidentInputExtension"),
+    };
+pub const CONFUSIONMAT_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    CONFUSIONMAT_INTEGER_GROUP_EXTENSION,
+    CONFUSIONMAT_INTEGER_GROUPHAT_EXTENSION,
+    CONFUSIONMAT_INTEGER_ORDER_EXTENSION,
+    CONFUSIONMAT_RESIDENT_INPUT_EXTENSION,
+];
+
+const INTEGER_GROUP_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "group",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+    notes: "Integer labels are exact and must use the same class as grouphat and Order.",
+}];
+const INTEGER_GROUPHAT_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "grouphat",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+        notes: "Integer predicted labels are exact and must use the same class as group and Order.",
+    }];
+const INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "Order",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+    notes: "Integer Order labels are deduplicated and matched without floating conversion.",
+}];
+pub const CONFUSIONMAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor { form: "C = confusionmat(integer_group, grouphat)", inputs: &INTEGER_GROUP_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat mode groups and sorts all eight integer classes exactly; C contains double counts." },
+    BuiltinIntegerCapabilityDescriptor { form: "C = confusionmat(group, integer_grouphat)", inputs: &INTEGER_GROUPHAT_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "This role is independently gated before gather; integer label classes must match." },
+    BuiltinIntegerCapabilityDescriptor { form: "[C, order] = confusionmat(integer_group, integer_grouphat, 'Order', integer_order)", inputs: &INTEGER_ORDER_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "C contains double counts; the optional order output retains the exact integer label class and values, including values above flintmax." },
+];
 
 const OUTPUT_C: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "C",
@@ -127,6 +194,7 @@ fn internal(message: impl Into<String>) -> RuntimeError {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LabelKind {
     Numeric,
+    Integer(NumericDType),
     String,
     Char,
     Cell,
@@ -137,6 +205,7 @@ enum LabelKind {
 #[derive(Clone, Debug, PartialEq)]
 enum Label {
     Numeric(f64),
+    Integer(IntValue),
     Text(String),
     Logical(bool),
 }
@@ -154,6 +223,8 @@ struct LabelVector {
     summary = "Compute a confusion matrix from true and predicted class labels.",
     keywords = "confusionmat,confusion matrix,classification,statistics,machine learning",
     type_resolver(confusionmat_type),
+    extensions(CONFUSIONMAT_EXTENSIONS),
+    integer_capabilities(CONFUSIONMAT_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::stats::ml::confusionmat::CONFUSIONMAT_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::ml::confusionmat"
 )]
@@ -169,6 +240,7 @@ async fn confusionmat_builtin(
     if matches!(requested_outputs, Some(count) if count > 2) {
         return Err(invalid("confusionmat: too many output arguments"));
     }
+    ensure_confusionmat_extensions(&group, &grouphat, &rest)?;
 
     let group = gather(group).await?;
     let grouphat = gather(grouphat).await?;
@@ -196,6 +268,53 @@ async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
         out.push(gather(value).await?);
     }
     Ok(out)
+}
+
+fn ensure_confusionmat_extensions(
+    group: &Value,
+    grouphat: &Value,
+    rest: &[Value],
+) -> BuiltinResult<()> {
+    if is_typed_integer_value(group) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CONFUSIONMAT_INTEGER_GROUP_EXTENSION,
+            NAME,
+        )?;
+    }
+    if is_typed_integer_value(grouphat) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CONFUSIONMAT_INTEGER_GROUPHAT_EXTENSION,
+            NAME,
+        )?;
+    }
+    for pair in rest.chunks_exact(2) {
+        if scalar_text(&pair[0], "option name").is_ok_and(|name| canonical(&name) == "order")
+            && is_typed_integer_value(&pair[1])
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CONFUSIONMAT_INTEGER_ORDER_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    if matches!(group, Value::GpuTensor(_))
+        || matches!(grouphat, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CONFUSIONMAT_RESIDENT_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 fn confusionmat_compute(
@@ -301,22 +420,22 @@ fn parse_options(rest: Vec<Value>) -> BuiltinResult<Option<LabelVector>> {
 
 fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     match value {
-        Value::Tensor(tensor) => Ok(LabelVector {
-            labels: vector_values(&tensor, name)?
-                .into_iter()
-                .map(Label::Numeric)
-                .collect(),
-            kind: LabelKind::Numeric,
-            categories: None,
-        }),
+        Value::Tensor(tensor) => {
+            ensure_vector_shape(&tensor.shape, name)?;
+            if let Some(storage) = tensor.integer_storage() {
+                Ok(LabelVector { labels: storage.exact_values().into_iter().map(Label::Integer).collect(), kind: LabelKind::Integer(storage.numeric_dtype()), categories: None })
+            } else {
+                Ok(LabelVector { labels: vector_values(&tensor, name)?.into_iter().map(Label::Numeric).collect(), kind: LabelKind::Numeric, categories: None })
+            }
+        }
         Value::Num(value) => Ok(LabelVector {
             labels: vec![Label::Numeric(value)],
             kind: LabelKind::Numeric,
             categories: None,
         }),
         Value::Int(value) => Ok(LabelVector {
-            labels: vec![Label::Numeric(value.to_f64())],
-            kind: LabelKind::Numeric,
+            kind: LabelKind::Integer(int_value_dtype(&value)),
+            labels: vec![Label::Integer(value)],
             categories: None,
         }),
         Value::Bool(value) => Ok(LabelVector {
@@ -405,7 +524,7 @@ fn inferred_order(group: &LabelVector, grouphat: &LabelVector) -> Vec<Label> {
             combined.extend(group.labels.iter().cloned());
             combined.extend(grouphat.labels.iter().cloned());
             let mut out = dedupe_labels(combined);
-            if kind == LabelKind::Numeric {
+            if matches!(kind, LabelKind::Numeric | LabelKind::Integer(_)) {
                 sort_labels(&mut out, kind);
             }
             out
@@ -467,6 +586,10 @@ fn sort_labels(labels: &mut [Label], kind: LabelKind) {
             (Label::Numeric(a), Label::Numeric(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
             _ => Ordering::Equal,
         }),
+        LabelKind::Integer(_) => labels.sort_by(|left, right| match (left, right) {
+            (Label::Integer(a), Label::Integer(b)) => integer_sort_key(a).cmp(&integer_sort_key(b)),
+            _ => Ordering::Equal,
+        }),
         LabelKind::String | LabelKind::Char | LabelKind::Cell | LabelKind::Categorical => labels
             .sort_by(|left, right| match (left, right) {
                 (Label::Text(a), Label::Text(b)) => a.cmp(b),
@@ -500,6 +623,7 @@ fn label_key(label: &Label) -> String {
     match label {
         Label::Numeric(value) if *value == 0.0 => "n:0".to_string(),
         Label::Numeric(value) => format!("n:{:016x}", value.to_bits()),
+        Label::Integer(value) => format!("i:{value:?}"),
         Label::Text(value) => format!("t:{value}"),
         Label::Logical(value) => format!("l:{}", usize::from(*value)),
     }
@@ -508,6 +632,7 @@ fn label_key(label: &Label) -> String {
 fn same_label(left: &Label, right: &Label) -> bool {
     match (left, right) {
         (Label::Numeric(a), Label::Numeric(b)) => (a == b) || (a.is_nan() && b.is_nan()),
+        (Label::Integer(a), Label::Integer(b)) => a == b,
         (Label::Text(a), Label::Text(b)) => a == b,
         (Label::Logical(a), Label::Logical(b)) => a == b,
         _ => false,
@@ -517,6 +642,7 @@ fn same_label(left: &Label, right: &Label) -> bool {
 fn is_missing_label(label: &Label) -> bool {
     match label {
         Label::Numeric(value) => value.is_nan(),
+        Label::Integer(_) => false,
         Label::Text(value) => value.is_empty() || value == "<missing>",
         Label::Logical(_) => false,
     }
@@ -548,6 +674,20 @@ fn labels_to_value(labels: &[Label], kind: LabelKind) -> BuiltinResult<Value> {
             )
             .map_err(|err| internal(format!("confusionmat: {err}")))?,
         )),
+        LabelKind::Integer(dtype) => {
+            let values = labels
+                .iter()
+                .map(|label| match label {
+                    Label::Integer(value) => Ok(value.clone()),
+                    _ => Err(internal("confusionmat: noninteger label in integer order")),
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            let storage = integer_storage_from_values(dtype, values)?;
+            Ok(Value::Tensor(
+                Tensor::new_integer(storage, vec![labels.len(), 1])
+                    .map_err(|err| internal(format!("confusionmat: {err}")))?,
+            ))
+        }
         LabelKind::Logical => Ok(Value::LogicalArray(
             LogicalArray::new(
                 labels
@@ -590,6 +730,54 @@ fn labels_to_value(labels: &[Label], kind: LabelKind) -> BuiltinResult<Value> {
                     .map_err(|err| internal(format!("confusionmat: {err}")))?,
             );
             crate::builtins::table::categorical_from_args(vec![value_array, categories])
+        }
+    }
+}
+
+fn int_value_dtype(value: &IntValue) -> NumericDType {
+    IntegerStorage::from_scalar(value.clone()).numeric_dtype()
+}
+
+fn integer_sort_key(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(v) => *v as i128,
+        IntValue::I16(v) => *v as i128,
+        IntValue::I32(v) => *v as i128,
+        IntValue::I64(v) => *v as i128,
+        IntValue::U8(v) => *v as i128,
+        IntValue::U16(v) => *v as i128,
+        IntValue::U32(v) => *v as i128,
+        IntValue::U64(v) => *v as i128,
+    }
+}
+
+fn integer_storage_from_values(
+    dtype: NumericDType,
+    values: Vec<IntValue>,
+) -> BuiltinResult<IntegerStorage> {
+    macro_rules! collect_variant {
+        ($variant:ident, $ty:ty) => {{
+            values
+                .into_iter()
+                .map(|value| match value {
+                    IntValue::$variant(value) => Ok(value),
+                    _ => Err(internal("confusionmat: integer order class mismatch")),
+                })
+                .collect::<BuiltinResult<Vec<$ty>>>()
+                .map(IntegerStorage::$variant)
+        }};
+    }
+    match dtype {
+        NumericDType::I8 => collect_variant!(I8, i8),
+        NumericDType::I16 => collect_variant!(I16, i16),
+        NumericDType::I32 => collect_variant!(I32, i32),
+        NumericDType::I64 => collect_variant!(I64, i64),
+        NumericDType::U8 => collect_variant!(U8, u8),
+        NumericDType::U16 => collect_variant!(U16, u16),
+        NumericDType::U32 => collect_variant!(U32, u32),
+        NumericDType::U64 => collect_variant!(U64, u64),
+        NumericDType::F32 | NumericDType::F64 => {
+            Err(internal("confusionmat: floating dtype in integer order"))
         }
     }
 }
@@ -667,6 +855,7 @@ fn canonical(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_builtins::IntegerStorage;
 
@@ -717,18 +906,171 @@ mod tests {
     }
 
     #[test]
-    fn numeric_labels_accept_typed_integer_tensors() {
+    fn typed_integer_labels_cover_all_classes_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let cases = [
+            IntegerStorage::I8(vec![2, 1, 2]),
+            IntegerStorage::I16(vec![2, 1, 2]),
+            IntegerStorage::I32(vec![2, 1, 2]),
+            IntegerStorage::I64(vec![2, 1, 2]),
+            IntegerStorage::U8(vec![2, 1, 2]),
+            IntegerStorage::U16(vec![2, 1, 2]),
+            IntegerStorage::U32(vec![2, 1, 2]),
+            IntegerStorage::U64(vec![2, 1, 2]),
+        ];
+        for storage in cases {
+            let values = confusionmat(
+                int_tensor(storage.clone(), vec![3, 1]),
+                int_tensor(storage.clone(), vec![3, 1]),
+                Vec::new(),
+                2,
+            );
+            let Value::Tensor(c) = &values[0] else {
+                panic!("matrix");
+            };
+            assert_eq!(c.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
+            let Value::Tensor(order) = &values[1] else {
+                panic!("order");
+            };
+            assert_eq!(
+                order.integer_storage().map(IntegerStorage::numeric_dtype),
+                Some(storage.numeric_dtype())
+            );
+            assert_eq!(order.integer_storage().unwrap().exact_values().len(), 2);
+        }
+    }
+
+    #[test]
+    fn typed_integer_labels_reject_mixed_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let err = block_on(confusionmat_builtin(
+            int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
+            int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("label types must be compatible"));
+    }
+
+    #[test]
+    fn uint64_labels_above_flintmax_remain_distinct() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let a = 9_007_199_254_740_993_u64;
+        let b = u64::MAX;
         let values = confusionmat(
-            int_tensor(IntegerStorage::I16(vec![1, 2, 2]), vec![3, 1]),
-            int_tensor(IntegerStorage::U16(vec![1, 1, 2]), vec![3, 1]),
+            int_tensor(IntegerStorage::U64(vec![b, a, b]), vec![3, 1]),
+            int_tensor(IntegerStorage::U64(vec![a, a, b]), vec![3, 1]),
             Vec::new(),
             2,
         );
         let Value::Tensor(c) = &values[0] else {
             panic!("matrix");
         };
-        assert_eq!(c.shape, vec![2, 2]);
         assert_eq!(c.materialize_f64(), vec![1.0, 1.0, 0.0, 1.0]);
+        let Value::Tensor(order) = &values[1] else {
+            panic!("order");
+        };
+        assert_eq!(
+            order.integer_storage(),
+            Some(&IntegerStorage::U64(vec![a, b]))
+        );
+    }
+
+    #[test]
+    fn typed_integer_roles_are_independently_compatibility_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let group_err = block_on(confusionmat_builtin(
+            Value::Int(IntValue::I8(1)),
+            Value::Int(IntValue::I8(1)),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            group_err.identifier(),
+            CONFUSIONMAT_INTEGER_GROUP_EXTENSION.error_identifier
+        );
+        let grouphat_err = block_on(confusionmat_builtin(
+            Value::Num(1.0),
+            Value::Int(IntValue::I8(1)),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            grouphat_err.identifier(),
+            CONFUSIONMAT_INTEGER_GROUPHAT_EXTENSION.error_identifier
+        );
+        let order_err = block_on(confusionmat_builtin(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            vec![Value::from("Order"), Value::Int(IntValue::I8(1))],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            order_err.identifier(),
+            CONFUSIONMAT_INTEGER_ORDER_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn resident_integer_labels_gate_before_gather_and_remain_exact_in_runmat_mode() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                vec![2, 1],
+            )
+            .unwrap();
+            let group = gpu_helpers::upload_tensor(provider, &tensor).expect("group upload");
+            let grouphat = gpu_helpers::upload_tensor(provider, &tensor).expect("grouphat upload");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = block_on(confusionmat_builtin(
+                    Value::GpuTensor(group.clone()),
+                    Value::GpuTensor(grouphat.clone()),
+                    Vec::new(),
+                ))
+                .unwrap_err();
+                assert_eq!(
+                    err.identifier(),
+                    CONFUSIONMAT_INTEGER_GROUP_EXTENSION.error_identifier
+                );
+            }
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let values = confusionmat(
+                Value::GpuTensor(group),
+                Value::GpuTensor(grouphat),
+                Vec::new(),
+                2,
+            );
+            let Value::Tensor(order) = &values[1] else {
+                panic!("order");
+            };
+            assert_eq!(order.integer_storage(), tensor.integer_storage());
+        });
+    }
+
+    #[test]
+    fn resident_floating_labels_use_the_resident_extension_gate() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+            let data = tensor.materialize_f64();
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &data,
+                    shape: &tensor.shape,
+                })
+                .expect("upload");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = block_on(confusionmat_builtin(
+                Value::GpuTensor(handle.clone()),
+                Value::GpuTensor(handle),
+                Vec::new(),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                err.identifier(),
+                CONFUSIONMAT_RESIDENT_INPUT_EXTENSION.error_identifier
+            );
+        });
     }
 
     #[test]

@@ -715,6 +715,15 @@ fn fcontour_dispatches_function_handle_contour_through_vm() {
 }
 
 #[test]
+fn contour_accepts_transposed_integer_coordinate_matrices_through_vm() {
+    let _guard = disable_interactive_plots_for_test();
+    execute_source(
+        "x = uint64([10 10 10; 20 20 20]); y = uint64([1 2 3; 1 2 3]); z = uint64([1 2 3; 4 5 6]); h = contour(x,y,z,uint64([2 4]),'LevelList',uint64([2 4]),'LineWidth',uint64(2)); if ~ishandle(h) || ~strcmp(get(h,'Type'),'contour'); error('integer contour mismatch'); end; h2 = contour(x,y,z,'--'); if ~ishandle(h2); error('explicit contour LineSpec mismatch'); end; h3 = contour(x,y,z,'LineWidth',uint64(2)); if ~ishandle(h3); error('explicit integer contour LineWidth mismatch'); end; h4 = contour(z,'--'); if ~ishandle(h4); error('implicit contour LineSpec mismatch'); end;",
+    )
+    .expect("typed integer contour script");
+}
+
+#[test]
 fn animatedline_and_addpoints_dispatch_through_vm() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\
