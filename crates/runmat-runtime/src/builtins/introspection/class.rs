@@ -6,8 +6,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::type_resolvers::class_type;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -69,6 +73,27 @@ pub const CLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CLASS_ERRORS,
 };
 
+const CLASS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer scalars and arrays report their exact signedness and width; gpuArray reports its container class without inspecting or gathering payload data.",
+    }];
+
+pub const CLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "name = class(A)",
+        inputs: &CLASS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The result is a host character class name. Dense, sparse, and paired complex integer host storage is read from exact dtype metadata; resident values return gpuArray without provider access.",
+    }];
+
 #[runtime_builtin(
     name = "class",
     category = "introspection",
@@ -76,6 +101,7 @@ pub const CLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "class,type inspection,type name,gpuArray class",
     type_resolver(class_type),
     descriptor(crate::builtins::introspection::class::CLASS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::introspection::class::CLASS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::class"
 )]
 fn class_builtin(value: Value) -> crate::BuiltinResult<String> {

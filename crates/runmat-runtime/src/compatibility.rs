@@ -316,6 +316,9 @@ mod tests {
                 ("categorical", "categorical-gpu-input"),
                 ("caxis", "clim-integer-limits"),
                 ("clim", "clim-integer-limits"),
+                ("contains", "contains-numeric-ignore-case"),
+                ("contains", "contains-positional-ignore-case"),
+                ("contains", "contains-text-ignore-case"),
                 ("corr", "corr-integer-data"),
                 ("corr", "corr-integer-weights"),
                 ("corrcoef", "corrcoef-integer-data"),
@@ -606,6 +609,14 @@ mod tests {
             "cdfplot",
             "ceil",
             "cell",
+            "class",
+            "contains",
+            "convertCharsToStrings",
+            "convertContainedStringsToChars",
+            "convertStringsToChars",
+            "dbstack",
+            "disp",
+            "display",
             "data.create",
         ] {
             let builtin = registered
@@ -716,6 +727,7 @@ mod tests {
                 "argsort",
                 "cancel",
                 "caxis",
+                "clearCache",
                 "commit",
                 "data.copy",
                 "data.delete",
@@ -726,6 +738,7 @@ mod tests {
                 "data.list",
                 "data.move",
                 "data.open",
+                "deblank",
                 "onCleanup",
             ]
         );

@@ -93,6 +93,11 @@ pub const APPEND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAu
 };
 descriptor!(REVERSE_DESCRIPTOR, "s = reverse(text)", &IN_TEXT, &OUT_ANY);
 descriptor!(DEBLANK_DESCRIPTOR, "s = deblank(text)", &IN_TEXT, &OUT_ANY);
+pub const DEBLANK_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "deblank accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider gather.",
+};
 descriptor!(
     STRJUST_DESCRIPTOR,
     "s = strjust(text, side)",
@@ -336,9 +341,16 @@ async fn reverse_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::DEBLANK_DESCRIPTOR),
+    integer_audit(crate::builtins::strings::transform::compat::DEBLANK_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn deblank_builtin(text: Value) -> BuiltinResult<Value> {
+    if crate::dispatcher::value_contains_gpu(&text) {
+        return Err(transform_error(
+            "deblank",
+            "deblank: expected string, character array, or cell array of character vectors",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("deblank"))?;
@@ -1297,5 +1309,34 @@ mod tests {
             .unwrap(),
             Value::CharArray(CharArray::new_row("x  "))
         );
+    }
+
+    #[test]
+    fn deblank_rejects_every_integer_class_without_text_conversion() {
+        for value in [
+            IntValue::I8(-1),
+            IntValue::I16(-1),
+            IntValue::I32(-1),
+            IntValue::I64(-1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ] {
+            assert!(block(deblank_builtin(Value::Int(value))).is_err());
+        }
+        assert!(block(deblank_builtin(Value::Tensor(
+            runmat_builtins::Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .unwrap()
+        )))
+        .is_err());
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
+        let err = block(deblank_builtin(nested)).unwrap_err();
+        assert!(!err.to_string().contains("provider"));
     }
 }

@@ -17114,7 +17114,36 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "name = class(A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer scalars and arrays report their exact signedness and width; gpuArray reports its container class without inspecting or gathering payload data."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "The result is a host character class name. Dense, sparse, and paired complex integer host storage is read from exact dtype metadata; resident values return gpuArray without provider access."
+        }
+      ]
     },
     {
       "name": "classify",
@@ -17424,15 +17453,7 @@
               "description": "MemoizedFunction object."
             }
           ],
-          "outputs": [
-            {
-              "name": "status",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Zero when the operation completes."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -17447,8 +17468,18 @@
           "identifier": "RunMat:memoize:GcFailure",
           "when": "The memoized object target cannot be allocated or accessed.",
           "message": "memoize: internal object storage failed"
+        },
+        {
+          "code": "RM.CLEAR_CACHE.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:clearCache:TooManyOutputs",
+          "when": "An output is requested from clearCache.",
+          "message": "clearCache does not return output arguments"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "clearCache accepts only a MemoizedFunction handle and has no public output; integer values may exist inside cached results but are opaque to cache clearing."
+      }
     },
     {
       "name": "clearvars",
@@ -19264,41 +19295,6 @@
               "description": "Logical result indicating whether each text element contains the pattern."
             }
           ]
-        },
-        {
-          "label": "tf = contains(str, pat, nameValuePairs...)",
-          "inputs": [
-            {
-              "name": "str",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Text input (string/char/cell/string array)."
-            },
-            {
-              "name": "pat",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Pattern text (string/char/cell/string array)."
-            },
-            {
-              "name": "nameValuePairs...",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Name-value option pairs (`\"IgnoreCase\"`, value)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "tf",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Logical result indicating whether each text element contains the pattern."
-            }
-          ]
         }
       ],
       "errors": [
@@ -19325,6 +19321,82 @@
           "identifier": "RunMat:contains:InternalError",
           "when": "Internal logical result assembly failed.",
           "message": "contains: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "contains-positional-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "contains with a positional IgnoreCase flag is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainsPositionalIgnoreCaseExtension"
+        },
+        {
+          "id": "contains-numeric-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "contains with a numeric IgnoreCase value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainsNumericIgnoreCaseExtension"
+        },
+        {
+          "id": "contains-text-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "contains with a textual IgnoreCase value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ContainsTextIgnoreCaseExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = contains(str, pat, 'IgnoreCase', integer_value)",
+          "inputs": [
+            {
+              "name": "IgnoreCase",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts a scalar integer zero as false and any nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Integer flags are a compatibility-gated RunMat convenience. Text matching remains host-only and returns logical output; numeric subject or pattern data is never treated as text."
+        },
+        {
+          "form": "tf = contains(str, pat, integer_ignore_case)",
+          "inputs": [
+            {
+              "name": "IgnoreCase",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts a scalar integer zero as false and any nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The positional integer flag requires both the positional and numeric RunMat extension gates. Zero is false and any nonzero exact integer is true; subject and pattern inputs remain text-only."
         }
       ]
     },
@@ -20284,61 +20356,133 @@
     },
     {
       "name": "convertCharsToStrings",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "out = convertCharsToStrings(value)",
+          "label": "[out1, ...] = convertCharsToStrings(value1, ...)",
           "inputs": [
             {
-              "name": "value",
+              "name": "text",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
             }
           ],
           "outputs": [
             {
               "name": "out",
               "ty": "Any",
-              "arity": "Required",
+              "arity": "Variadic",
               "default": null,
-              "description": "Output value."
+              "description": "One converted output for each corresponding input."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "[out1, ...] = convertCharsToStrings(value1, ...)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every non-target datatype is returned unaltered, so integer class, shape, value, and provider ownership remain exact."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Only character arrays and cell arrays consisting entirely of character vectors convert. Every integer-containing non-cellstr value passes through identically without provider access."
+        }
+      ]
     },
     {
       "name": "convertContainedStringsToChars",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "out = convertContainedStringsToChars(value)",
+          "label": "[out1, ...] = convertContainedStringsToChars(value1, ...)",
           "inputs": [
             {
-              "name": "value",
+              "name": "text",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input value."
+              "description": "Input text."
+            },
+            {
+              "name": "arg",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Additional arguments."
             }
           ],
           "outputs": [
             {
               "name": "out",
               "ty": "Any",
-              "arity": "Required",
+              "arity": "Variadic",
               "default": null,
-              "description": "Output value."
+              "description": "One converted output for each corresponding input."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "[out1, ...] = convertContainedStringsToChars(value1, ...)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every non-target datatype is returned unaltered, so integer class, shape, value, and provider ownership remain exact."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Top-level integer values and integer members nested at any cell/struct depth remain exact. Top-level and contained string values convert; resident numeric handles are preserved without gather."
+        }
+      ]
     },
     {
       "name": "convertStringsToChars",
@@ -20367,14 +20511,43 @@
             {
               "name": "out",
               "ty": "Any",
-              "arity": "Required",
+              "arity": "Variadic",
               "default": null,
-              "description": "Output value."
+              "description": "One converted output for each corresponding input."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "[out1, ...] = convertStringsToChars(value1, ...)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every non-target datatype is returned unaltered, so integer class, shape, value, and provider ownership remain exact."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Only top-level string inputs convert. Integer scalars, arrays, cells, structs, and resident handles pass through without gather or floating materialization."
+        }
+      ]
     },
     {
       "name": "copyfile",
@@ -29177,21 +29350,104 @@
           "outputs": []
         },
         {
+          "label": "ST = dbstack",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
+            }
+          ]
+        },
+        {
+          "label": "ST = dbstack(n)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of leading stack entries to omit."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
+            }
+          ]
+        },
+        {
+          "label": "ST = dbstack('-completenames')",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`-completenames` requests full source paths."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
+            }
+          ]
+        },
+        {
+          "label": "ST = dbstack('-completenames', n)",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`-completenames` requests full source paths."
+            },
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of leading stack entries to omit."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
+            }
+          ]
+        },
+        {
           "label": "ST = dbstack(n, '-completenames')",
           "inputs": [
             {
               "name": "n",
               "ty": "IntegerScalar",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
               "description": "Number of leading stack entries to omit."
             },
             {
               "name": "option",
               "ty": "StringScalar",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
-              "description": "`-completenames` is accepted for MATLAB command compatibility."
+              "description": "`-completenames` requests full source paths."
             }
           ],
           "outputs": [
@@ -29200,26 +29456,39 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Call-stack entries as a 1-by-N cell row of scalar structs."
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
             }
           ]
         },
         {
-          "label": "[ST,I] = dbstack(...)",
+          "label": "[ST,I] = dbstack",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
+            },
+            {
+              "name": "I",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current workspace index within the returned stack."
+            }
+          ]
+        },
+        {
+          "label": "[ST,I] = dbstack(n)",
           "inputs": [
             {
               "name": "n",
               "ty": "IntegerScalar",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
               "description": "Number of leading stack entries to omit."
-            },
-            {
-              "name": "option",
-              "ty": "StringScalar",
-              "arity": "Optional",
-              "default": null,
-              "description": "`-completenames` is accepted for MATLAB command compatibility."
             }
           ],
           "outputs": [
@@ -29228,12 +29497,110 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Call-stack entries as a 1-by-N cell row of scalar structs."
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
             },
             {
               "name": "I",
               "ty": "NumericScalar",
-              "arity": "Optional",
+              "arity": "Required",
+              "default": null,
+              "description": "Current workspace index within the returned stack."
+            }
+          ]
+        },
+        {
+          "label": "[ST,I] = dbstack('-completenames')",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`-completenames` requests full source paths."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
+            },
+            {
+              "name": "I",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current workspace index within the returned stack."
+            }
+          ]
+        },
+        {
+          "label": "[ST,I] = dbstack('-completenames', n)",
+          "inputs": [
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`-completenames` requests full source paths."
+            },
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of leading stack entries to omit."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
+            },
+            {
+              "name": "I",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Current workspace index within the returned stack."
+            }
+          ]
+        },
+        {
+          "label": "[ST,I] = dbstack(n, '-completenames')",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "IntegerScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of leading stack entries to omit."
+            },
+            {
+              "name": "option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "`-completenames` requests full source paths."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ST",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Call-stack entries in RunMat's column-cell representation of a structure array."
+            },
+            {
+              "name": "I",
+              "ty": "NumericScalar",
+              "arity": "Required",
               "default": null,
               "description": "Current workspace index within the returned stack."
             }
@@ -29246,6 +29613,12 @@
           "identifier": "RunMat:TooManyInputs",
           "when": "A debugger compatibility helper receives more inputs than it supports.",
           "message": "debugger helper: too many input arguments"
+        },
+        {
+          "code": "RM.DEBUG.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:dbstack:TooManyOutputs",
+          "when": "More than two outputs are requested from dbstack.",
+          "message": "dbstack: too many output arguments"
         },
         {
           "code": "RM.DEBUG.INVALID_INPUT",
@@ -29270,6 +29643,35 @@
           "identifier": "RunMat:FileReadFailed",
           "when": "`dbtype` cannot read the resolved source file.",
           "message": "dbtype: failed to read file"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ST or [ST, I] = dbstack(n) or dbstack('-completenames', n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "n is an exact nonnegative scalar count of leading stack entries to omit; values outside the host indexing domain reject."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The skip count is parsed from exact scalar storage. Stack line and workspace-index fields follow the debugger's host metadata representation rather than n's input class."
         }
       ]
     },
@@ -29528,7 +29930,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "deblank accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider gather."
+      }
     },
     {
       "name": "decomposition",
@@ -31282,15 +31688,7 @@
               "description": "Value to display in the Command Window."
             }
           ],
-          "outputs": [
-            {
-              "name": "ans",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Empty matrix placeholder returned by sink invocation."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -31305,6 +31703,41 @@
           "identifier": null,
           "when": "Input value cannot be gathered onto the host for rendering.",
           "message": "disp: failed to gather value for display"
+        },
+        {
+          "code": "RM.DISP.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:disp:TooManyOutputs",
+          "when": "An output is requested from disp.",
+          "message": "disp does not return output arguments"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "disp(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer class is formatted from exact authoritative storage, including 64-bit extrema and integer members nested in supported containers."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "disp is a no-output host rendering sink. Resident integer values gather through exact typed provider download before decimal formatting; no floating compatibility mirror or provider output is created."
         }
       ]
     },
@@ -31324,15 +31757,7 @@
               "description": "Value to display with a variable-name header."
             }
           ],
-          "outputs": [
-            {
-              "name": "ans",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Empty matrix placeholder returned by sink invocation."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -31347,6 +31772,41 @@
           "identifier": "RunMat:display:GatherFailed",
           "when": "Input value cannot be gathered onto the host for rendering.",
           "message": "display: failed to gather value for display"
+        },
+        {
+          "code": "RM.DISPLAY.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:display:TooManyOutputs",
+          "when": "An output is requested from display.",
+          "message": "display does not return output arguments"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "display(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer class is displayed exactly through the variable-aware display path unless class-specific display or disp dispatch handles the object."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "display is a no-output host rendering sink with class-method dispatch. Resident integer arrays gather through exact typed provider download before the shared formatter runs."
         }
       ]
     },

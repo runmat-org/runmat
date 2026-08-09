@@ -9,11 +9,12 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
-    IntegerStorage, LogicalArray, MethodDef, NumericScalar, ObjectInstance, PropertyDef,
-    SparseTensor, StringArray, StructValue, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
+    ClassDef, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, MethodDef, NumericScalar, ObjectInstance, PropertyDef, SparseTensor, StringArray,
+    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -90,8 +91,15 @@ const STATS_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 const CLEAR_CACHE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "clearCache(memoizedFcn)",
     inputs: &MEMOIZED_INPUTS,
-    outputs: &STATUS_OUTPUTS,
+    outputs: &[],
 }];
+
+pub const CLEAR_CACHE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "clearCache accepts only a MemoizedFunction handle and has no public output; integer values may exist inside cached results but are opaque to cache clearing.",
+    };
 const STATS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "S = stats(memoizedFcn)",
     inputs: &MEMOIZED_INPUTS,
@@ -169,6 +177,12 @@ const MEMOIZE_ERROR_GC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "The memoized object target cannot be allocated or accessed.",
     message: "memoize: internal object storage failed",
 };
+const CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CLEAR_CACHE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:clearCache:TooManyOutputs"),
+    when: "An output is requested from clearCache.",
+    message: "clearCache does not return output arguments",
+};
 const MEMOIZE_CREATE_ERRORS: [BuiltinErrorDescriptor; 2] =
     [MEMOIZE_ERROR_INVALID_FUNCTION, MEMOIZE_ERROR_GC];
 const MEMOIZED_SUBSREF_ERRORS: [BuiltinErrorDescriptor; 4] = [
@@ -177,8 +191,11 @@ const MEMOIZED_SUBSREF_ERRORS: [BuiltinErrorDescriptor; 4] = [
     MEMOIZE_ERROR_INVALID_INDEX,
     MEMOIZE_ERROR_GC,
 ];
-const CLEAR_CACHE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [MEMOIZE_ERROR_INVALID_OBJECT, MEMOIZE_ERROR_GC];
+const CLEAR_CACHE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    MEMOIZE_ERROR_INVALID_OBJECT,
+    MEMOIZE_ERROR_GC,
+    CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS,
+];
 const STATS_ERRORS: [BuiltinErrorDescriptor; 3] = [
     MEMOIZE_ERROR_INVALID_OBJECT,
     MEMOIZE_ERROR_INVALID_CACHE_SIZE,
@@ -317,9 +334,16 @@ pub(crate) async fn memoized_subsref_builtin(
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::introspection::memoize::CLEAR_CACHE_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::memoize::CLEAR_CACHE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::memoize"
 )]
 pub(crate) async fn clear_cache_builtin(receiver: Value) -> BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 0) {
+        return Err(memoize_error(
+            &CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS,
+            CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS.message,
+        ));
+    }
     let handle = memoized_handle(&receiver)?;
     clear_cache_for_handle(handle)?;
     Ok(Value::Num(0.0))
@@ -1210,6 +1234,23 @@ mod tests {
         })
     }
 
+    #[test]
+    fn clear_cache_is_integer_inapplicable_and_has_no_public_output() {
+        assert!(CLEAR_CACHE_DESCRIPTOR.signatures[0].outputs.is_empty());
+        for value in [
+            IntValue::I8(-1),
+            IntValue::I16(-1),
+            IntValue::I32(-1),
+            IntValue::I64(-1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ] {
+            assert!(block_on(clear_cache_builtin(Value::Int(value))).is_err());
+        }
+    }
+
     fn echo_first_invoker() -> Arc<crate::user_functions::FunctionInvoker> {
         Arc::new(move |_function, args, _requested_outputs| {
             let first = args.first().cloned().unwrap_or(Value::Num(0.0));
@@ -1588,6 +1629,12 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let f = memoized();
+
+        {
+            let _outputs = crate::output_count::push_output_count(Some(1));
+            let err = block_on(clear_cache_builtin(f.clone())).unwrap_err();
+            assert_eq!(err.identifier(), Some("RunMat:clearCache:TooManyOutputs"));
+        }
 
         let _ = block_on(crate::call_feval_async_with_outputs(
             f.clone(),

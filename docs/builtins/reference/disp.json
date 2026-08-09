@@ -38,7 +38,7 @@
     "Structures display one field per line using four-space indentation; nested arrays collapse to size/type summaries just like MATLAB.",
     "Cell arrays print a compact grid using four-space indentation. Elements summarise their contents (e.g., `[2x2 double]`, `'hello'`, `\"world\"`).",
     "gpuArray values are gathered to host memory before formatting so the output matches MATLAB.",
-    "Empty arrays display as `[]`, while empty string arrays report their size (e.g., `0x2 string`)."
+    "Empty built-in numeric, logical, complex, character-array, string-array, and cell-array values produce no displayed text; an empty string scalar produces its documented blank line."
   ],
   "examples": [
     {
@@ -75,7 +75,7 @@
   "faqs": [
     {
       "question": "Does `disp` change the result of my computation?",
-      "answer": "No. `disp` produces no output argument. Its return value is unused and exists only for internal compliance with the builtin registry."
+      "answer": "No. `disp` produces no output argument; requesting one is an error."
     },
     {
       "question": "Can I pass multiple arguments to `disp`?",
@@ -87,7 +87,7 @@
     },
     {
       "question": "What happens with empty arrays?",
-      "answer": "Numeric and logical empties print as `[]`. Empty string arrays display their shape (e.g., `0x0 string`) so you can distinguish them from scalar empty strings."
+      "answer": "Empty built-in numeric, logical, complex, character-array, string-array, and cell-array values return without displaying text. An empty string scalar displays a blank line."
     },
     {
       "question": "Can `disp` print GPU data directly?",

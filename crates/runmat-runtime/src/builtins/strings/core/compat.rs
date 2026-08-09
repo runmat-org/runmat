@@ -29,6 +29,14 @@ const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Output value.",
 }];
 
+const OUT_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "One converted output for each corresponding input.",
+}];
+
 const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
     ty: BuiltinParamType::LogicalArray,
@@ -190,20 +198,65 @@ descriptor_by_outputs!(
     CONVERT_STRINGS_TO_CHARS_DESCRIPTOR,
     "[out1, ...] = convertStringsToChars(value1, ...)",
     &IN_TEXT_REST,
-    &OUT_ANY
+    &OUT_VARIADIC
 );
-descriptor!(
+descriptor_by_outputs!(
     CONVERT_CHARS_TO_STRINGS_DESCRIPTOR,
-    "out = convertCharsToStrings(value)",
-    &IN_VALUE,
-    &OUT_ANY
+    "[out1, ...] = convertCharsToStrings(value1, ...)",
+    &IN_TEXT_REST,
+    &OUT_VARIADIC
 );
-descriptor!(
+descriptor_by_outputs!(
     CONVERT_CONTAINED_STRINGS_TO_CHARS_DESCRIPTOR,
-    "out = convertContainedStringsToChars(value)",
-    &IN_VALUE,
-    &OUT_ANY
+    "[out1, ...] = convertContainedStringsToChars(value1, ...)",
+    &IN_TEXT_REST,
+    &OUT_VARIADIC
 );
+
+const CONVERT_PASSTHROUGH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every non-target datatype is returned unaltered, so integer class, shape, value, and provider ownership remain exact.",
+    }];
+
+pub const CONVERT_STRINGS_TO_CHARS_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "[out1, ...] = convertStringsToChars(value1, ...)",
+    inputs: &CONVERT_PASSTHROUGH_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::Multiple,
+    notes: "Only top-level string inputs convert. Integer scalars, arrays, cells, structs, and resident handles pass through without gather or floating materialization.",
+}];
+
+pub const CONVERT_CHARS_TO_STRINGS_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "[out1, ...] = convertCharsToStrings(value1, ...)",
+    inputs: &CONVERT_PASSTHROUGH_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::Multiple,
+    notes: "Only character arrays and cell arrays consisting entirely of character vectors convert. Every integer-containing non-cellstr value passes through identically without provider access.",
+}];
+
+pub const CONVERT_CONTAINED_STRINGS_TO_CHARS_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "[out1, ...] = convertContainedStringsToChars(value1, ...)",
+    inputs: &CONVERT_PASSTHROUGH_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::Multiple,
+    notes: "Top-level integer values and integer members nested at any cell/struct depth remain exact. Top-level and contained string values convert; resident numeric handles are preserved without gather.",
+}];
 descriptor!(
     STRNCMPI_DESCRIPTOR,
     "tf = strncmpi(A, B, N)",
@@ -405,29 +458,13 @@ fn is_string_scalar_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::CONVERT_STRINGS_TO_CHARS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::compat::CONVERT_STRINGS_TO_CHARS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn convert_strings_to_chars_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let mut inputs = Vec::with_capacity(rest.len() + 1);
-    inputs.push(value);
-    inputs.extend(rest);
-
-    let mut outputs = Vec::with_capacity(inputs.len());
-    for value in inputs {
-        let value = gather_if_needed_async(&value)
-            .await
-            .map_err(map_flow("convertStringsToChars"))?;
-        outputs.push(convert_strings_to_chars(value, false)?);
-    }
-
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(n) => Ok(crate::output_count::output_list_with_padding(n, outputs)),
-        None => Ok(outputs
-            .into_iter()
-            .next()
-            .unwrap_or(Value::String(String::new()))),
-    }
+    convert_variadic(value, rest, convert_strings_to_chars)
 }
 
 #[runtime_builtin(
@@ -438,13 +475,13 @@ async fn convert_strings_to_chars_builtin(value: Value, rest: Vec<Value>) -> Bui
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::CONVERT_CHARS_TO_STRINGS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::compat::CONVERT_CHARS_TO_STRINGS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn convert_chars_to_strings_builtin(value: Value) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_flow("convertCharsToStrings"))?;
-    convert_chars_to_strings(value)
+async fn convert_chars_to_strings_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    convert_variadic(value, rest, convert_chars_to_strings)
 }
 
 #[runtime_builtin(
@@ -457,13 +494,33 @@ async fn convert_chars_to_strings_builtin(value: Value) -> BuiltinResult<Value> 
     descriptor(
         crate::builtins::strings::core::compat::CONVERT_CONTAINED_STRINGS_TO_CHARS_DESCRIPTOR
     ),
+    integer_capabilities(crate::builtins::strings::core::compat::CONVERT_CONTAINED_STRINGS_TO_CHARS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn convert_contained_strings_to_chars_builtin(value: Value) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_flow("convertContainedStringsToChars"))?;
-    convert_strings_to_chars(value, true)
+async fn convert_contained_strings_to_chars_builtin(
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    convert_variadic(value, rest, convert_contained_strings_to_chars)
+}
+
+fn convert_variadic(
+    value: Value,
+    rest: Vec<Value>,
+    convert: fn(Value) -> BuiltinResult<Value>,
+) -> BuiltinResult<Value> {
+    let outputs = std::iter::once(value)
+        .chain(rest)
+        .map(convert)
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(n) => Ok(crate::output_count::output_list_with_padding(n, outputs)),
+        None => Ok(outputs
+            .into_iter()
+            .next()
+            .unwrap_or(Value::String(String::new()))),
+    }
 }
 
 #[runtime_builtin(
@@ -1072,33 +1129,40 @@ fn nonnegative_platform_usize(value: f64) -> Option<usize> {
     Some(value as usize)
 }
 
-fn convert_strings_to_chars(value: Value, contained_only: bool) -> BuiltinResult<Value> {
+fn convert_strings_to_chars(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::CharArray(CharArray::new_row(&text))),
-        Value::StringArray(array) if array.data.len() == 1 && !contained_only => {
-            Ok(Value::CharArray(CharArray::new_row(&array.data[0])))
+        Value::String(text) => Ok(Value::CharArray(string_scalar_to_chars(&text))),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Value::CharArray(string_scalar_to_chars(&array.data[0])))
         }
-        Value::StringArray(array) if !contained_only => {
+        Value::StringArray(array) => {
             let values = array
                 .data
                 .into_iter()
-                .map(|text| Value::CharArray(CharArray::new_row(&text)))
+                .map(|text| Value::CharArray(string_scalar_to_chars(&text)))
                 .collect();
             make_cell_with_shape(values, array.shape)
                 .map_err(|e| compat_error("convertStringsToChars", e))
         }
+        other => Ok(other),
+    }
+}
+
+fn convert_contained_strings_to_chars(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::String(_) | Value::StringArray(_) => convert_strings_to_chars(value),
         Value::Cell(cell) => {
             let values = cell
                 .data
                 .into_iter()
-                .map(|value| convert_strings_to_chars(value, true))
+                .map(convert_contained_member_to_chars)
                 .collect::<BuiltinResult<Vec<_>>>()?;
             make_cell_with_shape(values, cell.shape)
                 .map_err(|e| compat_error("convertContainedStringsToChars", e))
         }
         Value::Struct(mut st) => {
             for value in st.fields.values_mut() {
-                *value = convert_strings_to_chars(value.clone(), true)?;
+                *value = convert_contained_member_to_chars(value.clone())?;
             }
             Ok(Value::Struct(st))
         }
@@ -1106,31 +1170,61 @@ fn convert_strings_to_chars(value: Value, contained_only: bool) -> BuiltinResult
     }
 }
 
+fn string_scalar_to_chars(text: &str) -> CharArray {
+    if text.is_empty() || crate::builtins::strings::common::is_missing_string(text) {
+        CharArray::new(Vec::new(), 0, 0).expect("valid empty character array")
+    } else {
+        CharArray::new_row(text)
+    }
+}
+
+fn convert_contained_member_to_chars(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::String(_) | Value::StringArray(_) => convert_strings_to_chars(value),
+        Value::Cell(_) | Value::Struct(_) => convert_contained_strings_to_chars(value),
+        other => Ok(other),
+    }
+}
+
 fn convert_chars_to_strings(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::CharArray(array) => {
-            let data = (0..array.rows)
-                .map(|row| {
-                    char_row_to_string_slice(&array.data, array.cols, row)
-                        .trim_end()
-                        .to_string()
-                })
-                .collect::<Vec<_>>();
-            StringArray::new(data, vec![array.rows, 1])
-                .map(Value::StringArray)
-                .map_err(|e| compat_error("convertCharsToStrings", e))
+            let mut text = String::with_capacity(array.data.len());
+            for col in 0..array.cols {
+                for row in 0..array.rows {
+                    text.push(array.data[row * array.cols + col]);
+                }
+            }
+            Ok(Value::String(text))
         }
         Value::Cell(cell) => {
-            let values = cell
+            if !cell.data.iter().all(is_character_vector) {
+                return Ok(Value::Cell(cell));
+            }
+            let data = cell
                 .data
                 .into_iter()
-                .map(convert_chars_to_strings)
+                .map(|value| match value {
+                    Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
+                    Value::CharArray(array) => {
+                        Ok(char_row_to_string_slice(&array.data, array.cols, 0))
+                    }
+                    _ => Err(compat_error(
+                        "convertCharsToStrings",
+                        "convertCharsToStrings: invalid cellstr element",
+                    )),
+                })
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            make_cell_with_shape(values, cell.shape)
+            StringArray::new(data, cell.shape)
+                .map(Value::StringArray)
                 .map_err(|e| compat_error("convertCharsToStrings", e))
         }
         other => Ok(other),
     }
+}
+
+fn is_character_vector(value: &Value) -> bool {
+    matches!(value, Value::CharArray(array) if array.rows <= 1)
 }
 
 fn prefix_eq_ignore_case(a: &str, b: &str, n: usize) -> bool {
@@ -1826,7 +1920,7 @@ async fn bounded_pattern(
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerStorage, NumericDType};
+    use runmat_builtins::{CellArray, IntValue, IntegerStorage, NumericDType};
 
     #[test]
     fn text_broadcast_helpers_append_trailing_singletons() {
@@ -2054,12 +2148,31 @@ mod tests {
             Value::OutputList(outputs) if outputs.len() == 2
         ));
         drop(_guard);
-        assert_eq!(
-            block(convert_chars_to_strings_builtin(Value::CharArray(
-                CharArray::new_row("abc")
-            )))
+        let _guard = crate::output_count::push_output_count(Some(2));
+        assert!(matches!(
+            block(convert_chars_to_strings_builtin(
+                Value::CharArray(CharArray::new_row("a")),
+                vec![Value::CharArray(CharArray::new_row("b"))],
+            ))
             .unwrap(),
-            Value::StringArray(StringArray::new(vec!["abc".into()], vec![1, 1]).unwrap())
+            Value::OutputList(outputs) if outputs == vec![Value::String("a".into()), Value::String("b".into())]
+        ));
+        assert!(matches!(
+            block(convert_contained_strings_to_chars_builtin(
+                Value::String("a".into()),
+                vec![Value::String("b".into())],
+            ))
+            .unwrap(),
+            Value::OutputList(outputs) if outputs == vec![Value::CharArray(CharArray::new_row("a")), Value::CharArray(CharArray::new_row("b"))]
+        ));
+        drop(_guard);
+        assert_eq!(
+            block(convert_chars_to_strings_builtin(
+                Value::CharArray(CharArray::new_row("abc")),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::String("abc".into())
         );
         assert_eq!(
             block(str2num_builtin(Value::String("1 2; 3 4".into()))).unwrap(),
@@ -2073,6 +2186,172 @@ mod tests {
             .unwrap(),
             Value::String("[1 2;3 4]".into())
         );
+    }
+
+    #[test]
+    fn integer_conversion_passthrough_is_exact_for_every_class() {
+        for int in [
+            IntValue::I8(i8::MIN),
+            IntValue::I16(i16::MIN),
+            IntValue::I32(i32::MIN),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(u8::MAX),
+            IntValue::U16(u16::MAX),
+            IntValue::U32(u32::MAX),
+            IntValue::U64(u64::MAX),
+        ] {
+            let value = Value::Int(int);
+            assert_eq!(
+                block(convert_strings_to_chars_builtin(value.clone(), Vec::new())).unwrap(),
+                value
+            );
+            assert_eq!(
+                block(convert_chars_to_strings_builtin(value.clone(), Vec::new())).unwrap(),
+                value
+            );
+            assert_eq!(
+                block(convert_contained_strings_to_chars_builtin(
+                    value.clone(),
+                    Vec::new()
+                ))
+                .unwrap(),
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn integer_conversion_passthrough_preserves_provider_ownership_without_gather() {
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[u64::MAX]),
+                    shape: &[1, 1],
+                })
+                .expect("upload integer");
+            for output in [
+                block(convert_strings_to_chars_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Vec::new(),
+                ))
+                .unwrap(),
+                block(convert_chars_to_strings_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Vec::new(),
+                ))
+                .unwrap(),
+                block(convert_contained_strings_to_chars_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Vec::new(),
+                ))
+                .unwrap(),
+            ] {
+                let Value::GpuTensor(returned) = output else {
+                    panic!("expected unchanged resident integer handle");
+                };
+                assert_eq!(returned.buffer_id, handle.buffer_id);
+                assert_eq!(returned.device_id, handle.device_id);
+                assert_eq!(returned.shape, handle.shape);
+            }
+        });
+    }
+
+    #[test]
+    fn conversion_scope_and_container_shapes_match_their_contracts() {
+        let matrix = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+        assert_eq!(
+            block(convert_chars_to_strings_builtin(
+                Value::CharArray(matrix),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::String("acbd".into())
+        );
+
+        let cellstr = CellArray::new(
+            vec![
+                Value::CharArray(CharArray::new_row("a")),
+                Value::CharArray(CharArray::new_row("b")),
+            ],
+            1,
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            block(convert_chars_to_strings_builtin(
+                Value::Cell(cellstr),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap())
+        );
+
+        let mixed = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::String("keep".into()),
+                    Value::Int(IntValue::U64(u64::MAX)),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            block(convert_strings_to_chars_builtin(mixed.clone(), Vec::new())).unwrap(),
+            mixed
+        );
+
+        assert_eq!(
+            block(convert_contained_strings_to_chars_builtin(
+                Value::String("top-level".into()),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::CharArray(CharArray::new_row("top-level"))
+        );
+        for text in ["", "<missing>"] {
+            assert_eq!(
+                block(convert_strings_to_chars_builtin(
+                    Value::String(text.into()),
+                    Vec::new()
+                ))
+                .unwrap(),
+                Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap())
+            );
+        }
+        let converted = block(convert_contained_strings_to_chars_builtin(
+            mixed,
+            Vec::new(),
+        ))
+        .unwrap();
+        let Value::Cell(cell) = converted else {
+            panic!("expected cell");
+        };
+        assert_eq!(
+            cell.data,
+            vec![
+                Value::CharArray(CharArray::new_row("keep")),
+                Value::Int(IntValue::U64(u64::MAX))
+            ]
+        );
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let nested = Value::Cell(CellArray::new(vec![resident.clone()], 1, 1).unwrap());
+        let Value::Cell(preserved) = block(convert_contained_strings_to_chars_builtin(
+            nested,
+            Vec::new(),
+        ))
+        .unwrap() else {
+            panic!("expected cell");
+        };
+        assert_eq!(preserved.data, vec![resident]);
     }
 
     #[test]

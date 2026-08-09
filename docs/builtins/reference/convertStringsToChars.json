@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "No GPU kernel is needed. Non-string values, including resident integer arrays and containers, pass through unchanged without provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -52,7 +52,7 @@
         {
           "name": "out",
           "ty": "Any",
-          "arity": "Required",
+          "arity": "Variadic",
           "default": null,
           "description": "Output value."
         }
@@ -62,7 +62,8 @@
   "behaviors": [
     "Convert string scalars and arrays to character vectors.",
     "Supports multiple inputs and requested outputs; each input is converted independently.",
-    "String arrays with more than one element become cells of character vectors."
+    "String arrays with more than one element become same-size cells of character vectors.",
+    "Every non-string datatype is returned identically; cells and structs are not traversed by this function."
   ],
   "examples": [
     "[a,b] = convertStringsToChars(\"run\", \"mat\") returns character vectors for both outputs."
