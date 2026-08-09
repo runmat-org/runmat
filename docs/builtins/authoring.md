@@ -65,6 +65,10 @@ Public builtins selected by the integer-capability census must eventually carry 
 
 Run `scripts/development/integer-capability-census.sh` after changing these records. Its signature screen is a conservative triage population because `Any` intentionally covers many unrelated value families; the untriaged count is not a defect count or proof that every selected builtin accepts integers.
 
+For cohort work, use `scripts/development/integer-capability-audit.sh queue` to obtain a deterministic catalog-order worklist, filter it with `--name-regex` or `--input-type`, and select 8–25 semantically related names. Run `scripts/development/integer-capability-audit.sh packet NAME...` before research or implementation; it rejects duplicate, unknown, settled, or out-of-size selections and emits the exact descriptor labels, screened input types, one-based queue/catalog positions, and available reference paths needed for a bounded evidence packet. The legacy census command delegates to the same query definitions, so dashboard and worklist counts cannot drift.
+
+After exporting live descriptors for a completed cohort, use `scripts/development/integer-capability-catalog-sync.sh --live LIVE.json --in-place NAME...` to replace exactly those 8–25 checked records. The command rejects missing or duplicate names, proves the canonical target records equal the live export, proves every non-target checked record is unchanged, and prints the before/after hashes required by the cohort closure record; use `--output` instead of `--in-place` when reviewing the candidate file before replacement.
+
 ## Runtime Semantics
 
 Builtins receive and return `runmat_builtins::Value`. Keep MATLAB compatibility at the boundary:
