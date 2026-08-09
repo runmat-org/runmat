@@ -176,6 +176,12 @@ pub(crate) async fn close_if_network_targets(args: &[Value]) -> BuiltinResult<Op
 
     let mut gathered_args = Vec::with_capacity(args.len());
     for raw in args {
+        // Graphics figure numbers are numeric host controls. In particular, a resident numeric
+        // value can never become a networking struct or selector after gathering, so classify it
+        // before touching the provider and let the plotting dispatcher reject resident targets.
+        if !is_network_target_value(raw) {
+            return Ok(None);
+        }
         let gathered = gather_if_needed_async(raw)
             .await
             .map_err(|flow| map_close_flow(flow, &CLOSE_ERROR_INTERNAL))?;
@@ -288,9 +294,7 @@ fn close_everything() -> bool {
 
 fn is_network_target_value(value: &Value) -> bool {
     match value {
-        Value::Struct(st) => {
-            st.fields.contains_key(CLIENT_HANDLE_FIELD) || st.fields.contains_key(HANDLE_ID_FIELD)
-        }
+        Value::Struct(_) => true,
         Value::String(text) => is_network_command_token(text),
         Value::CharArray(chars) => {
             if chars.data.is_empty() {
@@ -409,6 +413,20 @@ pub(crate) mod tests {
         let tensor =
             Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 0]).expect("empty tensor");
         assert_eq!(close_value(&Value::Tensor(tensor)).expect("close"), false);
+    }
+
+    #[test]
+    fn resident_numeric_target_is_not_gathered_during_network_dispatch() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        assert_eq!(
+            futures::executor::block_on(close_if_network_targets(&[resident]))
+                .expect("resident numeric target should bypass networking"),
+            None
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

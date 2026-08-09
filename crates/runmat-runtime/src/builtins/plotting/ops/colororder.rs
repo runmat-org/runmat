@@ -2,7 +2,11 @@
 
 use glam::Vec4;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, Tensor, Value,
 };
@@ -28,6 +32,7 @@ const COLORORDER_OUTPUT_COLORS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescr
     default: None,
     description: "Current color order as an m-by-3 RGB triplet matrix.",
 }];
+const COLORORDER_OUTPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 
 const COLORORDER_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 
@@ -79,17 +84,17 @@ const COLORORDER_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
         label: "colororder(colors)",
         inputs: &COLORORDER_INPUTS_COLORS,
-        outputs: &COLORORDER_OUTPUT_COLORS,
+        outputs: &COLORORDER_OUTPUTS_NONE,
     },
     BuiltinSignatureDescriptor {
         label: "colororder(palettename)",
         inputs: &COLORORDER_INPUTS_COLORS,
-        outputs: &COLORORDER_OUTPUT_COLORS,
+        outputs: &COLORORDER_OUTPUTS_NONE,
     },
     BuiltinSignatureDescriptor {
         label: "colororder(target, colors)",
         inputs: &COLORORDER_INPUTS_TARGET_COLORS,
-        outputs: &COLORORDER_OUTPUT_COLORS,
+        outputs: &COLORORDER_OUTPUTS_NONE,
     },
 ];
 
@@ -117,6 +122,38 @@ pub const COLORORDER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &COLORORDER_ERRORS,
 };
 
+pub(crate) const COLORORDER_INTEGER_RGB_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "colororder-integer-rgb",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "colororder with a typed integer RGB matrix is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ColororderIntegerRgbExtension"),
+    };
+
+pub const COLORORDER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [COLORORDER_INTEGER_RGB_EXTENSION];
+
+const COLORORDER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "colors",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Public numeric RGB matrices are single or double. RunMat mode additionally admits every integer class when each channel is exactly 0 or 1.",
+    }];
+
+pub const COLORORDER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "colororder(integer_colors)",
+        inputs: &COLORORDER_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Integer channels are range-checked from native storage, then cross the explicit host graphics-state f32 boundary; subsequent query output is an m-by-3 host double matrix. Resident color arrays reject without provider access.",
+    }];
+
 #[runtime_builtin(
     name = "colororder",
     category = "plotting",
@@ -125,6 +162,8 @@ pub const COLORORDER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::colororder::COLORORDER_DESCRIPTOR),
+    extensions(crate::builtins::plotting::colororder::COLORORDER_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::colororder::COLORORDER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::colororder"
 )]
 pub fn colororder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -180,6 +219,13 @@ fn query_target(target: ColorOrderTarget) -> BuiltinResult<Value> {
 }
 
 fn resolve_colororder_target(value: &Value) -> BuiltinResult<ColorOrderTarget> {
+    if matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+    {
+        return Err(colororder_err(
+            "target must be a figure or axes graphics handle, not a typed integer",
+        ));
+    }
     match resolve_plot_handle(value, BUILTIN_NAME) {
         Ok(PlotHandle::Figure(handle)) => Ok(ColorOrderTarget::Figure(handle)),
         Ok(PlotHandle::Axes(handle, axes_index)) => Ok(ColorOrderTarget::Axes(handle, axes_index)),
@@ -193,7 +239,15 @@ fn parse_color_order(value: &Value) -> BuiltinResult<Vec<Vec4>> {
         return parse_color_text_or_palette(&text);
     }
     match value {
-        Value::Tensor(tensor) => colors_from_tensor(tensor),
+        Value::Tensor(tensor) => {
+            if tensor.integer_storage().is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &COLORORDER_INTEGER_RGB_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            colors_from_tensor(tensor)
+        }
         Value::StringArray(strings) => colors_from_strings(&strings.data),
         Value::Cell(cell) => colors_from_cell(cell),
         Value::GpuTensor(_) => Err(colororder_err(
@@ -394,7 +448,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use runmat_accelerate_api::GpuTensorHandle;
-    use runmat_builtins::StringArray;
+    use runmat_builtins::{IntegerStorage, StringArray};
 
     fn setup_plot_tests() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -438,9 +492,96 @@ mod tests {
     #[test]
     fn colororder_reads_typed_integer_rgb_storage_exactly() {
         let _guard = setup_plot_tests();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let colors = integer_rgb_matrix(vec![1, 0, 0, 0, 1, 0], 2);
         let set = colororder_builtin(vec![colors]).unwrap();
         assert_eq!(tensor_data(set), vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn colororder_runmat_integer_extension_covers_all_eight_classes() {
+        let _guard = setup_plot_tests();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = [
+            IntegerStorage::I8(vec![1, 0, 1]),
+            IntegerStorage::I16(vec![1, 0, 1]),
+            IntegerStorage::I32(vec![1, 0, 1]),
+            IntegerStorage::I64(vec![1, 0, 1]),
+            IntegerStorage::U8(vec![1, 0, 1]),
+            IntegerStorage::U16(vec![1, 0, 1]),
+            IntegerStorage::U32(vec![1, 0, 1]),
+            IntegerStorage::U64(vec![1, 0, 1]),
+        ];
+        for storage in storages {
+            let colors = Value::Tensor(Tensor::new_integer(storage, vec![1, 3]).unwrap());
+            colororder_builtin(vec![colors]).expect("RunMat integer RGB extension");
+            let queried = colororder_builtin(Vec::new()).unwrap();
+            assert_eq!(tensor_data(queried), vec![1.0, 0.0, 1.0]);
+        }
+    }
+
+    #[test]
+    fn colororder_integer_extension_is_gated_before_conversion() {
+        let _guard = setup_plot_tests();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let colors = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U8(vec![1, 0, 1]), vec![1, 3]).unwrap(),
+        );
+        let err = colororder_builtin(vec![colors]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:ColororderIntegerRgbExtension")
+        );
+    }
+
+    #[test]
+    fn colororder_integer_extension_rejects_channels_outside_zero_one() {
+        let _guard = setup_plot_tests();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let colors = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 0, 1]), vec![1, 3]).unwrap(),
+        );
+        let err = colororder_builtin(vec![colors]).unwrap_err();
+        assert!(err.to_string().contains("values in [0, 1]"));
+    }
+
+    #[test]
+    fn colororder_rejects_typed_integer_targets_without_f64_aliasing() {
+        let _guard = setup_plot_tests();
+        let colors = rgb_matrix(vec![1.0, 0.0, 0.0], 1);
+        let err = colororder_builtin(vec![
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            colors,
+        ])
+        .unwrap_err();
+        assert!(err.to_string().contains("not a typed integer"));
+    }
+
+    #[test]
+    fn colororder_descriptor_distinguishes_query_and_setter_outputs() {
+        let query = COLORORDER_DESCRIPTOR
+            .signatures
+            .iter()
+            .find(|signature| signature.label == "C = colororder()")
+            .unwrap();
+        assert_eq!(query.outputs.len(), 1);
+        for label in [
+            "colororder(colors)",
+            "colororder(palettename)",
+            "colororder(target, colors)",
+        ] {
+            let setter = COLORORDER_DESCRIPTOR
+                .signatures
+                .iter()
+                .find(|signature| signature.label == label)
+                .unwrap();
+            assert!(setter.outputs.is_empty());
+        }
+        assert_eq!(COLORORDER_INTEGER_INPUTS[0].classes.len(), 8);
+        assert_eq!(
+            COLORORDER_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::NotApplicable
+        );
     }
 
     #[test]

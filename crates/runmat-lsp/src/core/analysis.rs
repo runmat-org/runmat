@@ -2164,7 +2164,7 @@ mod tests {
                 "axis([xmin xmax ymin ymax | ... cmin cmax])",
             ),
             ("cla();", "ok = cla()"),
-            ("colormap('parula');", "ok = colormap(name)"),
+            ("colormap('parula');", "colormap(name)"),
             ("shading('flat');", "ok = shading(mode)"),
             ("colorbar('off');", "enabled = colorbar(mode)"),
             ("semilogx([1 10 100]);", "h = semilogx(Y)"),

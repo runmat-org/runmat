@@ -3,29 +3,31 @@
 //! These operate on the active figure/axes state (grid/axis/cla/colormap/shading/colorbar).
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::colormap_arrays::parse_rgb_colormap_tensor;
+use super::colormap_arrays::{colormap_tensor, parse_rgb_colormap_tensor};
 use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
 use super::state::{
     axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, clear_current_axes,
-    color_limits_snapshot, current_axes_state, current_figure_handle, set_axes_style_for_axes,
-    set_axis_equal, set_axis_equal_and_limits, set_axis_limits, set_box_enabled,
-    set_color_limits_runtime, set_colorbar_enabled, set_colormap, set_colormap_with_length,
+    clone_figure, color_limits_snapshot, colormap_length_for_axes, current_axes_state,
+    current_colormap_length, current_figure_handle, set_axes_style_for_axes, set_axis_equal,
+    set_axis_equal_and_limits, set_axis_limits, set_box_enabled, set_color_limits_runtime,
+    set_colorbar_enabled, set_colormap_for_axes_with_length, set_colormap_with_length,
     set_grid_and_minor_grid_enabled, set_hidden_line_removal_for_axes, set_surface_shading,
     set_z_limits, toggle_box, toggle_colorbar, toggle_grid, toggle_minor_grid, z_limits_snapshot,
     FigureHandle,
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
-use crate::builtins::plotting::type_resolvers::{axis_type, bool_type};
+use crate::builtins::plotting::type_resolvers::{axis_type, bool_type, get_type};
 use crate::{build_runtime_error, RuntimeError};
 
 const GRID_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -254,13 +256,15 @@ pub const CLA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CLA_ERRORS,
 };
 
-const COLORMAP_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ok",
-    ty: BuiltinParamType::LogicalArray,
+const COLORMAP_OUTPUT_MAP: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "cmap",
+    ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "True on successful colormap update.",
+    description: "Current colormap as an m-by-3 normalized double RGB matrix.",
 }];
+const COLORMAP_OUTPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const COLORMAP_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 const COLORMAP_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "name",
     ty: BuiltinParamType::StringScalar,
@@ -273,18 +277,56 @@ const COLORMAP_INPUTS_RGB: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "m-by-3 RGB colormap array with values in [0, 1].",
+    description: "m-by-3 single/double RGB map in [0,1], or uint8 RGB map in [0,255].",
 }];
-const COLORMAP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const COLORMAP_INPUTS_TARGET: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "target",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Target figure or axes handle.",
+}];
+const COLORMAP_INPUTS_TARGET_MAP: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "target",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target figure or axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "map",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Colormap name or m-by-3 numeric RGB map.",
+    },
+];
+const COLORMAP_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
-        label: "ok = colormap(name)",
-        inputs: &COLORMAP_INPUTS_NAME,
-        outputs: &COLORMAP_OUTPUT_OK,
+        label: "cmap = colormap()",
+        inputs: &COLORMAP_INPUTS_NONE,
+        outputs: &COLORMAP_OUTPUT_MAP,
     },
     BuiltinSignatureDescriptor {
-        label: "ok = colormap(map)",
+        label: "cmap = colormap(target)",
+        inputs: &COLORMAP_INPUTS_TARGET,
+        outputs: &COLORMAP_OUTPUT_MAP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "colormap(name)",
+        inputs: &COLORMAP_INPUTS_NAME,
+        outputs: &COLORMAP_OUTPUTS_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "colormap(map)",
         inputs: &COLORMAP_INPUTS_RGB,
-        outputs: &COLORMAP_OUTPUT_OK,
+        outputs: &COLORMAP_OUTPUTS_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "colormap(target, map)",
+        inputs: &COLORMAP_INPUTS_TARGET_MAP,
+        outputs: &COLORMAP_OUTPUTS_NONE,
     },
 ];
 const COLORMAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -300,6 +342,66 @@ pub const COLORMAP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &COLORMAP_ERRORS,
 };
+
+pub(crate) const COLORMAP_NON_UINT8_INTEGER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "colormap-non-uint8-integer-map",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "colormap with an integer RGB map other than uint8 is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ColormapNonUint8IntegerMapExtension"),
+    };
+
+pub const COLORMAP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [COLORMAP_NON_UINT8_INTEGER_EXTENSION];
+
+const COLORMAP_UINT8_CLASSES: [BuiltinIntegerClass; 1] = [BuiltinIntegerClass::Uint8];
+const COLORMAP_NON_UINT8_CLASSES: [BuiltinIntegerClass; 7] = [
+    BuiltinIntegerClass::Int8,
+    BuiltinIntegerClass::Int16,
+    BuiltinIntegerClass::Int32,
+    BuiltinIntegerClass::Int64,
+    BuiltinIntegerClass::Uint16,
+    BuiltinIntegerClass::Uint32,
+    BuiltinIntegerClass::Uint64,
+];
+const COLORMAP_UINT8_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "map",
+    classes: &COLORMAP_UINT8_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Public uint8 RGB maps use the full [0,255] channel range and are normalized to [0,1].",
+}];
+const COLORMAP_NON_UINT8_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "map",
+        classes: &COLORMAP_NON_UINT8_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode admits the other seven integer classes only when every RGB component is exactly 0 or 1.",
+    }];
+
+pub const COLORMAP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "colormap(uint8_map)",
+        inputs: &COLORMAP_UINT8_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Authoritative uint8 channels are divided by 255 at the explicit host graphics-state boundary; the applied map is stored as normalized double and resident inputs remain unsupported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "colormap(non_uint8_integer_map)",
+        inputs: &COLORMAP_NON_UINT8_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "This useful RunMat-only form validates exact native 0/1 components before conversion to normalized host graphics metadata; resident inputs reject without provider access.",
+    },
+];
 
 const SHADING_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ok",
@@ -763,19 +865,117 @@ pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<bool> {
     summary = "Set the active colormap.",
     keywords = "colormap,plotting",
     suppress_auto_output = true,
-    type_resolver(bool_type),
+    type_resolver(get_type),
     descriptor(crate::builtins::plotting::cmds::COLORMAP_DESCRIPTOR),
+    extensions(crate::builtins::plotting::cmds::COLORMAP_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::cmds::COLORMAP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
-    let [arg] = args.as_slice() else {
-        return Err(cmd_error_with_message(
-            "colormap",
-            COLORMAP_ERROR_INVALID_ARGUMENT.message,
-            &COLORMAP_ERROR_INVALID_ARGUMENT,
-        ));
-    };
+pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if args.is_empty() {
+        let state = current_axes_state();
+        return colormap_query(state.handle, state.active_index);
+    }
+    if args.len() == 1 {
+        let typed_integer_map = matches!(&args[0], Value::Int(_))
+            || matches!(&args[0], Value::Tensor(tensor) if tensor.integer_storage().is_some());
+        if !typed_integer_map {
+            if let Ok(target) = resolve_plot_handle(&args[0], "colormap") {
+                return match target {
+                    PlotHandle::Axes(handle, axes) => colormap_query(handle, axes),
+                    PlotHandle::Figure(handle) => {
+                        let axes = clone_figure(handle)
+                            .map(|figure| figure.active_axes_index)
+                            .unwrap_or(0);
+                        colormap_query(handle, axes)
+                    }
+                    _ => Err(cmd_error_with_message(
+                        "colormap",
+                        "target must be a figure or axes handle",
+                        &COLORMAP_ERROR_INVALID_ARGUMENT,
+                    )),
+                };
+            }
+        }
+        let (cmap, len) = colormap_parse_map(&args[0])?;
+        let output = Value::Tensor(colormap_tensor(cmap.clone(), len));
+        set_colormap_with_length(cmap, len);
+        return Ok(output);
+    }
+    if args.len() == 2 {
+        if matches!(&args[0], Value::Int(_))
+            || matches!(&args[0], Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        {
+            return Err(cmd_error_with_message(
+                "colormap",
+                "target must be a figure or axes graphics handle, not a typed integer",
+                &COLORMAP_ERROR_INVALID_ARGUMENT,
+            ));
+        }
+        let target = resolve_plot_handle(&args[0], "colormap")?;
+        let (cmap, len) = colormap_parse_map(&args[1])?;
+        let output = Value::Tensor(colormap_tensor(cmap.clone(), len));
+        match target {
+            PlotHandle::Axes(handle, axes) => {
+                set_colormap_for_axes_with_length(handle, axes, cmap, len).map_err(|err| {
+                    cmd_error_with_message(
+                        "colormap",
+                        format!("{}: {err}", COLORMAP_ERROR_INVALID_ARGUMENT.message),
+                        &COLORMAP_ERROR_INVALID_ARGUMENT,
+                    )
+                })?;
+            }
+            PlotHandle::Figure(handle) => {
+                let count = clone_figure(handle)
+                    .map(|figure| figure.axes_count())
+                    .unwrap_or(1)
+                    .max(1);
+                for axes in 0..count {
+                    set_colormap_for_axes_with_length(handle, axes, cmap.clone(), len).map_err(
+                        |err| {
+                            cmd_error_with_message(
+                                "colormap",
+                                format!("{}: {err}", COLORMAP_ERROR_INVALID_ARGUMENT.message),
+                                &COLORMAP_ERROR_INVALID_ARGUMENT,
+                            )
+                        },
+                    )?;
+                }
+            }
+            _ => {
+                return Err(cmd_error_with_message(
+                    "colormap",
+                    "target must be a figure or axes handle",
+                    &COLORMAP_ERROR_INVALID_ARGUMENT,
+                ))
+            }
+        }
+        return Ok(output);
+    }
+    Err(cmd_error_with_message(
+        "colormap",
+        "expected colormap(), colormap(map), colormap(target), or colormap(target, map)",
+        &COLORMAP_ERROR_INVALID_ARGUMENT,
+    ))
+}
 
+fn colormap_query(handle: FigureHandle, axes: usize) -> crate::BuiltinResult<Value> {
+    let metadata = axes_metadata_snapshot(handle, axes).map_err(|err| {
+        cmd_error_with_message(
+            "colormap",
+            format!("{}: {err}", COLORMAP_ERROR_INVALID_ARGUMENT.message),
+            &COLORMAP_ERROR_INVALID_ARGUMENT,
+        )
+    })?;
+    Ok(Value::Tensor(colormap_tensor(
+        metadata.colormap,
+        colormap_length_for_axes(handle, axes),
+    )))
+}
+
+fn colormap_parse_map(
+    arg: &Value,
+) -> crate::BuiltinResult<(runmat_plot::plots::surface::ColorMap, usize)> {
     if let Some(name) = as_lower_str(arg) {
         let Some(cmap) = runmat_plot::plots::surface::ColorMap::from_name(&name) else {
             let other = name.trim();
@@ -788,14 +988,18 @@ pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
                 &COLORMAP_ERROR_INVALID_ARGUMENT,
             ));
         };
-        set_colormap(cmap);
-        return Ok(true);
+        let len = current_colormap_length();
+        return Ok((cmap, len));
     }
 
     if let Value::Tensor(tensor) = arg {
-        let (cmap, len) = parse_rgb_colormap_tensor(tensor, "colormap")?;
-        set_colormap_with_length(cmap, len);
-        return Ok(true);
+        if tensor.integer_storage().is_some() && tensor.numeric_dtype() != NumericDType::U8 {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &COLORMAP_NON_UINT8_INTEGER_EXTENSION,
+                "colormap",
+            )?;
+        }
+        return parse_rgb_colormap_tensor(tensor, "colormap");
     };
 
     Err(cmd_error_with_message(
@@ -1332,6 +1536,64 @@ mod tests {
     }
 
     #[test]
+    fn colormap_integer_admission_covers_all_classes_and_uint8_scaling() {
+        let _guard = setup();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let uint8 = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 128]), vec![1, 3])
+            .expect("uint8 map");
+        let returned = colormap_builtin(vec![Value::Tensor(uint8)]).expect("public uint8 map");
+        let values = Tensor::try_from(&returned).unwrap().materialize_f64();
+        assert_eq!(values[0], 1.0);
+        assert_eq!(values[1], 0.0);
+        assert!((values[2] - 128.0 / 255.0).abs() < 1.0e-6);
+
+        let extensions = [
+            IntegerStorage::I8(vec![1, 0, 1]),
+            IntegerStorage::I16(vec![1, 0, 1]),
+            IntegerStorage::I32(vec![1, 0, 1]),
+            IntegerStorage::I64(vec![1, 0, 1]),
+            IntegerStorage::U16(vec![1, 0, 1]),
+            IntegerStorage::U32(vec![1, 0, 1]),
+            IntegerStorage::U64(vec![1, 0, 1]),
+        ];
+        for storage in extensions {
+            let map = Tensor::new_integer(storage, vec![1, 3]).unwrap();
+            let returned = colormap_builtin(vec![Value::Tensor(map)]).unwrap();
+            assert_eq!(
+                Tensor::try_from(&returned).unwrap().materialize_f64(),
+                vec![1.0, 0.0, 1.0]
+            );
+        }
+    }
+
+    #[test]
+    fn colormap_strict_mode_keeps_uint8_public_and_gates_other_integers() {
+        let _guard = setup();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let public = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 3]).unwrap();
+        colormap_builtin(vec![Value::Tensor(public)]).expect("uint8 is public");
+        let extension =
+            Tensor::new_integer(IntegerStorage::I64(vec![1, 0, 0]), vec![1, 3]).unwrap();
+        let err = colormap_builtin(vec![Value::Tensor(extension)]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:ColormapNonUint8IntegerMapExtension")
+        );
+    }
+
+    #[test]
+    fn colormap_rejects_typed_integer_targets_without_f64_aliasing() {
+        let _guard = setup();
+        let err = colormap_builtin(vec![
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::String("parula".into()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:colormap:InvalidArgument"));
+        assert!(err.to_string().contains("not a typed integer"));
+    }
+
+    #[test]
     fn command_descriptors_cover_core_forms() {
         let grid_labels: Vec<&str> = GRID_DESCRIPTOR
             .signatures
@@ -1372,8 +1634,11 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(colormap_labels.contains(&"ok = colormap(name)"));
-        assert!(colormap_labels.contains(&"ok = colormap(map)"));
+        assert!(colormap_labels.contains(&"cmap = colormap()"));
+        assert!(colormap_labels.contains(&"cmap = colormap(target)"));
+        assert!(colormap_labels.contains(&"colormap(name)"));
+        assert!(colormap_labels.contains(&"colormap(map)"));
+        assert!(colormap_labels.contains(&"colormap(target, map)"));
 
         let shading_labels: Vec<&str> = SHADING_DESCRIPTOR
             .signatures

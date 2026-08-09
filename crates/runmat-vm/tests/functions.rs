@@ -3609,6 +3609,25 @@ fn compiled_numeric_integer_cohort_executes_in_runmat_mode() {
 }
 
 #[test]
+fn compiled_colon_to_cond_integer_cohort_preserves_exact_values_and_boundaries() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "base = uint64(9007199254740992); sequence = colon(base + uint64(1), base + uint64(3)); z = complex(base + uint64(1), uint64(7)); choices = combinations(uint8([1 2]), int16([3 4])); text = compose(\"%d\", base + uint64(1)); estimate = cond(uint8([1 0; 0 2]));",
+    );
+    assert!(vars.iter().any(|value| {
+        matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.integer_storage() == Some(&runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994, 9_007_199_254_740_995])))
+    }));
+    assert!(vars.iter().any(|value| {
+        matches!(value, runmat_builtins::Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.real == runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]) && storage.imag == runmat_builtins::IntegerStorage::U64(vec![7])))
+    }));
+    assert!(has_object_class(&vars, "table"));
+    assert!(vars.iter().any(|value| {
+        matches!(value, runmat_builtins::Value::StringArray(strings) if strings.data == vec!["9007199254740993"])
+    }));
+    assert!(has_num(&vars, 2.0));
+}
+
+#[test]
 fn arrayfun_str2func_local_semantic_callback_executes() {
     let vars = execute_source(
         "function y = inc(x); y = x + 1; end; xs = [1, 2]; ys = arrayfun(str2func('inc'), xs); total = sum(ys);",

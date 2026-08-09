@@ -2,9 +2,14 @@
 
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LiteralValue, LogicalArray, Tensor, Type, Value,
+    CharArray, ComplexTensor, IntValue, LiteralValue, LogicalArray, NumericDType, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -82,6 +87,50 @@ fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
 
 const BUILTIN_NAME: &str = "colon";
 
+pub const COLON_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "colon-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "colon with logical operands is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ColonLogicalInputExtension"),
+};
+
+pub const COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "colon-zero-imaginary-complex",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "colon with zero-imaginary complex operands is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ColonZeroImaginaryComplexExtension"),
+    };
+
+pub const COLON_GPU_64_BIT_INTEGER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "colon-gpu-64-bit-integer",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "colon with resident int64 or uint64 operands is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ColonGpu64BitIntegerExtension"),
+    };
+
+pub const COLON_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    COLON_LOGICAL_INPUT_EXTENSION,
+    COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION,
+    COLON_GPU_64_BIT_INTEGER_EXTENSION,
+];
+
+const COLON_INTEGER_INPUTS_TWO: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "start", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A typed-integer operand selects the output integer class; all typed-integer operands must use that class." },
+    BuiltinIntegerInputCapability { name: "stop", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The bound must be representable by the selected output class." },
+];
+const COLON_INTEGER_INPUTS_THREE: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability { name: "start", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A typed-integer operand selects the output integer class; all typed-integer operands must use that class." },
+    BuiltinIntegerInputCapability { name: "step", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The explicit step is decoded exactly and may be negative even for an unsigned output class." },
+    BuiltinIntegerInputCapability { name: "stop", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The bound must be representable by the selected output class." },
+];
+
+pub const COLON_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "x = colon(integer_start, integer_stop)", inputs: &COLON_INTEGER_INPUTS_TWO, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "All eight integer classes use exact native storage with an implicit +1 step." },
+    BuiltinIntegerCapabilityDescriptor { form: "x = colon(integer_start, integer_step, integer_stop)", inputs: &COLON_INTEGER_INPUTS_THREE, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "All eight integer classes use exact native storage. MATLAB-compatible GPU execution excludes int64 and uint64; RunMat mode accepts them through an exact owning-provider gather/upload fallback." },
+];
+
 const COLON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "x",
     ty: BuiltinParamType::Any,
@@ -120,7 +169,7 @@ const COLON_SIG_THREE_INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Non-zero increment.",
+        description: "Increment; zero returns an empty row vector.",
     },
     BuiltinParamDescriptor {
         name: "stop",
@@ -149,13 +198,6 @@ const COLON_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     identifier: None,
     when: "More than three input arguments are provided.",
     message: "colon: expected two or three input arguments",
-};
-
-const COLON_ERROR_ZERO_INCREMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.ZERO_INCREMENT",
-    identifier: Some("RunMat:IndexStepZero"),
-    when: "The explicit increment is zero.",
-    message: "colon: increment must be nonzero",
 };
 
 const COLON_ERROR_NON_SCALAR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -221,9 +263,8 @@ const COLON_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "colon: internal error",
 };
 
-const COLON_ERRORS: [BuiltinErrorDescriptor; 11] = [
+const COLON_ERRORS: [BuiltinErrorDescriptor; 10] = [
     COLON_ERROR_ARG_COUNT,
-    COLON_ERROR_ZERO_INCREMENT,
     COLON_ERROR_NON_SCALAR_INPUT,
     COLON_ERROR_NON_FINITE_INPUT,
     COLON_ERROR_COMPLEX_IMAGINARY_NONZERO,
@@ -264,6 +305,8 @@ fn colon_error_with_message(
     keywords = "colon,sequence,range,step,gpu",
     accel = "array_construct",
     type_resolver(colon_type),
+    extensions(COLON_EXTENSIONS),
+    integer_capabilities(COLON_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::array::creation::colon::COLON_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::colon"
 )]
@@ -274,6 +317,12 @@ async fn colon_builtin(
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(colon_error(&COLON_ERROR_ARG_COUNT));
+    }
+
+    ensure_colon_extensions(&start, &step_or_end, &rest)?;
+
+    if [&start, &step_or_end].into_iter().chain(rest.iter()).any(|value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())) {
+        return resident_integer_colon(start, step_or_end, rest).await;
     }
 
     let (integer_step, integer_stop) = match rest.first() {
@@ -305,9 +354,6 @@ async fn colon_builtin(
         )
     } else {
         let step_scalar = parse_real_scalar("colon", step_or_end).await?;
-        if step_scalar.value == 0.0 {
-            return Err(colon_error(&COLON_ERROR_ZERO_INCREMENT));
-        }
         let stop_scalar = parse_real_scalar("colon", rest[0].clone()).await?;
         let char_mode =
             start_scalar.origin == ScalarOrigin::Char && stop_scalar.origin == ScalarOrigin::Char;
@@ -316,6 +362,13 @@ async fn colon_builtin(
         } else {
             start_scalar.prefer_gpu || step_scalar.prefer_gpu || stop_scalar.prefer_gpu
         };
+        if step_scalar.value == 0.0 {
+            return if char_mode {
+                build_char_sequence(Vec::new())
+            } else {
+                finalize_numeric_sequence(Vec::new(), explicit_gpu)
+            };
+        }
         build_sequence(
             start_scalar.value,
             step_scalar.value,
@@ -324,6 +377,140 @@ async fn colon_builtin(
             char_mode,
         )
     }
+}
+
+async fn resident_integer_colon(
+    start: Value,
+    step_or_end: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let mut owner_device = None;
+    for value in [&start, &step_or_end].into_iter().chain(rest.iter()) {
+        if let Value::GpuTensor(handle) = value {
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &COLON_LOGICAL_INPUT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            if runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            let device = runmat_accelerate_api::provider_for_handle(handle)
+                .ok_or_else(|| {
+                    colon_error_with_message(
+                        "colon: resident input provider is unavailable",
+                        &COLON_ERROR_INTERNAL,
+                    )
+                })?
+                .device_id();
+            if owner_device.is_some_and(|owner| owner != device) {
+                return Err(colon_error_with_message(
+                    "colon: resident inputs must belong to the same provider",
+                    &COLON_ERROR_INTERNAL,
+                ));
+            }
+            owner_device = Some(device);
+        }
+    }
+    let provider = [&start, &step_or_end]
+        .into_iter()
+        .chain(rest.iter())
+        .find_map(|value| match value {
+            Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle),
+            _ => None,
+        });
+    let start = gather_colon_operand(start).await?;
+    let step_or_end = gather_colon_operand(step_or_end).await?;
+    let rest = match rest.into_iter().next() {
+        Some(value) => vec![gather_colon_operand(value).await?],
+        None => Vec::new(),
+    };
+    let (step, stop) = match rest.first() {
+        Some(stop) => (Some(&step_or_end), stop),
+        None => (None, &step_or_end),
+    };
+    let result = try_integer_sequence(&start, step, stop)?.ok_or_else(|| {
+        colon_error_with_message(
+            "colon: resident integer operands require a typed-integer sequence",
+            &COLON_ERROR_INTERNAL,
+        )
+    })?;
+    let Some(provider) = provider else {
+        return Ok(result);
+    };
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, result).map_err(|error| {
+        colon_error_with_message(format!("colon: {error}"), &COLON_ERROR_INTERNAL)
+    })?;
+    let handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
+        colon_error_with_message(format!("colon: {error}"), &COLON_ERROR_INTERNAL)
+    })?;
+    Ok(gpu_helpers::resident_gpu_value(handle))
+}
+
+async fn gather_colon_operand(value: Value) -> crate::BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(&value).await,
+        other => Ok(other),
+    }
+}
+
+fn ensure_colon_extensions(
+    start: &Value,
+    step_or_end: &Value,
+    rest: &[Value],
+) -> crate::BuiltinResult<()> {
+    for value in std::iter::once(start)
+        .chain(std::iter::once(step_or_end))
+        .chain(rest.iter())
+    {
+        if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &COLON_LOGICAL_INPUT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if let Value::GpuTensor(handle) = value {
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &COLON_LOGICAL_INPUT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            if runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            if matches!(
+                runmat_accelerate_api::handle_integer_type(handle),
+                Some(
+                    runmat_accelerate_api::IntegerElementType::I64
+                        | runmat_accelerate_api::IntegerElementType::U64
+                )
+            ) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &COLON_GPU_64_BIT_INTEGER_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Integer colon expressions must retain their exact class and cannot use the
@@ -347,7 +534,11 @@ fn try_integer_sequence(
         None => 1,
     };
     if step == 0 {
-        return Err(colon_error(&COLON_ERROR_ZERO_INCREMENT));
+        let tensor =
+            Tensor::new_integer(target.storage(Vec::new()), vec![1, 0]).map_err(|error| {
+                colon_error_with_message(format!("colon: {error}"), &COLON_ERROR_INTERNAL)
+            })?;
+        return Ok(Some(tensor::tensor_into_value(tensor)));
     }
 
     let count = integer_progression_count(start, step, stop)?;
@@ -402,6 +593,26 @@ fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTar
             }
             Ok(tensor.integer_storage().map(IntegerTarget::from_storage))
         }
+        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
+            if complex_tensor_element_len(tensor) != 1 {
+                return Err(colon_error_with_message(
+                    "colon: expected scalar input",
+                    &COLON_ERROR_NON_SCALAR_INPUT,
+                ));
+            }
+            let storage = tensor
+                .integer_storage()
+                .expect("typed complex integer storage");
+            if !storage
+                .imag
+                .value_at(0)
+                .expect("scalar imaginary value")
+                .is_zero()
+            {
+                return Err(colon_error(&COLON_ERROR_COMPLEX_IMAGINARY_NONZERO));
+            }
+            Ok(Some(IntegerTarget::from_storage(&storage.real)))
+        }
         _ => Ok(None),
     }
 }
@@ -439,8 +650,40 @@ fn integer_colon_value(
             }
             int_value_to_i128(&storage.value_at(0).expect("scalar typed tensor value"))
         }
+        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
+            if complex_tensor_element_len(tensor) != 1 {
+                return Err(colon_error_with_message(
+                    "colon: expected scalar input",
+                    &COLON_ERROR_NON_SCALAR_INPUT,
+                ));
+            }
+            let storage = tensor
+                .integer_storage()
+                .expect("typed complex integer storage");
+            if !storage
+                .imag
+                .value_at(0)
+                .expect("scalar imaginary value")
+                .is_zero()
+            {
+                return Err(colon_error(&COLON_ERROR_COMPLEX_IMAGINARY_NONZERO));
+            }
+            if IntegerTarget::from_storage(&storage.real) != target {
+                return Err(colon_error_with_message(
+                    "colon: integer operands must have the same integer class",
+                    &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+                ));
+            }
+            int_value_to_i128(&storage.real.value_at(0).expect("scalar real value"))
+        }
         Value::Num(value) => float_to_integral_i128(*value)?,
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            if tensor.numeric_dtype() != NumericDType::F64 {
+                return Err(colon_error_with_message(
+                    "colon: integer sequences permit only a full scalar double as a noninteger operand",
+                    &COLON_ERROR_SEQUENCE_RANGE,
+                ));
+            }
             float_to_integral_i128(tensor::tensor_value_f64(tensor, 0))?
         }
         Value::Bool(value) => i128::from(u8::from(*value)),
@@ -541,7 +784,7 @@ fn build_sequence(
         return Err(colon_error(&COLON_ERROR_NON_FINITE_INPUT));
     }
     if step == 0.0 {
-        return Err(colon_error(&COLON_ERROR_ZERO_INCREMENT));
+        return finalize_numeric_sequence(Vec::new(), explicit_gpu);
     }
 
     let plan = plan_progression(start, step, stop)?;
@@ -964,9 +1207,9 @@ pub(crate) mod tests {
     #[test]
     fn colon_integer_sequences_support_signed_steps_and_reject_unrepresentable_ranges() {
         let value = colon_builtin(
-            Value::Int(IntValue::U64(5)),
+            Value::Int(IntValue::U32(5)),
             Value::Num(-2.0),
-            vec![Value::Int(IntValue::U64(1))],
+            vec![Value::Int(IntValue::U32(1))],
         )
         .expect("unsigned endpoint with signed step");
         let Value::Tensor(tensor) = value else {
@@ -974,7 +1217,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             tensor.integer_storage(),
-            Some(&IntegerStorage::U64(vec![5, 3, 1]))
+            Some(&IntegerStorage::U32(vec![5, 3, 1]))
         );
 
         let err = colon_builtin(Value::Int(IntValue::I8(1)), Value::Num(256.0), Vec::new())
@@ -1096,10 +1339,25 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn colon_zero_increment_errors() {
-        let err = colon_builtin(Value::Num(0.0), Value::Num(0.0), vec![Value::Num(1.0)])
-            .expect_err("colon should error");
-        assert!(err.message().contains("increment must be nonzero"));
+    fn colon_zero_increment_returns_empty_in_selected_class() {
+        let Value::Tensor(result) =
+            colon_builtin(Value::Num(0.0), Value::Num(0.0), vec![Value::Num(1.0)]).expect("empty")
+        else {
+            panic!("expected empty tensor");
+        };
+        assert_eq!(result.shape, vec![1, 0]);
+        let Value::Tensor(typed) = colon_builtin(
+            Value::Int(IntValue::U16(0)),
+            Value::Num(0.0),
+            vec![Value::Int(IntValue::U16(1))],
+        )
+        .expect("typed empty") else {
+            panic!("expected typed empty");
+        };
+        assert_eq!(
+            typed.integer_storage(),
+            Some(&IntegerStorage::U16(Vec::new()))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1160,7 +1418,133 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn colon_int64_accepts_integral_scalar_double_values_and_tensors_exactly() {
+        let start = Value::Int(IntValue::I64(1));
+        let Value::Tensor(scalar) =
+            colon_builtin(start.clone(), Value::Num(3.0), Vec::new()).expect("scalar double")
+        else {
+            panic!("expected typed range");
+        };
+        assert_eq!(
+            scalar.integer_storage(),
+            Some(&IntegerStorage::I64(vec![1, 2, 3]))
+        );
+
+        let double_tensor = Tensor::new(vec![3.0], vec![1, 1]).expect("double scalar");
+        let Value::Tensor(tensor) = colon_builtin(start, Value::Tensor(double_tensor), Vec::new())
+            .expect("scalar double tensor")
+        else {
+            panic!("expected typed range");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::I64(vec![1, 2, 3]))
+        );
+    }
+
+    #[test]
+    fn colon_resident_uint32_preserves_exact_class_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let start = Tensor::new_integer(IntegerStorage::U32(vec![u32::MAX - 2]), vec![1, 1])
+                .expect("start");
+            let stop =
+                Tensor::new_integer(IntegerStorage::U32(vec![u32::MAX]), vec![1, 1]).expect("stop");
+            let start = gpu_helpers::upload_tensor(provider, &start).expect("upload start");
+            let stop = gpu_helpers::upload_tensor(provider, &stop).expect("upload stop");
+            let result = colon_builtin(Value::GpuTensor(start), Value::GpuTensor(stop), Vec::new())
+                .expect("resident colon");
+            let Value::GpuTensor(handle) = &result else {
+                panic!("expected resident output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(handle),
+                Some(runmat_accelerate_api::IntegerElementType::U32)
+            );
+            let gathered = block_on(gpu_helpers::gather_value_async(&result)).expect("gather");
+            let Value::Tensor(tensor) = gathered else {
+                panic!("expected typed tensor");
+            };
+            assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::U32(vec![
+                    u32::MAX - 2,
+                    u32::MAX - 1,
+                    u32::MAX
+                ]))
+            );
+        });
+    }
+
+    #[test]
+    fn colon_resident_uint64_is_independently_mode_gated() {
+        test_support::with_test_provider(|provider| {
+            let value = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+                .expect("value");
+            let handle = gpu_helpers::upload_tensor(provider, &value).expect("upload");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = colon_builtin(
+                Value::GpuTensor(handle.clone()),
+                Value::GpuTensor(handle),
+                Vec::new(),
+            )
+            .expect_err("uint64 GPU colon is extension");
+            assert_eq!(
+                error.identifier(),
+                COLON_GPU_64_BIT_INTEGER_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
+    fn colon_resident_logical_and_complex_metadata_are_gated_before_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
+            let logical = provider
+                .upload(&HostTensorView {
+                    data: &tensor.materialize_f64(),
+                    shape: &tensor.shape,
+                })
+                .expect("logical upload");
+            runmat_accelerate_api::set_handle_logical(&logical, true);
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = colon_builtin(
+                Value::GpuTensor(logical.clone()),
+                Value::GpuTensor(logical),
+                Vec::new(),
+            )
+            .expect_err("logical gate");
+            assert_eq!(
+                error.identifier(),
+                COLON_LOGICAL_INPUT_EXTENSION.error_identifier
+            );
+            drop(_compat);
+            let complex = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 0.0],
+                    shape: &[1, 1],
+                })
+                .expect("complex upload");
+            runmat_accelerate_api::set_handle_storage(
+                &complex,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = colon_builtin(
+                Value::GpuTensor(complex.clone()),
+                Value::GpuTensor(complex),
+                Vec::new(),
+            )
+            .expect_err("complex gate");
+            assert_eq!(
+                error.identifier(),
+                COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
     fn colon_complex_integer_scalar_tensors_read_exact_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let start = ComplexTensor::new_integer(
             IntegerComplexStorage::new(IntegerStorage::I16(vec![1]), IntegerStorage::I16(vec![0]))
                 .expect("complex storage"),
@@ -1200,6 +1584,41 @@ pub(crate) mod tests {
         assert_eq!(
             err.identifier(),
             COLON_ERROR_COMPLEX_IMAGINARY_NONZERO.identifier
+        );
+
+        let wide_start = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                IntegerStorage::U64(vec![0]),
+            )
+            .expect("wide start"),
+            vec![1, 1],
+        )
+        .expect("wide start tensor");
+        let wide_stop = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_007_199_254_740_995]),
+                IntegerStorage::U64(vec![0]),
+            )
+            .expect("wide stop"),
+            vec![1, 1],
+        )
+        .expect("wide stop tensor");
+        let Value::Tensor(wide) = colon_builtin(
+            Value::ComplexTensor(wide_start),
+            Value::ComplexTensor(wide_stop),
+            Vec::new(),
+        )
+        .expect("wide exact complex colon") else {
+            panic!("expected typed range");
+        };
+        assert_eq!(
+            wide.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                9_007_199_254_740_994,
+                9_007_199_254_740_995
+            ]))
         );
     }
 
@@ -1279,6 +1698,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_bool_inputs_promote() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result =
             colon_builtin(Value::Bool(false), Value::Bool(true), Vec::new()).expect("colon");
         match result {
@@ -1340,6 +1760,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_complex_imaginary_errors() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = colon_builtin(Value::Complex(1.0, 1e-2), Value::Num(2.0), Vec::new())
             .expect_err("colon should reject complex inputs");
         assert!(

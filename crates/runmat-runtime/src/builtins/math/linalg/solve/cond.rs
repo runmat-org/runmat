@@ -4,9 +4,13 @@ use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderCondNorm};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, Tensor, Value,
+    ComplexTensor, IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +25,64 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cond";
+
+pub const COND_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cond-integer-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cond with a typed-integer matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CondIntegerMatrixExtension"),
+};
+
+pub const COND_LOGICAL_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cond-logical-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cond with a logical matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CondLogicalMatrixExtension"),
+};
+
+pub const COND_INTEGER_NORM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cond-integer-norm-selector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cond with a typed-integer norm selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CondIntegerNormSelectorExtension"),
+};
+
+pub const COND_LOGICAL_NORM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "cond-logical-norm-selector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "cond with a logical norm selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CondLogicalNormSelectorExtension"),
+};
+
+pub const COND_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    COND_INTEGER_MATRIX_EXTENSION,
+    COND_LOGICAL_MATRIX_EXTENSION,
+    COND_INTEGER_NORM_EXTENSION,
+    COND_LOGICAL_NORM_EXTENSION,
+];
+
+const COND_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "RunMat mode accepts integer matrices only when every element is exactly representable at the floating linear-algebra boundary.",
+}];
+
+const COND_INTEGER_NORM_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "p",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "Integer norm selectors are decoded structurally and accept only exact values 1 or 2.",
+    }];
+
+pub const COND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "c = cond(integer_A, p)", inputs: &COND_INTEGER_MATRIX_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "This RunMat extension checks exact binary64 representability before host execution; the result is double on host, while a resident scalar uses the owning provider's selected precision, and no integer compatibility mirror is materialized." },
+    BuiltinIntegerCapabilityDescriptor { form: "c = cond(A, integer_p)", inputs: &COND_INTEGER_NORM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Host typed-integer selectors do not enter matrix arithmetic and wide values are rejected without floating conversion; resident norm selectors are not supported." },
+];
 
 const COND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "c",
@@ -181,12 +243,26 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "cond,condition number,norm,gpu",
     accel = "cond",
     type_resolver(numeric_scalar_type),
+    extensions(COND_EXTENSIONS),
+    integer_capabilities(COND_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::linalg::solve::cond::COND_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
 async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if rest.iter().any(is_typed_integer_norm_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(&COND_INTEGER_NORM_EXTENSION, NAME)?;
+    }
+    if rest
+        .iter()
+        .any(|value| matches!(value, Value::Bool(_) | Value::LogicalArray(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(&COND_LOGICAL_NORM_EXTENSION, NAME)?;
+    }
     let norm = parse_norm_argument(&rest)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
+    ensure_cond_input_policy(&value)?;
+    let single_output = matches!(&value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(&value, Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32);
     let result = match value {
         Value::GpuTensor(handle) => return cond_gpu(handle, norm).await,
         Value::ComplexTensor(matrix) => cond_complex_tensor_builtin(&matrix, norm)?,
@@ -199,11 +275,64 @@ async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             cond_real_tensor_builtin(&tensor, norm)?
         }
     };
+    cond_host_output(result, single_output)
+}
+
+fn cond_host_output(result: f64, single: bool) -> BuiltinResult<Value> {
+    if single {
+        return Tensor::from_f32(vec![result as f32], vec![1, 1])
+            .map(Value::Tensor)
+            .map_err(builtin_error);
+    }
     Ok(Value::Num(result))
 }
 
+fn is_typed_integer_norm_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+}
+
+fn ensure_cond_input_policy(value: &Value) -> BuiltinResult<()> {
+    let integer = matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some());
+    if integer {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &COND_INTEGER_MATRIX_EXTENSION,
+            NAME,
+        )?;
+    }
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &COND_LOGICAL_MATRIX_EXTENSION,
+            NAME,
+        )?;
+    }
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &COND_LOGICAL_MATRIX_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
 async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Value> {
-    let maybe_provider = runmat_accelerate_api::provider();
+    let maybe_provider = runmat_accelerate_api::provider_for_handle(&handle);
+
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+            .await
+            .map_err(map_control_flow)?;
+        let tensor = tensor::value_into_tensor_for(NAME, gathered).map_err(builtin_error)?;
+        let cond_value = cond_real_tensor_builtin(&tensor, norm)?;
+        if let Some(provider) = maybe_provider {
+            let uploaded = upload_scalar(provider, cond_value)?;
+            return Ok(gpu_helpers::resident_gpu_value(uploaded));
+        }
+        return Ok(Value::Num(cond_value));
+    }
 
     if let Some(provider) = maybe_provider {
         if let Some(value) = cond_gpu_via_provider(provider, &handle, norm).await? {
@@ -239,16 +368,8 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
     };
 
     if let Some(provider) = maybe_provider {
-        match upload_scalar(provider, cond_value) {
-            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(build_runtime_error("interaction pending...")
-                        .with_builtin(NAME)
-                        .build());
-                }
-            }
-        }
+        let uploaded = upload_scalar(provider, cond_value)?;
+        return Ok(gpu_helpers::resident_gpu_value(uploaded));
     }
 
     Ok(Value::Num(cond_value))
@@ -276,9 +397,13 @@ fn cond_complex_tensor_builtin(matrix: &ComplexTensor, norm: CondNorm) -> Builti
 
 fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
     let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
+    ensure_integer_matrix_exact_at_f64_boundary(matrix)?;
     let values = tensor::tensor_values_f64_cow(matrix);
     if rows == 0 || cols == 0 {
         return Ok(0.0);
+    }
+    if values.iter().any(|value| !value.is_finite()) {
+        return Ok(f64::NAN);
     }
     if values.len() == 1 {
         return Ok(if values[0] == 0.0 { f64::INFINITY } else { 1.0 });
@@ -297,10 +422,42 @@ fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
     }
 }
 
+fn ensure_integer_matrix_exact_at_f64_boundary(matrix: &Tensor) -> BuiltinResult<()> {
+    let Some(storage) = matrix.integer_storage() else {
+        return Ok(());
+    };
+    for index in 0..storage.len() {
+        let value = storage
+            .value_at(index)
+            .expect("integer storage length is authoritative");
+        let exact = match value {
+            IntValue::I8(value) => i128::from(value),
+            IntValue::I16(value) => i128::from(value),
+            IntValue::I32(value) => i128::from(value),
+            IntValue::I64(value) => i128::from(value),
+            IntValue::U8(value) => i128::from(value),
+            IntValue::U16(value) => i128::from(value),
+            IntValue::U32(value) => i128::from(value),
+            IntValue::U64(value) => i128::from(value),
+        };
+        if (exact as f64) as i128 != exact {
+            return Err(builtin_error(format!("{NAME}: integer matrix element at linear index {} is not exactly representable as double", index + 1)));
+        }
+    }
+    Ok(())
+}
+
 fn cond_complex_tensor(matrix: &ComplexTensor, norm: CondNorm) -> BuiltinResult<f64> {
     let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0.0);
+    }
+    if matrix
+        .materialize_f64()
+        .iter()
+        .any(|(re, im)| !re.is_finite() || !im.is_finite())
+    {
+        return Ok(f64::NAN);
     }
     if matrix.materialize_f64().len() == 1 {
         let (re, im) = matrix.materialize_f64()[0];
@@ -452,7 +609,7 @@ fn singular_value_cond(singular_values: &[f64]) -> f64 {
     for &sv in singular_values {
         let abs = sv.abs();
         if !abs.is_finite() {
-            return f64::INFINITY;
+            return f64::NAN;
         }
         min_sv = min_sv.min(abs);
         max_sv = max_sv.max(abs);
@@ -665,12 +822,35 @@ pub(crate) mod tests {
 
     #[test]
     fn cond_reads_typed_integer_tensor_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
             .expect("integer");
         let result = cond_builtin(Value::Tensor(tensor), Vec::new()).expect("cond");
         match result {
             Value::Num(value) => assert!((value - 2.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cond_integer_matrix_accepts_all_eight_classes_and_returns_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = vec![
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ];
+        for storage in storages {
+            let matrix = Tensor::new_integer(storage, vec![1, 1]).expect("integer matrix");
+            assert_eq!(
+                cond_builtin(Value::Tensor(matrix), Vec::new()).expect("cond"),
+                Value::Num(1.0)
+            );
         }
     }
 
@@ -688,6 +868,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cond_one_norm_matches_manual() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![4.0, 2.0, -1.0, 3.0], vec![2, 2]).unwrap();
         let result =
             cond_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))]).expect("cond");
@@ -700,6 +881,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cond_norm_argument_reads_integer_tensor_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![4.0, 2.0, -1.0, 3.0], vec![2, 2]).unwrap();
         let order = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("order");
         let result = cond_builtin(Value::Tensor(tensor), vec![Value::Tensor(order)]).expect("cond");
@@ -707,6 +889,91 @@ pub(crate) mod tests {
             Value::Num(value) => assert!((value - 2.142_857_142_857_143).abs() < 1e-9),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cond_integer_matrix_is_independently_gated_and_rejects_inexact_wide_values() {
+        let matrix = Tensor::new_integer(IntegerStorage::U64(vec![1, 0, 0, 2]), vec![2, 2])
+            .expect("integer matrix");
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error =
+            cond_builtin(Value::Tensor(matrix), Vec::new()).expect_err("integer A is RunMat-only");
+        assert_eq!(
+            error.identifier(),
+            COND_INTEGER_MATRIX_EXTENSION.error_identifier
+        );
+        drop(_matlab);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("wide integer");
+        let error = cond_builtin(Value::Tensor(wide), Vec::new())
+            .expect_err("inexact binary64 boundary must fail");
+        assert!(error
+            .message()
+            .contains("not exactly representable as double"));
+
+        let exact_wide = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN]), vec![1, 1])
+            .expect("exact wide integer");
+        let Value::Num(value) =
+            cond_builtin(Value::Tensor(exact_wide), Vec::new()).expect("exact wide value")
+        else {
+            panic!("expected scalar");
+        };
+        assert_eq!(value, 1.0);
+    }
+
+    #[test]
+    fn cond_logical_matrix_and_norm_selector_are_independently_gated() {
+        let matrix = Tensor::new(vec![1.0], vec![1, 1]).expect("matrix");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let norm_error = cond_builtin(Value::Tensor(matrix), vec![Value::Bool(true)])
+            .expect_err("logical p extension");
+        assert_eq!(
+            norm_error.identifier(),
+            COND_LOGICAL_NORM_EXTENSION.error_identifier
+        );
+        drop(_compat);
+
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("logical payload");
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &tensor.materialize_f64(),
+                    shape: &tensor.shape,
+                })
+                .expect("upload");
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = cond_builtin(Value::GpuTensor(handle), Vec::new())
+                .expect_err("resident logical A extension");
+            assert_eq!(
+                error.identifier(),
+                COND_LOGICAL_MATRIX_EXTENSION.error_identifier
+            );
+        });
+    }
+
+    #[test]
+    fn cond_nonfinite_input_returns_nan() {
+        let matrix = Tensor::new(vec![f64::NAN, 0.0, 0.0, 1.0], vec![2, 2]).expect("matrix");
+        let Value::Num(result) = cond_builtin(Value::Tensor(matrix), Vec::new()).expect("cond")
+        else {
+            panic!("expected scalar");
+        };
+        assert!(result.is_nan());
+    }
+
+    #[test]
+    fn cond_single_input_returns_native_single_scalar() {
+        let matrix = Tensor::from_f32(vec![2.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("single matrix");
+        let Value::Tensor(result) = cond_builtin(Value::Tensor(matrix), Vec::new()).expect("cond")
+        else {
+            panic!("expected native single scalar");
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(result.as_f32_slice(), Some(&[2.0][..]));
     }
 
     #[test]

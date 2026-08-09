@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Networking runs on the host CPU. GPU-resident structs are gathered automatically before the close operation executes."
+    "notes": "Networking and plotting state run on the host CPU. Numeric figure targets must already be host values and are rejected before provider dispatch when resident."
   },
   "fusion": {
     "elementwise": false,
@@ -28,29 +28,30 @@
     "unit": "builtins::plotting::close::tests and builtins::io::net::close::tests",
     "integration": "runmat-core close command rewrite and no-current-figure execution tests"
   },
-  "description": "`close` releases plotting figures and TCP clients/servers. Bare `close` targets the current figure and is a no-op when no figures exist, so common startup code such as `clc; clear; close` is safe. Object and selector forms return status codes indicating whether handles were closed.",
+  "description": "`close` releases plotting figures and TCP clients/servers. Bare `close` targets the current figure and is a no-op when no figures exist, so common startup code such as `clc; clear; close` is safe. In RunMat mode, typed integer figure numbers are exact structural selectors; compatibility mode accepts ordinary double figure numbers.",
   "behaviors": [
-    "`close` with no arguments closes the current figure when one exists. If no figure exists, it returns `0` and does not create or error on a default figure.",
+    "`close` with no arguments closes the current figure when one exists. If no figure exists, it is a successful no-op that returns `1` without creating a default figure.",
     "`close('all')` closes every open figure. Networking resources use explicit selectors such as `close('clients')` and `close('servers')`.",
     "`close(fig)` closes an explicit figure handle and raises a figure-handle diagnostic if that explicit handle does not exist.",
     "`close(t)` closes the TCP client struct `t` that was previously returned by `tcpclient` or `accept`. Subsequent socket operations on that client raise MATLAB-style “not connected” diagnostics.",
     "`close(s)` closes the TCP server struct `s` that was returned by `tcpserver`. Any clients that were accepted from that server are also disconnected to match MATLAB’s lifecycle rules.",
     "`close('clients')` closes every registered TCP client (including those produced by `accept`). Likewise, `close('servers')` closes every TCP server. Use those explicit networking selectors instead of `close('all')`, which is reserved for figure closure.",
-    "Multiple inputs are processed from left to right. The return value is `1` when at least one handle was closed and `0` otherwise.",
+    "Plotting forms return scalar double `1` after a successful or no-op close. A `0` status is reserved for refused closure, which RunMat cannot yet produce because `CloseRequestFcn` callbacks are not implemented. Networking inputs return `1` when at least one resource was closed and `0` otherwise.",
     "Invalid arguments raise `RunMat:close:InvalidArgument`. Structs that do not contain the hidden RunMat networking identifiers raise `RunMat:close:InvalidHandle`.",
-    "Networking happens on the CPU. If the arguments live on the GPU, RunMat gathers them automatically before touching the host-side registries.",
-    "Arguments wrapped in cell arrays (possibly nested) or scalar string arrays are supported. `close` walks each element in-order and applies the usual rules to every value it discovers."
+    "Networking happens on the CPU. Resident numeric arguments are not networking resources and are rejected as non-host figure targets before provider dispatch.",
+    "In RunMat mode, networking resources may be passed as separate arguments or wrapped in nested cell arrays, and networking selectors may be scalar strings. Separate variadic targets are rejected in compatibility mode; plotting figure targets are not accepted through cell containers in the current implementation.",
+    "In RunMat mode, scalar and array figure numbers can use any of the eight integer classes. Values are read exactly, must be positive, and must fit RunMat's `uint32` figure-number range. Compatibility mode rejects typed integer figure numbers because the public compatibility contract does not advertise integer classes."
   ],
   "examples": [
     {
       "description": "Start a script safely when no figures are open",
       "input": "clc;\nclear;\nstatus = close",
-      "output": "status = 0"
+      "output": "status = 1"
     },
     {
       "description": "Close the current figure",
       "input": "figure(7);\nstatus = close",
-      "output": "status = 7"
+      "output": "status = 1"
     },
     {
       "description": "Close a TCP client after finishing I/O",
@@ -86,15 +87,15 @@
   "faqs": [
     {
       "question": "Is bare `close` safe when no figures are open?",
-      "answer": "Yes. RunMat treats bare `close` as a no-op when there is no current figure, returning `0` instead of creating a default figure or raising an invalid-handle error."
+      "answer": "Yes. RunMat treats bare `close` as a successful no-op when there is no current figure, returning `1` without creating a default figure or raising an invalid-handle error."
     },
     {
       "question": "What does the return value represent?",
-      "answer": "For figure targets, the return value is the closed figure handle for a single target or a count for multi-target/all closures. For networking resources, it is `1` when at least one client or server was closed and `0` otherwise."
+      "answer": "Figure forms return scalar double `1` when the requested operation succeeds or has nothing to close. MATLAB can return `0` when a close callback refuses the request; RunMat does not yet implement that callback path. Networking resources return `1` when at least one client or server was closed and `0` otherwise."
     },
     {
       "question": "Can I pass multiple clients or servers at once?",
-      "answer": "Yes. Pass them as separate arguments (`close(client1, client2)`) or wrap them in a cell array. The function closes each handle in order and returns `1` when any of the handles required closing."
+      "answer": "Yes in RunMat mode. Pass them as separate arguments (`close(client1, client2)`) or wrap them in a cell array. Separate variadic targets are a RunMat extension; compatibility mode accepts one target argument."
     },
     {
       "question": "Does closing a server also close accepted clients?",
@@ -106,11 +107,15 @@
     },
     {
       "question": "Do GPU arrays require special handling?",
-      "answer": "No. RunMat gathers GPU-resident values automatically before inspecting them, and networking always runs on the CPU."
+      "answer": "Resident numeric values are not networking resources and are rejected as non-host figure targets before provider access. Networking structs and plotting state remain host-resident."
     },
     {
       "question": "Is it safe to call close twice?",
-      "answer": "Yes. The second call simply returns `0`, indicating that nothing needed to be closed."
+      "answer": "It depends on the target. Repeating an explicit figure-number close raises the missing-handle diagnostic, while bare `close` with no current figure is a successful no-op returning `1`. Repeating a networking close returns `0` when no resource remained to close."
+    },
+    {
+      "question": "Can figure numbers use integer classes?",
+      "answer": "Yes in RunMat mode. All eight signed and unsigned integer classes are accepted exactly as host structural selectors within the positive `uint32` range. Compatibility mode requires an ordinary double figure number."
     }
   ],
   "links": [
@@ -148,6 +153,6 @@
     "url": "crates/runmat-runtime/src/builtins/close/mod.rs"
   },
   "gpu_behavior": [
-    "`close` performs only CPU-side bookkeeping. When network structs or option strings reside on the GPU, RunMat gathers them to host memory before inspecting their hidden identifiers. No provider hooks participate, and GPU residency is irrelevant to the close operation."
+    "`close` performs only CPU-side bookkeeping. Resident numeric values cannot be networking resources and bypass the networking gather path; plotting then rejects them as non-host figure targets without provider dispatch."
   ]
 }

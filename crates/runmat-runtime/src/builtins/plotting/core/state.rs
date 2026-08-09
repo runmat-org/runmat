@@ -3461,10 +3461,6 @@ pub fn toggle_colorbar() -> bool {
     enabled
 }
 
-pub fn set_colormap(colormap: ColorMap) {
-    set_colormap_with_length(colormap, DEFAULT_COLORMAP_LENGTH);
-}
-
 pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
     let (handle, figure_clone) = {
         let mut reg = registry();
@@ -3484,14 +3480,29 @@ pub fn set_colormap_for_axes(
     axes_index: usize,
     colormap: ColorMap,
 ) -> Result<(), FigureError> {
+    set_colormap_for_axes_with_length(handle, axes_index, colormap, DEFAULT_COLORMAP_LENGTH)
+}
+
+pub fn set_colormap_for_axes_with_length(
+    handle: FigureHandle,
+    axes_index: usize,
+    colormap: ColorMap,
+    length: usize,
+) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_colormap(axes_index, colormap);
-        state
-            .colormap_lengths
-            .insert(axes_index, DEFAULT_COLORMAP_LENGTH);
+        state.colormap_lengths.insert(axes_index, length);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
+}
+
+pub fn colormap_length_for_axes(handle: FigureHandle, axes_index: usize) -> usize {
+    let reg = registry();
+    reg.figures
+        .get(&handle)
+        .and_then(|state| state.colormap_lengths.get(&axes_index).copied())
+        .unwrap_or(DEFAULT_COLORMAP_LENGTH)
 }
 
 pub fn current_colormap_length() -> usize {

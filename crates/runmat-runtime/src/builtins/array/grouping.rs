@@ -4,13 +4,14 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType,
-    NumericScalar, ObjectInstance, SparseTensor, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, ObjectInstance,
+    SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -70,6 +71,7 @@ const ERROR_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 };
 
 const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INVALID_INPUT, ERROR_CALLBACK, ERROR_TOO_LARGE];
+const COMBINATIONS_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_TOO_LARGE];
 
 pub const GROUPING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
@@ -77,6 +79,63 @@ pub const GROUPING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+
+const COMBINATIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "T",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Host table whose variables preserve the corresponding input classes.",
+}];
+const COMBINATIONS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "One or more input arrays; each is linearized in column-major order.",
+}];
+const COMBINATIONS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "T = combinations(A1, A2, ..., An)",
+    inputs: &COMBINATIONS_INPUTS,
+    outputs: &COMBINATIONS_OUTPUT,
+}];
+pub const COMBINATIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COMBINATIONS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COMBINATIONS_ERRORS,
+};
+
+pub(crate) const COMBINATIONS_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "combinations-resident-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "combinations with a resident input and host-table output is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CombinationsResidentInputExtension"),
+    };
+pub const COMBINATIONS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [COMBINATIONS_RESIDENT_INPUT_EXTENSION];
+
+const COMBINATIONS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A1...An",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every public integer class is accepted and each output table variable retains its corresponding input class and exact values.",
+    }];
+pub const COMBINATIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "T = combinations(integer_A1, ..., integer_An)",
+        inputs: &COMBINATIONS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host inputs are repeated from authoritative native storage without an f64 mirror. A resident input is a gated RunMat extension because the required table result is host-resident.",
+    }];
 
 const ACCUMARRAY_IND_PARAM: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "ind",
@@ -732,10 +791,22 @@ pub(crate) async fn discretize_builtin(
     summary = "Generate all element combinations of arrays.",
     keywords = "combinations,cartesian,table,combinatorics",
     accel = "cpu",
-    descriptor(crate::builtins::array::grouping::GROUPING_DESCRIPTOR),
+    descriptor(crate::builtins::array::grouping::COMBINATIONS_DESCRIPTOR),
+    extensions(crate::builtins::array::grouping::COMBINATIONS_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::grouping::COMBINATIONS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::grouping"
 )]
 pub(crate) async fn combinations_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(first, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &COMBINATIONS_RESIDENT_INPUT_EXTENSION,
+            "combinations",
+        )?;
+    }
     let first = gather_if_needed_async(&first).await?;
     let rest = gather_values(rest).await?;
     combinations_impl(first, rest)
@@ -1976,43 +2047,14 @@ fn equal_width_edges(values: &[f64], bins: usize) -> BuiltinResult<Vec<f64>> {
 
 fn combinations_impl(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let mut values = vec![first];
-    let mut options_start = rest.len();
-    let mut idx = 0usize;
-    while idx < rest.len() {
-        if is_option_name(&rest[idx]) {
-            options_start = idx;
-            break;
-        }
-        values.push(rest[idx].clone());
-        idx += 1;
-    }
-    let mut names = (0..values.len())
+    values.extend(rest);
+    let names = (0..values.len())
         .map(|idx| format!("Var{}", idx + 1))
         .collect::<Vec<_>>();
-    if options_start < rest.len() {
-        let mut opt = options_start;
-        while opt < rest.len() {
-            if opt + 1 >= rest.len() {
-                return Err(grouping_error(
-                    "combinations: name-value options must be provided in pairs",
-                ));
-            }
-            let name = scalar_text(&rest[opt], "combinations option")?;
-            if name.eq_ignore_ascii_case("VariableNames") {
-                names = string_list(&rest[opt + 1])?;
-                if names.len() != values.len() {
-                    return Err(grouping_error(
-                        "combinations: VariableNames length must match input count",
-                    ));
-                }
-            } else {
-                return Err(grouping_error(format!(
-                    "combinations: unsupported option '{name}'"
-                )));
-            }
-            opt += 2;
-        }
-    }
+    let empty_columns = values
+        .iter()
+        .map(empty_combination_column_like)
+        .collect::<BuiltinResult<Vec<_>>>()?;
     let columns = values
         .into_iter()
         .map(vector_elements)
@@ -2023,6 +2065,9 @@ fn combinations_impl(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     })?;
     if row_count > MAX_MATERIALIZED_ELEMENTS {
         return Err(too_large_error("combinations: output is too large"));
+    }
+    if row_count == 0 {
+        return table_from_columns(names, empty_columns);
     }
     let mut out_columns = Vec::with_capacity(columns.len());
     for col_idx in 0..columns.len() {
@@ -2047,6 +2092,44 @@ fn combinations_impl(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         out_columns.push(collect_column_values(values, row_count)?);
     }
     table_from_columns(names, out_columns)
+}
+
+fn empty_combination_column_like(value: &Value) -> BuiltinResult<Value> {
+    match value {
+        Value::Tensor(tensor) => Tensor::from_numeric_storage(
+            tensor
+                .clone()
+                .into_numeric_storage()
+                .map_err(grouping_error)?
+                .zeros_like(0),
+            vec![0, 1],
+        )
+        .map(Value::Tensor)
+        .map_err(grouping_error),
+        Value::Int(value) => {
+            let sample = [Value::Int(value.clone())];
+            let storage = homogeneous_integer_values(&sample)
+                .expect("typed integer scalar storage")
+                .zeros_like(0);
+            Tensor::new_integer(storage, vec![0, 1])
+                .map(Value::Tensor)
+                .map_err(grouping_error)
+        }
+        Value::Num(_) => Tensor::new(Vec::new(), vec![0, 1])
+            .map(Value::Tensor)
+            .map_err(grouping_error),
+        Value::Bool(_) | Value::LogicalArray(_) => LogicalArray::new(Vec::new(), vec![0, 1])
+            .map(Value::LogicalArray)
+            .map_err(grouping_error),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
+            StringArray::new(Vec::new(), vec![0, 1])
+                .map(Value::StringArray)
+                .map_err(grouping_error)
+        }
+        _ => CellArray::new(Vec::new(), 0, 1)
+            .map(Value::Cell)
+            .map_err(grouping_error),
+    }
 }
 
 fn parse_name_selector(
@@ -3093,6 +3176,102 @@ mod tests {
             ),
             other => panic!("expected typed integer tensor column, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn combinations_preserves_all_integer_classes_and_linearizes_input_shape() {
+        for storage in all_integer_triplets() {
+            let expected = storage.clone();
+            let input = Tensor::new_integer(storage, vec![1, 3]).unwrap();
+            let out = block_on(combinations_builtin(Value::Tensor(input), Vec::new())).unwrap();
+            let Value::Object(table) = out else {
+                panic!("expected table");
+            };
+            assert_eq!(table_height(&table).unwrap(), 3);
+            let variables = table_variables(&table).unwrap();
+            let Value::Tensor(column) = variables.fields.values().next().unwrap() else {
+                panic!("expected numeric table variable");
+            };
+            assert_eq!(column.shape, vec![3, 1]);
+            assert_eq!(column.integer_storage(), Some(&expected));
+        }
+        assert_eq!(COMBINATIONS_INTEGER_INPUTS[0].classes.len(), 8);
+    }
+
+    #[test]
+    fn combinations_preserves_empty_integer_class() {
+        let empty = Tensor::new_integer(IntegerStorage::I32(Vec::new()), vec![0, 1]).unwrap();
+        let out = block_on(combinations_builtin(Value::Tensor(empty), Vec::new())).unwrap();
+        let Value::Object(table) = out else {
+            panic!("expected table");
+        };
+        assert_eq!(table_height(&table).unwrap(), 0);
+        let variables = table_variables(&table).unwrap();
+        let Value::Tensor(column) = variables.fields.values().next().unwrap() else {
+            panic!("expected numeric table variable");
+        };
+        assert_eq!(
+            column.integer_storage(),
+            Some(&IntegerStorage::I32(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn combinations_empty_cartesian_product_keeps_every_integer_column_empty_and_typed() {
+        for nonempty in all_integer_triplets() {
+            let empty_storage = nonempty.zeros_like(0);
+            let expected_empty = empty_storage.clone();
+            let expected_other = nonempty.zeros_like(0);
+            let out = block_on(combinations_builtin(
+                Value::Tensor(Tensor::new_integer(empty_storage, vec![0, 1]).unwrap()),
+                vec![Value::Tensor(
+                    Tensor::new_integer(nonempty, vec![1, 3]).unwrap(),
+                )],
+            ))
+            .unwrap();
+            let Value::Object(table) = out else {
+                panic!("expected table");
+            };
+            assert_eq!(table_height(&table).unwrap(), 0);
+            let variables = table_variables(&table).unwrap();
+            for (name, expected) in [("Var1", expected_empty), ("Var2", expected_other)] {
+                let Value::Tensor(column) = variables.fields.get(name).unwrap() else {
+                    panic!("expected typed numeric column");
+                };
+                assert_eq!(column.shape, vec![0, 1]);
+                assert_eq!(column.integer_storage(), Some(&expected));
+            }
+        }
+    }
+
+    #[test]
+    fn combinations_strict_mode_gates_resident_extension_before_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 99,
+            buffer_id: 77,
+        });
+        let error = block_on(combinations_builtin(resident, Vec::new())).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:CombinationsResidentInputExtension")
+        );
+    }
+
+    #[test]
+    fn combinations_treats_variable_names_text_as_data() {
+        let out = block_on(combinations_builtin(
+            Value::String("VariableNames".into()),
+            vec![Value::StringArray(
+                StringArray::new(vec!["A".into(), "B".into()], vec![1, 2]).unwrap(),
+            )],
+        ))
+        .unwrap();
+        let Value::Object(table) = out else {
+            panic!("expected table");
+        };
+        assert_eq!(table_height(&table).unwrap(), 2);
     }
 
     #[test]

@@ -18315,6 +18315,55 @@
           "when": "Internal figure clear operation fails.",
           "message": "clf: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "clf-integer-figure-number",
+          "mode": "RunMatOnly",
+          "description": "clf with a typed integer figure number is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClfIntegerFigureNumberExtension"
+        },
+        {
+          "id": "clf-all-selector",
+          "mode": "RunMatOnly",
+          "description": "clf('all') is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClfAllSelectorExtension"
+        },
+        {
+          "id": "clf-variadic-targets",
+          "mode": "RunMatOnly",
+          "description": "clf with separate variadic figure targets is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ClfVariadicTargetsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "f = clf(integer_fig)",
+          "inputs": [
+            {
+              "name": "fig",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode interprets a scalar or array of any built-in integer class as figure numbers, not as numeric figure data. The public compatibility contract documents figure numbers but does not advertise typed integer classes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Figure numbers are read from authoritative host integer storage and must be positive and representable as RunMat's u32 figure identifier. RunMat currently encodes a returned figure opaquely as f64 and returns a scalar count for multiple targets; those are explicit graphics-representation gaps, not integer numeric output. No numeric kernel or provider dispatch occurs."
+        }
       ]
     },
     {
@@ -18444,7 +18493,7 @@
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Closed handle for single-target calls or count/status for multi/all closures."
+              "description": "Scalar double status: 1 when the requested close operation completes, 0 when it is refused."
             }
           ]
         },
@@ -18465,7 +18514,7 @@
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Closed handle for single-target calls or count/status for multi/all closures."
+              "description": "Scalar double status: 1 when the requested close operation completes, 0 when it is refused."
             }
           ]
         },
@@ -18486,7 +18535,7 @@
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Closed handle for single-target calls or count/status for multi/all closures."
+              "description": "Scalar double status: 1 when the requested close operation completes, 0 when it is refused."
             }
           ]
         }
@@ -18497,6 +18546,61 @@
           "identifier": "RunMat:close:InvalidArgument",
           "when": "Close target values are invalid or unsupported.",
           "message": "close: invalid argument"
+        },
+        {
+          "code": "RM.CLOSE.INVALID_HANDLE",
+          "identifier": "RunMat:close:InvalidHandle",
+          "when": "A structure target is not a valid networking resource handle.",
+          "message": "close: invalid handle"
+        },
+        {
+          "code": "RM.CLOSE.INTERNAL",
+          "identifier": null,
+          "when": "Internal networking, gather, or plotting close processing fails.",
+          "message": "close: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "close-integer-figure-number",
+          "mode": "RunMatOnly",
+          "description": "close with a typed integer figure number is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CloseIntegerFigureNumberExtension"
+        },
+        {
+          "id": "close-variadic-targets",
+          "mode": "RunMatOnly",
+          "description": "close with separate variadic targets is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CloseVariadicTargetsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "status = close(integer_fig)",
+          "inputs": [
+            {
+              "name": "fig",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode interprets a scalar or array of any built-in integer class as figure numbers. The public compatibility contract documents figure numbers but does not advertise typed integer classes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Figure numbers are read from authoritative host integer storage and must be positive and representable as RunMat's u32 figure identifier. Resident numeric targets are rejected before networking/provider gather. Successful and no-op plotting closures return scalar double 1; callback-driven refusal remains unavailable until CloseRequestFcn is implemented."
         }
       ]
     },
@@ -18548,7 +18652,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Non-zero increment."
+              "description": "Increment; zero returns an empty row vector."
             },
             {
               "name": "stop",
@@ -18575,12 +18679,6 @@
           "identifier": null,
           "when": "More than three input arguments are provided.",
           "message": "colon: expected two or three input arguments"
-        },
-        {
-          "code": "RM.COLON.ZERO_INCREMENT",
-          "identifier": "RunMat:IndexStepZero",
-          "when": "The explicit increment is zero.",
-          "message": "colon: increment must be nonzero"
         },
         {
           "code": "RM.COLON.NON_SCALAR_INPUT",
@@ -18635,6 +18733,130 @@
           "identifier": null,
           "when": "Internal tensor/character output construction failed.",
           "message": "colon: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "colon-logical-input",
+          "mode": "RunMatOnly",
+          "description": "colon with logical operands is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ColonLogicalInputExtension"
+        },
+        {
+          "id": "colon-zero-imaginary-complex",
+          "mode": "RunMatOnly",
+          "description": "colon with zero-imaginary complex operands is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ColonZeroImaginaryComplexExtension"
+        },
+        {
+          "id": "colon-gpu-64-bit-integer",
+          "mode": "RunMatOnly",
+          "description": "colon with resident int64 or uint64 operands is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ColonGpu64BitIntegerExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = colon(integer_start, integer_stop)",
+          "inputs": [
+            {
+              "name": "start",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A typed-integer operand selects the output integer class; all typed-integer operands must use that class."
+            },
+            {
+              "name": "stop",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The bound must be representable by the selected output class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "ScalarOnly",
+          "notes": "All eight integer classes use exact native storage with an implicit +1 step."
+        },
+        {
+          "form": "x = colon(integer_start, integer_step, integer_stop)",
+          "inputs": [
+            {
+              "name": "start",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A typed-integer operand selects the output integer class; all typed-integer operands must use that class."
+            },
+            {
+              "name": "step",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The explicit step is decoded exactly and may be negative even for an unsigned output class."
+            },
+            {
+              "name": "stop",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The bound must be representable by the selected output class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "ScalarOnly",
+          "notes": "All eight integer classes use exact native storage. MATLAB-compatible GPU execution excludes int64 and uint64; RunMat mode accepts them through an exact owning-provider gather/upload fallback."
         }
       ]
     },
@@ -18734,6 +18956,35 @@
           "when": "The requested colormap length or RGB colormap array is invalid.",
           "message": "colormap array: invalid argument"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "c = colorcube(integer_m)",
+          "inputs": [
+            {
+              "name": "m",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonnegative scalar length accepts every built-in integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "m is read exactly from authoritative host integer storage, validated against RunMat's allocation guard, and used only as the row count. The generated m-by-3 RGB colormap is double; resident scalar controls are rejected without provider dispatch."
+        }
       ]
     },
     {
@@ -18742,7 +18993,41 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "ok = colormap(name)",
+          "label": "cmap = colormap()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "cmap",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current colormap as an m-by-3 normalized double RGB matrix."
+            }
+          ]
+        },
+        {
+          "label": "cmap = colormap(target)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target figure or axes handle."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "cmap",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Current colormap as an m-by-3 normalized double RGB matrix."
+            }
+          ]
+        },
+        {
+          "label": "colormap(name)",
           "inputs": [
             {
               "name": "name",
@@ -18752,36 +19037,40 @@
               "description": "Colormap name."
             }
           ],
-          "outputs": [
-            {
-              "name": "ok",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "True on successful colormap update."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "ok = colormap(map)",
+          "label": "colormap(map)",
           "inputs": [
             {
               "name": "map",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "m-by-3 RGB colormap array with values in [0, 1]."
+              "description": "m-by-3 single/double RGB map in [0,1], or uint8 RGB map in [0,255]."
             }
           ],
-          "outputs": [
+          "outputs": []
+        },
+        {
+          "label": "colormap(target, map)",
+          "inputs": [
             {
-              "name": "ok",
-              "ty": "LogicalArray",
+              "name": "target",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "True on successful colormap update."
+              "description": "Target figure or axes handle."
+            },
+            {
+              "name": "map",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Colormap name or m-by-3 numeric RGB map."
             }
-          ]
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -18790,6 +19079,62 @@
           "identifier": "RunMat:colormap:InvalidArgument",
           "when": "Colormap input is missing, unknown, or not a valid m-by-3 RGB array.",
           "message": "colormap: invalid argument"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "colormap-non-uint8-integer-map",
+          "mode": "RunMatOnly",
+          "description": "colormap with an integer RGB map other than uint8 is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ColormapNonUint8IntegerMapExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "colormap(uint8_map)",
+          "inputs": [
+            {
+              "name": "map",
+              "classes": [
+                "Uint8"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Public uint8 RGB maps use the full [0,255] channel range and are normalized to [0,1]."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative uint8 channels are divided by 255 at the explicit host graphics-state boundary; the applied map is stored as normalized double and resident inputs remain unsupported."
+        },
+        {
+          "form": "colormap(non_uint8_integer_map)",
+          "inputs": [
+            {
+              "name": "map",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode admits the other seven integer classes only when every RGB component is exactly 0 or 1."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "This useful RunMat-only form validates exact native 0/1 components before conversion to normalized host graphics metadata; resident inputs reject without provider access."
         }
       ]
     },
@@ -18843,15 +19188,7 @@
               "description": "m-by-3 RGB matrix, color name array, color cellstr, palette name, or default."
             }
           ],
-          "outputs": [
-            {
-              "name": "C",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Current color order as an m-by-3 RGB triplet matrix."
-            }
-          ]
+          "outputs": []
         },
         {
           "label": "colororder(palettename)",
@@ -18864,15 +19201,7 @@
               "description": "m-by-3 RGB matrix, color name array, color cellstr, palette name, or default."
             }
           ],
-          "outputs": [
-            {
-              "name": "C",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Current color order as an m-by-3 RGB triplet matrix."
-            }
-          ]
+          "outputs": []
         },
         {
           "label": "colororder(target, colors)",
@@ -18892,15 +19221,7 @@
               "description": "m-by-3 RGB matrix, color name array, color cellstr, palette name, or default."
             }
           ],
-          "outputs": [
-            {
-              "name": "C",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Current color order as an m-by-3 RGB triplet matrix."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -18916,31 +19237,68 @@
           "when": "Internal plotting state update fails.",
           "message": "colororder: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "colororder-integer-rgb",
+          "mode": "RunMatOnly",
+          "description": "colororder with a typed integer RGB matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ColororderIntegerRgbExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "colororder(integer_colors)",
+          "inputs": [
+            {
+              "name": "colors",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Public numeric RGB matrices are single or double. RunMat mode additionally admits every integer class when each channel is exactly 0 or 1."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer channels are range-checked from native storage, then cross the explicit host graphics-state f32 boundary; subsequent query output is an m-by-3 host double matrix. Resident color arrays reject without provider access."
+        }
       ]
     },
     {
       "name": "combinations",
-      "output_mode": "ByRequestedOutputCount",
+      "output_mode": "Fixed",
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "varargout = groupingBuiltin(args...)",
+          "label": "T = combinations(A1, A2, ..., An)",
           "inputs": [
             {
-              "name": "args",
+              "name": "A",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "MATLAB-compatible arguments."
+              "description": "One or more input arrays; each is linearized in column-major order."
             }
           ],
           "outputs": [
             {
-              "name": "varargout",
+              "name": "T",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "Builtin outputs."
+              "description": "Host table whose variables preserve the corresponding input classes."
             }
           ]
         }
@@ -18953,16 +19311,47 @@
           "message": "grouping builtin: invalid input"
         },
         {
-          "code": "RM.GROUPING.CALLBACK",
-          "identifier": "RunMat:grouping:CallbackFailed",
-          "when": "A grouped callback fails or returns incompatible outputs.",
-          "message": "grouping builtin: callback failed"
-        },
-        {
           "code": "RM.GROUPING.TOO_LARGE",
           "identifier": "RunMat:grouping:TooLarge",
           "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
           "message": "grouping builtin: output is too large"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "combinations-resident-input",
+          "mode": "RunMatOnly",
+          "description": "combinations with a resident input and host-table output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CombinationsResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "T = combinations(integer_A1, ..., integer_An)",
+          "inputs": [
+            {
+              "name": "A1...An",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every public integer class is accepted and each output table variable retains its corresponding input class and exact values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Host inputs are repeated from authoritative native storage without an f64 mirror. A resident input is a gated RunMat extension because the required table result is host-resident."
         }
       ]
     },
@@ -19104,6 +19493,84 @@
           "identifier": "RunMat:complex:Internal",
           "when": "Internal complex tensor construction failed.",
           "message": "complex: internal error"
+        },
+        {
+          "code": "RM.COMPLEX.INTEGER_CLASS",
+          "identifier": "RunMat:complex:IntegerClass",
+          "when": "An integer input is paired with an unsupported unlike input class.",
+          "message": "complex: integer inputs require matching integer classes or a scalar double"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Z = complex(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Unary complex preserves the input integer class and adds an exact zero imaginary component."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "All eight integer classes retain exact real storage and receive a same-class zero imaginary lane."
+        },
+        {
+          "form": "Z = complex(integer_A, integer_B_or_scalar_double)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "If either component is integer, the other component must use the same integer class or be a full scalar double."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The integer class is retained by the complex result; scalar doubles use integer conversion semantics."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "Host complex integer storage is exact for all eight classes. Resident typed integers gather before composition because the current provider ABI has no typed-complex-integer buffer contract."
         }
       ]
     },
@@ -19120,7 +19587,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Format text or array returned as strings when no data args are supplied."
+              "description": "Format text or array returned in the corresponding string or cellstr family when no data arguments are supplied."
             }
           ],
           "outputs": [
@@ -19129,7 +19596,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Formatted string array output."
+              "description": "Formatted string array or cell array of character vectors, selected by formatSpec."
             }
           ]
         },
@@ -19157,7 +19624,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Formatted string array output."
+              "description": "Formatted string array or cell array of character vectors, selected by formatSpec."
             }
           ]
         }
@@ -19180,6 +19647,49 @@
           "identifier": "RunMat:compose:InternalError",
           "when": "Internal string-array construction failed.",
           "message": "compose: internal error"
+        },
+        {
+          "code": "RM.COMPOSE.INVALID_DATA",
+          "identifier": "RunMat:compose:InvalidData",
+          "when": "A data argument is outside compose's documented numeric, logical, character, or string domain.",
+          "message": "compose: unsupported data argument"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "compose-resident-input",
+          "mode": "RunMatOnly",
+          "description": "compose with resident array arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ComposeResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "S = compose(formatSpec, integer_A...)",
+          "inputs": [
+            {
+              "name": "A...",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are formatted directly from native storage, including exact int64 and uint64 values above flintmax."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer substitution is textual and exact; the format-spec family selects a host string array or cell array of character vectors. Resident arguments are a separately gated RunMat extension and gather before formatting."
         }
       ]
     },
@@ -19256,6 +19766,88 @@
           "identifier": "RunMat:cond:Internal",
           "when": "Runtime fails while computing cond or executing fallback/upload paths.",
           "message": "cond: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "cond-integer-matrix",
+          "mode": "RunMatOnly",
+          "description": "cond with a typed-integer matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CondIntegerMatrixExtension"
+        },
+        {
+          "id": "cond-logical-matrix",
+          "mode": "RunMatOnly",
+          "description": "cond with a logical matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CondLogicalMatrixExtension"
+        },
+        {
+          "id": "cond-integer-norm-selector",
+          "mode": "RunMatOnly",
+          "description": "cond with a typed-integer norm selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CondIntegerNormSelectorExtension"
+        },
+        {
+          "id": "cond-logical-norm-selector",
+          "mode": "RunMatOnly",
+          "description": "cond with a logical norm selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CondLogicalNormSelectorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "c = cond(integer_A, p)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode accepts integer matrices only when every element is exactly representable at the floating linear-algebra boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "This RunMat extension checks exact binary64 representability before host execution; the result is double on host, while a resident scalar uses the owning provider's selected precision, and no integer compatibility mirror is materialized."
+        },
+        {
+          "form": "c = cond(A, integer_p)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer norm selectors are decoded structurally and accept only exact values 1 or 2."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Host typed-integer selectors do not enter matrix arithmetic and wide values are rejected without floating conversion; resident norm selectors are not supported."
         }
       ]
     },

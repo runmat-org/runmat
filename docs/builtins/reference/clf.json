@@ -25,13 +25,15 @@
   "tested": {
     "unit": "builtins::plotting::clf::tests"
   },
-  "description": "`clf` clears the contents of the current figure while leaving the figure handle itself alive. It also accepts explicit figure handles and the `'all'` selector, consistent with MATLAB and RunMat plotting behavior.",
+  "description": "`clf` clears the contents of the current figure while leaving the figure handle itself alive. It accepts explicit figure numbers, figure-number arrays, and RunMat's `'all'` selector. Typed integer figure numbers are an exact structural convenience available in RunMat mode; compatibility mode accepts ordinary double figure numbers.",
   "behaviors": [
     "`clf()` clears the current figure.",
     "`clf(handle)` clears the specified figure handle.",
-    "`clf('all')` clears every known figure and returns the number of figures that were cleared.",
-    "`clf(handle1, handle2, ...)` clears multiple figures and returns the number cleared when more than one handle is supplied.",
-    "`clf('reset')` is currently treated the same as plain `clf`."
+    "`clf('all')` is a separately gated RunMat convenience that clears every known figure and returns the number of figures that were cleared; compatibility mode rejects it before plotting-state access.",
+    "`clf(handle1, handle2, ...)` is a separately gated RunMat convenience that clears multiple figures and returns the number cleared. Compatibility syntax uses one figure object or figure array.",
+    "`clf('reset')` is currently treated the same as plain `clf`.",
+    "In RunMat mode, scalar and array figure numbers can use any of the eight integer classes. Values are read from authoritative integer storage and must be positive and no larger than `uint32`'s maximum.",
+    "Typed integer figure numbers are rejected in compatibility mode because the public compatibility contract documents figure numbers but does not advertise integer classes. GPU-resident numeric targets are rejected without provider dispatch."
   ],
   "examples": [
     {
@@ -62,6 +64,10 @@
     {
       "question": "What does `clf('all')` return?",
       "answer": "It returns the number of figures that were cleared. When no figures exist, it returns `0`."
+    },
+    {
+      "question": "Can figure numbers use integer classes?",
+      "answer": "Yes in RunMat mode. `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64` are exact structural selectors, subject to the positive `uint32` figure-number range. Compatibility mode requires an ordinary double figure number."
     }
   ],
   "links": [
@@ -86,7 +92,7 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/clf.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/clf.rs"
   },
-  "gpu_residency": "`clf` only mutates plotting state and does not affect array residency.",
+  "gpu_residency": "`clf` only mutates host plotting state. Figure-number controls must be host values; resident numeric targets are rejected without gathering.",
   "gpu_behavior": [
     "`clf` performs no provider dispatch; it clears figures from the plotting registry and renderer state."
   ]

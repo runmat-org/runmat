@@ -345,6 +345,26 @@ fn colormap_array_generators_round_trip_through_vm() {
 }
 
 #[test]
+fn compiled_graphics_integer_cohort_crosses_only_explicit_host_boundaries() {
+    let _guard = disable_interactive_plots_for_test();
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let input = "\
+        figure(41); \
+        clf(uint8(41)); \
+        cube = colorcube(uint16(6)); \
+        if size(cube, 1) ~= 6 || size(cube, 2) ~= 3; error('colorcube size mismatch'); end; \
+        colormap(uint8([0 255 0; 255 0 255])); \
+        map = colormap(); \
+        if size(map, 1) ~= 2 || map(1, 2) ~= 1; error('colormap normalization mismatch'); end; \
+        colororder(int8([0 1 0; 1 0 1])); \
+        order = colororder(); \
+        if size(order, 1) ~= 2 || order(2, 3) ~= 1; error('colororder mismatch'); end; \
+        status = close(uint8(41)); \
+        if status ~= 1; error('close status mismatch'); end;";
+    execute_source(input).expect("execute compiled graphics integer cohort");
+}
+
+#[test]
 fn data_tip_text_row_dispatches_and_round_trips_properties() {
     let _guard = disable_interactive_plots_for_test();
     let input = "\

@@ -18,13 +18,16 @@
   "tested": {
     "unit": "builtins::plotting::colororder::tests"
   },
-  "description": "`colororder` controls the implicit series colors used by line-style plotting commands. RunMat supports querying the current color order, setting figure-wide or axes-specific palettes, RGB triplet matrices, string and cell string color specifications, hex colors, and common MATLAB palette names.",
+  "description": "`colororder` controls the implicit series colors used by line-style plotting commands. Public numeric RGB inputs are single or double matrices in [0,1]. RunMat additionally supports a gated host-only integer RGB extension.",
   "behaviors": [
     "`colororder()` returns the current figure color order as an m-by-3 RGB triplet matrix.",
     "`colororder(colors)` sets the color order for the current figure and applies it to existing axes.",
     "`colororder(ax, colors)` sets the color order for the specified axes without changing the current axes.",
     "`colororder(fig, colors)` sets the color order for every axes in the specified figure.",
-    "Numeric color arrays must be m-by-3 RGB triplet matrices with finite values in [0, 1]. A single RGB triplet vector is accepted as one color.",
+    "Numeric color arrays must be m-by-3 RGB triplet matrices with finite values in [0,1]. Public numeric classes are single and double; a single RGB triplet vector is accepted as one color.",
+    "All eight integer classes are accepted only in RunMat mode and only when every native channel is exactly 0 or 1. Strict compatibility mode rejects integer RGB setters before conversion.",
+    "Integer channels cross an explicit host f32 graphics-state boundary. Query output is always an m-by-3 host double matrix; setter forms expose no output.",
+    "Resident numeric color arrays are rejected without provider access.",
     "String and cell string color arrays accept MATLAB color names, short color tokens, and `#RGB` or `#RRGGBB` hex strings.",
     "Palette names include `default`, `gem`, `gem12`, `glow`, `glow12`, `sail`, `reef`, `meadow`, `dye`, and `earth`.",
     "Changing the color order recolors existing line/scatter/bar-family series cyclically and controls future implicit plot colors."

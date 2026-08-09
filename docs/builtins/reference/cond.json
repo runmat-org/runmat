@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "RunMat gathers GPU inputs to the host when a provider does not expose a native cond hook, then re-uploads the scalar result to preserve residency."
+    "notes": "RunMat uses the input handle's owning provider. When its cond hook is unavailable, RunMat gathers to host and re-uploads the scalar through that same provider; upload failures are reported rather than silently changing residency."
   },
   "fusion": {
     "elementwise": false,
@@ -38,7 +38,11 @@
     "Scalars behave like 1x1 matrices. Non-zero scalars have condition number `1`, while `cond(0) = Inf`.",
     "Empty matrices return `0`, matching MATLAB's convention.",
     "Singular or rank-deficient matrices return `Inf`.",
-    "Complex inputs are handled in full complex arithmetic."
+    "Any NaN or infinite matrix element returns `NaN`, matching the current MATLAB nonfinite-input convention.",
+    "Single-precision host input returns a native single scalar; double input returns double. Resident output retains the owning provider's selected precision, including integer gather-fallback results re-uploaded through that provider.",
+    "Complex inputs are handled in full complex arithmetic.",
+    "The documented matrix domain is single or double. Typed-integer and logical matrices are independent RunMat-only extensions; integer matrices must be exactly representable as binary64 before crossing the floating linear-algebra boundary.",
+    "Typed-integer norm selectors are a separate RunMat-only structural extension. They are decoded exactly and accept only 1 or 2 without entering matrix arithmetic."
   ],
   "examples": [
     {
@@ -91,7 +95,7 @@
     },
     {
       "question": "Will calling `cond` move my data off the GPU?",
-      "answer": "Only when the active provider lacks a dedicated implementation. In that case RunMat gathers the data, computes the scalar on the host, and uploads it back so subsequent GPU operations still see a device-resident value."
+      "answer": "Only when the owning provider lacks a dedicated implementation. RunMat then gathers, computes on the host, and uploads the scalar through that same provider; an upload failure is reported rather than silently changing residency."
     }
   ],
   "links": [
