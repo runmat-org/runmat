@@ -40088,6 +40088,121 @@
           "when": "RunMat cannot construct ECDF outputs or plots.",
           "message": "ecdf: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "ecdf-integer-y",
+          "mode": "RunMatOnly",
+          "description": "ecdf with typed-integer sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EcdfIntegerYExtension"
+        },
+        {
+          "id": "ecdf-logical-y",
+          "mode": "RunMatOnly",
+          "description": "ecdf with logical sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EcdfLogicalYExtension"
+        },
+        {
+          "id": "ecdf-integer-frequency",
+          "mode": "RunMatOnly",
+          "description": "ecdf with typed-integer Frequency data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EcdfIntegerFrequencyExtension"
+        },
+        {
+          "id": "ecdf-logical-frequency",
+          "mode": "RunMatOnly",
+          "description": "ecdf with logical Frequency data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EcdfLogicalFrequencyExtension"
+        },
+        {
+          "id": "ecdf-integer-censoring",
+          "mode": "RunMatOnly",
+          "description": "ecdf with typed-integer Censoring data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EcdfIntegerCensoringExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ecdf(y, ...) with typed-integer y",
+          "inputs": [
+            {
+              "name": "y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer samples are classified before provider access and must be exactly representable at the explicit binary64 statistics boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only explicit binary64 statistics boundary; all numeric outputs are double."
+        },
+        {
+          "form": "ecdf(y, 'Frequency', frequency, ...) with typed-integer frequency",
+          "inputs": [
+            {
+              "name": "Frequency",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer counts remain authoritative through validation and must be exactly representable at the floating ratio boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Counts are checked as exact nonnegative integers before the floating ratio boundary."
+        },
+        {
+          "form": "ecdf(y, 'Censoring', censoring, ...) with typed-integer censoring",
+          "inputs": [
+            {
+              "name": "Censoring",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer censoring indicators are validated exactly as -1, 0, or 1 before floating evaluation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Indicators are exact structural labels; outputs remain floating statistics."
+        }
       ]
     },
     {
@@ -40535,6 +40650,86 @@
           "when": "Runtime cannot compute or materialize eig outputs.",
           "message": "eig: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "eig-nonfloating-coefficient",
+          "mode": "RunMatOnly",
+          "description": "eig with an integer or logical coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EigNonfloatingCoefficientExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "eig(A, ...) with typed-integer A",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Admitted integer coefficients must be exactly representable at the explicit binary64 eigensolver boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only coefficient extension with double outputs."
+        },
+        {
+          "form": "eig(A, B, ...) with a typed-integer coefficient",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "First generalized coefficient matrix."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Second generalized coefficient matrix."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each integer coefficient is checked independently before binary64 materialization."
+        }
       ]
     },
     {
@@ -40819,6 +41014,144 @@
           "mode": "RunMatOnly",
           "description": "eigs with a gpuArray argument is a RunMat extension",
           "error_identifier": "RunMat:compatibility:EigsGpuInputExtension"
+        },
+        {
+          "id": "eigs-integer-sigma",
+          "mode": "RunMatOnly",
+          "description": "eigs with a typed-integer sigma is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EigsIntegerSigmaExtension"
+        },
+        {
+          "id": "eigs-integer-start-vector",
+          "mode": "RunMatOnly",
+          "description": "eigs with a typed-integer StartVector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EigsIntegerStartVectorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "eigs(A, B, ...) with a typed-integer coefficient",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Primary coefficient matrix."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Optional generalized coefficient matrix."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only coefficients are checked before dense binary64 fallback."
+        },
+        {
+          "form": "eigs(A, k, ...) with typed-integer k",
+          "inputs": [
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Positive structural count parsed exactly without a binary64 mirror."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Documented exact structural control."
+        },
+        {
+          "form": "eigs(A, k, sigma, ...) with typed-integer sigma",
+          "inputs": [
+            {
+              "name": "sigma",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat-only numeric shift crossing an exact binary64 boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "RunMat-only shift extension."
+        },
+        {
+          "form": "eigs(..., 'StartVector', v) with typed-integer v",
+          "inputs": [
+            {
+              "name": "StartVector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat-only initial-vector class; current dense fallback validates shape but does not consume iterative values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat-only iterative-control class extension."
         }
       ]
     },
@@ -40828,7 +41161,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "A = empty()",
+          "label": "A = ClassName.empty",
           "inputs": [],
           "outputs": [
             {
@@ -40836,61 +41169,19 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Empty output array."
+              "description": "Empty array preserving the receiver class."
             }
           ]
         },
         {
-          "label": "A = empty(n)",
+          "label": "A = ClassName.empty(sz1, ..., szN)",
           "inputs": [
             {
-              "name": "n",
-              "ty": "SizeArg",
-              "arity": "Required",
-              "default": null,
-              "description": "Square size with at least one zero dimension."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Empty output array."
-            }
-          ]
-        },
-        {
-          "label": "A = empty(size_vector)",
-          "inputs": [
-            {
-              "name": "size_vector",
-              "ty": "SizeArg",
-              "arity": "Required",
-              "default": null,
-              "description": "Size vector with at least one zero dimension."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Empty output array."
-            }
-          ]
-        },
-        {
-          "label": "A = empty(m, n, ...)",
-          "inputs": [
-            {
-              "name": "dims",
+              "name": "dimensions",
               "ty": "SizeArg",
               "arity": "Variadic",
               "default": null,
-              "description": "Dimension sizes with at least one zero dimension."
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
             }
           ],
           "outputs": [
@@ -40899,26 +41190,19 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Empty output array."
+              "description": "Empty array preserving the receiver class."
             }
           ]
         },
         {
-          "label": "A = empty(..., typename)",
+          "label": "A = ClassName.empty(sizeVector)",
           "inputs": [
             {
-              "name": "dims",
+              "name": "sizeVector",
               "ty": "SizeArg",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "Dimension sizes."
-            },
-            {
-              "name": "typename",
-              "ty": "StringScalar",
-              "arity": "Optional",
-              "default": "\"double\"",
-              "description": "Class override ('double'|'single'|'logical'|'char'|'string'|'cell'|'struct'|'gpuArray')."
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
             }
           ],
           "outputs": [
@@ -40927,76 +41211,100 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Empty output array."
-            }
-          ]
-        },
-        {
-          "label": "A = empty(..., \"like\", prototype)",
-          "inputs": [
-            {
-              "name": "dims",
-              "ty": "SizeArg",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Dimension sizes."
-            },
-            {
-              "name": "like_kw",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"like\"",
-              "description": "Like keyword."
-            },
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype array used to infer shape."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Empty output array."
+              "description": "Empty array preserving the receiver class."
             }
           ]
         }
       ],
       "errors": [
         {
-          "code": "RM.EMPTY.LIKE_EXPECTED_PROTOTYPE",
-          "identifier": null,
-          "when": "The 'like' keyword is provided without a prototype argument.",
-          "message": "empty: expected prototype after 'like'"
-        },
-        {
-          "code": "RM.EMPTY.MULTIPLE_LIKE",
-          "identifier": null,
-          "when": "The 'like' keyword is provided multiple times.",
-          "message": "empty: multiple 'like' prototypes are not supported"
-        },
-        {
           "code": "RM.EMPTY.INVALID_DIMS",
-          "identifier": null,
-          "when": "Size arguments are not numeric scalars or size vectors.",
-          "message": "empty: size inputs must be numeric scalars or size vectors"
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
         },
         {
           "code": "RM.EMPTY.NON_EMPTY_SHAPE",
-          "identifier": null,
-          "when": "All dimensions are non-zero.",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
           "message": "empty: at least one dimension must be zero"
         },
         {
-          "code": "RM.EMPTY.CHAR_DIMENSIONALITY",
-          "identifier": null,
-          "when": "Character empty arrays are requested with more than 2 dimensions.",
-          "message": "empty: character arrays must be 2-D"
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-global-call",
+          "mode": "RunMatOnly",
+          "description": "calling empty as a global function is a RunMat extension; MATLAB uses ClassName.empty",
+          "error_identifier": "RunMat:compatibility:EmptyGlobalCallExtension"
+        },
+        {
+          "id": "empty-typename",
+          "mode": "RunMatOnly",
+          "description": "selecting the empty output class with a trailing typename is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyTypenameExtension"
+        },
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
         }
       ]
     },
@@ -41047,6 +41355,92 @@
           "identifier": "RunMat:encode:InvalidInput",
           "when": "Inputs do not match a supported Text Analytics encode form.",
           "message": "encode: invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "encode-numeric-force-cell-output",
+          "mode": "RunMatOnly",
+          "description": "encode with a numeric ForceCellOutput value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EncodeNumericForceCellOutputExtension"
+        },
+        {
+          "id": "encode-resident-force-cell-output",
+          "mode": "RunMatOnly",
+          "description": "encode with a resident ForceCellOutput value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EncodeResidentForceCellOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "counts = encode(bag, documentsOrWords)",
+          "inputs": [
+            {
+              "name": "bag",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "Rejected",
+              "notes": "The model role requires a bagOfWords or bagOfNgrams object; integer values are not model payloads and reject before provider access."
+            },
+            {
+              "name": "documentsOrWords",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "Rejected",
+              "notes": "The document role is tokenizedDocument or text; integer values are not converted to words and reject before provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "encode is object/text based. Its integer-valued counts intentionally cross the documented sparse-double output boundary rather than using integer sparse storage."
+        },
+        {
+          "form": "counts = encode(___, 'ForceCellOutput', integer_value)",
+          "inputs": [
+            {
+              "name": "ForceCellOutput",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact scalar integer zero as false and every nonzero integer as true; MATLAB-compatible mode requires logical."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The compatibility-gated integer control only selects sparse-double versus cell-of-sparse-double representation; it never changes count storage."
         }
       ]
     },
@@ -41159,41 +41553,6 @@
               "description": "Logical result indicating whether each text element ends with the pattern."
             }
           ]
-        },
-        {
-          "label": "tf = endsWith(str, pat, nameValuePairs...)",
-          "inputs": [
-            {
-              "name": "str",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Text input (string/char/cell/string array)."
-            },
-            {
-              "name": "pat",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Pattern text (string/char/cell/string array)."
-            },
-            {
-              "name": "nameValuePairs...",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Name-value option pairs (`\"IgnoreCase\"`, value)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "tf",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Logical result indicating whether each text element ends with the pattern."
-            }
-          ]
         }
       ],
       "errors": [
@@ -41210,16 +41569,92 @@
           "message": "endsWith: invalid option arguments"
         },
         {
-          "code": "RM.ENDSWITH.SHAPE_MISMATCH",
-          "identifier": "RunMat:endsWith:ShapeMismatch",
-          "when": "Text and pattern inputs are not broadcast-compatible.",
-          "message": "endsWith: input sizes are not broadcast-compatible"
-        },
-        {
           "code": "RM.ENDSWITH.INTERNAL",
           "identifier": "RunMat:endsWith:InternalError",
           "when": "Internal logical result assembly failed.",
           "message": "endsWith: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "endswith-positional-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "endsWith with a positional IgnoreCase flag is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EndsWithPositionalIgnoreCaseExtension"
+        },
+        {
+          "id": "endswith-numeric-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "endsWith with a numeric IgnoreCase value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EndsWithNumericIgnoreCaseExtension"
+        },
+        {
+          "id": "endswith-text-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "endsWith with a textual IgnoreCase value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EndsWithTextIgnoreCaseExtension"
+        },
+        {
+          "id": "endswith-resident-ignore-case",
+          "mode": "RunMatOnly",
+          "description": "endsWith with a resident IgnoreCase value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EndsWithResidentIgnoreCaseExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = endsWith(str, pat, 'IgnoreCase', integer_value)",
+          "inputs": [
+            {
+              "name": "IgnoreCase",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact scalar integer zero as false and every nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Integer flags are compatibility-gated controls. Subject and pattern remain host text, multiple patterns are alternatives, and output has the subject shape."
+        },
+        {
+          "form": "tf = endsWith(str, pat, integer_ignore_case)",
+          "inputs": [
+            {
+              "name": "IgnoreCase",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts exact scalar integer zero as false and every nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The positional integer flag requires both positional and numeric RunMat extension gates; a resident flag additionally requires the resident-control gate before gather."
         }
       ]
     },
@@ -41392,6 +41827,76 @@
           "when": "More than two output arguments are requested.",
           "message": "envelope: expected at most two output arguments"
         }
+      ],
+      "extensions": [
+        {
+          "id": "envelope-integer-data",
+          "mode": "RunMatOnly",
+          "description": "envelope with typed-integer signal data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EnvelopeIntegerDataExtension"
+        },
+        {
+          "id": "envelope-integer-control",
+          "mode": "RunMatOnly",
+          "description": "envelope with a typed-integer length control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EnvelopeIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[yupper, ylower] = envelope(integer_x, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public signal input lists single and double only; RunMat mode converts authoritative typed-integer storage at the explicit floating computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer elements remain authoritative until the documented floating envelope algorithm requires conversion; resident integer storage gathers exactly before that boundary."
+        },
+        {
+          "form": "[yupper, ylower] = envelope(x, integer_n, method?)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public filter, window, and separation controls list single and double only; RunMat mode parses typed integers exactly before converting to a host size."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The typed control is extension-gated before x or a provider is accessed and is parsed without an f64 mirror; RunMat preserves the floating signal precision consistently across host and resident execution."
+        }
       ]
     },
     {
@@ -41440,6 +41945,51 @@
           "identifier": "RunMat:eq:SizeMismatch",
           "when": "Operands are not broadcast-compatible.",
           "message": "eq: array sizes are not compatible for broadcasting"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = eq(integer_A, integer_or_numeric_B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public equality operation accepts every integer class and guarantees that mixed numeric comparison does not lose precision through conversion."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public equality operation accepts every integer class and guarantees that mixed numeric comparison does not lose precision through conversion."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "BroadcastCompatible",
+          "notes": "Signed, unsigned, floating, logical, character, and complex components compare without materializing authoritative integer storage through f64; the result is logical."
         }
       ]
     },
@@ -41501,6 +42051,51 @@
           "identifier": "RunMat:erase:InternalError",
           "when": "Internal output container construction failed.",
           "message": "erase: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = erase(str, match)",
+          "inputs": [
+            {
+              "name": "str",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "Rejected",
+              "notes": "The public input text accepts string arrays, a character vector, or a cell array of character vectors; numeric values are rejected before provider access."
+            },
+            {
+              "name": "match",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "Rejected",
+              "notes": "The public match argument accepts text or pattern values; numeric values are rejected before provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "erase is text-only; integer values in either role, including nested resident values, are rejected without gathering."
         }
       ]
     },
@@ -41648,6 +42243,104 @@
           "identifier": "RunMat:eraseBetween:InternalError",
           "when": "Internal output construction failed.",
           "message": "eraseBetween: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "erasebetween-full-broadcast",
+          "mode": "RunMatOnly",
+          "description": "eraseBetween with non-scalar boundary expansion is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EraseBetweenFullBroadcastExtension"
+        },
+        {
+          "id": "erasebetween-resident-position",
+          "mode": "RunMatOnly",
+          "description": "eraseBetween with GPU-resident position arrays is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EraseBetweenResidentPositionExtension"
+        },
+        {
+          "id": "erasebetween-char-matrix",
+          "mode": "RunMatOnly",
+          "description": "eraseBetween row-wise character-matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EraseBetweenCharMatrixExtension"
+        },
+        {
+          "id": "erasebetween-string-cell",
+          "mode": "RunMatOnly",
+          "description": "eraseBetween cells containing string scalars are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EraseBetweenStringCellExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = eraseBetween(str, integer_startPos, integer_endPos)",
+          "inputs": [
+            {
+              "name": "startPos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric position array accepts positive integer values; typed storage is parsed exactly with one-based indexing."
+            },
+            {
+              "name": "endPos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric position array accepts positive integer values; typed storage is parsed exactly with one-based indexing."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "Positions are exact structural controls; strict compatibility accepts scalar positions or arrays the same size as str and preserves the str container class."
+        },
+        {
+          "form": "newStr = eraseBetween(integer_str, start, end)",
+          "inputs": [
+            {
+              "name": "str",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "Rejected",
+              "notes": "The public first argument is text; integer data is rejected before any provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer text input is outside the public text domain and is rejected without gathering."
         }
       ]
     },
@@ -63275,6 +63968,147 @@
       ]
     },
     {
+      "name": "int16.empty",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = ClassName.empty",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sz1, ..., szN)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "sizeVector",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EMPTY.INVALID_DIMS",
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
+        },
+        {
+          "code": "RM.EMPTY.NON_EMPTY_SHAPE",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
+          "message": "empty: at least one dimension must be zero"
+        },
+        {
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
+        }
+      ]
+    },
+    {
       "name": "int2str",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -63367,6 +64201,429 @@
           "identifier": "RunMat:int32:Internal",
           "when": "Internal conversion, gather, or provider upload failed.",
           "message": "int32: internal error"
+        }
+      ]
+    },
+    {
+      "name": "int32.empty",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = ClassName.empty",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sz1, ..., szN)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "sizeVector",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EMPTY.INVALID_DIMS",
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
+        },
+        {
+          "code": "RM.EMPTY.NON_EMPTY_SHAPE",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
+          "message": "empty: at least one dimension must be zero"
+        },
+        {
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
+        }
+      ]
+    },
+    {
+      "name": "int64.empty",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = ClassName.empty",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sz1, ..., szN)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "sizeVector",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EMPTY.INVALID_DIMS",
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
+        },
+        {
+          "code": "RM.EMPTY.NON_EMPTY_SHAPE",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
+          "message": "empty: at least one dimension must be zero"
+        },
+        {
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
+        }
+      ]
+    },
+    {
+      "name": "int8.empty",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = ClassName.empty",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sz1, ..., szN)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "sizeVector",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EMPTY.INVALID_DIMS",
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
+        },
+        {
+          "code": "RM.EMPTY.NON_EMPTY_SHAPE",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
+          "message": "empty: at least one dimension must be zero"
+        },
+        {
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
         }
       ]
     },
@@ -126895,6 +128152,147 @@
       ]
     },
     {
+      "name": "uint16.empty",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = ClassName.empty",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sz1, ..., szN)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "sizeVector",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EMPTY.INVALID_DIMS",
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
+        },
+        {
+          "code": "RM.EMPTY.NON_EMPTY_SHAPE",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
+          "message": "empty: at least one dimension must be zero"
+        },
+        {
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
+        }
+      ]
+    },
+    {
       "name": "uint32",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -126943,6 +128341,288 @@
       ]
     },
     {
+      "name": "uint32.empty",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = ClassName.empty",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sz1, ..., szN)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "sizeVector",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EMPTY.INVALID_DIMS",
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
+        },
+        {
+          "code": "RM.EMPTY.NON_EMPTY_SHAPE",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
+          "message": "empty: at least one dimension must be zero"
+        },
+        {
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
+        }
+      ]
+    },
+    {
+      "name": "uint64.empty",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = ClassName.empty",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sz1, ..., szN)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "sizeVector",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EMPTY.INVALID_DIMS",
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
+        },
+        {
+          "code": "RM.EMPTY.NON_EMPTY_SHAPE",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
+          "message": "empty: at least one dimension must be zero"
+        },
+        {
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
+        }
+      ]
+    },
+    {
       "name": "uint8",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -126987,6 +128667,147 @@
           "identifier": "RunMat:uint8:Internal",
           "when": "Internal conversion, gather, or provider upload failed.",
           "message": "uint8: internal error"
+        }
+      ]
+    },
+    {
+      "name": "uint8.empty",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "A = ClassName.empty",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sz1, ..., szN)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "ty": "SizeArg",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Integer scalar dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        },
+        {
+          "label": "A = ClassName.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "sizeVector",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Row vector of integer dimensions; at least one dimension must be zero."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Empty array preserving the receiver class."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.EMPTY.INVALID_DIMS",
+          "identifier": "RunMat:empty:InvalidSize",
+          "when": "Size arguments are not integer-valued numeric scalars or one row size vector.",
+          "message": "empty: invalid size arguments"
+        },
+        {
+          "code": "RM.EMPTY.NON_EMPTY_SHAPE",
+          "identifier": "RunMat:empty:NonEmptyShape",
+          "when": "Every normalized dimension is nonzero.",
+          "message": "empty: at least one dimension must be zero"
+        },
+        {
+          "code": "RM.EMPTY.UNSUPPORTED_CLASS",
+          "identifier": "RunMat:empty:UnsupportedClass",
+          "when": "The selected shorthand class cannot be represented as a shaped empty value.",
+          "message": "empty: unsupported output class"
+        },
+        {
+          "code": "RM.EMPTY.INTERNAL",
+          "identifier": "RunMat:empty:Internal",
+          "when": "The empty value cannot be assembled.",
+          "message": "empty: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "empty-resident-size",
+          "mode": "RunMatOnly",
+          "description": "empty with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EmptyResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = IntegerClass.empty, IntegerClass.empty(sz1, ..., szN), or IntegerClass.empty(sizeVector)",
+          "inputs": [
+            {
+              "name": "IntegerClass receiver",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "Each of the eight integer primitive classes exposes ClassName.empty and determines the exact output storage class."
+            },
+            {
+              "name": "size dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer scalar dimensions and row size vectors are decoded from authoritative storage; signed negatives clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Output is empty authoritative storage of the receiver class. At least one normalized dimension is zero, trailing singleton dimensions after dimension two are removed, and resident controls are independently gated before exact gather."
         }
       ]
     },

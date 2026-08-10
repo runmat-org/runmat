@@ -34,11 +34,13 @@
   "behaviors": [
     "`yupper = envelope(x)` returns the upper envelope.",
     "`[yupper, ylower] = envelope(x)` returns both bounds.",
-    "`envelope(x, n)` uses analytic mode and accepts `n` for MATLAB call-form compatibility.",
-    "`envelope(x, n, 'analytic')` computes an FFT-domain analytic envelope.",
+    "`envelope(x, n)` uses analytic mode and computes the analytic signal with a Kaiser-windowed Hilbert FIR filter of length `n`.",
+    "`envelope(x, n, 'analytic')` explicitly selects the same Hilbert FIR-filter path.",
     "`envelope(x, wl, 'rms')` computes a centered sliding RMS envelope over a window of `wl` samples.",
     "`envelope(x, np, 'peak')` detects local maxima/minima separated by at least `np` samples and interpolates them with a spline curve.",
-    "Statement form with no outputs plots the signal with the upper and lower envelopes."
+    "Statement form with no outputs plots the signal with the upper and lower envelopes.",
+    "MATLAB-compatible mode accepts single- and double-precision signal data and controls. Typed-integer signal data or length controls are explicit RunMat extensions; integer data crosses into the floating envelope computation only after exact storage is read.",
+    "The public source does not state the output class for single-precision host input, so that compatibility detail remains evidence-open. RunMat preserves single-precision output for single-precision input consistently across host and resident execution."
   ],
   "examples": [
     {

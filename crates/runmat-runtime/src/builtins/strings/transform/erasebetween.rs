@@ -2,15 +2,22 @@
 
 use std::cmp::min;
 
+use regex::Regex;
+
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::core::compat::pattern_regex;
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, IntValue, NumericScalar, StringArray, Value,
 };
@@ -31,12 +38,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Runs on the CPU; GPU-resident inputs are gathered before deletion and outputs remain on the host.",
+    notes: "The builtin owns resident arguments so compatibility gates run before provider access; RunMat mode may then gather resident numeric position controls, while text and outputs remain on host.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -49,10 +56,87 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Pure string manipulation builtin; excluded from fusion plans and gathers GPU inputs immediately.",
+    notes: "Pure string manipulation builtin; excluded from fusion plans, with resident numeric position controls handled only by an explicit extension.",
 };
 
 const BUILTIN_NAME: &str = "eraseBetween";
+
+const FULL_BROADCAST_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "erasebetween-full-broadcast",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eraseBetween with non-scalar boundary expansion is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EraseBetweenFullBroadcastExtension"),
+};
+const RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "erasebetween-resident-position",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eraseBetween with GPU-resident position arrays is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EraseBetweenResidentPositionExtension"),
+};
+const CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "erasebetween-char-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eraseBetween row-wise character-matrix input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EraseBetweenCharMatrixExtension"),
+};
+const STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "erasebetween-string-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eraseBetween cells containing string scalars are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EraseBetweenStringCellExtension"),
+};
+const EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FULL_BROADCAST_EXTENSION,
+    RESIDENT_POSITION_EXTENSION,
+    CHAR_MATRIX_EXTENSION,
+    STRING_CELL_EXTENSION,
+];
+const INTEGER_POSITION_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "startPos",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public numeric position array accepts positive integer values; typed storage is parsed exactly with one-based indexing.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "endPos",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public numeric position array accepts positive integer values; typed storage is parsed exactly with one-based indexing.",
+    },
+];
+const INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "str",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+    notes:
+        "The public first argument is text; integer data is rejected before any provider access.",
+}];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "newStr = eraseBetween(str, integer_startPos, integer_endPos)",
+        inputs: &INTEGER_POSITION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Positions are exact structural controls; strict compatibility accepts scalar positions or arrays the same size as str and preserves the str container class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "newStr = eraseBetween(integer_str, start, end)",
+        inputs: &INTEGER_TEXT_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer text input is outside the public text domain and is rejected without gathering.",
+    },
+];
 
 const ERASE_BETWEEN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "newText",
@@ -251,6 +335,8 @@ enum BoundariesMode {
     summary = "Delete text between boundary markers.",
     keywords = "eraseBetween,delete,boundaries,strings",
     accel = "sink",
+    extensions(EXTENSIONS),
+    integer_capabilities(INTEGER_CAPABILITIES),
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::erasebetween::ERASE_BETWEEN_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::erasebetween"
@@ -261,6 +347,35 @@ async fn erase_between_builtin(
     stop: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if is_numeric_or_resident(&text) || contains_nested_numeric_or_resident(&text) {
+        return Err(erase_between_error(&ERASE_BETWEEN_ERROR_INVALID_INPUT));
+    }
+    if is_resident_or_contains_resident(&start) || is_resident_or_contains_resident(&stop) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESIDENT_POSITION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if is_char_matrix(&text) || is_char_matrix(&start) || is_char_matrix(&stop) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CHAR_MATRIX_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if cell_contains_string(&text) || cell_contains_string(&start) || cell_contains_string(&stop) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRING_CELL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if raw_boundary_uses_full_broadcast(&text, &start)
+        || raw_boundary_uses_full_broadcast(&text, &stop)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FULL_BROADCAST_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let start = gather_if_needed_async(&start).await.map_err(map_flow)?;
     let stop = gather_if_needed_async(&stop).await.map_err(map_flow)?;
@@ -283,6 +398,15 @@ async fn erase_between_builtin(
     let start_shape = start_boundary.shape();
     let stop_shape = stop_boundary.shape();
     let text_shape = normalized_text.shape();
+
+    if !shape_is_scalar_or_same(start_shape, text_shape)
+        || !shape_is_scalar_or_same(stop_shape, text_shape)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FULL_BROADCAST_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
 
     let shape_ts = broadcast_shapes(BUILTIN_NAME, text_shape, start_shape).map_err(|err| {
         erase_between_error_with_message(
@@ -319,8 +443,8 @@ async fn erase_between_builtin(
         let result = match boundary_kind {
             BoundaryKind::Text => {
                 let text_value = normalized_text.data(text_idx);
-                let start_value = start_boundary.text(start_idx);
-                let stop_value = stop_boundary.text(stop_idx);
+                let start_value = start_boundary.marker(start_idx);
+                let stop_value = stop_boundary.marker(stop_idx);
                 erase_with_text_boundaries(text_value, start_value, stop_value, effective_mode)
             }
             BoundaryKind::Position => {
@@ -334,6 +458,89 @@ async fn erase_between_builtin(
     }
 
     normalized_text.into_value(results, output_shape)
+}
+
+fn is_numeric_or_resident(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn contains_nested_numeric_or_resident(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|value| {
+            is_numeric_or_resident(value) || contains_nested_numeric_or_resident(value)
+        }),
+        _ => false,
+    }
+}
+
+fn is_resident_or_contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(cell) => cell.data.iter().any(is_resident_or_contains_resident),
+        _ => false,
+    }
+}
+
+fn is_char_matrix(value: &Value) -> bool {
+    matches!(value, Value::CharArray(array) if array.rows > 1)
+}
+
+fn cell_contains_string(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|value| {
+            matches!(value, Value::String(_) | Value::StringArray(_)) || cell_contains_string(value)
+        }),
+        _ => false,
+    }
+}
+
+fn raw_text_shape(value: &Value) -> Option<Vec<usize>> {
+    match value {
+        Value::String(_) => Some(vec![1, 1]),
+        Value::StringArray(array) => Some(array.shape.clone()),
+        Value::CharArray(array) => Some(vec![array.rows, 1]),
+        Value::Cell(cell) => Some(cell.shape.clone()),
+        _ => None,
+    }
+}
+
+fn raw_boundary_shape(value: &Value) -> Option<Vec<usize>> {
+    match value {
+        Value::String(_) | Value::Num(_) | Value::Int(_) | Value::Object(_) => Some(vec![1, 1]),
+        Value::StringArray(array) => Some(array.shape.clone()),
+        Value::CharArray(array) => Some(vec![array.rows, 1]),
+        Value::Cell(cell) => Some(cell.shape.clone()),
+        Value::Tensor(tensor) => Some(tensor.shape.clone()),
+        Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        _ => None,
+    }
+}
+
+fn raw_boundary_uses_full_broadcast(text: &Value, boundary: &Value) -> bool {
+    let (Some(text_shape), Some(boundary_shape)) =
+        (raw_text_shape(text), raw_boundary_shape(boundary))
+    else {
+        return false;
+    };
+    !shape_is_scalar_or_same(&boundary_shape, &text_shape)
+}
+
+fn shape_is_scalar_or_same(shape: &[usize], text_shape: &[usize]) -> bool {
+    shape
+        .iter()
+        .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+        == Some(1)
+        || shape == text_shape
 }
 
 async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMode>> {
@@ -410,24 +617,24 @@ impl EraseResult {
 
 fn erase_with_text_boundaries(
     text: &str,
-    start: &str,
-    stop: &str,
+    start: &BoundaryMarker,
+    stop: &BoundaryMarker,
     mode: BoundariesMode,
 ) -> EraseResult {
-    if is_missing_string(text) || is_missing_string(start) || is_missing_string(stop) {
+    if is_missing_string(text) || start.is_missing() || stop.is_missing() {
         return EraseResult::missing();
     }
 
-    if let Some(start_idx) = text.find(start) {
-        let search_start = start_idx + start.len();
+    if let Some((start_idx, start_end)) = start.find(text) {
+        let search_start = start_end;
         if search_start > text.len() {
             return EraseResult::text(text.to_string());
         }
-        if let Some(relative_end) = text[search_start..].find(stop) {
+        if let Some((relative_end, relative_capture_end)) = stop.find(&text[search_start..]) {
             let end_idx = search_start + relative_end;
             match mode {
                 BoundariesMode::Inclusive => {
-                    let end_capture = min(text.len(), end_idx + stop.len());
+                    let end_capture = min(text.len(), search_start + relative_capture_end);
                     let mut result = String::with_capacity(text.len());
                     result.push_str(&text[..start_idx]);
                     result.push_str(&text[end_capture..]);
@@ -435,7 +642,7 @@ fn erase_with_text_boundaries(
                 }
                 BoundariesMode::Exclusive => {
                     let mut result = String::with_capacity(text.len());
-                    result.push_str(&text[..search_start]);
+                    result.push_str(&text[..start_end]);
                     result.push_str(&text[end_idx..]);
                     EraseResult::text(result)
                 }
@@ -750,9 +957,11 @@ enum BoundaryArg {
 impl BoundaryArg {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
-            Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-                BoundaryText::from_value(value).map(BoundaryArg::Text)
-            }
+            Value::String(_)
+            | Value::StringArray(_)
+            | Value::CharArray(_)
+            | Value::Cell(_)
+            | Value::Object(_) => BoundaryText::from_value(value).map(BoundaryArg::Text),
             Value::Num(_) | Value::Int(_) | Value::Tensor(_) => {
                 BoundaryPositions::from_value(value).map(BoundaryArg::Position)
             }
@@ -780,7 +989,7 @@ impl BoundaryArg {
         }
     }
 
-    fn text(&self, idx: usize) -> &str {
+    fn marker(&self, idx: usize) -> &BoundaryMarker {
         match self {
             BoundaryArg::Text(text) => &text.data[idx],
             BoundaryArg::Position(_) => unreachable!(),
@@ -797,25 +1006,55 @@ impl BoundaryArg {
 
 #[derive(Clone, Debug)]
 struct BoundaryText {
-    data: Vec<String>,
+    data: Vec<BoundaryMarker>,
     shape: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+enum BoundaryMarker {
+    Literal(String),
+    Pattern(Regex),
+}
+
+impl BoundaryMarker {
+    fn is_missing(&self) -> bool {
+        matches!(self, Self::Literal(text) if is_missing_string(text))
+    }
+
+    fn find(&self, text: &str) -> Option<(usize, usize)> {
+        match self {
+            Self::Literal(marker) => text
+                .find(marker)
+                .map(|start| (start, start.saturating_add(marker.len()))),
+            Self::Pattern(pattern) => pattern
+                .find(text)
+                .map(|matched| (matched.start(), matched.end())),
+        }
+    }
 }
 
 impl BoundaryText {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
-                data: vec![s],
+                data: vec![BoundaryMarker::Literal(s)],
                 shape: vec![1, 1],
             }),
             Value::StringArray(sa) => Ok(Self {
-                data: sa.data.clone(),
+                data: sa
+                    .data
+                    .iter()
+                    .cloned()
+                    .map(BoundaryMarker::Literal)
+                    .collect(),
                 shape: sa.shape.clone(),
             }),
             Value::CharArray(ca) => {
                 let mut data = Vec::with_capacity(ca.rows);
                 for row in 0..ca.rows {
-                    data.push(char_row_to_string_slice(&ca.data, ca.cols, row));
+                    data.push(BoundaryMarker::Literal(char_row_to_string_slice(
+                        &ca.data, ca.cols, row,
+                    )));
                 }
                 Ok(Self {
                     data,
@@ -827,15 +1066,17 @@ impl BoundaryText {
                 let mut data = Vec::with_capacity(cell.data.len());
                 for element in &cell.data {
                     match &element {
-                        Value::String(s) => data.push(s.clone()),
+                        Value::String(s) => data.push(BoundaryMarker::Literal(s.clone())),
                         Value::StringArray(sa) if sa.data.len() == 1 => {
-                            data.push(sa.data[0].clone());
+                            data.push(BoundaryMarker::Literal(sa.data[0].clone()));
                         }
                         Value::CharArray(ca) if ca.rows <= 1 => {
                             if ca.rows == 0 {
-                                data.push(String::new());
+                                data.push(BoundaryMarker::Literal(String::new()));
                             } else {
-                                data.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
+                                data.push(BoundaryMarker::Literal(char_row_to_string_slice(
+                                    &ca.data, ca.cols, 0,
+                                )));
                             }
                         }
                         Value::CharArray(_) => {
@@ -845,6 +1086,24 @@ impl BoundaryText {
                     }
                 }
                 Ok(Self { data, shape })
+            }
+            object @ Value::Object(_) => {
+                let regex = pattern_regex(&object, BUILTIN_NAME).map_err(|error| {
+                    erase_between_error_with_message(
+                        error.message().to_string(),
+                        &ERASE_BETWEEN_ERROR_BOUNDARY_TYPE,
+                    )
+                })?;
+                let pattern = Regex::new(&regex).map_err(|error| {
+                    erase_between_error_with_message(
+                        format!("{}: {error}", ERASE_BETWEEN_ERROR_BOUNDARY_TYPE.message),
+                        &ERASE_BETWEEN_ERROR_BOUNDARY_TYPE,
+                    )
+                })?;
+                Ok(Self {
+                    data: vec![BoundaryMarker::Pattern(pattern)],
+                    shape: vec![1, 1],
+                })
             }
             _ => Err(erase_between_error(&ERASE_BETWEEN_ERROR_BOUNDARY_TYPE)),
         }
@@ -1028,6 +1287,69 @@ pub(crate) mod tests {
         assert_eq!(result, Value::String("af".into()));
     }
 
+    #[test]
+    fn eraseBetween_full_broadcast_is_mode_gated() {
+        let text = StringArray::new(vec!["abcd".into(), "efgh".into()], vec![2, 1]).unwrap();
+        let start = Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![1, 2]).unwrap();
+        let stop = Tensor::new_integer(IntegerStorage::U8(vec![2, 3]), vec![1, 2]).unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = erase_between_builtin(
+            Value::StringArray(text),
+            Value::Tensor(start),
+            Value::Tensor(stop),
+            Vec::new(),
+        )
+        .expect_err("general broadcasting is an extension");
+        assert_eq!(
+            error.identifier(),
+            FULL_BROADCAST_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn eraseBetween_resident_positions_are_gated_before_gather() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        test_support::with_test_provider(|provider| {
+            let positions = Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &positions).expect("upload");
+            provider.reset_telemetry();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = erase_between_builtin(
+                Value::String("abcd".into()),
+                Value::GpuTensor(handle.clone()),
+                Value::Num(3.0),
+                Vec::new(),
+            )
+            .expect_err("resident positions are an extension");
+            assert_eq!(
+                error.identifier(),
+                RESIDENT_POSITION_EXTENSION.error_identifier
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            provider.free(&handle).expect("free input");
+        });
+    }
+
+    #[test]
+    fn eraseBetween_dispatch_preserves_residency_until_builtin_validation() {
+        assert_eq!(GPU_SPEC.residency, ResidencyPolicy::NewHandle);
+    }
+
+    #[test]
+    fn eraseBetween_accepts_scalar_pattern_boundaries() {
+        let start = crate::builtins::strings::core::compat::pattern_object(r"<[^>]*>");
+        let stop = crate::builtins::strings::core::compat::pattern_object(r"</[^>]*>");
+        let result = erase_between_builtin(
+            Value::String("<course>algebra</course>".into()),
+            start,
+            stop,
+            Vec::new(),
+        )
+        .expect("pattern boundaries");
+        assert_eq!(result, Value::String("<course></course>".into()));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_numeric_positions_exclusive_option() {
@@ -1090,6 +1412,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_zero_sized_broadcast_produces_empty_array() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let start = StringArray::new(Vec::new(), vec![0, 1]).unwrap();
         let stop = StringArray::new(Vec::new(), vec![0, 1]).unwrap();
         let result = erase_between_builtin(
@@ -1133,6 +1456,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eraseBetween_cell_array_preserves_types() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("A[B]C")),

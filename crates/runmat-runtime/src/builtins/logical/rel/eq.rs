@@ -2,9 +2,12 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -67,6 +70,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "eq";
+
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public equality operation accepts every integer class and guarantees that mixed numeric comparison does not lose precision through conversion.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public equality operation accepts every integer class and guarantees that mixed numeric comparison does not lose precision through conversion.",
+    },
+];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = eq(integer_A, integer_or_numeric_B)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Signed, unsigned, floating, logical, character, and complex components compare without materializing authoritative integer storage through f64; the result is logical.",
+    }];
 
 const EQ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -136,6 +167,7 @@ fn eq_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     summary = "Compute element-wise equality.",
     keywords = "eq,equality,comparison,logical,gpu",
     accel = "elementwise",
+    integer_capabilities(INTEGER_CAPABILITIES),
     type_resolver(logical_binary_type),
     descriptor(crate::builtins::logical::rel::eq::EQ_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::rel::eq"
@@ -146,20 +178,87 @@ async fn eq_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             return result;
         }
     }
+    let lhs = gather_eq_operand(lhs).await?;
+    let rhs = gather_eq_operand(rhs).await?;
     eq_host(lhs, rhs).await
+}
+
+async fn gather_eq_operand(value: Value) -> crate::BuiltinResult<Value> {
+    if matches!(value, Value::GpuTensor(_)) {
+        gpu_helpers::gather_value_async(&value)
+            .await
+            .map_err(|_| eq_error(&EQ_ERROR_INVALID_INPUT))
+    } else {
+        Ok(value)
+    }
 }
 
 async fn try_eq_gpu(
     a: &GpuTensorHandle,
     b: &GpuTensorHandle,
 ) -> Option<crate::BuiltinResult<Value>> {
-    let provider = runmat_accelerate_api::provider()?;
+    if a.device_id != b.device_id {
+        return None;
+    }
+    let provider = resolved_actual_eq_owner(a)?;
+    let rhs_owner = resolved_actual_eq_owner(b)?;
+    if !std::ptr::eq(provider, rhs_owner) {
+        return None;
+    }
     match provider.elem_eq(a, b).await {
-        Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
+        Ok(handle) if valid_eq_gpu_output(&handle, a, b, provider) => {
+            Some(Ok(gpu_helpers::logical_gpu_value(handle)))
+        }
+        Ok(handle) => {
+            free_rejected_eq_handle(&handle, &[a, b]);
+            None
+        }
         Err(err) => {
             drop(err);
             None
         }
+    }
+}
+
+fn resolved_actual_eq_owner(
+    handle: &GpuTensorHandle,
+) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
+    runmat_accelerate_api::provider_for_handle(handle)
+        .filter(|owner| owner.device_id() == handle.device_id)
+}
+
+fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn valid_eq_gpu_output(
+    output: &GpuTensorHandle,
+    lhs: &GpuTensorHandle,
+    rhs: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    let expected_shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape).ok();
+    expected_shape.as_deref() == Some(output.shape.as_slice())
+        && output.device_id == lhs.device_id
+        && !gpu_handles_alias(output, lhs)
+        && !gpu_handles_alias(output, rhs)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(lhs)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && resolved_actual_eq_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn free_rejected_eq_handle(handle: &GpuTensorHandle, protected: &[&GpuTensorHandle]) {
+    if protected
+        .iter()
+        .any(|protected| gpu_handles_alias(handle, protected))
+    {
+        return;
+    }
+    if let Some(owner) = resolved_actual_eq_owner(handle) {
+        let _ = owner.free(handle);
     }
 }
 
@@ -920,6 +1019,30 @@ pub(crate) mod tests {
                 LogicalArray::new(vec![1, 0, 0, 0], vec![2, 2]).expect("logical result")
             )
         );
+    }
+
+    #[test]
+    fn eq_resident_integer_with_host_scalar_falls_back_exactly() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![2, 1],
+            )
+            .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let result = run_eq(
+                Value::GpuTensor(handle.clone()),
+                Value::Int(runmat_builtins::IntValue::U64((1_u64 << 53) + 1)),
+            )
+            .expect("exact fallback");
+            assert_eq!(
+                result,
+                Value::LogicalArray(
+                    LogicalArray::new(vec![1, 0], vec![2, 1]).expect("logical result")
+                )
+            );
+            provider.free(&handle).expect("free input");
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

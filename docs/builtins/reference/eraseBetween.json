@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Executes on the CPU. RunMat gathers GPU-resident inputs before deleting text and returns host-side results; the builtin is registered as an Accelerate sink so fusion never keeps the data on device."
+    "notes": "Executes on the CPU. Host text is required; RunMat mode can gather GPU-resident numeric position controls as an explicit extension."
   },
   "fusion": {
     "elementwise": false,
@@ -31,11 +31,13 @@
   "description": "`eraseBetween(text, start, stop)` removes text between two boundary markers. String/position markers, expansion rules, and `'Boundaries'` option behavior follow MATLAB semantics.",
   "behaviors": [
     "Accepts **string scalars**, **string arrays**, **character arrays** (row-by-row), and **cell arrays** containing string scalars or character vectors; the output keeps the same container type.",
-    "Boundary arguments can be text or numeric positions. Both boundaries in a call must use the same representation—mixing text and numeric markers raises a size/type error.",
+    "Boundary arguments can be literal text, scalar pattern objects, or numeric positions. Both boundaries in a call must use the same representation—mixing text/pattern and numeric markers raises a size/type error. Broader pattern-array containers depend on shared pattern-array runtime representation and are not claimed by this implementation.",
     "Text boundaries are **exclusive** by default: the markers are preserved while the enclosed text is deleted. Numeric positions are **inclusive** by default: characters at `startPos` and `endPos` are deleted together with the interior.",
     "`'Boundaries','inclusive'` removes the markers themselves; `'Boundaries','exclusive'` keeps them. The option is case-insensitive and must be supplied as name-value pairs.",
     "Missing string scalars propagate (the MATLAB `missing` placeholder in either boundary or text yields `<missing>` in the result). When a boundary cannot be located, `eraseBetween` returns the original element unchanged.",
-    "Numeric positions are validated as positive integers, clamped to the string length, and interpreted using MATLAB’s 1-based indexing rules."
+    "Numeric positions are validated as positive integers and interpreted using MATLAB’s 1-based indexing rules. All eight typed-integer classes are read exactly as documented numeric structural controls.",
+    "MATLAB-compatible array forms require each boundary to be scalar or the same size as the text input. RunMat mode additionally permits general broadcast-compatible boundary shapes.",
+    "Row-wise character matrices, cells containing string scalars, and GPU-resident position arrays are separately gated RunMat extensions."
   ],
   "examples": [
     {
@@ -89,7 +91,7 @@
     },
     {
       "question": "Can I broadcast scalar boundaries across an array input?",
-      "answer": "Yes. Scalar markers follow MATLAB implicit expansion rules. Character-array and cell-array markers must match the size of the text input."
+      "answer": "Scalar markers apply to every text element. Nonscalar boundary arrays must be the same size as the text input in MATLAB-compatible mode; RunMat mode separately enables general broadcast-compatible shapes."
     },
     {
       "question": "Are GPU inputs supported?",
@@ -97,7 +99,7 @@
     },
     {
       "question": "Does `eraseBetween` validate numeric positions?",
-      "answer": "Yes. Positions are parsed as positive integers using MATLAB’s 1-based indexing. Stops are clamped to the string length, and start positions that lie beyond the text leave the element unchanged."
+      "answer": "Yes. Positions are parsed exactly as positive integers using MATLAB’s 1-based indexing. The current public source does not fully specify every out-of-range case, so those details remain evidence-open rather than being presented as MATLAB guarantees."
     }
   ],
   "links": [
@@ -154,8 +156,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/transform/erasebetween.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/erasebetween.rs"
   },
-  "gpu_residency": "No. RunMat automatically gathers device-resident inputs, performs the deletion on the CPU, and returns host outputs. Manual `gpuArray` / `gather` calls are unnecessary; they are honoured only for compatibility with MATLAB when you explicitly need to control residency.",
+  "gpu_residency": "No text output remains resident. GPU-resident numeric position controls are a RunMat extension and are gathered exactly in RunMat mode; strict compatibility rejects them before provider access.",
   "gpu_behavior": [
-    "The builtin performs all work on the CPU. When any argument is GPU-resident, RunMat gathers the values first, applies the deletions on the host, and returns host-resident outputs. Providers do not need to expose device kernels, and fusion planning treats `eraseBetween` as a residency sink so surrounding expressions will gather automatically."
+    "The builtin performs text work on the CPU. In RunMat mode, resident numeric position controls gather through their authoritative storage and outputs remain on host; strict compatibility gates that extension before download."
   ]
 }

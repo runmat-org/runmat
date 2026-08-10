@@ -15,6 +15,9 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle};
 
 use crate::builtins::common::random_args::keyword_of;
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
+};
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
 use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
@@ -23,6 +26,119 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const ECDF_NAME: &str = "ecdf";
 const CDFPLOT_NAME: &str = "cdfplot";
+
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::ecdf")]
+pub const CDFPLOT_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: CDFPLOT_NAME,
+    op_kind: GpuOpKind::Custom("empirical-cdf-plot"),
+    supported_precisions: &[],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::NewHandle,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "The builtin owns resident input so compatibility and exactness checks run before provider access; admitted input gathers explicitly for host statistics and plotting.",
+};
+
+const ECDF_INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ecdf-integer-y",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ecdf with typed-integer sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EcdfIntegerYExtension"),
+};
+const ECDF_LOGICAL_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ecdf-logical-y",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ecdf with logical sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EcdfLogicalYExtension"),
+};
+const ECDF_INTEGER_FREQUENCY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ecdf-integer-frequency",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ecdf with typed-integer Frequency data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EcdfIntegerFrequencyExtension"),
+};
+const ECDF_LOGICAL_FREQUENCY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ecdf-logical-frequency",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ecdf with logical Frequency data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EcdfLogicalFrequencyExtension"),
+};
+const ECDF_INTEGER_CENSORING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ecdf-integer-censoring",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ecdf with typed-integer Censoring data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EcdfIntegerCensoringExtension"),
+};
+
+pub const ECDF_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    ECDF_INTEGER_Y_EXTENSION,
+    ECDF_LOGICAL_Y_EXTENSION,
+    ECDF_INTEGER_FREQUENCY_EXTENSION,
+    ECDF_LOGICAL_FREQUENCY_EXTENSION,
+    ECDF_INTEGER_CENSORING_EXTENSION,
+];
+
+const ECDF_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "y",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Integer samples are classified before provider access and must be exactly representable at the explicit binary64 statistics boundary.",
+}];
+const ECDF_INTEGER_FREQUENCY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Frequency",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer counts remain authoritative through validation and must be exactly representable at the floating ratio boundary.",
+    }];
+const ECDF_INTEGER_CENSORING_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Censoring",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer censoring indicators are validated exactly as -1, 0, or 1 before floating evaluation.",
+    }];
+
+pub const ECDF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ecdf(y, ...) with typed-integer y",
+        inputs: &ECDF_INTEGER_Y_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only explicit binary64 statistics boundary; all numeric outputs are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ecdf(y, 'Frequency', frequency, ...) with typed-integer frequency",
+        inputs: &ECDF_INTEGER_FREQUENCY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes:
+            "Counts are checked as exact nonnegative integers before the floating ratio boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "ecdf(y, 'Censoring', censoring, ...) with typed-integer censoring",
+        inputs: &ECDF_INTEGER_CENSORING_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Indicators are exact structural labels; outputs remain floating statistics.",
+    },
+];
 
 const OUTPUT_F: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "f",
@@ -425,16 +541,24 @@ impl EcdfEvaluation {
     suppress_auto_output = true,
     type_resolver(ecdf_type),
     descriptor(crate::builtins::stats::summary::ecdf::ECDF_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::ecdf::ECDF_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::ecdf::ECDF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::ecdf"
 )]
 pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (axes_target, args) =
-        split_leading_axes_handle(args, ECDF_NAME).map_err(|err| map_error(ECDF_NAME, err))?;
+    let (axes_target, args) = split_ecdf_axes_target(args, ECDF_NAME)?;
+    ensure_ecdf_extensions_enabled(&args)?;
+    let gpu_source = args.first().and_then(|value| match value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    });
     let mut args = gather_values(args).await?;
     if args.is_empty() {
         return Err(invalid_argument(ECDF_NAME, "ecdf: expected sample data"));
     }
     let y = args.remove(0);
+    ensure_exact_ecdf_integer_boundary(&y, "sample")?;
+    ensure_exact_ecdf_option_boundaries(&args)?;
     let options = parse_options(args)?;
     let eval = evaluate_ecdf(y, options)?;
 
@@ -450,12 +574,133 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             plot_ecdf_line(ECDF_NAME, &eval)?;
             Ok(Value::OutputList(Vec::new()))
         }
-        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            eval.outputs_for_count(out_count)?,
-        )),
-        None => eval.f_value(),
+        Some(out_count) => {
+            let outputs = eval.outputs_for_count(out_count)?;
+            Ok(crate::output_count::output_list_with_padding(
+                out_count,
+                restore_ecdf_outputs(outputs, gpu_source.as_ref())?,
+            ))
+        }
+        None => restore_ecdf_output(eval.f_value()?, gpu_source.as_ref()),
     }
+}
+
+fn ensure_ecdf_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
+    let Some(y) = args.first() else {
+        return Ok(());
+    };
+    ensure_ecdf_value_extension(y, &ECDF_INTEGER_Y_EXTENSION, &ECDF_LOGICAL_Y_EXTENSION)?;
+    let mut idx = 1usize;
+    while idx + 1 < args.len() {
+        let Some(name) = keyword_of(&args[idx]) else {
+            idx += 2;
+            continue;
+        };
+        let value = &args[idx + 1];
+        match name.trim().to_ascii_lowercase().as_str() {
+            "frequency" => ensure_ecdf_value_extension(
+                value,
+                &ECDF_INTEGER_FREQUENCY_EXTENSION,
+                &ECDF_LOGICAL_FREQUENCY_EXTENSION,
+            )?,
+            "censoring" if is_typed_integer_value(value) => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ECDF_INTEGER_CENSORING_EXTENSION,
+                    ECDF_NAME,
+                )?;
+            }
+            _ => {}
+        }
+        idx += 2;
+    }
+    Ok(())
+}
+
+fn ensure_ecdf_value_extension(
+    value: &Value,
+    integer: &'static BuiltinExtensionDescriptor,
+    logical: &'static BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if is_typed_integer_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(integer, ECDF_NAME)?;
+    }
+    if is_logical_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(logical, ECDF_NAME)?;
+    }
+    Ok(())
+}
+
+fn ensure_exact_ecdf_option_boundaries(args: &[Value]) -> BuiltinResult<()> {
+    let mut idx = 0usize;
+    while idx + 1 < args.len() {
+        if let Some(name) = keyword_of(&args[idx]) {
+            match name.trim().to_ascii_lowercase().as_str() {
+                "frequency" => ensure_exact_ecdf_integer_boundary(&args[idx + 1], "Frequency")?,
+                "censoring" => ensure_exact_ecdf_integer_boundary(&args[idx + 1], "Censoring")?,
+                _ => {}
+            }
+        }
+        idx += 2;
+    }
+    Ok(())
+}
+
+fn ensure_exact_ecdf_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    let check = |exact: i128| {
+        if (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+            Ok(())
+        } else {
+            Err(invalid_argument(
+                ECDF_NAME,
+                format!("ecdf: integer {role} values must be exactly representable as double"),
+            ))
+        }
+    };
+    match value {
+        Value::Int(value) => check(int_value_i128(value)),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            for index in 0..tensor.len() {
+                if let Some(exact) = tensor.numeric_value_at(index).and_then(numeric_scalar_i128) {
+                    check(exact)?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn restore_ecdf_outputs(
+    outputs: Vec<Value>,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Vec<Value>> {
+    outputs
+        .into_iter()
+        .map(|value| restore_ecdf_output(value, source))
+        .collect()
+}
+
+fn restore_ecdf_output(
+    value: Value,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> BuiltinResult<Value> {
+    let Some(source) = source else {
+        return Ok(value);
+    };
+    let tensor = match value {
+        Value::Tensor(tensor) => tensor,
+        Value::Num(number) => Tensor::new(vec![number], vec![1, 1])
+            .map_err(|err| internal_error(ECDF_NAME, format!("ecdf: {err}")))?,
+        other => return Ok(other),
+    };
+    let provider = runmat_accelerate_api::provider_for_handle(source)
+        .ok_or_else(|| internal_error(ECDF_NAME, "ecdf: source GPU provider is unavailable"))?;
+    let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|err| internal_error(ECDF_NAME, format!("ecdf: {err}")))?;
+    Ok(crate::builtins::common::gpu_helpers::resident_gpu_value(
+        handle,
+    ))
 }
 
 #[runtime_builtin(
@@ -472,8 +717,7 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::stats::summary::ecdf"
 )]
 pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (axes_target, args) = split_leading_axes_handle(args, CDFPLOT_NAME)
-        .map_err(|err| map_error(CDFPLOT_NAME, err))?;
+    let (axes_target, args) = split_ecdf_axes_target(args, CDFPLOT_NAME)?;
     if args.len() != 1 {
         return Err(invalid_argument(
             CDFPLOT_NAME,
@@ -502,6 +746,22 @@ pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )),
         None => Ok(Value::Num(handle)),
     }
+}
+
+fn split_ecdf_axes_target(
+    args: Vec<Value>,
+    builtin: &'static str,
+) -> BuiltinResult<crate::builtins::plotting::op_common::SplitAxesArgs> {
+    let first_is_data_only = args.len() == 1
+        || args.first().is_some_and(|value| {
+            is_typed_integer_value(value)
+                || is_logical_value(value)
+                || matches!(value, Value::GpuTensor(_))
+        });
+    if first_is_data_only {
+        return Ok((None, args));
+    }
+    split_leading_axes_handle(args, builtin).map_err(|err| map_error(builtin, err))
 }
 
 fn ensure_cdfplot_extensions_enabled(value: &Value) -> BuiltinResult<()> {
@@ -788,10 +1048,10 @@ fn evaluate_ecdf(value: Value, options: Options) -> BuiltinResult<EcdfEvaluation
                 "ecdf: sample data must be finite after removing NaN values",
             ));
         }
-        if !(freq.is_finite() && freq >= 0.0) {
+        if !(freq.is_finite() && freq >= 0.0 && freq.fract() == 0.0) {
             return Err(invalid_argument(
                 ECDF_NAME,
-                "ecdf: Frequency values must be finite nonnegative scalars",
+                "ecdf: Frequency values must be finite nonnegative integer counts",
             ));
         }
         let censor = if censor == 0.0 {
@@ -1374,27 +1634,25 @@ mod tests {
     }
 
     #[test]
-    fn ecdf_numeric_parsers_read_typed_integer_storage_exactly() {
-        let wide = u64::MAX - 1;
+    fn ecdf_numeric_parsers_read_admitted_typed_integer_storage() {
+        let exact = (1_u64 << 53) - 1;
         assert_eq!(
             numeric_vector(
-                &int_tensor(IntegerStorage::U64(vec![wide, wide - 1]), 2),
+                &int_tensor(IntegerStorage::U64(vec![exact, exact - 1]), 2),
                 ECDF_NAME,
             )
             .unwrap(),
-            vec![
-                IntValue::U64(wide).to_f64(),
-                IntValue::U64(wide - 1).to_f64()
-            ]
+            vec![exact as f64, (exact - 1) as f64]
         );
         assert_eq!(
-            scalar_number(&int_tensor(IntegerStorage::U64(vec![wide]), 1)).unwrap(),
-            IntValue::U64(wide).to_f64()
+            scalar_number(&int_tensor(IntegerStorage::U64(vec![exact]), 1)).unwrap(),
+            exact as f64
         );
     }
 
     #[test]
     fn ecdf_accepts_typed_integer_data_frequency_and_censoring() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = crate::output_count::push_output_count(Some(2));
         let value = block_on(ecdf_builtin(vec![
             int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), 4),
@@ -1412,6 +1670,7 @@ mod tests {
 
     #[test]
     fn ecdf_alpha_rejects_typed_integer_boundary_value() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = block_on(ecdf_builtin(vec![
             int_tensor(IntegerStorage::I16(vec![1, 2, 3]), 3),
             Value::from("Alpha"),
@@ -1420,6 +1679,130 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:ecdf:InvalidArgument"));
         assert!(err.message().contains("open interval"), "{}", err.message());
+    }
+
+    #[test]
+    fn ecdf_integer_roles_follow_strict_compatibility_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer_y = int_tensor(IntegerStorage::I16(vec![1, 2]), 2);
+        let error = block_on(ecdf_builtin(vec![integer_y])).expect_err("integer y must gate");
+        assert_eq!(
+            error.identifier(),
+            ECDF_INTEGER_Y_EXTENSION.error_identifier
+        );
+
+        let error = block_on(ecdf_builtin(vec![
+            tensor(vec![1.0, 2.0]),
+            Value::from("Frequency"),
+            int_tensor(IntegerStorage::U16(vec![1, 1]), 2),
+        ]))
+        .expect_err("integer Frequency must gate");
+        assert_eq!(
+            error.identifier(),
+            ECDF_INTEGER_FREQUENCY_EXTENSION.error_identifier
+        );
+
+        let error = block_on(ecdf_builtin(vec![
+            tensor(vec![1.0, 2.0]),
+            Value::from("Censoring"),
+            int_tensor(IntegerStorage::I8(vec![0, 1]), 2),
+        ]))
+        .expect_err("integer Censoring must gate");
+        assert_eq!(
+            error.identifier(),
+            ECDF_INTEGER_CENSORING_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn ecdf_classifies_resident_integer_y_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: 0,
+            buffer_id: 9_300_041,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::I16,
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(ecdf_builtin(vec![Value::GpuTensor(handle.clone())]))
+            .expect_err("resident integer y must gate before gather");
+        runmat_accelerate_api::clear_handle_integer_type(&handle);
+        assert_eq!(
+            error.identifier(),
+            ECDF_INTEGER_Y_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn cdfplot_dispatch_preserves_residency_until_builtin_preflight() {
+        assert_eq!(CDFPLOT_GPU_SPEC.residency, ResidencyPolicy::NewHandle);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 3,
+        });
+        let prepared = block_on(runmat_accelerate::prepare_builtin_args(
+            "cdfplot",
+            &[resident],
+        ))
+        .expect("dispatcher must retain resident argument");
+        assert!(matches!(prepared.as_slice(), [Value::GpuTensor(_)]));
+    }
+
+    #[test]
+    fn ecdf_admits_all_integer_y_classes_and_rejects_wide_boundary() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_storages((2, 2)) {
+            let output =
+                block_on(ecdf_builtin(vec![int_tensor(storage, 1)])).expect("small integer y");
+            assert!(matches!(output, Value::Tensor(_)));
+        }
+        let wide = int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1);
+        let error = block_on(ecdf_builtin(vec![wide])).expect_err("wide y must reject");
+        assert!(
+            error.message().contains("exactly representable as double"),
+            "{}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn ecdf_rejects_fractional_frequency_counts() {
+        let error = block_on(ecdf_builtin(vec![
+            tensor(vec![1.0, 2.0]),
+            Value::from("Frequency"),
+            tensor(vec![1.5, 1.0]),
+        ]))
+        .expect_err("fractional Frequency must reject");
+        assert!(error.message().contains("integer counts"));
+    }
+
+    #[test]
+    fn ecdf_descriptor_exposes_role_specific_integer_policy() {
+        let builtin = builtin_function_by_name(ECDF_NAME).expect("registered ecdf");
+        assert_eq!(builtin.extensions, &ECDF_EXTENSIONS);
+        assert_eq!(builtin.integer_capabilities.len(), 3);
+    }
+
+    #[test]
+    fn ecdf_resident_input_restores_numeric_outputs_to_its_owner() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
+                .expect("resident input");
+            let result =
+                block_on(ecdf_builtin(vec![Value::GpuTensor(handle)])).expect("resident ecdf");
+            let Value::OutputList(outputs) = result else {
+                panic!("expected output list");
+            };
+            assert_eq!(outputs.len(), 2);
+            assert!(outputs
+                .iter()
+                .all(|value| matches!(value, Value::GpuTensor(_))));
+        });
     }
 
     #[test]
@@ -1670,7 +2053,11 @@ mod tests {
             1,
         )]))
         .expect_err("wide integer must not be rounded");
-        assert!(error.message().contains("exact binary64 integer range"));
+        assert!(
+            error.message().contains("exact binary64 integer range"),
+            "{}",
+            error.message()
+        );
     }
 
     #[test]

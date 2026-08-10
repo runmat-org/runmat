@@ -5,9 +5,13 @@ use runmat_accelerate_api::{
     ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use rustfft::FftPlanner;
@@ -26,6 +30,58 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "envelope";
 const EPS: f64 = 1.0e-12;
+
+const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "envelope-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "envelope with typed-integer signal data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EnvelopeIntegerDataExtension"),
+};
+const INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "envelope-integer-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "envelope with a typed-integer length control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EnvelopeIntegerControlExtension"),
+};
+const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [INTEGER_DATA_EXTENSION, INTEGER_CONTROL_EXTENSION];
+const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "x",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The public signal input lists single and double only; RunMat mode converts authoritative typed-integer storage at the explicit floating computation boundary.",
+}];
+const INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public filter, window, and separation controls list single and double only; RunMat mode parses typed integers exactly before converting to a host size.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[yupper, ylower] = envelope(integer_x, ...)",
+        inputs: &INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer elements remain authoritative until the documented floating envelope algorithm requires conversion; resident integer storage gathers exactly before that boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[yupper, ylower] = envelope(x, integer_n, method?)",
+        inputs: &INTEGER_CONTROL_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The typed control is extension-gated before x or a provider is accessed and is parsed without an f64 mirror; RunMat preserves the floating signal precision consistently across host and resident execution.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::envelope")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -214,6 +270,7 @@ struct SignalInput {
     rows: usize,
     cols: usize,
     vector: bool,
+    single_output: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -245,6 +302,15 @@ fn envelope_error_with_message(
     builder.build()
 }
 
+fn is_typed_integer_value(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
+}
+
 #[runtime_builtin(
     name = "envelope",
     category = "math/signal",
@@ -253,11 +319,25 @@ fn envelope_error_with_message(
     accel = "sink",
     sink = true,
     suppress_auto_output = true,
+    extensions(EXTENSIONS),
+    integer_capabilities(INTEGER_CAPABILITIES),
     type_resolver(envelope_type),
     descriptor(crate::builtins::math::signal::envelope::ENVELOPE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::envelope"
 )]
 async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if is_typed_integer_value(&x) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if rest.first().is_some_and(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let options = parse_options(&rest)?;
 
     if crate::output_context::requested_output_count() == Some(0)
@@ -310,6 +390,16 @@ async fn try_gpu_envelope(
     options: &EnvelopeOptions,
     out_count: Option<usize>,
 ) -> BuiltinResult<Option<Value>> {
+    if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+        || runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        return Ok(None);
+    }
+    let Some(provider) = resolved_actual_envelope_owner(handle) else {
+        return Ok(None);
+    };
     let Some(method) = provider_envelope_method(options) else {
         return Ok(None);
     };
@@ -323,11 +413,67 @@ async fn try_gpu_envelope(
         output_shape: &output_shape,
         method,
     };
-    let result = match runmat_accelerate_api::signal_envelope(request).await {
+    let result = match provider.signal_envelope(&request).await {
         Ok(result) => result,
         Err(_) => return Ok(None),
     };
+    if !valid_gpu_envelope_result(&result, handle, provider, &output_shape) {
+        free_rejected_envelope_handle(&result.upper, &[handle]);
+        free_rejected_envelope_handle(&result.lower, &[handle, &result.upper]);
+        return Ok(None);
+    }
     Ok(Some(gpu_envelope_value(result, out_count)))
+}
+
+fn resolved_actual_envelope_owner(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
+    runmat_accelerate_api::provider_for_handle(handle)
+        .filter(|owner| owner.device_id() == handle.device_id)
+}
+
+fn gpu_handles_alias(
+    lhs: &runmat_accelerate_api::GpuTensorHandle,
+    rhs: &runmat_accelerate_api::GpuTensorHandle,
+) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn valid_gpu_envelope_result(
+    result: &ProviderEnvelopeResult,
+    input: &runmat_accelerate_api::GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output_shape: &[usize],
+) -> bool {
+    let valid = |output: &runmat_accelerate_api::GpuTensorHandle| {
+        output.shape == output_shape
+            && output.device_id == input.device_id
+            && !gpu_handles_alias(output, input)
+            && runmat_accelerate_api::handle_storage(output)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_precision(output)
+                == runmat_accelerate_api::handle_precision(input)
+            && runmat_accelerate_api::handle_integer_type(output).is_none()
+            && !runmat_accelerate_api::handle_is_logical(output)
+            && resolved_actual_envelope_owner(output)
+                .is_some_and(|owner| std::ptr::eq(owner, provider))
+    };
+    valid(&result.upper) && valid(&result.lower) && !gpu_handles_alias(&result.upper, &result.lower)
+}
+
+fn free_rejected_envelope_handle(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) {
+    if protected
+        .iter()
+        .any(|protected| gpu_handles_alias(handle, protected))
+    {
+        return;
+    }
+    if let Some(owner) = resolved_actual_envelope_owner(handle) {
+        let _ = owner.free(handle);
+    }
 }
 
 fn provider_envelope_method(options: &EnvelopeOptions) -> Option<ProviderEnvelopeMethod> {
@@ -379,13 +525,22 @@ fn gpu_signal_shape(
 }
 
 fn gpu_envelope_value(result: ProviderEnvelopeResult, out_count: Option<usize>) -> Value {
-    let upper = gpu_helpers::resident_gpu_value(result.upper);
+    let ProviderEnvelopeResult { upper, lower } = result;
     match out_count {
-        None => upper,
-        Some(1) => Value::OutputList(vec![upper]),
+        None => {
+            free_rejected_envelope_handle(&lower, &[&upper]);
+            gpu_helpers::resident_gpu_value(upper)
+        }
+        Some(1) => {
+            free_rejected_envelope_handle(&lower, &[&upper]);
+            Value::OutputList(vec![gpu_helpers::resident_gpu_value(upper)])
+        }
         Some(count) => crate::output_count::output_list_with_padding(
             count,
-            vec![upper, gpu_helpers::resident_gpu_value(result.lower)],
+            vec![
+                gpu_helpers::resident_gpu_value(upper),
+                gpu_helpers::resident_gpu_value(lower),
+            ],
         ),
     }
 }
@@ -426,12 +581,14 @@ fn scalar_signal_input(value: f64) -> BuiltinResult<SignalInput> {
         rows: 1,
         cols: 1,
         vector: true,
+        single_output: false,
     })
 }
 
 fn tensor_to_signal_input(tensor: Tensor) -> BuiltinResult<SignalInput> {
     let len = tensor.len();
     let shape_meta = tensor.shape.clone();
+    let single_output = tensor.numeric_dtype() == NumericDType::F32;
     let data = tensor::tensor_into_values_f64(tensor);
     if data.is_empty() || data.iter().any(|value| !value.is_finite()) {
         return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
@@ -451,6 +608,7 @@ fn tensor_to_signal_input(tensor: Tensor) -> BuiltinResult<SignalInput> {
         rows,
         cols,
         vector: rows == 1 || cols == 1,
+        single_output,
     })
 }
 
@@ -542,23 +700,40 @@ impl SignalInput {
 
 impl EnvelopeEvaluation {
     fn upper_value(&self) -> BuiltinResult<Value> {
-        value_from_data(self.upper.clone(), self.input.shape.clone())
+        value_from_data(
+            self.upper.clone(),
+            self.input.shape.clone(),
+            self.input.single_output,
+        )
     }
 
     fn lower_value(&self) -> BuiltinResult<Value> {
-        value_from_data(self.lower.clone(), self.input.shape.clone())
+        value_from_data(
+            self.lower.clone(),
+            self.input.shape.clone(),
+            self.input.single_output,
+        )
     }
 
     fn input_value(&self) -> BuiltinResult<Value> {
-        value_from_data(self.input.data.clone(), self.input.shape.clone())
+        value_from_data(
+            self.input.data.clone(),
+            self.input.shape.clone(),
+            self.input.single_output,
+        )
     }
 }
 
-fn value_from_data(data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
-    if data.len() == 1 {
+fn value_from_data(data: Vec<f64>, shape: Vec<usize>, single_output: bool) -> BuiltinResult<Value> {
+    if data.len() == 1 && !single_output {
         return Ok(Value::Num(data[0]));
     }
-    Tensor::new(data, shape)
+    let storage = if single_output {
+        NumericStorage::F32(data.into_iter().map(|value| value as f32).collect())
+    } else {
+        NumericStorage::F64(data)
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map(Value::Tensor)
         .map_err(|err| envelope_error_with_detail(&ENVELOPE_ERROR_INTERNAL, err))
 }
@@ -939,6 +1114,7 @@ mod tests {
 
     #[test]
     fn envelope_reads_typed_integer_vector_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let outputs =
             output_list(call(integer_row(vec![3, 4, 3, 2]), Vec::new(), Some(2)).unwrap());
         let upper = tensor_data(outputs[0].clone());
@@ -949,6 +1125,64 @@ mod tests {
         assert!(lower.iter().all(|value| value.is_finite()));
         assert!(upper.iter().all(|value| *value >= 3.0));
         assert!(lower.iter().all(|value| *value <= 3.0));
+    }
+
+    #[test]
+    fn envelope_preserves_native_single_output_on_host() {
+        let input =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![3.0, 4.0, 3.0, 2.0]), vec![1, 4])
+                .expect("single input");
+        let outputs =
+            output_list(call(Value::Tensor(input), Vec::new(), Some(2)).expect("single envelope"));
+        for output in outputs {
+            let Value::Tensor(tensor) = output else {
+                panic!("expected single tensor output");
+            };
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        }
+    }
+
+    #[test]
+    fn envelope_integer_data_and_control_are_separately_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let data_error = call(integer_row(vec![1, 2, 3]), Vec::new(), Some(1))
+            .expect_err("typed integer data is an extension");
+        assert_eq!(
+            data_error.identifier(),
+            INTEGER_DATA_EXTENSION.error_identifier
+        );
+
+        let control_error = call(
+            row(vec![1.0, 2.0, 3.0]),
+            vec![Value::Int(runmat_builtins::IntValue::U64(3))],
+            Some(1),
+        )
+        .expect_err("typed integer control is an extension");
+        assert_eq!(
+            control_error.identifier(),
+            INTEGER_CONTROL_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn envelope_resident_integer_data_is_gated_before_provider_access() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            provider.reset_telemetry();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(Value::GpuTensor(handle.clone()), Vec::new(), Some(1))
+                .expect_err("resident integer data is an extension");
+            assert_eq!(error.identifier(), INTEGER_DATA_EXTENSION.error_identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            provider.free(&handle).expect("free input");
+        });
     }
 
     #[test]
@@ -1004,6 +1238,7 @@ mod tests {
 
     #[test]
     fn envelope_reads_typed_integer_matrix_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let out = call(
             integer_matrix(vec![1, 0, -1, 0, 2, 3, 2, 1], vec![4, 2]),
             Vec::new(),
