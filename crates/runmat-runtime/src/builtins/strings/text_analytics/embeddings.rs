@@ -7,10 +7,13 @@ use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ClassDef, ObjectInstance, PropertyDef, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, ClassDef, ObjectInstance, PropertyDef,
+    ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -440,6 +443,35 @@ pub const DOC2SEQUENCE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DOC2SEQUENCE_ERRORS,
 };
 
+const DOC2SEQUENCE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "Length",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "PaddingValue",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary.",
+    },
+];
+
+pub const DOC2SEQUENCE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "sequences = doc2sequence(enc_or_emb, documents, Length=integer_length, PaddingValue=integer_value)",
+        inputs: &DOC2SEQUENCE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Length is an exact positive structural control; PaddingValue crosses explicitly to RunMat's current host floating sequence storage. doc2sequence has no documented GPU-array capability.",
+    }];
+
 pub const TRAIN_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
         BuiltinSignatureDescriptor {
@@ -608,9 +640,16 @@ async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::embeddings::DOC2SEQUENCE_DESCRIPTOR),
+    integer_capabilities(DOC2SEQUENCE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
 async fn doc2sequence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(crate::value_contains_gpu) {
+        return Err(embedding_error(
+            "doc2sequence",
+            "doc2sequence: gpuArray inputs are not supported",
+        ));
+    }
     let gathered = gather_args(args, "doc2sequence").await?;
     let (sequence_object, document_object, options) = parse_doc2sequence_args(gathered)?;
     let document_shape = document_shape_from_object(&document_object, "doc2sequence")?;
@@ -2596,6 +2635,7 @@ fn embedding_error_with_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use runmat_builtins::{CellArray, IntegerStorage};
     use std::fs::File as StdFile;
     use std::io::Write;
@@ -3343,6 +3383,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn doc2sequence_rejects_resident_controls_before_provider_access() {
+        let model = EmbeddingModel {
+            vocabulary: vec!["alpha".into()],
+            vectors: vec![1.0, 10.0],
+            dimension: 2,
+        };
+        let emb = embedding_object(model).unwrap();
+        let documents = Value::Object(tokenized_document_object(vec![vec!["alpha"]]));
+        let resident_length = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error =
+            doc2sequence_builtin(vec![emb, documents, Value::from("Length"), resident_length])
+                .await
+                .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:doc2sequence:InvalidInput"));
+        assert!(error
+            .message()
+            .contains("gpuArray inputs are not supported"));
+    }
+
+    #[test]
+    fn doc2sequence_rejects_nested_resident_embedding_before_provider_access() {
+        test_support::with_test_provider(|provider| {
+            let model = EmbeddingModel {
+                vocabulary: vec!["alpha".into()],
+                vectors: vec![1.0, 10.0],
+                dimension: 2,
+            };
+            let Value::Object(mut embedding) = embedding_object(model).unwrap() else {
+                panic!("expected wordEmbedding object")
+            };
+            let vectors = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0, 10.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload resident embedding vectors");
+            embedding.properties.insert(
+                VECTOR_PROPERTY.to_string(),
+                Value::GpuTensor(vectors.clone()),
+            );
+            let documents = Value::Object(tokenized_document_object(vec![vec!["alpha"]]));
+            provider.reset_telemetry();
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+            let error = futures::executor::block_on(doc2sequence_builtin(vec![
+                Value::Object(embedding),
+                documents,
+            ]))
+            .expect_err("nested resident vectors must reject before gather");
+            assert_eq!(error.identifier(), Some("RunMat:doc2sequence:InvalidInput"));
+            assert!(error
+                .message()
+                .contains("gpuArray inputs are not supported"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            provider.free(&vectors).expect("free resident vectors");
+        });
+    }
+
+    #[tokio::test]
     async fn train_word_embedding_honors_min_count_and_option_validation() {
         let err = train_word_embedding_builtin(vec![
             Value::String("missing.txt".into()),
@@ -3516,6 +3619,22 @@ mod tests {
             .unwrap(),
             -4.0
         );
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            assert_eq!(
+                parse_numeric_scalar(&poisoned_integer_scalar(storage), "test", "PaddingValue")
+                    .unwrap(),
+                2.0
+            );
+        }
         assert_eq!(
             numeric_scalar(
                 &poisoned_integer_scalar(IntegerStorage::U16(vec![11])),

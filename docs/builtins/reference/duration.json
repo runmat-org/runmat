@@ -8,13 +8,13 @@
     "Format",
     "MATLAB compatibility"
   ],
-  "summary": "Create duration arrays from hour, minute, second, and unit-helper forms with MATLAB-compatible construction behavior.",
+  "summary": "Create duration arrays from numeric component or three-column matrix inputs.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "duration values are host-side objects backed by day-count tensors; there is no GPU-resident duration type."
+    "notes": "GPU numeric constructor input is a compatibility-gated RunMat extension. The owning provider gathers it before RunMat constructs a host-side duration object backed by a day-count tensor."
   },
   "fusion": {
     "elementwise": false,
@@ -24,17 +24,22 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::duration::tests"
+    "unit": "duration_builds_from_components, duration_integer_matrix_form_supports_all_classes_and_returns_column, duration_four_component_form_adds_milliseconds, duration_public_components_preserve_nan_and_infinity, duration_short_numeric_forms_are_extension_gated_but_matrix_is_public, duration_gpu_extension_rejects_before_provider_access"
   },
-  "description": "`duration` constructs duration objects from numeric hour, minute, and second components or from unit helper functions such as `days`, `hours`, `minutes`, `seconds`, `milliseconds`, and fixed-length `years`. It supports MATLAB-compatible scalar expansion, internal elapsed-time representation, conversion back to numeric unit counts, and display-format controls.",
+  "description": "`duration(H, MI, S)` and `duration(H, MI, S, MS)` construct duration arrays from numeric components. `duration(X)` accepts an `N`-by-3 numeric matrix whose columns are hours, minutes, and seconds. RunMat stores elapsed time as binary64 day counts and supports display-format controls.",
   "behaviors": [
-    "`duration(H)` treats the input as hours.",
-    "`duration(H, M)` treats the inputs as hours and minutes.",
+    "`duration(X)` requires a numeric matrix with exactly three columns and returns an `N`-by-1 duration array.",
     "`duration(H, M, S)` treats the inputs as hours, minutes, and seconds.",
+    "`duration(H, M, S, MS)` adds the millisecond component to the elapsed time.",
+    "All eight signed and unsigned integer classes are accepted in the documented numeric forms. Computation and storage use binary64 day counts, so wide integer values follow the constructor's documented numeric conversion boundary rather than preserving integer storage.",
+    "`NaN`, positive infinity, and negative infinity components remain nonfinite duration values and display as `NaN`, `Inf`, and `-Inf` without changing their stored values.",
+    "The one-component `duration(H)` and two-component `duration(H, M)` conveniences are compatibility-gated RunMat extensions.",
     "`days(X)`, `hours(X)`, `minutes(X)`, `seconds(X)`, `milliseconds(X)`, and `years(X)` create duration values from numeric inputs.",
     "Calling the unit helpers on a duration converts that duration back to numeric counts in the requested unit.",
     "`isduration(x)` returns true for duration objects and false for non-duration values.",
     "Scalar component inputs broadcast to match non-scalar component arrays; non-scalar inputs must share the same shape.",
+    "GPU numeric inputs are a compatibility-gated RunMat extension, are rejected before provider access in strict mode, and produce host duration objects after owner-resolved gathering.",
+    "Text parsing forms of `duration` are not yet implemented.",
     "The `Format` property controls text rendering. Supported values are `hh:mm:ss`, `hh:mm`, `mm:ss`, `s`, and `ss`.",
     "Linear indexing `d(k)` is supported and returns duration values.",
     "Comparison operators and `plus`/`minus` duration arithmetic are supported.",
@@ -48,7 +53,7 @@
     },
     {
       "description": "Broadcasting scalar minutes across an hour vector",
-      "input": "t = duration([1 2], 15)",
+      "input": "t = duration([1 2], 15, 0)",
       "output": "t =\n01:15:00  02:15:00"
     },
     {
@@ -78,7 +83,7 @@
     },
     {
       "question": "Does `duration` run on the GPU?",
-      "answer": "No. duration values are represented as host-side objects. Numeric inputs may be gathered first, but the resulting duration object remains on the CPU."
+      "answer": "The resulting duration object is always host-side. RunMat can accept GPU numeric inputs as a compatibility-gated extension, gather them through their owning provider, and then build the host object."
     },
     {
       "question": "Can I add a duration to a datetime?",
@@ -113,6 +118,6 @@
   },
   "gpu_residency": "No. RunMat represents `duration` values as host-side objects with an internal day-count tensor and a `Format` property. Even when the constructor receives gathered numeric data, the resulting object remains resident on the CPU.",
   "gpu_behavior": [
-    "`duration` does not allocate GPU objects or invoke provider kernels. If a numeric input originates on the GPU, RunMat gathers it before building the duration object."
+    "`duration` does not allocate GPU objects or invoke provider kernels. GPU numeric constructor input is a RunMat extension; strict compatibility mode rejects it before provider access, while extension mode gathers through the owning provider before building the host object."
   ]
 }

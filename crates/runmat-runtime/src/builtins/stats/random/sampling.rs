@@ -19,6 +19,35 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const MAX_DIVIDERAND_Q: usize = 10_000_000;
 
+const DIVIDERAND_RESIDENT_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "dividerand-resident-argument",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "resident dividerand arguments are gathered as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DividerandResidentArgumentExtension"),
+    };
+const DIVIDERAND_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [DIVIDERAND_RESIDENT_ARGUMENT_EXTENSION];
+const DIVIDERAND_INTEGER_Q_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Q",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Q is a nonnegative scalar target count and typed integer scalars are decoded from authoritative storage.",
+    }];
+pub const DIVIDERAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[trainInd,valInd,testInd] = dividerand(integer_Q,___)",
+        inputs: &DIVIDERAND_INTEGER_Q_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Q must fit usize and RunMat's bounded allocation policy; all returned index vectors are double row vectors.",
+    }];
+
 const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SAMPLING.INVALID_ARGUMENT",
     identifier: None,
@@ -1706,10 +1735,21 @@ pub mod dividerand {
         summary = "Divide target indices randomly into training, validation, and test sets.",
         keywords = "dividerand,random,partition,train,validation,test,statistics,machine-learning",
         type_resolver(super::sampling_type),
+        extensions(super::DIVIDERAND_EXTENSIONS),
+        integer_capabilities(super::DIVIDERAND_INTEGER_CAPABILITIES),
         descriptor(self::DESCRIPTOR),
         builtin_path = "crate::builtins::stats::random::sampling::dividerand"
     )]
     pub(crate) async fn dividerand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        if args
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &super::DIVIDERAND_RESIDENT_ARGUMENT_EXTENSION,
+                "dividerand",
+            )?;
+        }
         let parsed = super::parse_dividerand_args(args).await?;
         let [train, val, test] = super::dividerand_compute(parsed)?;
         match crate::output_count::current_output_count() {
@@ -2648,6 +2688,52 @@ mod tests {
                 other => panic!("expected output list, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn dividerand_q_accepts_every_typed_integer_scalar_exactly() {
+        let values = [
+            IntValue::I8(3),
+            IntValue::I16(3),
+            IntValue::I32(3),
+            IntValue::I64(3),
+            IntValue::U8(3),
+            IntValue::U16(3),
+            IntValue::U32(3),
+            IntValue::U64(3),
+        ];
+        for value in values {
+            assert_eq!(
+                parse_nonnegative_usize("dividerand", Value::Int(value), "Q").unwrap(),
+                3
+            );
+        }
+        assert_eq!(DIVIDERAND_INTEGER_CAPABILITIES.len(), 1);
+    }
+
+    #[test]
+    fn dividerand_resident_extension_rejects_before_gather() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[3.0],
+                    shape: &[1, 1],
+                })
+                .expect("resident Q upload");
+            provider.reset_telemetry();
+            let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(dividerand::dividerand_builtin(vec![Value::GpuTensor(
+                handle.clone(),
+            )]))
+            .expect_err("resident argument must reject before gather");
+            assert_eq!(
+                error.identifier(),
+                DIVIDERAND_RESIDENT_ARGUMENT_EXTENSION.error_identifier
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            drop(strict);
+            provider.free(&handle).expect("free resident Q");
+        });
     }
 
     #[test]

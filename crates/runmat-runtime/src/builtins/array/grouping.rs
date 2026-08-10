@@ -10,8 +10,8 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, ObjectInstance,
-    SparseTensor, StringArray, Tensor, Value,
+    CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, NumericStorage,
+    ObjectInstance, SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -26,6 +26,53 @@ use crate::{
 };
 
 const MAX_MATERIALIZED_ELEMENTS: usize = 50_000_000;
+
+const DISCRETIZE_INTEGER_X_EDGES_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented and explicit-edge comparisons use authoritative values.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "edges",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer edge classes are documented; increasing edges are validated without an f64 mirror.",
+    },
+];
+const DISCRETIZE_INTEGER_VALUES_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer replacement values preserve class and use exact zero for out-of-range or missing X.",
+    }];
+pub const DISCRETIZE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = discretize(integer_X,integer_edges,___)",
+        inputs: &DISCRETIZE_INTEGER_X_EDGES_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Explicit-edge bin assignment is exact across mixed integer and floating classes; default bin numbers are double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = discretize(X,edges,integer_values,___)",
+        inputs: &DISCRETIZE_INTEGER_VALUES_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Replacement output preserves the values vector's numeric class; missing assignments are zero for integer values.",
+    },
+];
 
 const OUTPUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "varargout",
@@ -78,6 +125,172 @@ pub const GROUPING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
+};
+
+const DISCRETIZE_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Bin numbers or replacement values with the shape of X.",
+}];
+const DISCRETIZE_OUTPUT_Y_EDGES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bin numbers or replacement values with the shape of X.",
+    },
+    BuiltinParamDescriptor {
+        name: "E",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Computed bin-edge row vector.",
+    },
+];
+const DISCRETIZE_INPUTS_X_EDGES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric input values to assign to bins.",
+    },
+    BuiltinParamDescriptor {
+        name: "edges",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Monotonically increasing numeric bin edges.",
+    },
+];
+const DISCRETIZE_INPUTS_X_N: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric input values to assign to bins.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive integer number of equal-width bins.",
+    },
+];
+const DISCRETIZE_INPUTS_VALUES: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric input values to assign to bins.",
+    },
+    BuiltinParamDescriptor {
+        name: "edges_or_N",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Explicit numeric edges or a positive scalar bin count.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One replacement value for each bin.",
+    },
+];
+const DISCRETIZE_INPUTS_INCLUDED_EDGE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric input values to assign to bins.",
+    },
+    BuiltinParamDescriptor {
+        name: "edges_or_N",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Explicit numeric edges or a positive scalar bin count.",
+    },
+    BuiltinParamDescriptor {
+        name: "IncludedEdge",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal option name \"IncludedEdge\".",
+    },
+    BuiltinParamDescriptor {
+        name: "side",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Either \"left\" or \"right\".",
+    },
+];
+const DISCRETIZE_INPUTS_X_N_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric input values to assign to bins.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive integer number of equal-width bins.",
+    },
+    BuiltinParamDescriptor {
+        name: "arguments",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional replacement values and IncludedEdge name-value pair.",
+    },
+];
+const DISCRETIZE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = discretize(X, edges)",
+        inputs: &DISCRETIZE_INPUTS_X_EDGES,
+        outputs: &DISCRETIZE_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = discretize(X, N)",
+        inputs: &DISCRETIZE_INPUTS_X_N,
+        outputs: &DISCRETIZE_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = discretize(___, values)",
+        inputs: &DISCRETIZE_INPUTS_VALUES,
+        outputs: &DISCRETIZE_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = discretize(___, \"IncludedEdge\", side)",
+        inputs: &DISCRETIZE_INPUTS_INCLUDED_EDGE,
+        outputs: &DISCRETIZE_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Y, E] = discretize(X, N, ___)",
+        inputs: &DISCRETIZE_INPUTS_X_N_REST,
+        outputs: &DISCRETIZE_OUTPUT_Y_EDGES,
+    },
+];
+const DISCRETIZE_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_TOO_LARGE];
+pub const DISCRETIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DISCRETIZE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DISCRETIZE_ERRORS,
 };
 
 const COMBINATIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -771,7 +984,8 @@ pub(crate) async fn accumarray_builtin(
     summary = "Group numeric data into bins.",
     keywords = "discretize,bins,edges,categorical,grouping",
     accel = "cpu",
-    descriptor(crate::builtins::array::grouping::GROUPING_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::grouping::DISCRETIZE_INTEGER_CAPABILITIES),
+    descriptor(crate::builtins::array::grouping::DISCRETIZE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::grouping"
 )]
 pub(crate) async fn discretize_builtin(
@@ -782,7 +996,18 @@ pub(crate) async fn discretize_builtin(
     let x = gather_if_needed_async(&x).await?;
     let edges_or_n = gather_if_needed_async(&edges_or_n).await?;
     let rest = gather_values(rest).await?;
-    discretize_impl(x, edges_or_n, rest)
+    let computed_edges = is_discretize_bin_count(&edges_or_n);
+    let (output, edges) = discretize_impl(x, edges_or_n, rest)?;
+    match crate::output_count::current_output_count() {
+        None => Ok(output),
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(1) => Ok(Value::OutputList(vec![output])),
+        Some(2) if computed_edges => Ok(Value::OutputList(vec![output, edges])),
+        Some(2) => Err(grouping_error(
+            "discretize: the second edge output requires a scalar bin count",
+        )),
+        Some(_) => Err(grouping_error("discretize: too many output arguments")),
+    }
 }
 
 #[runtime_builtin(
@@ -1906,8 +2131,22 @@ fn accumarray_numeric_output(
         .map_err(grouping_error)
 }
 
-fn discretize_impl(x: Value, edges_or_n: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let values = numeric_values(&x, "discretize X")?;
+enum DiscretizeLabels {
+    Text(Vec<String>),
+    Numeric(NumericStorage),
+}
+
+impl DiscretizeLabels {
+    fn len(&self) -> usize {
+        match self {
+            Self::Text(values) => values.len(),
+            Self::Numeric(values) => values.len(),
+        }
+    }
+}
+
+fn discretize_impl(x: Value, edges_or_n: Value, rest: Vec<Value>) -> BuiltinResult<(Value, Value)> {
+    let values = numeric_scalars(&x, "discretize X")?;
     let shape = value_shape(&x);
     let (edges, labels, included_right) = parse_discretize_args(&values, edges_or_n, rest)?;
     if edges.len() < 2 {
@@ -1917,41 +2156,72 @@ fn discretize_impl(x: Value, edges_or_n: Value, rest: Vec<Value>) -> BuiltinResu
     }
     let bins = values
         .iter()
-        .map(|value| discretize_one(*value, &edges, included_right))
+        .map(|value| discretize_one_exact(*value, &edges, included_right))
         .collect::<Vec<_>>();
-    if let Some(labels) = labels {
-        let data = bins
-            .iter()
-            .map(|bin| match bin {
-                Some(idx) => labels.get(*idx - 1).cloned().unwrap_or_default(),
-                None => String::new(),
-            })
-            .collect::<Vec<_>>();
-        return StringArray::new(data, shape)
-            .map(Value::StringArray)
-            .map_err(grouping_error);
-    }
-    Tensor::new(
-        bins.into_iter()
-            .map(|bin| bin.map(|idx| idx as f64).unwrap_or(f64::NAN))
-            .collect(),
-        shape,
+    let edge_output = Tensor::new(
+        edges.iter().map(|value| value.materialize_f64()).collect(),
+        vec![1, edges.len()],
     )
     .map(Value::Tensor)
-    .map_err(grouping_error)
+    .map_err(grouping_error)?;
+    let output = match labels {
+        Some(DiscretizeLabels::Text(labels)) => {
+            let data = bins
+                .iter()
+                .map(|bin| match bin {
+                    Some(idx) => labels.get(*idx - 1).cloned().unwrap_or_default(),
+                    None => String::new(),
+                })
+                .collect::<Vec<_>>();
+            StringArray::new(data, shape)
+                .map(Value::StringArray)
+                .map_err(grouping_error)?
+        }
+        Some(DiscretizeLabels::Numeric(labels)) => {
+            let mut output = missing_numeric_labels(&labels, bins.len());
+            for (position, bin) in bins.iter().enumerate() {
+                if let Some(index) = bin {
+                    let label = labels.value_at(index - 1).ok_or_else(|| {
+                        grouping_error("discretize: replacement value index is out of bounds")
+                    })?;
+                    output.set_value(position, label).map_err(grouping_error)?;
+                }
+            }
+            Tensor::from_numeric_storage(output, shape)
+                .map(Value::Tensor)
+                .map_err(grouping_error)?
+        }
+        None => Tensor::new(
+            bins.into_iter()
+                .map(|bin| bin.map(|idx| idx as f64).unwrap_or(f64::NAN))
+                .collect(),
+            shape,
+        )
+        .map(Value::Tensor)
+        .map_err(grouping_error)?,
+    };
+    Ok((output, edge_output))
+}
+
+fn is_discretize_bin_count(value: &Value) -> bool {
+    match value {
+        Value::Num(value) => is_positive_integer_f64(*value),
+        Value::Int(value) => value.try_to_usize().is_some_and(|value| value > 0),
+        _ => false,
+    }
 }
 
 fn parse_discretize_args(
-    values: &[f64],
+    values: &[NumericScalar],
     edges_or_n: Value,
     rest: Vec<Value>,
-) -> BuiltinResult<(Vec<f64>, Option<Vec<String>>, bool)> {
+) -> BuiltinResult<(Vec<NumericScalar>, Option<DiscretizeLabels>, bool)> {
     let mut labels = None;
     let mut included_right = false;
     let mut idx = 0usize;
     if let Some(first) = rest.first() {
         if !is_option_name(first) {
-            labels = Some(string_list(first)?);
+            labels = Some(discretize_labels(first)?);
             idx = 1;
         }
     }
@@ -1981,13 +2251,40 @@ fn parse_discretize_args(
         idx += 2;
     }
     let edges = match edges_or_n {
-        Value::Num(n) if is_positive_integer_f64(n) => equal_width_edges(values, n as usize)?,
+        Value::Num(n) if is_positive_integer_f64(n) => equal_width_edges(
+            &values
+                .iter()
+                .map(|value| value.materialize_f64())
+                .collect::<Vec<_>>(),
+            n as usize,
+        )?
+        .into_iter()
+        .map(NumericScalar::F64)
+        .collect(),
         Value::Int(n) => match n.try_to_usize().filter(|bins| *bins > 0) {
-            Some(bins) => equal_width_edges(values, bins)?,
-            None => numeric_values(&Value::Int(n), "discretize edges")?,
+            Some(bins) => equal_width_edges(
+                &values
+                    .iter()
+                    .map(|value| value.materialize_f64())
+                    .collect::<Vec<_>>(),
+                bins,
+            )?
+            .into_iter()
+            .map(NumericScalar::F64)
+            .collect(),
+            None => numeric_scalars(&Value::Int(n), "discretize edges")?,
         },
-        other => numeric_values(&other, "discretize edges")?,
+        other => numeric_scalars(&other, "discretize edges")?,
     };
+    for pair in edges.windows(2) {
+        let ordering = compare_numeric(pair[0], pair[1])
+            .ok_or_else(|| grouping_error("discretize: bin edges must not contain NaN"))?;
+        if ordering == Ordering::Greater {
+            return Err(grouping_error(
+                "discretize: bin edges must be monotonically increasing",
+            ));
+        }
+    }
     if let Some(labels) = &labels {
         if labels.len() != edges.len().saturating_sub(1) {
             return Err(grouping_error(
@@ -1998,17 +2295,26 @@ fn parse_discretize_args(
     Ok((edges, labels, included_right))
 }
 
-fn discretize_one(value: f64, edges: &[f64], included_right: bool) -> Option<usize> {
-    if value.is_nan() {
+fn discretize_one_exact(
+    value: NumericScalar,
+    edges: &[NumericScalar],
+    included_right: bool,
+) -> Option<usize> {
+    if compare_numeric(value, value).is_none() {
         return None;
     }
     for bin in 0..edges.len() - 1 {
         let lower = edges[bin];
         let upper = edges[bin + 1];
+        let lower_cmp = compare_numeric(value, lower)?;
+        let upper_cmp = compare_numeric(value, upper)?;
         let hit = if included_right {
-            (value > lower || (bin == 0 && value == lower)) && value <= upper
+            (lower_cmp == Ordering::Greater || (bin == 0 && lower_cmp == Ordering::Equal))
+                && upper_cmp != Ordering::Greater
         } else {
-            value >= lower && (value < upper || (bin == edges.len() - 2 && value == upper))
+            lower_cmp != Ordering::Less
+                && (upper_cmp == Ordering::Less
+                    || (bin == edges.len() - 2 && upper_cmp == Ordering::Equal))
         };
         if hit {
             return Some(bin + 1);
@@ -2017,10 +2323,108 @@ fn discretize_one(value: f64, edges: &[f64], included_right: bool) -> Option<usi
     None
 }
 
+fn discretize_labels(value: &Value) -> BuiltinResult<DiscretizeLabels> {
+    match value {
+        Value::Num(value) => Ok(DiscretizeLabels::Numeric(NumericStorage::F64(vec![*value]))),
+        Value::Int(value) => homogeneous_integer_values(&[Value::Int(value.clone())])
+            .map(NumericStorage::from)
+            .map(DiscretizeLabels::Numeric)
+            .ok_or_else(|| grouping_error("discretize: invalid integer replacement values")),
+        Value::Tensor(tensor) => tensor
+            .clone()
+            .into_numeric_storage()
+            .map(DiscretizeLabels::Numeric)
+            .map_err(grouping_error),
+        _ => string_list(value).map(DiscretizeLabels::Text),
+    }
+}
+
+fn missing_numeric_labels(labels: &NumericStorage, len: usize) -> NumericStorage {
+    match labels {
+        NumericStorage::F64(_) => NumericStorage::F64(vec![f64::NAN; len]),
+        NumericStorage::F32(_) => NumericStorage::F32(vec![f32::NAN; len]),
+        _ => labels.zeros_like(len),
+    }
+}
+
+fn numeric_scalars(value: &Value, context: &str) -> BuiltinResult<Vec<NumericScalar>> {
+    match value {
+        Value::Num(value) => Ok(vec![NumericScalar::F64(*value)]),
+        Value::Int(value) => Ok(vec![NumericScalar::from(value.clone())]),
+        Value::Bool(value) => Ok(vec![NumericScalar::F64(if *value { 1.0 } else { 0.0 })]),
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                tensor
+                    .numeric_value_at(index)
+                    .ok_or_else(|| grouping_error(format!("{context}: invalid numeric element")))
+            })
+            .collect(),
+        Value::LogicalArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|flag| NumericScalar::F64(if *flag != 0 { 1.0 } else { 0.0 }))
+            .collect()),
+        Value::SparseTensor(sparse) => numeric_scalars(
+            &Value::Tensor(sparse.to_dense().map_err(grouping_error)?),
+            context,
+        ),
+        other => Err(grouping_error(format!(
+            "{context}: expected numeric input, got {other:?}"
+        ))),
+    }
+}
+
+fn compare_numeric(left: NumericScalar, right: NumericScalar) -> Option<Ordering> {
+    match (numeric_integer(left), numeric_integer(right)) {
+        (Some(left), Some(right)) => Some(left.cmp(&right)),
+        (Some(left), None) => compare_integer_float(left, right.materialize_f64()),
+        (None, Some(right)) => {
+            compare_integer_float(right, left.materialize_f64()).map(Ordering::reverse)
+        }
+        (None, None) => left.materialize_f64().partial_cmp(&right.materialize_f64()),
+    }
+}
+
+fn numeric_integer(value: NumericScalar) -> Option<i128> {
+    value.into_int_value().map(|value| match value {
+        IntValue::I8(value) => i128::from(value),
+        IntValue::I16(value) => i128::from(value),
+        IntValue::I32(value) => i128::from(value),
+        IntValue::I64(value) => i128::from(value),
+        IntValue::U8(value) => i128::from(value),
+        IntValue::U16(value) => i128::from(value),
+        IntValue::U32(value) => i128::from(value),
+        IntValue::U64(value) => i128::from(value),
+    })
+}
+
+fn compare_integer_float(integer: i128, float: f64) -> Option<Ordering> {
+    if float.is_nan() {
+        return None;
+    }
+    if float == f64::INFINITY {
+        return Some(Ordering::Less);
+    }
+    if float == f64::NEG_INFINITY {
+        return Some(Ordering::Greater);
+    }
+    let truncated = float.trunc() as i128;
+    match integer.cmp(&truncated) {
+        Ordering::Equal if float.fract() > 0.0 => Some(Ordering::Less),
+        Ordering::Equal if float.fract() < 0.0 => Some(Ordering::Greater),
+        ordering => Some(ordering),
+    }
+}
+
 fn equal_width_edges(values: &[f64], bins: usize) -> BuiltinResult<Vec<f64>> {
     if bins == 0 {
         return Err(grouping_error(
             "discretize: number of bins must be positive",
+        ));
+    }
+    if bins >= MAX_MATERIALIZED_ELEMENTS {
+        return Err(too_large_error(
+            "discretize: requested number of bins is too large",
         ));
     }
     let finite = values
@@ -2630,15 +3034,148 @@ mod tests {
     use runmat_builtins::{IntValue, IntegerStorage, NumericStorage};
 
     #[test]
+    fn discretize_descriptor_covers_public_forms_and_output_arity() {
+        assert_eq!(
+            DISCRETIZE_DESCRIPTOR.output_mode,
+            BuiltinOutputMode::ByRequestedOutputCount
+        );
+        assert_eq!(
+            DISCRETIZE_SIGNATURES
+                .iter()
+                .map(|signature| signature.label)
+                .collect::<Vec<_>>(),
+            vec![
+                "Y = discretize(X, edges)",
+                "Y = discretize(X, N)",
+                "Y = discretize(___, values)",
+                "Y = discretize(___, \"IncludedEdge\", side)",
+                "[Y, E] = discretize(X, N, ___)",
+            ]
+        );
+        assert!(DISCRETIZE_SIGNATURES[..4]
+            .iter()
+            .all(|signature| signature.outputs.len() == 1));
+        assert_eq!(DISCRETIZE_SIGNATURES[4].outputs.len(), 2);
+        assert_eq!(DISCRETIZE_DESCRIPTOR.errors.len(), 2);
+        assert!(DISCRETIZE_DESCRIPTOR
+            .errors
+            .iter()
+            .all(|error| error.code != ERROR_CALLBACK.code));
+    }
+
+    #[test]
     fn discretize_typed_bin_count_preserves_exact_unsigned_values() {
-        let values = [0.0, 1.0];
+        let values = [NumericScalar::F64(0.0), NumericScalar::F64(1.0)];
         let (edges, _, _) =
             parse_discretize_args(&values, Value::Int(IntValue::U16(2)), Vec::new()).unwrap();
-        assert_eq!(edges, vec![0.0, 0.5, 1.0]);
+        assert_eq!(
+            edges,
+            vec![
+                NumericScalar::F64(0.0),
+                NumericScalar::F64(0.5),
+                NumericScalar::F64(1.0)
+            ]
+        );
 
         let (edges, _, _) =
             parse_discretize_args(&values, Value::Int(IntValue::U8(1)), Vec::new()).unwrap();
-        assert_eq!(edges, vec![0.0, 1.0]);
+        assert_eq!(
+            edges,
+            vec![NumericScalar::F64(0.0), NumericScalar::F64(1.0)]
+        );
+    }
+
+    #[test]
+    fn discretize_explicit_integer_edges_do_not_use_f64_mirror() {
+        let base = 9_007_199_254_740_992_u64;
+        let out = block_on(discretize_builtin(
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![base + 1]), vec![1, 1]).unwrap(),
+            ),
+            Value::Tensor(
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![base, base + 1, base + 2]),
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
+            Vec::new(),
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn discretize_integer_replacement_values_preserve_class_and_zero_missing() {
+        let out = block_on(discretize_builtin(
+            Value::Tensor(Tensor::new(vec![-1.0, 0.5, 1.5, 3.0], vec![1, 4]).unwrap()),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap()),
+            vec![Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 7]), vec![1, 2]).unwrap(),
+            )],
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => assert_eq!(
+                tensor.integer_storage(),
+                Some(&IntegerStorage::U64(vec![0, u64::MAX, 7, 0]))
+            ),
+            other => panic!("expected integer tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn discretize_scalar_bin_count_returns_computed_edges_as_second_output() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let out = block_on(discretize_builtin(
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Int(IntValue::U8(2)),
+            Vec::new(),
+        ))
+        .unwrap();
+        match out {
+            Value::OutputList(values) => {
+                assert_eq!(values.len(), 2);
+                assert!(
+                    matches!(&values[0], Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0, 2.0])
+                );
+                assert!(
+                    matches!(&values[1], Value::Tensor(tensor) if tensor.materialize_f64() == vec![0.0, 0.5, 1.0])
+                );
+            }
+            other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn discretize_bins_infinities_when_outer_edges_are_infinite() {
+        let input = Value::Tensor(
+            Tensor::new(
+                vec![f64::NEG_INFINITY, -1.0, 1.0, f64::INFINITY, f64::NAN],
+                vec![1, 5],
+            )
+            .unwrap(),
+        );
+        let edges = Value::Tensor(
+            Tensor::new(vec![f64::NEG_INFINITY, 0.0, f64::INFINITY], vec![1, 3]).unwrap(),
+        );
+
+        for options in [
+            Vec::new(),
+            vec![Value::from("IncludedEdge"), Value::from("right")],
+        ] {
+            let output = block_on(discretize_builtin(input.clone(), edges.clone(), options))
+                .expect("infinite values with infinite outer edges");
+            let Value::Tensor(output) = output else {
+                panic!("expected tensor")
+            };
+            let values = output.materialize_f64();
+            assert_eq!(values[..4], [1.0, 1.0, 2.0, 2.0]);
+            assert!(values[4].is_nan());
+        }
     }
 
     #[test]

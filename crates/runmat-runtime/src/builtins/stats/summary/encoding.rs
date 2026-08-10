@@ -3,10 +3,14 @@
 use std::{cmp::Ordering, collections::HashMap};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CellArray, CharArray, IntValue, LogicalArray, ObjectInstance, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -15,6 +19,42 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const MAX_ONEHOT_CELLS: usize = 50_000_000;
 const MAX_ENCODING_RANK: usize = 32;
+
+const DUMMYVAR_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dummyvar-integer-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "dummyvar with typed-integer grouping variables is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DummyvarIntegerGroupExtension"),
+};
+const DUMMYVAR_GPU_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dummyvar-gpu-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "dummyvar with a resident grouping variable is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DummyvarGpuGroupExtension"),
+};
+const DUMMYVAR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DUMMYVAR_INTEGER_GROUP_EXTENSION,
+    DUMMYVAR_GPU_GROUP_EXTENSION,
+];
+const DUMMYVAR_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "group",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a lists single and double numeric grouping variables. RunMat mode additionally admits all eight integer classes as positive level labels; values outside the bounded feasible output domain reject before floating conversion.",
+    }];
+pub const DUMMYVAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "D = dummyvar(integer_group)",
+        inputs: &DUMMYVAR_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Positive integer labels select columns 1:max(group). Typed labels are validated exactly against sign and the bounded feasible output domain before their now-exact floating representation is used; resident extension inputs gather through their owner and return a host double matrix.",
+    }];
 
 const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "X",
@@ -282,12 +322,84 @@ enum OutputKind {
     summary = "Create dummy variables for grouping variables.",
     keywords = "dummyvar,dummy variables,one hot,statistics,categorical",
     type_resolver(tensor_type),
+    extensions(DUMMYVAR_EXTENSIONS),
+    integer_capabilities(DUMMYVAR_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::stats::summary::encoding::dummyvar_meta::DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::encoding"
 )]
 async fn dummyvar_builtin(group: Value) -> BuiltinResult<Value> {
+    if value_contains_typed_integer(&group) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DUMMYVAR_INTEGER_GROUP_EXTENSION,
+            "dummyvar",
+        )?;
+    }
+    if crate::value_contains_gpu(&group) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DUMMYVAR_GPU_GROUP_EXTENSION,
+            "dummyvar",
+        )?;
+    }
     let group = gather("dummyvar", group).await?;
+    validate_dummyvar_integer_levels(&group)?;
     dummyvar_compute(group)
+}
+
+fn value_contains_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_typed_integer))
+}
+
+fn validate_dummyvar_integer_levels(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Int(value) => validate_dummyvar_integer_level(value),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                for index in 0..storage.len() {
+                    let value = storage.value_at(index).ok_or_else(|| {
+                        internal(
+                            "dummyvar",
+                            "dummyvar: invalid typed-integer grouping storage",
+                        )
+                    })?;
+                    validate_dummyvar_integer_level(&value)?;
+                }
+            }
+            Ok(())
+        }
+        Value::Cell(cell) => {
+            for item in &cell.data {
+                validate_dummyvar_integer_levels(item)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_dummyvar_integer_level(value: &IntValue) -> BuiltinResult<()> {
+    let level = match value {
+        IntValue::I8(value) if *value > 0 => u128::from(*value as u8),
+        IntValue::I16(value) if *value > 0 => u128::from(*value as u16),
+        IntValue::I32(value) if *value > 0 => u128::from(*value as u32),
+        IntValue::I64(value) if *value > 0 => u128::from(*value as u64),
+        IntValue::U8(value) if *value > 0 => u128::from(*value),
+        IntValue::U16(value) if *value > 0 => u128::from(*value),
+        IntValue::U32(value) if *value > 0 => u128::from(*value),
+        IntValue::U64(value) if *value > 0 => u128::from(*value),
+        _ => {
+            return Err(invalid(
+                "dummyvar",
+                "dummyvar: numeric groups must contain positive integer levels or NaN",
+            ))
+        }
+    };
+    if level > MAX_ONEHOT_CELLS as u128 {
+        return Err(invalid("dummyvar", "dummyvar: output is too large"));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -1414,6 +1526,7 @@ mod tests {
 
     #[test]
     fn dummyvar_reads_typed_integer_labels_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let Value::Tensor(out) = block_on(dummyvar_builtin(int_tensor(
             IntegerStorage::I16(vec![1, 2, 1, 2, 2, 1]),
             vec![3, 2],
@@ -1429,6 +1542,83 @@ mod tests {
     }
 
     #[test]
+    fn dummyvar_supports_all_integer_classes_in_extension_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = [
+            runmat_builtins::IntegerStorage::I8(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::I16(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::I32(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::I64(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::U8(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::U16(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::U32(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::U64(vec![1, 2, 1]),
+        ];
+        for storage in storages {
+            let Value::Tensor(output) = block_on(dummyvar_builtin(int_tensor(storage, vec![3, 1])))
+                .expect("integer groups")
+            else {
+                panic!("expected double tensor")
+            };
+            assert!(output.integer_storage().is_none());
+            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        }
+    }
+
+    #[test]
+    fn dummyvar_rejects_wide_typed_levels_before_floating_conversion() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in [
+            IntegerStorage::I64(vec![(1_i64 << 53) + 1]),
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ] {
+            let error = block_on(dummyvar_builtin(int_tensor(storage, vec![1, 1])))
+                .expect_err("wide typed labels cannot request an unbounded design matrix");
+            assert!(error.message().contains("output is too large"));
+        }
+
+        let error = block_on(dummyvar_builtin(int_tensor(
+            IntegerStorage::I64(vec![i64::MIN]),
+            vec![1, 1],
+        )))
+        .expect_err("negative typed labels remain invalid");
+        assert!(error.message().contains("positive integer levels"));
+    }
+
+    #[test]
+    fn dummyvar_integer_extension_rejects_before_computation_in_strict_mode() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(dummyvar_builtin(int_tensor(
+            runmat_builtins::IntegerStorage::U8(vec![1, 2]),
+            vec![2, 1],
+        )))
+        .expect_err("integer extension gate");
+        assert_eq!(
+            error.identifier(),
+            DUMMYVAR_INTEGER_GROUP_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn dummyvar_gpu_extension_rejects_before_provider_access() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: 0,
+            buffer_id: 9_399_001,
+        });
+        let error = block_on(dummyvar_builtin(resident)).expect_err("GPU extension gate");
+        assert_eq!(
+            error.identifier(),
+            DUMMYVAR_GPU_GROUP_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
     fn dummyvar_rejects_unrepresentable_numeric_level_before_cast() {
         let err = block_on(dummyvar_builtin(tensor(
             vec![usize::MAX as f64],
@@ -1440,6 +1630,7 @@ mod tests {
 
     #[test]
     fn dummyvar_grouping_detection_uses_typed_integer_storage_len() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let first = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 1]), vec![3, 1]);
         let second = mirrorless_int_tensor(IntegerStorage::I16(vec![2, 2, 1]), vec![3, 1]);
 

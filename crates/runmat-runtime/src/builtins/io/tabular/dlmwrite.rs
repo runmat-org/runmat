@@ -1,7 +1,11 @@
 //! MATLAB-compatible `dlmwrite` builtin for delimiter-separated exports.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, Tensor, Value,
 };
@@ -20,6 +24,82 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const BUILTIN_NAME: &str = "dlmwrite";
 const MAX_NUMERIC_FORMAT_FIELD: usize = 4096;
+const MAX_DLMWRITE_LAYOUT_FIELDS: usize = 50_000_000;
+
+const DLMWRITE_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dlmwrite-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "dlmwrite with resident gpuArray data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DlmwriteResidentInputExtension"),
+};
+const DLMWRITE_BYTE_COUNT_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "dlmwrite-byte-count-output",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "requesting a dlmwrite byte-count output is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DlmwriteByteCountOutputExtension"),
+    };
+const DLMWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DLMWRITE_RESIDENT_INPUT_EXTENSION,
+    DLMWRITE_BYTE_COUNT_OUTPUT_EXTENSION,
+];
+const DLMWRITE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "M",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents all eight integer matrix classes; default formatting serializes authoritative values exactly.",
+    }];
+const DLMWRITE_INTEGER_PRECISION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "precision",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "R2026a documents all eight integer classes for the positive significant-digit count.",
+    }];
+const DLMWRITE_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "row/col/roffset/coffset",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed nonnegative scalar offsets are decoded exactly and must produce a checked, bounded materializable file layout.",
+    }];
+pub const DLMWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "dlmwrite(filename,integer_M,___)",
+        inputs: &DLMWRITE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Without explicit precision, integer text is emitted directly from native storage, including uint64 values above flintmax.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "dlmwrite(___,precision=integer_N)",
+        inputs: &DLMWRITE_INTEGER_PRECISION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The precision count must fit a positive u32 and controls floating text formatting.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "dlmwrite(___,integer_offsets)",
+        inputs: &DLMWRITE_INTEGER_OFFSET_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Offsets must fit usize and produce a checked layout of at most 50,000,000 fields; resident structural arguments gather before exact decoding.",
+    },
+];
 
 const DLMWRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bytesWritten",
@@ -199,7 +279,13 @@ const DLMWRITE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "File inspection/open/write/flush operations fail.",
     message: "dlmwrite: file write failed",
 };
-const DLMWRITE_ERRORS: [BuiltinErrorDescriptor; 7] = [
+const DLMWRITE_ERROR_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMWRITE.SIZE",
+    identifier: None,
+    when: "Row or column offsets overflow or request an impractically large file layout.",
+    message: "dlmwrite: requested output layout is too large",
+};
+const DLMWRITE_ERRORS: [BuiltinErrorDescriptor; 8] = [
     DLMWRITE_ERROR_ARG_CONFIG,
     DLMWRITE_ERROR_FILENAME,
     DLMWRITE_ERROR_OPTION,
@@ -207,6 +293,7 @@ const DLMWRITE_ERRORS: [BuiltinErrorDescriptor; 7] = [
     DLMWRITE_ERROR_DATA_SHAPE,
     DLMWRITE_ERROR_FORMAT,
     DLMWRITE_ERROR_IO,
+    DLMWRITE_ERROR_SIZE,
 ];
 pub const DLMWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DLMWRITE_SIGNATURES,
@@ -293,6 +380,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "dlmwrite,delimiter,precision,append,roffset,coffset",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
+    extensions(DLMWRITE_EXTENSIONS),
+    integer_capabilities(DLMWRITE_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::io::tabular::dlmwrite::DLMWRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::tabular::dlmwrite"
 )]
@@ -301,6 +390,23 @@ async fn dlmwrite_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 0) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DLMWRITE_BYTE_COUNT_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(&filename, Value::GpuTensor(_))
+        || matches!(&data, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DLMWRITE_RESIDENT_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered_path = gather_if_needed_async(&filename)
         .await
         .map_err(map_control_flow)?;
@@ -811,6 +917,7 @@ async fn write_dlm(
     let rows = tensor.rows();
     let cols = tensor.cols();
     let newline = options.newline.as_str();
+    let layout = validate_output_layout(rows, cols, options)?;
 
     let (existing_nonempty, ends_with_newline) = if options.append {
         match vfs::metadata_async(path).await {
@@ -873,17 +980,12 @@ async fn write_dlm(
                 err,
             )
         })?;
-        bytes += newline.len();
+        add_written_bytes(&mut bytes, newline.len())?;
     }
 
     for _ in 0..options.roffset {
-        bytes += write_blank_row(
-            &mut file,
-            cols,
-            options.coffset,
-            &options.delimiter,
-            newline,
-        )?;
+        let written = write_blank_row(&mut file, layout.output_cols, &options.delimiter, newline)?;
+        add_written_bytes(&mut bytes, written)?;
     }
 
     if rows == 0 || cols == 0 {
@@ -898,7 +1000,7 @@ async fn write_dlm(
     }
 
     for row in 0..rows {
-        let mut fields = Vec::with_capacity(options.coffset + cols);
+        let mut fields = Vec::with_capacity(layout.output_cols);
         for _ in 0..options.coffset {
             fields.push(String::new());
         }
@@ -915,7 +1017,7 @@ async fn write_dlm(
                     err,
                 )
             })?;
-            bytes += line.len();
+            add_written_bytes(&mut bytes, line.len())?;
         }
         file.write_all(newline.as_bytes()).map_err(|err| {
             dlmwrite_error_with_source(
@@ -924,7 +1026,7 @@ async fn write_dlm(
                 err,
             )
         })?;
-        bytes += newline.len();
+        add_written_bytes(&mut bytes, newline.len())?;
     }
 
     file.flush_async().await.map_err(|err| {
@@ -939,13 +1041,12 @@ async fn write_dlm(
 
 fn write_blank_row(
     file: &mut File,
-    cols: usize,
-    coffset: usize,
+    field_count: usize,
     delimiter: &str,
     newline: &str,
 ) -> BuiltinResult<usize> {
     let mut bytes = 0usize;
-    if coffset == 0 && cols == 0 {
+    if field_count == 0 {
         file.write_all(newline.as_bytes()).map_err(|err| {
             dlmwrite_error_with_source(
                 &DLMWRITE_ERROR_IO,
@@ -955,11 +1056,8 @@ fn write_blank_row(
         })?;
         return Ok(newline.len());
     }
-    let mut fields = Vec::with_capacity(coffset + cols);
-    for _ in 0..coffset {
-        fields.push(String::new());
-    }
-    for _ in 0..cols {
+    let mut fields = Vec::with_capacity(field_count);
+    for _ in 0..field_count {
         fields.push(String::new());
     }
     let line = fields.join(delimiter);
@@ -971,7 +1069,7 @@ fn write_blank_row(
                 err,
             )
         })?;
-        bytes += line.len();
+        add_written_bytes(&mut bytes, line.len())?;
     }
     file.write_all(newline.as_bytes()).map_err(|err| {
         dlmwrite_error_with_source(
@@ -980,8 +1078,60 @@ fn write_blank_row(
             err,
         )
     })?;
-    bytes += newline.len();
+    add_written_bytes(&mut bytes, newline.len())?;
     Ok(bytes)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DlmWriteLayout {
+    output_cols: usize,
+}
+
+fn validate_output_layout(
+    rows: usize,
+    cols: usize,
+    options: &DlmWriteOptions,
+) -> BuiltinResult<DlmWriteLayout> {
+    let output_rows = rows.checked_add(options.roffset).ok_or_else(|| {
+        dlmwrite_error_with(
+            &DLMWRITE_ERROR_SIZE,
+            "dlmwrite: row offset overflows the output layout",
+        )
+    })?;
+    let output_cols = cols.checked_add(options.coffset).ok_or_else(|| {
+        dlmwrite_error_with(
+            &DLMWRITE_ERROR_SIZE,
+            "dlmwrite: column offset overflows the output layout",
+        )
+    })?;
+    let fields = output_rows.checked_mul(output_cols).ok_or_else(|| {
+        dlmwrite_error_with(
+            &DLMWRITE_ERROR_SIZE,
+            "dlmwrite: row and column offsets overflow the output layout",
+        )
+    })?;
+    if output_rows > MAX_DLMWRITE_LAYOUT_FIELDS
+        || output_cols > MAX_DLMWRITE_LAYOUT_FIELDS
+        || fields > MAX_DLMWRITE_LAYOUT_FIELDS
+    {
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_SIZE,
+            format!(
+                "dlmwrite: requested output layout exceeds the {MAX_DLMWRITE_LAYOUT_FIELDS}-field safety limit"
+            ),
+        ));
+    }
+    Ok(DlmWriteLayout { output_cols })
+}
+
+fn add_written_bytes(total: &mut usize, written: usize) -> BuiltinResult<()> {
+    *total = total.checked_add(written).ok_or_else(|| {
+        dlmwrite_error_with(
+            &DLMWRITE_ERROR_SIZE,
+            "dlmwrite: byte count overflow while writing output",
+        )
+    })?;
+    Ok(())
 }
 
 async fn file_ends_with_newline(path: &Path) -> io::Result<bool> {
@@ -1727,6 +1877,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmwrite_handles_gpu_tensors() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
@@ -1744,10 +1895,57 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn dlmwrite_strict_resident_input_rejects_before_provider_or_file_access() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0],
+                    shape: &[1, 2],
+                })
+                .expect("upload resident data");
+            provider.reset_telemetry();
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let path = temp_path("csv");
+            assert!(!path.exists());
+
+            let error = dlmwrite_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                Value::GpuTensor(handle.clone()),
+                Vec::new(),
+            )
+            .expect_err("resident data must reject before provider or file access");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DlmwriteResidentInputExtension")
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(!path.exists());
+            provider.free(&handle).expect("free resident data");
+        });
+    }
+
+    #[test]
+    fn dlmwrite_byte_count_output_is_a_gated_extension() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let _outputs = crate::output_count::push_output_count(Some(1));
+        let error = dlmwrite_builtin(
+            Value::from("unused.csv"),
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+            Vec::new(),
+        )
+        .expect_err("byte-count output must reject in strict mode");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:DlmwriteByteCountOutputExtension")
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn dlmwrite_handles_wgpu_provider_gather() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ =
             wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default());
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -1818,6 +2016,72 @@ pub(crate) mod tests {
         );
         assert!(message.to_ascii_lowercase().contains("integer"));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn dlmwrite_rejects_unmaterializable_offsets_before_file_access() {
+        for (label, args) in [
+            (
+                "row",
+                vec![
+                    Value::from(","),
+                    Value::Int(IntValue::U64(u64::MAX)),
+                    Value::Int(IntValue::U8(0)),
+                ],
+            ),
+            (
+                "column",
+                vec![
+                    Value::from(","),
+                    Value::Int(IntValue::U8(0)),
+                    Value::Int(IntValue::U64(u64::MAX)),
+                ],
+            ),
+        ] {
+            let path = temp_path("csv");
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let error = dlmwrite_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                Value::Tensor(tensor),
+                args,
+            )
+            .expect_err("unmaterializable offset must reject");
+            assert!(
+                error.message().contains("offset") || error.message().contains("layout"),
+                "unexpected {label} error: {}",
+                error.message()
+            );
+            assert!(!path.exists(), "{label} offset must reject before open");
+        }
+    }
+
+    #[test]
+    fn dlmwrite_layout_validation_checks_addition_product_limit_and_byte_count() {
+        let mut row_overflow = DlmWriteOptions::default();
+        row_overflow.roffset = usize::MAX;
+        assert!(validate_output_layout(1, 1, &row_overflow).is_err());
+
+        let mut column_overflow = DlmWriteOptions::default();
+        column_overflow.coffset = usize::MAX;
+        assert!(validate_output_layout(1, 1, &column_overflow).is_err());
+
+        let multiplication_overflow = DlmWriteOptions::default();
+        assert!(validate_output_layout(usize::MAX / 2 + 1, 2, &multiplication_overflow).is_err());
+
+        let bounded_limit = DlmWriteOptions::default();
+        assert!(validate_output_layout(10_000, 10_000, &bounded_limit).is_err());
+
+        let mut row_limit = DlmWriteOptions::default();
+        row_limit.roffset = MAX_DLMWRITE_LAYOUT_FIELDS;
+        assert!(validate_output_layout(1, 0, &row_limit).is_err());
+
+        let mut column_limit = DlmWriteOptions::default();
+        column_limit.coffset = MAX_DLMWRITE_LAYOUT_FIELDS;
+        assert!(validate_output_layout(0, 1, &column_limit).is_err());
+
+        let mut bytes = usize::MAX;
+        assert!(add_written_bytes(&mut bytes, 1).is_err());
+        assert_eq!(bytes, usize::MAX);
     }
 
     #[test]

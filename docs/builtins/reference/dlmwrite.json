@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the CPU. gpuArray inputs are gathered before serialisation following MATLAB semantics."
+    "notes": "Runs entirely on the CPU. No GPU capability is documented; gathering resident input is a named RunMat extension and rejects in strict compatibility mode."
   },
   "fusion": {
     "elementwise": false,
@@ -45,10 +45,12 @@
   },
   "description": "`dlmwrite(filename, M)` writes numeric matrix data to plain-text files using configurable delimiters. Precision, line-ending, and offset options follow MATLAB and RunMat legacy semantics.",
   "behaviors": [
-    "Accepts real numeric or logical arrays up to two dimensions (trailing singleton dimensions are ignored). Complex inputs raise an error. Logical values are converted to `0`/`1`.",
+    "Accepts real numeric or logical arrays up to two dimensions (trailing singleton dimensions are ignored). All eight integer classes serialize directly from authoritative storage at default precision, including uint64 values beyond flintmax. Logical values are converted to `0`/`1`.",
     "The default delimiter is a comma. Supply a character vector, string scalar, or control sequence (`\"\\t\"`, `\"\\n\"`, `\"\\r\"`) to change it. Delimiters must not be empty.",
     "Positional syntax matches MATLAB: `dlmwrite(filename, M, delimiter)` and `dlmwrite(filename, M, delimiter, row, col)` provide quick overrides. Row/column offsets are zero-based and insert blank rows/columns filled with the delimiter before the numeric data.",
-    "Name-value pairs extend any syntax: `'-append'` appends to an existing file, `'delimiter'` overrides the separator, `'precision'` accepts either a scalar (significant digits) or a C-style printf format such as `'%.6f'`, `'newline'` chooses between `'pc'` (`CRLF`), `'unix'` (`LF`), or `'mac'` (`CR`), and `'roffset'`/`'coffset'` mirror the positional offsets.",
+    "Name-value pairs extend any syntax: `'-append'` appends to an existing file, `'delimiter'` overrides the separator, `'precision'` accepts either a scalar (significant digits) or a C-style printf format such as `'%.6f'`, `'newline'` chooses between `'pc'` (`CRLF`), `'unix'` (`LF`), or `'mac'` (`CR`), and `'roffset'`/`'coffset'` mirror the positional offsets. Typed integer offsets and precision counts are decoded exactly. Row and column additions are checked before file access, and layouts above 50,000,000 fields reject with a controlled size error.",
+    "Explicit precision intentionally enters the floating formatting domain; default integer formatting remains exact.",
+    "MATLAB documents complex numeric and numeric cell input and documents no output argument. RunMat currently rejects complex/cell data; requesting RunMat's byte-count output is a named extension.",
     "Empty fields created by offsets are emitted as empty tokens separated by the delimiter, matching MATLAB's behaviour.",
     "Files are opened in text mode. When appending, RunMat preserves the existing newline convention and honours offsets relative to the end of the file.",
     "Paths beginning with `~` expand to the user's home directory before writing, matching other RunMat I/O builtins."
@@ -75,7 +77,7 @@
       "input": "dlmwrite(\"fixed.txt\", rand(2, 2), \"precision\", \"%.6f\", \"delimiter\", \"\\t\")"
     },
     {
-      "description": "Selecting the Windows line ending while writing GPU data",
+      "description": "Using the RunMat resident-input extension with Windows line endings",
       "input": "G = gpuArray(single([1.5; 2.5; 3.5]));\ndlmwrite(\"gpu_pc.txt\", G, \"newline\", \"pc\")",
       "output": "% Data is gathered from the GPU and written using CR/LF line endings."
     }
@@ -124,6 +126,10 @@
   ],
   "links": [
     {
+      "label": "MathWorks R2026a dlmwrite documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/dlmwrite.html"
+    },
+    {
       "label": "dlmread",
       "url": "./dlmread"
     },
@@ -160,8 +166,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/tabular/dlmwrite.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/dlmwrite.rs"
   },
-  "gpu_residency": "No. `dlmwrite` gathers GPU-resident tensors automatically before writing. This mirrors MATLAB's behaviour, where `dlmwrite` always operates on host-resident values.",
+  "gpu_residency": "No. `dlmwrite` gathers GPU-resident tensors only when RunMat extensions are enabled; public MATLAB documentation does not advertise gpuArray input support.",
   "gpu_behavior": [
-    "`dlmwrite` performs all formatting on the CPU. When the input array lives on a GPU, RunMat gathers it through the active acceleration provider before serialisation. No provider hooks are required, and the builtin returns once the host-side write completes. If no provider is registered, the same gather error surface as other residency sinks appears."
+    "`dlmwrite` performs all formatting on the CPU. With RunMat extensions enabled, resident input is gathered through the active acceleration provider before serialisation; strict compatibility mode rejects that form."
   ]
 }

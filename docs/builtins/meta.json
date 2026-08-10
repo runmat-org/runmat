@@ -37549,23 +37549,177 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "varargout = groupingBuiltin(args...)",
+          "label": "Y = discretize(X, edges)",
           "inputs": [
             {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
               "default": null,
-              "description": "MATLAB-compatible arguments."
+              "description": "Numeric input values to assign to bins."
+            },
+            {
+              "name": "edges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Monotonically increasing numeric bin edges."
             }
           ],
           "outputs": [
             {
-              "name": "varargout",
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bin numbers or replacement values with the shape of X."
+            }
+          ]
+        },
+        {
+          "label": "Y = discretize(X, N)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric input values to assign to bins."
+            },
+            {
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer number of equal-width bins."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bin numbers or replacement values with the shape of X."
+            }
+          ]
+        },
+        {
+          "label": "Y = discretize(___, values)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric input values to assign to bins."
+            },
+            {
+              "name": "edges_or_N",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Explicit numeric edges or a positive scalar bin count."
+            },
+            {
+              "name": "values",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One replacement value for each bin."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bin numbers or replacement values with the shape of X."
+            }
+          ]
+        },
+        {
+          "label": "Y = discretize(___, \"IncludedEdge\", side)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric input values to assign to bins."
+            },
+            {
+              "name": "edges_or_N",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Explicit numeric edges or a positive scalar bin count."
+            },
+            {
+              "name": "IncludedEdge",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Literal option name \"IncludedEdge\"."
+            },
+            {
+              "name": "side",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Either \"left\" or \"right\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bin numbers or replacement values with the shape of X."
+            }
+          ]
+        },
+        {
+          "label": "[Y, E] = discretize(X, N, ___)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric input values to assign to bins."
+            },
+            {
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive integer number of equal-width bins."
+            },
+            {
+              "name": "arguments",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Builtin outputs."
+              "description": "Optional replacement values and IncludedEdge name-value pair."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bin numbers or replacement values with the shape of X."
+            },
+            {
+              "name": "E",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Computed bin-edge row vector."
             }
           ]
         }
@@ -37578,16 +37732,82 @@
           "message": "grouping builtin: invalid input"
         },
         {
-          "code": "RM.GROUPING.CALLBACK",
-          "identifier": "RunMat:grouping:CallbackFailed",
-          "when": "A grouped callback fails or returns incompatible outputs.",
-          "message": "grouping builtin: callback failed"
-        },
-        {
           "code": "RM.GROUPING.TOO_LARGE",
           "identifier": "RunMat:grouping:TooLarge",
           "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
           "message": "grouping builtin: output is too large"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = discretize(integer_X,integer_edges,___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented and explicit-edge comparisons use authoritative values."
+            },
+            {
+              "name": "edges",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer edge classes are documented; increasing edges are validated without an f64 mirror."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Explicit-edge bin assignment is exact across mixed integer and floating classes; default bin numbers are double."
+        },
+        {
+          "form": "Y = discretize(X,edges,integer_values,___)",
+          "inputs": [
+            {
+              "name": "values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer replacement values preserve class and use exact zero for out-of-range or missing X."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Replacement output preserves the values vector's numeric class; missing assignments are zero for integer values."
         }
       ]
     },
@@ -37838,6 +38058,43 @@
           "identifier": "RunMat:dividerand:Internal",
           "when": "Internal conversion or allocation fails.",
           "message": "sampling: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "dividerand-resident-argument",
+          "mode": "RunMatOnly",
+          "description": "resident dividerand arguments are gathered as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DividerandResidentArgumentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[trainInd,valInd,testInd] = dividerand(integer_Q,___)",
+          "inputs": [
+            {
+              "name": "Q",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Q is a nonnegative scalar target count and typed integer scalars are decoded from authoritative storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Q must fit usize and RunMat's bounded allocation policy; all returned index vectors are double row vectors."
         }
       ]
     },
@@ -38118,6 +38375,77 @@
           "when": "Internal tensor output materialization fails.",
           "message": "dlmread: unable to construct output matrix"
         }
+      ],
+      "extensions": [
+        {
+          "id": "dlmread-numeric-delimiter",
+          "mode": "RunMatOnly",
+          "description": "numeric delimiter character codes for dlmread are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DlmreadNumericDelimiterExtension"
+        },
+        {
+          "id": "dlmread-resident-argument",
+          "mode": "RunMatOnly",
+          "description": "resident dlmread arguments are gathered as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DlmreadResidentArgumentExtension"
+        },
+        {
+          "id": "dlmread-composed-range",
+          "mode": "RunMatOnly",
+          "description": "omitted-delimiter and offset-plus-range dlmread forms are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:DlmreadComposedRangeExtension"
+        },
+        {
+          "id": "dlmread-colon-spreadsheet-range",
+          "mode": "RunMatOnly",
+          "description": "colon-delimited spreadsheet ranges for dlmread are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DlmreadColonSpreadsheetRangeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = dlmread(filename,delimiter,integer_offsets_or_range)",
+          "inputs": [
+            {
+              "name": "R1/R2",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer classes for zero-based row offsets."
+            },
+            {
+              "name": "C1/C2",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer classes for zero-based column offsets."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed offsets and numeric range vectors are decoded from authoritative integer storage before host file parsing; output is always a host double matrix."
+        }
       ]
     },
     {
@@ -38322,6 +38650,109 @@
           "identifier": null,
           "when": "File inspection/open/write/flush operations fail.",
           "message": "dlmwrite: file write failed"
+        },
+        {
+          "code": "RM.DLMWRITE.SIZE",
+          "identifier": null,
+          "when": "Row or column offsets overflow or request an impractically large file layout.",
+          "message": "dlmwrite: requested output layout is too large"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "dlmwrite-resident-input",
+          "mode": "RunMatOnly",
+          "description": "dlmwrite with resident gpuArray data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DlmwriteResidentInputExtension"
+        },
+        {
+          "id": "dlmwrite-byte-count-output",
+          "mode": "RunMatOnly",
+          "description": "requesting a dlmwrite byte-count output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DlmwriteByteCountOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dlmwrite(filename,integer_M,___)",
+          "inputs": [
+            {
+              "name": "M",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents all eight integer matrix classes; default formatting serializes authoritative values exactly."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Without explicit precision, integer text is emitted directly from native storage, including uint64 values above flintmax."
+        },
+        {
+          "form": "dlmwrite(___,precision=integer_N)",
+          "inputs": [
+            {
+              "name": "precision",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer classes for the positive significant-digit count."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The precision count must fit a positive u32 and controls floating text formatting."
+        },
+        {
+          "form": "dlmwrite(___,integer_offsets)",
+          "inputs": [
+            {
+              "name": "row/col/roffset/coffset",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Typed nonnegative scalar offsets are decoded exactly and must produce a checked, bounded materializable file layout."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Offsets must fit usize and produce a checked layout of at most 50,000,000 fields; resident structural arguments gather before exact decoding."
         }
       ]
     },
@@ -38464,6 +38895,51 @@
           "when": "Inputs do not match a supported doc2sequence form.",
           "message": "doc2sequence received invalid input"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "sequences = doc2sequence(enc_or_emb, documents, Length=integer_length, PaddingValue=integer_value)",
+          "inputs": [
+            {
+              "name": "Length",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length."
+            },
+            {
+              "name": "PaddingValue",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Length is an exact positive structural control; PaddingValue crosses explicitly to RunMat's current host floating sequence storage. doc2sequence has no documented GPU-array capability."
+        }
       ]
     },
     {
@@ -38554,6 +39030,76 @@
           "when": "Runtime cannot materialize dot outputs.",
           "message": "dot: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "dot-integer-data",
+          "mode": "RunMatOnly",
+          "description": "dot with typed-integer data operands is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DotIntegerDataExtension"
+        },
+        {
+          "id": "dot-logical-data",
+          "mode": "RunMatOnly",
+          "description": "dot with logical data operands is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DotLogicalDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "C = dot(integer_A_or_B, B, dim?)",
+          "inputs": [
+            {
+              "name": "A_or_B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Mode-gated integer operands are read from authoritative storage and multiplied exactly when both host operands are integral; each exact product then crosses to the floating reduction/output domain."
+        },
+        {
+          "form": "C = dot(A, B, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented positive-integer scalar dimension is read exactly from typed scalar storage before platform-bound validation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "All eight scalar integer classes select the reduction dimension without passing through an f64 mirror."
+        }
       ]
     },
     {
@@ -38642,6 +39188,43 @@
           "identifier": "RunMat:double:Internal",
           "when": "Internal conversion, gather, or provider upload failed.",
           "message": "double: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "double-like-prototype",
+          "mode": "RunMatOnly",
+          "description": "double(X, 'like', prototype) is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DoubleLikePrototypeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = double(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents conversion from every built-in integer class; conversion to IEEE binary64 can round wide int64/uint64 values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "All eight integer classes convert elementwise to double. Host conversion reads authoritative integer storage; resident conversion uses the owning provider when it can produce true F64 and otherwise gathers."
         }
       ]
     },
@@ -38757,6 +39340,109 @@
           "when": "Output tensor construction fails.",
           "message": "sample-rate builtin: failed to build output"
         }
+      ],
+      "extensions": [
+        {
+          "id": "downsample-integer-factor",
+          "mode": "RunMatOnly",
+          "description": "downsample with a typed-integer factor is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DownsampleIntegerFactorExtension"
+        },
+        {
+          "id": "downsample-integer-phase",
+          "mode": "RunMatOnly",
+          "description": "downsample with a typed-integer phase is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DownsampleIntegerPhaseExtension"
+        },
+        {
+          "id": "downsample-nd-input",
+          "mode": "RunMatOnly",
+          "description": "downsample with an input having more than two dimensions is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DownsampleNdInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = downsample(integer_X, N, PHASE?)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The public X argument is a vector or matrix without a datatype restriction. Downsampling is structural selection, so authoritative integer elements and their class are preserved exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Host storage is selected without conversion; resident integer storage uses the owner-resolved linear-gather hook and is accepted only with matching owner, device, shape, storage, and integer class."
+        },
+        {
+          "form": "Y = downsample(X, integer_N, PHASE?)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a lists single and double for N; RunMat mode additionally parses typed integers exactly as host sizes."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The factor is extension-gated before X or any provider is accessed, then converted exactly to a host size."
+        },
+        {
+          "form": "Y = downsample(X, N, integer_PHASE)",
+          "inputs": [
+            {
+              "name": "PHASE",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a lists single and double for PHASE; RunMat mode additionally parses typed integers exactly before validating 0 <= PHASE < N."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The phase is extension-gated before X or any provider is accessed, parsed exactly, and range-checked against N."
+        }
       ]
     },
     {
@@ -38827,6 +39513,49 @@
           "when": "Internal conversion or allocation fails.",
           "message": "encoding: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "dummyvar-integer-group",
+          "mode": "RunMatOnly",
+          "description": "dummyvar with typed-integer grouping variables is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DummyvarIntegerGroupExtension"
+        },
+        {
+          "id": "dummyvar-gpu-group",
+          "mode": "RunMatOnly",
+          "description": "dummyvar with a resident grouping variable is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DummyvarGpuGroupExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "D = dummyvar(integer_group)",
+          "inputs": [
+            {
+              "name": "group",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a lists single and double numeric grouping variables. RunMat mode additionally admits all eight integer classes as positive level labels; values outside the bounded feasible output domain reject before floating conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Positive integer labels select columns 1:max(group). Typed labels are validated exactly against sign and the bounded feasible output domain before their now-exact floating representation is used; resident extension inputs gather through their owner and return a host double matrix."
+        }
       ]
     },
     {
@@ -38835,14 +39564,14 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "t = duration(hours)",
+          "label": "t = duration(X)",
           "inputs": [
             {
-              "name": "hours",
+              "name": "X",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Hour component."
+              "description": "N-by-3 matrix of hour, minute, and second components."
             }
           ],
           "outputs": [
@@ -38919,6 +39648,48 @@
           ]
         },
         {
+          "label": "t = duration(hours, minutes, seconds, milliseconds)",
+          "inputs": [
+            {
+              "name": "hours",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hour component."
+            },
+            {
+              "name": "minutes",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Minute component."
+            },
+            {
+              "name": "seconds",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Second component."
+            },
+            {
+              "name": "milliseconds",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Millisecond component."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Duration object result."
+            }
+          ]
+        },
+        {
           "label": "t = duration(___, \"Format\", format)",
           "inputs": [
             {
@@ -38979,6 +39750,124 @@
           "identifier": "RunMat:duration:Internal",
           "when": "Internal duration state or indexing/evaluation failed unexpectedly.",
           "message": "duration: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "duration-short-component-form",
+          "mode": "RunMatOnly",
+          "description": "duration with one hour component or two hour/minute components is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DurationShortComponentFormExtension"
+        },
+        {
+          "id": "duration-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "duration with resident numeric input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DurationGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "D = duration(integer_H, integer_MI, integer_S, integer_MS?)",
+          "inputs": [
+            {
+              "name": "H",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric hour arrays can be scalar-expanded; values enter the duration floating representation."
+            },
+            {
+              "name": "MI",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric minute arrays can be scalar-expanded; nonscalars must match the other component sizes."
+            },
+            {
+              "name": "S",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric second arrays can be scalar-expanded; nonscalars must match the other component sizes."
+            },
+            {
+              "name": "MS",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The optional fourth component contributes milliseconds and follows the same scalar-expansion rule."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "All numeric classes share MATLAB scalar expansion and produce a host duration object backed by binary64 day counts; resident inputs are a separately gated RunMat extension and gather before construction."
+        },
+        {
+          "form": "D = duration(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "X must be a numeric matrix with exactly three columns ordered as hours, minutes, and seconds."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each row of the N-by-3 matrix creates one duration; output is an N-by-1 host duration array."
         }
       ]
     },

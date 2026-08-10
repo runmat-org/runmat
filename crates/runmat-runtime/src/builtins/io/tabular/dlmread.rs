@@ -3,17 +3,21 @@
 //! `dlmread` predates `readmatrix` but is still widely used in MATLAB
 //! codebases for quick numeric imports with custom delimiters. This
 //! implementation mirrors MATLAB's zero-based range semantics and
-//! accepts the same mix of delimiter forms: characters, string scalars,
-//! and numeric codes corresponding to ASCII delimiters.
+//! accepts character and string delimiters. Numeric delimiter codes remain
+//! available as an explicitly classified RunMat extension.
 
 use std::char;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, Tensor, Value,
+    IntValue, NumericScalar, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -27,6 +31,67 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dlmread";
+
+const DLMREAD_NUMERIC_DELIMITER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "dlmread-numeric-delimiter",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "numeric delimiter character codes for dlmread are a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DlmreadNumericDelimiterExtension"),
+    };
+const DLMREAD_RESIDENT_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "dlmread-resident-argument",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "resident dlmread arguments are gathered as a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DlmreadResidentArgumentExtension"),
+    };
+const DLMREAD_COMPOSED_RANGE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dlmread-composed-range",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "omitted-delimiter and offset-plus-range dlmread forms are RunMat extensions",
+    error_identifier: Some("RunMat:compatibility:DlmreadComposedRangeExtension"),
+};
+const DLMREAD_COLON_RANGE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dlmread-colon-spreadsheet-range",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "colon-delimited spreadsheet ranges for dlmread are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DlmreadColonSpreadsheetRangeExtension"),
+};
+const DLMREAD_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    DLMREAD_NUMERIC_DELIMITER_EXTENSION,
+    DLMREAD_RESIDENT_ARGUMENT_EXTENSION,
+    DLMREAD_COMPOSED_RANGE_EXTENSION,
+    DLMREAD_COLON_RANGE_EXTENSION,
+];
+
+const DLMREAD_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "R1/R2",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents all eight integer classes for zero-based row offsets.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "C1/C2",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents all eight integer classes for zero-based column offsets.",
+    },
+];
+pub const DLMREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "M = dlmread(filename,delimiter,integer_offsets_or_range)",
+        inputs: &DLMREAD_INTEGER_OFFSET_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed offsets and numeric range vectors are decoded from authoritative integer storage before host file parsing; output is always a host double matrix.",
+    }];
 
 const DLMREAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "M",
@@ -360,10 +425,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "dlmread,delimiter,ascii import,range",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::tensor_type),
+    extensions(DLMREAD_EXTENSIONS),
+    integer_capabilities(DLMREAD_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::io::tabular::dlmread::DLMREAD_DESCRIPTOR),
     builtin_path = "crate::builtins::io::tabular::dlmread"
 )]
 async fn dlmread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(&path, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DLMREAD_RESIDENT_ARGUMENT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered_path = gather_if_needed_async(&path)
         .await
         .map_err(map_control_flow)?;
@@ -392,6 +469,7 @@ async fn dlmread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
 
 #[derive(Clone, Debug)]
 enum DelimiterSpec {
+    Auto,
     Char(char),
     String(String),
 }
@@ -399,10 +477,7 @@ enum DelimiterSpec {
 impl DelimiterSpec {
     fn new_from_string(raw: &str) -> BuiltinResult<Self> {
         if raw.is_empty() {
-            return Err(dlmread_error_with(
-                &DLMREAD_ERROR_DELIMITER,
-                "dlmread: delimiter must not be empty",
-            ));
+            return Ok(DelimiterSpec::Auto);
         }
         if raw == r"\t" {
             return Ok(DelimiterSpec::Char('\t'));
@@ -424,6 +499,8 @@ impl DelimiterSpec {
 
     fn split<'a>(&self, line: &'a str) -> Vec<&'a str> {
         match self {
+            DelimiterSpec::Auto if line.contains(',') => line.split(',').collect(),
+            DelimiterSpec::Auto => line.split_whitespace().collect(),
             DelimiterSpec::Char(ch) => line.split(*ch).collect(),
             DelimiterSpec::String(pattern) => line.split(pattern.as_str()).collect(),
         }
@@ -441,7 +518,7 @@ struct DlmReadOptions {
 impl Default for DlmReadOptions {
     fn default() -> Self {
         Self {
-            delimiter: DelimiterSpec::Char(','),
+            delimiter: DelimiterSpec::Auto,
             start_row: 0,
             start_col: 0,
             range: None,
@@ -465,6 +542,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmReadOptions> {
         0 => Ok(options),
         1 => {
             if is_range_candidate(&gathered[0]) {
+                require_composed_range_extension()?;
                 options.range = Some(parse_range(&gathered[0])?);
             } else {
                 options.delimiter = parse_delimiter(&gathered[0])?;
@@ -476,6 +554,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmReadOptions> {
                 options.delimiter = parse_delimiter(&gathered[0])?;
                 options.range = Some(parse_range(&gathered[1])?);
             } else {
+                require_composed_range_extension()?;
                 options.start_row = value_to_start_index(&gathered[0], "row")?;
                 options.start_col = value_to_start_index(&gathered[1], "col")?;
             }
@@ -483,6 +562,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmReadOptions> {
         }
         3 => {
             if is_range_candidate(&gathered[2]) {
+                require_composed_range_extension()?;
                 options.start_row = value_to_start_index(&gathered[0], "row")?;
                 options.start_col = value_to_start_index(&gathered[1], "col")?;
                 options.range = Some(parse_range(&gathered[2])?);
@@ -499,6 +579,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmReadOptions> {
             Ok(options)
         }
         4 => {
+            require_composed_range_extension()?;
             if !is_range_candidate(&gathered[3]) {
                 return Err(dlmread_error_with(
                     &DLMREAD_ERROR_ARG_CONFIG,
@@ -516,6 +597,13 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmReadOptions> {
             "dlmread: expected dlmread(filename[, delimiter][, row, col][, range])",
         )),
     }
+}
+
+fn require_composed_range_extension() -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &DLMREAD_COMPOSED_RANGE_EXTENSION,
+        BUILTIN_NAME,
+    )
 }
 
 fn is_delimiter_value(value: &Value) -> bool {
@@ -577,9 +665,16 @@ fn parse_delimiter(value: &Value) -> BuiltinResult<DelimiterSpec> {
                 ))
             }
         }
-        Value::Int(i) => delimiter_from_integer(i),
-        Value::Num(n) => delimiter_from_numeric(*n),
+        Value::Int(i) => {
+            require_numeric_delimiter_extension()?;
+            delimiter_from_integer(i)
+        }
+        Value::Num(n) => {
+            require_numeric_delimiter_extension()?;
+            delimiter_from_numeric(*n)
+        }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            require_numeric_delimiter_extension()?;
             if let Some(storage) = t.integer_storage() {
                 let value = storage.value_at(0).expect("one-element integer storage");
                 delimiter_from_integer(&value)
@@ -592,6 +687,13 @@ fn parse_delimiter(value: &Value) -> BuiltinResult<DelimiterSpec> {
             format!("dlmread: unsupported delimiter value {value:?}"),
         )),
     }
+}
+
+fn require_numeric_delimiter_extension() -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &DLMREAD_NUMERIC_DELIMITER_EXTENSION,
+        BUILTIN_NAME,
+    )
 }
 
 fn delimiter_from_integer(value: &IntValue) -> BuiltinResult<DelimiterSpec> {
@@ -894,7 +996,17 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
             "dlmread: Range string cannot be empty",
         ));
     }
-    let parts: Vec<&str> = trimmed.split(':').collect();
+    let parts: Vec<&str> = if trimmed.contains("..") {
+        trimmed.split("..").collect()
+    } else {
+        if trimmed.contains(':') {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &DLMREAD_COLON_RANGE_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        trimmed.split(':').collect()
+    };
     if parts.len() > 2 {
         return Err(dlmread_error_with(
             &DLMREAD_ERROR_RANGE,
@@ -936,7 +1048,16 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
 
 fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
-        Value::Tensor(t) => tensor::tensor_values_f64(t),
+        Value::Tensor(t) => (0..t.len())
+            .map(|index| {
+                t.numeric_value_at(index).ok_or_else(|| {
+                    dlmread_error_with(
+                        &DLMREAD_ERROR_RANGE,
+                        "dlmread: numeric Range contains an invalid element",
+                    )
+                })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?,
         _ => {
             return Err(dlmread_error_with(
                 &DLMREAD_ERROR_RANGE,
@@ -952,7 +1073,7 @@ fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     }
     let mut indices = Vec::with_capacity(elements.len());
     for (idx, element) in elements.iter().enumerate() {
-        indices.push(non_negative_index(*element, idx)?);
+        indices.push(non_negative_numeric_index(*element, idx)?);
     }
     let start_row = indices[0];
     let start_col = indices[1];
@@ -968,6 +1089,21 @@ fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
         end_col,
     };
     validate_range(spec)
+}
+
+fn non_negative_numeric_index(value: NumericScalar, position: usize) -> BuiltinResult<usize> {
+    if let Some(integer) = value.into_int_value() {
+        return integer.try_to_usize().ok_or_else(|| {
+            dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
+                format!(
+                    "dlmread: Range index {} is too large or negative",
+                    position + 1
+                ),
+            )
+        });
+    }
+    non_negative_index(value.materialize_f64(), position)
 }
 
 fn non_negative_index(value: f64, position: usize) -> BuiltinResult<usize> {
@@ -1236,6 +1372,7 @@ fn rows_to_tensor(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use runmat_time::unix_timestamp_ns;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1343,6 +1480,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_ascii_code_delimiter() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = write_temp_file(&["5|6|7", "8|9|10"]);
         let args = vec![Value::Int(IntValue::I32('|' as i32))];
         let result = dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args)
@@ -1411,6 +1549,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_with_offsets() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = write_temp_file(&["0,1,2", "3,4,5", "6,7,8"]);
         let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(1))];
         let result = dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args)
@@ -1425,8 +1564,97 @@ pub(crate) mod tests {
         fs::remove_file(path).ok();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn dlmread_empty_delimiter_placeholders_are_documented_strict_forms() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let comma_path = write_temp_file(&["0,1,2", "3,4,5", "6,7,8"]);
+        let comma = dlmread_builtin(
+            Value::from(comma_path.to_string_lossy().to_string()),
+            vec![
+                Value::from(""),
+                Value::Int(IntValue::U8(1)),
+                Value::Int(IntValue::U8(1)),
+            ],
+        )
+        .expect("empty string delimiter placeholder");
+        let Value::Tensor(comma) = comma else {
+            panic!("expected comma tensor")
+        };
+        assert_eq!(comma.shape, vec![2, 2]);
+        assert_eq!(comma.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
+
+        let whitespace_path = write_temp_file(&["0 1 2", "3 4 5", "6 7 8"]);
+        let empty_char = CharArray::new(Vec::new(), 1, 0).expect("empty character vector");
+        let whitespace = dlmread_builtin(
+            Value::from(whitespace_path.to_string_lossy().to_string()),
+            vec![
+                Value::CharArray(empty_char),
+                Value::Int(IntValue::U8(1)),
+                Value::Int(IntValue::U8(1)),
+            ],
+        )
+        .expect("empty char delimiter placeholder");
+        let Value::Tensor(whitespace) = whitespace else {
+            panic!("expected whitespace tensor")
+        };
+        assert_eq!(whitespace.shape, vec![2, 2]);
+        assert_eq!(whitespace.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
+
+        fs::remove_file(comma_path).ok();
+        fs::remove_file(whitespace_path).ok();
+    }
+
+    #[test]
+    fn dlmread_strict_composed_range_rejects_before_file_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let path = unique_path("strict_composed_absent").with_extension("csv");
+        assert!(!path.exists());
+        let error = dlmread_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![Value::Int(IntValue::U8(0)), Value::Int(IntValue::U8(0))],
+        )
+        .expect_err("omitted-delimiter offsets must reject before file access");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:DlmreadComposedRangeExtension")
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn dlmread_strict_resident_argument_rejects_before_provider_or_file_access() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[44.0],
+                    shape: &[1, 1],
+                })
+                .expect("upload resident delimiter");
+            provider.reset_telemetry();
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let path = unique_path("strict_resident_absent").with_extension("csv");
+            assert!(!path.exists());
+
+            let error = dlmread_builtin(
+                Value::from(path.to_string_lossy().to_string()),
+                vec![Value::GpuTensor(handle.clone())],
+            )
+            .expect_err("resident argument must reject before provider access");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DlmreadResidentArgumentExtension")
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(!path.exists());
+            provider.free(&handle).expect("free resident delimiter");
+        });
+    }
+
     #[test]
     fn dlmread_integer_tensor_parsers_preserve_exact_bounds() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let row = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("row");
         let row = row;
         assert_eq!(value_to_start_index(&Value::Tensor(row), "row").unwrap(), 7);
@@ -1508,6 +1736,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_numeric_range_two_elements() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
         let range = BuiltinTensor::new(vec![1.0, 1.0], vec![2, 1]).expect("tensor");
         let args = vec![Value::Tensor(range)];
@@ -1526,6 +1755,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_excel_style_range_string() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = write_temp_file(&["1,2,3,4", "5,6,7,8", "9,10,11,12"]);
         let args = vec![Value::from(","), Value::from("B2:C3")];
         let result = dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args)
@@ -1543,6 +1773,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dlmread_range_without_delimiter() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
         let range = BuiltinTensor::new(vec![1.0, 0.0, 2.0, 1.0], vec![4, 1]).expect("tensor");
         let args = vec![Value::Tensor(range)];
@@ -1599,6 +1830,46 @@ pub(crate) mod tests {
         assert_eq!(parsed.start_col, 2);
         assert_eq!(parsed.end_row, Some(3));
         assert_eq!(parsed.end_col, Some(4));
+    }
+
+    #[test]
+    fn dlmread_accepts_documented_double_dot_spreadsheet_range() {
+        let range = parse_range_string("A1..B2").unwrap();
+        assert_eq!(range.start_row, 0);
+        assert_eq!(range.start_col, 0);
+        assert_eq!(range.end_row, Some(1));
+        assert_eq!(range.end_col, Some(1));
+    }
+
+    #[test]
+    fn dlmread_numeric_delimiter_is_a_gated_extension() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = parse_delimiter(&Value::Int(IntValue::U8(b',')))
+            .expect_err("numeric delimiter must reject in strict mode");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:DlmreadNumericDelimiterExtension")
+        );
+    }
+
+    #[test]
+    fn dlmread_colon_spreadsheet_range_is_a_gated_extension() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = parse_range_string("A1:B2")
+            .expect_err("colon spreadsheet range must reject in strict mode");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:DlmreadColonSpreadsheetRangeExtension")
+        );
+        drop(strict);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let range = parse_range_string("A1:B2").expect("colon range in RunMat mode");
+        assert_eq!(range.start_row, 0);
+        assert_eq!(range.start_col, 0);
+        assert_eq!(range.end_row, Some(1));
+        assert_eq!(range.end_col, Some(1));
+        drop(extensions);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
