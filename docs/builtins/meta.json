@@ -35913,7 +35913,7 @@
         {
           "code": "RM.DECONV.DENOMINATOR_INVALID",
           "identifier": "RunMat:deconv:DenominatorInvalid",
-          "when": "Denominator is empty, all zero, or numerically singular at leading term.",
+          "when": "Denominator is empty or contains only exact zero coefficients.",
           "message": "deconv: denominator is invalid"
         },
         {
@@ -35933,6 +35933,71 @@
           "identifier": "RunMat:deconv:BuildOutput",
           "when": "Real output tensor allocation fails.",
           "message": "deconv: failed to build tensor"
+        },
+        {
+          "code": "RM.DECONV.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:deconv:TooManyOutputs",
+          "when": "More than two outputs are requested.",
+          "message": "deconv: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "deconv-integer-input",
+          "mode": "RunMatOnly",
+          "description": "deconv with typed-integer coefficients is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DeconvIntegerInputExtension"
+        },
+        {
+          "id": "deconv-logical-input",
+          "mode": "RunMatOnly",
+          "description": "deconv with logical coefficients is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DeconvLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[Q,R] = deconv(integer_numerator, integer_denominator)",
+          "inputs": [
+            {
+              "name": "numerator",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients."
+            },
+            {
+              "name": "denominator",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Each authoritative coefficient is checked for exact binary64 representation before polynomial division; resident inputs gather through their owners and results return to the first resident owner."
         }
       ]
     },
@@ -35975,6 +36040,55 @@
           "identifier": "RunMat:deg2rad:Internal",
           "when": "Internal gather/conversion/allocation flow failed.",
           "message": "deg2rad: internal error"
+        },
+        {
+          "code": "RM.DEG2RAD.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:deg2rad:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "deg2rad: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "deg2rad-integer-input",
+          "mode": "RunMatOnly",
+          "description": "deg2rad with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Deg2radIntegerInputExtension"
+        },
+        {
+          "id": "deg2rad-logical-input",
+          "mode": "RunMatOnly",
+          "description": "deg2rad with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Deg2radLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = deg2rad(integer_D)",
+          "inputs": [
+            {
+              "name": "D",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents only single and double input; RunMat mode admits all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative integer storage enters one explicit binary64 degrees-to-radians boundary. Resident input gathers exactly and restores the double result to its owning provider."
         }
       ]
     },
@@ -35984,7 +36098,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "status = delete(filename)",
+          "label": "delete(filename)",
           "inputs": [
             {
               "name": "filename",
@@ -35994,18 +36108,10 @@
               "description": "Filename/pattern string, string array, char matrix, cell array of path strings, or handle input."
             }
           ],
-          "outputs": [
-            {
-              "name": "status",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Always 0 on success; function primarily acts as a sink."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "status = delete(filename1, filename2, ...)",
+          "label": "delete(filename1, filename2, ...)",
           "inputs": [
             {
               "name": "filename1",
@@ -36022,15 +36128,34 @@
               "description": "Additional filename/pattern/handle inputs."
             }
           ],
-          "outputs": [
+          "outputs": []
+        },
+        {
+          "label": "delete(___, ResolveSymbolicLinks=tf)",
+          "inputs": [
             {
-              "name": "status",
-              "ty": "NumericScalar",
+              "name": "filename",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Always 0 on success; function primarily acts as a sink."
+              "description": "Filename, filename collection, or wildcard pattern."
+            },
+            {
+              "name": "ResolveSymbolicLinks",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Name of the symbolic-link resolution option."
+            },
+            {
+              "name": "tf",
+              "ty": "Any",
+              "arity": "Required",
+              "default": "false",
+              "description": "Scalar logical or numeric zero/one selecting link-target deletion."
             }
-          ]
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -36076,6 +36201,35 @@
           "when": "Underlying filesystem operation fails while deleting files.",
           "message": "delete: filesystem deletion failed"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "delete(filename, \"ResolveSymbolicLinks\", integer_tf)",
+          "inputs": [
+            {
+              "name": "ResolveSymbolicLinks",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric/logical flag accepts only exact scalar zero or one; MATLAB's numeric category includes every built-in integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The flag is read exactly from authoritative integer storage before any filesystem access; deletion has no MATLAB-facing output."
+        }
       ]
     },
     {
@@ -36117,6 +36271,55 @@
           "identifier": "RunMat:det:Internal",
           "when": "Runtime fails while evaluating determinant or device fallback paths.",
           "message": "det: internal runtime failure"
+        },
+        {
+          "code": "RM.DET.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:det:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "det: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "det-integer-input",
+          "mode": "RunMatOnly",
+          "description": "det with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DetIntegerInputExtension"
+        },
+        {
+          "id": "det-logical-input",
+          "mode": "RunMatOnly",
+          "description": "det with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DetLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "d = det(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents square single/double matrices; RunMat mode additionally admits all eight real integer classes."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Authoritative integer values enter one explicit binary64 LU boundary. Resident integer input gathers exactly before LU and restores the double scalar to the owning provider."
         }
       ]
     },
@@ -36206,6 +36409,70 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "detectimportoptions-integer-num-header-lines",
+          "mode": "RunMatOnly",
+          "description": "detectImportOptions with a typed-integer NumHeaderLines value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DetectImportOptionsIntegerNumHeaderLinesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "opts = detectImportOptions(filename, integer_location_controls...)",
+          "inputs": [
+            {
+              "name": "Range, DataRange, Sheet, ExpectedNumVariables, or VariableNamesLine",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Supported text/spreadsheet location and size controls are parsed exactly from authoritative integer storage and validated before conversion to host indices; numeric DataRange supports scalar rows and one 1-by-2 interval, textual cell references remain available for detected-option replay, and multiple numeric Nx2 intervals remain a general gap."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The implemented text/spreadsheet subset preserves exact integer controls and returns host import metadata; JSON/XML/Word/HTML/archive families and concrete MATLAB options classes remain explicit general gaps."
+        },
+        {
+          "form": "opts = detectImportOptions(filename, \"NumHeaderLines\", typed_integer)",
+          "inputs": [
+            {
+              "name": "NumHeaderLines",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public R2026a datatype list is single/double; typed-integer values are admitted only in RunMat mode after an explicit extension gate."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "RunMat mode parses this pre-existing extension exactly; compatibility mode rejects before file or provider access."
+        }
       ]
     },
     {
@@ -36214,7 +36481,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = diag(A)",
+          "label": "D = diag(v)",
           "inputs": [
             {
               "name": "A",
@@ -36235,7 +36502,7 @@
           ]
         },
         {
-          "label": "B = diag(A, k)",
+          "label": "D = diag(v, k)",
           "inputs": [
             {
               "name": "A",
@@ -36263,7 +36530,7 @@
           ]
         },
         {
-          "label": "B = diag(A, sz)",
+          "label": "x = diag(A)",
           "inputs": [
             {
               "name": "A",
@@ -36271,13 +36538,6 @@
               "arity": "Required",
               "default": null,
               "description": "Input scalar, vector, or matrix."
-            },
-            {
-              "name": "sz",
-              "ty": "SizeArg",
-              "arity": "Required",
-              "default": null,
-              "description": "Output matrix size override as [m n] or scalar n."
             }
           ],
           "outputs": [
@@ -36291,7 +36551,7 @@
           ]
         },
         {
-          "label": "B = diag(A, k, sz)",
+          "label": "x = diag(A, k)",
           "inputs": [
             {
               "name": "A",
@@ -36306,132 +36566,6 @@
               "arity": "Required",
               "default": null,
               "description": "Diagonal offset index."
-            },
-            {
-              "name": "sz",
-              "ty": "SizeArg",
-              "arity": "Required",
-              "default": null,
-              "description": "Output matrix size override as [m n] or scalar n."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "B",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Diagonal matrix or diagonal vector extracted from the input."
-            }
-          ]
-        },
-        {
-          "label": "B = diag(A, \"vector\")",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input scalar, vector, or matrix."
-            },
-            {
-              "name": "option",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"vector\"",
-              "description": "Vector extraction option ('vector')."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "B",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Diagonal matrix or diagonal vector extracted from the input."
-            }
-          ]
-        },
-        {
-          "label": "B = diag(A, class)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input scalar, vector, or matrix."
-            },
-            {
-              "name": "class",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Output class override ('logical' or 'double')."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "B",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Diagonal matrix or diagonal vector extracted from the input."
-            }
-          ]
-        },
-        {
-          "label": "B = diag(A, \"like\", prototype)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input scalar, vector, or matrix."
-            },
-            {
-              "name": "like",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"like\"",
-              "description": "Literal option name ('like')."
-            },
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype value controlling output class/residency."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "B",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Diagonal matrix or diagonal vector extracted from the input."
-            }
-          ]
-        },
-        {
-          "label": "B = diag(A, args...)",
-          "inputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Input scalar, vector, or matrix."
-            },
-            {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Optional offset/size/options parsed by diag argument grammar."
             }
           ],
           "outputs": [
@@ -36457,6 +36591,110 @@
           "identifier": "RunMat:diag:InvalidOffset",
           "when": "Diagonal offset is not a finite integer scalar.",
           "message": "diag: invalid diagonal offset"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "diag-explicit-size",
+          "mode": "RunMatOnly",
+          "description": "diag with an explicit output size is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DiagExplicitSizeExtension"
+        },
+        {
+          "id": "diag-vector-option",
+          "mode": "RunMatOnly",
+          "description": "diag with the 'vector' option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DiagVectorOptionExtension"
+        },
+        {
+          "id": "diag-output-class",
+          "mode": "RunMatOnly",
+          "description": "diag with an output-class override is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DiagOutputClassExtension"
+        },
+        {
+          "id": "diag-like",
+          "mode": "RunMatOnly",
+          "description": "diag with a 'like' prototype is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DiagLikeExtension"
+        },
+        {
+          "id": "diag-trailing-singleton-dimensions",
+          "mode": "RunMatOnly",
+          "description": "diag with more than two trailing singleton dimensions is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DiagTrailingSingletonDimensionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "D = diag(integer_v) or x = diag(integer_A)",
+          "inputs": [
+            {
+              "name": "v or A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are documented input data and preserve exact class, shape semantics, and values through diagonal construction or extraction."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Vector input constructs a same-class diagonal matrix and matrix input extracts a same-class column vector; resident integer data exact-gathers and re-uploads to its owning provider until native integer structural hooks exist."
+        },
+        {
+          "form": "D = diag(integer_v,k) or x = diag(integer_A,k)",
+          "inputs": [
+            {
+              "name": "v or A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer data remains authoritative and is never converted through binary64 during structural placement or extraction."
+            },
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The real scalar diagonal number is read exactly from every integer class; integer-valued host double remains accepted and out-of-range values reject before shape arithmetic."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "k controls only diagonal placement or extraction. Host data and controls remain exact; resident integer data preserves class, owner, and residency through exact fallback."
         }
       ]
     },
@@ -36543,14 +36781,62 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "B = tabularBuiltin(args...)",
+          "label": "d = dictionary()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "d = dictionary(keys, values)",
           "inputs": [
             {
-              "name": "args",
+              "name": "keys",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Uniform or cell-wrapped dictionary keys."
+            },
+            {
+              "name": "values",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Uniform, scalar-expanded, or cell-wrapped dictionary values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "d = dictionary(k1, v1, ..., kN, vN)",
+          "inputs": [
+            {
+              "name": "keyValuePair1",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "First key/value argument pair."
+            },
+            {
+              "name": "keyValuePairN",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Input values and name-value options."
+              "description": "Additional key/value argument pairs."
             }
           ],
           "outputs": [
@@ -36594,6 +36880,86 @@
           "identifier": "RunMat:readtable:UnsupportedFileType",
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "dictionary-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "dictionary with an interactive resident argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DictionaryGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "d = dictionary(integer_keys, integer_values)",
+          "inputs": [
+            {
+              "name": "keys",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Dictionary keys accept every numeric integer class and retain exact configured-class identity, including wide uint64 values."
+            },
+            {
+              "name": "values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Dictionary values accept every numeric integer class and retain exact configured-class storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Construction, duplicate resolution, lookup, assignment, and removal compare authoritative configured-class integer values without a binary64 mirror; the result is a host dictionary object."
+        },
+        {
+          "form": "d = dictionary(gpuArray(integer_keys_or_values), ...)",
+          "inputs": [
+            {
+              "name": "resident keys or values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Interactive resident input is not a documented gpuArray overload and is gated before exact gather into the host dictionary object."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat mode gathers admitted resident inputs through the owning provider and preserves exact typed values in the host object."
         }
       ]
     },
@@ -36705,6 +37071,115 @@
           "identifier": "RunMat:diff:Internal",
           "when": "Finite-difference execution fails due to conversion, gather, allocation, or reshape operations.",
           "message": "diff: internal failure"
+        },
+        {
+          "code": "RM.DIFF.TOO_MANY_OUTPUTS",
+          "identifier": "RunMat:diff:TooManyOutputs",
+          "when": "More than one output is requested.",
+          "message": "diff: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "diff-character-input",
+          "mode": "RunMatOnly",
+          "description": "diff with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DiffCharacterInputExtension"
+        },
+        {
+          "id": "diff-zero-order",
+          "mode": "RunMatOnly",
+          "description": "diff with zero difference order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DiffZeroOrderExtension"
+        },
+        {
+          "id": "diff-empty-control",
+          "mode": "RunMatOnly",
+          "description": "diff with an empty order or dimension placeholder is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DiffEmptyControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = diff(integer_X, n?, dim?)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents every integer class for finite-difference data."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Each recursive adjacent subtraction preserves X's integer class and saturates at that class's bounds. Resident integer data uses an exact typed fallback and returns to the owning provider."
+        },
+        {
+          "form": "Y = diff(X, integer_n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for the positive scalar difference order."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The positive scalar order is decoded exactly before host or provider execution."
+        },
+        {
+          "form": "Y = diff(X, n, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented for the positive scalar dimension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The positive one-based dimension is decoded exactly before host or provider execution."
         }
       ]
     },
@@ -36734,28 +37209,7 @@
               "ty": "Any",
               "arity": "Optional",
               "default": null,
-              "description": "New digit count, or 'default' to reset to 32."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "d",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Current or previous variable-precision digit count."
-            }
-          ]
-        },
-        {
-          "label": "old = digits('default')",
-          "inputs": [
-            {
-              "name": "d",
-              "ty": "Any",
-              "arity": "Optional",
-              "default": null,
-              "description": "New digit count, or 'default' to reset to 32."
+              "description": "New numeric digit count."
             }
           ],
           "outputs": [
@@ -36782,6 +37236,49 @@
           "when": "The requested precision is not an integer in the supported range.",
           "message": "digits: expected a positive integer digit count"
         }
+      ],
+      "extensions": [
+        {
+          "id": "digits-default-reset",
+          "mode": "RunMatOnly",
+          "description": "digits('default') is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DigitsDefaultResetExtension"
+        },
+        {
+          "id": "digits-numeric-text",
+          "mode": "RunMatOnly",
+          "description": "digits with a numeric text scalar is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DigitsNumericTextExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "old = digits(integer_d)",
+          "inputs": [
+            {
+              "name": "d",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The positive integer precision control is read exactly from every host integer class; host double is rounded to the nearest integer before enforcing the documented 2..=100000000 range."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "d changes host symbolic precision state only; the returned previous precision is always a double scalar, and invalid controls leave state unchanged."
+        }
       ]
     },
     {
@@ -36790,21 +37287,55 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "pat = digitsPattern(N)",
-          "inputs": [
+          "label": "pat = digitsPattern",
+          "inputs": [],
+          "outputs": [
             {
-              "name": "text",
+              "name": "out",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
+              "description": "Output value."
+            }
+          ]
+        },
+        {
+          "label": "pat = digitsPattern(N)",
+          "inputs": [
+            {
+              "name": "N",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Exact nonnegative number of Unicode digit characters to match."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Output value."
+            }
+          ]
+        },
+        {
+          "label": "pat = digitsPattern(minCharacters, maxCharacters)",
+          "inputs": [
+            {
+              "name": "minCharacters",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Minimum nonnegative number of Unicode digit characters to match."
             },
             {
-              "name": "arg",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "maxCharacters",
+              "ty": "NumericScalar",
+              "arity": "Required",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Maximum nonnegative count, or positive infinity for no upper bound."
             }
           ],
           "outputs": [
@@ -36818,7 +37349,98 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.DIGITS_PATTERN.ARGUMENT_COUNT",
+          "identifier": "RunMat:digitsPattern:ArgumentCount",
+          "when": "More than two count arguments are supplied.",
+          "message": "digitsPattern: expected zero, one, or two input arguments"
+        },
+        {
+          "code": "RM.DIGITS_PATTERN.INVALID_COUNT",
+          "identifier": "RunMat:digitsPattern:InvalidCount",
+          "when": "A count is not a host nonnegative numeric integer scalar or positive infinity in the maximum position.",
+          "message": "digitsPattern: invalid character count"
+        },
+        {
+          "code": "RM.DIGITS_PATTERN.INVALID_RANGE",
+          "identifier": "RunMat:digitsPattern:InvalidRange",
+          "when": "minCharacters exceeds maxCharacters.",
+          "message": "digitsPattern: minCharacters must not exceed maxCharacters"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "pat = digitsPattern(integer_N)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every built-in integer class plus integer-valued host single or double can specify the exact nonnegative digit count."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "N controls only the exact Unicode-digit repetition bound of the returned host pattern object."
+        },
+        {
+          "form": "pat = digitsPattern(integer_minCharacters, integer_maxCharacters)",
+          "inputs": [
+            {
+              "name": "minCharacters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The inclusive lower bound is read exactly from every integer class."
+            },
+            {
+              "name": "maxCharacters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The inclusive upper bound is read exactly from every integer class; positive host floating infinity separately denotes an unbounded maximum."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The inclusive bounds are structural controls, min must not exceed max, and the returned pattern greedily matches toward max."
+        }
+      ]
     },
     {
       "name": "dir",

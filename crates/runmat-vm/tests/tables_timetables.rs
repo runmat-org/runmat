@@ -166,6 +166,44 @@ fn categorical_dictionary_and_selector_surface_executes_from_scripts() {
 }
 
 #[test]
+fn dictionary_compiled_surface_preserves_wide_integer_keys_and_scalar_expansion() {
+    let vars = execute_source(
+        "base = uint64(9007199254740992); keys = base + uint64([1 2 1]); D = dictionary(keys, int16(7)); x = D(base + uint64(2)); column = D(base + uint64([2; 1])); D(base + uint64([1 2])) = int16(9); y = D(base + uint64(1)); D(base + uint64(2)) = [];",
+    )
+    .expect("compiled exact integer dictionary construction and mutation");
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Int(runmat_builtins::IntValue::I16(7)))));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Int(runmat_builtins::IntValue::I16(9)))));
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.shape == [2, 1]
+                    && tensor.integer_storage()
+                        == Some(&runmat_builtins::IntegerStorage::I16(vec![7, 7]))
+        )
+    }));
+    let dictionary = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Object(object) if object.class_name == "dictionary" => Some(object),
+            _ => None,
+        })
+        .expect("dictionary result");
+    let Value::Cell(keys) = dictionary.properties.get("Keys").unwrap() else {
+        panic!("dictionary keys");
+    };
+    assert_eq!(keys.data.len(), 1);
+    assert_eq!(
+        keys.data[0],
+        Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993))
+    );
+}
+
+#[test]
 fn categorical_compiled_surface_preserves_exact_integer_identity_and_flags() {
     let vars = execute_source(
         "base = uint64(9007199254740992); C = categorical(base + uint64([1 2]), base + uint64([2 1]), {'two','one'}, 'Ordinal', uint8(1)); tf = isordinal(C);",

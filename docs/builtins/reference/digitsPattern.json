@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "Pattern construction is a host operation. The documented count controls are host scalars, and resident controls reject before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,24 +28,30 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "pat = digitsPattern(N) - Create a pattern matching digit characters.",
+  "description": "`digitsPattern` creates a greedy pattern for Unicode digit characters. It supports one-or-more matching, an exact count, or inclusive minimum and maximum counts.",
   "signatures": [
+    {
+      "label": "pat = digitsPattern",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Unicode digit pattern object."
+        }
+      ]
+    },
     {
       "label": "pat = digitsPattern(N)",
       "inputs": [
         {
-          "name": "text",
-          "ty": "Any",
+          "name": "N",
+          "ty": "NumericScalar",
           "arity": "Required",
           "default": null,
-          "description": "Input text."
-        },
-        {
-          "name": "arg",
-          "ty": "Any",
-          "arity": "Variadic",
-          "default": null,
-          "description": "Additional arguments."
+          "description": "Exact nonnegative number of Unicode digit characters."
         }
       ],
       "outputs": [
@@ -54,14 +60,44 @@
           "ty": "Any",
           "arity": "Required",
           "default": null,
-          "description": "Output value."
+          "description": "Unicode digit pattern object."
+        }
+      ]
+    },
+    {
+      "label": "pat = digitsPattern(minCharacters, maxCharacters)",
+      "inputs": [
+        {
+          "name": "minCharacters",
+          "ty": "NumericScalar",
+          "arity": "Required",
+          "default": null,
+          "description": "Inclusive nonnegative minimum count."
+        },
+        {
+          "name": "maxCharacters",
+          "ty": "NumericScalar",
+          "arity": "Required",
+          "default": null,
+          "description": "Inclusive nonnegative maximum count, or positive infinity."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "ty": "Any",
+          "arity": "Required",
+          "default": null,
+          "description": "Unicode digit pattern object."
         }
       ]
     }
   ],
   "behaviors": [
-    "Create a pattern matching digit characters.",
-    "Creates a regular-expression-backed pattern for digit runs, with optional exact count."
+    "With no inputs, the pattern matches one or more Unicode digit characters.",
+    "A single nonnegative integer scalar matches exactly that many digits.",
+    "Two nonnegative integer scalars specify inclusive minimum and maximum counts; positive infinity is accepted as an unbounded maximum, and matching is greedy toward the maximum.",
+    "Count controls accept host single, double, and every built-in integer class. Fractional, negative, logical, and resident controls reject."
   ],
   "examples": [
     "contains(\"A12\", digitsPattern) can match the digit run through pattern-aware string APIs."

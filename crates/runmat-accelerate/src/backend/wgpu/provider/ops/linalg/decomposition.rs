@@ -556,6 +556,10 @@ impl WgpuProvider {
     }
 
     pub(crate) async fn lu_exec(&self, handle: &GpuTensorHandle) -> Result<ProviderLuResult> {
+        ensure!(
+            runmat_accelerate_api::handle_integer_type(handle).is_none(),
+            "lu: typed-integer buffers require an explicit typed fallback"
+        );
         let host = self.download_exec(handle).await?;
         let LuHostFactors {
             combined,

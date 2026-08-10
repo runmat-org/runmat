@@ -469,6 +469,7 @@ impl WgpuProvider {
         runmat_accelerate_api::clear_handle_integer_type(handle);
         runmat_accelerate_api::clear_handle_class_name(handle);
         runmat_accelerate_api::clear_handle_storage(handle);
+        runmat_accelerate_api::clear_handle_precision(handle);
         runmat_accelerate_api::clear_handle_transpose(handle);
         Ok(())
     }

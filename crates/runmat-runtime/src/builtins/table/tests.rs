@@ -749,6 +749,42 @@ fn detect_import_options_registers_public_descriptor() {
         .collect::<Vec<_>>();
     assert!(labels.contains(&"opts = detectImportOptions(filename)"));
     assert!(labels.contains(&"opts = detectImportOptions(filename, nameValuePairs...)"));
+    assert_eq!(DETECT_IMPORT_OPTIONS_INTEGER_CAPABILITIES.len(), 2);
+    assert_eq!(DETECT_IMPORT_OPTIONS_EXTENSIONS.len(), 1);
+}
+
+#[test]
+fn detect_import_options_integer_num_header_lines_is_gated_before_file_access() {
+    let missing = Value::from("definitely-missing.csv");
+    let args = vec![
+        Value::from("NumHeaderLines"),
+        Value::Int(runmat_builtins::IntValue::U8(1)),
+    ];
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(detect_import_options_builtin(missing, args))
+        .expect_err("typed NumHeaderLines must be gated before opening the file");
+    assert_eq!(
+        error.identifier(),
+        DETECT_IMPORT_OPTIONS_INTEGER_NUM_HEADER_LINES_EXTENSION.error_identifier
+    );
+}
+
+#[test]
+fn detect_import_options_rejects_nested_resident_input_before_provider_access() {
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+    });
+    let mut options = runmat_builtins::StructValue::new();
+    options.fields.insert("Range".to_string(), resident);
+    let error = block_on(detect_import_options_builtin(
+        Value::from("definitely-missing.csv"),
+        vec![Value::Struct(options)],
+    ))
+    .expect_err("nested resident option must reject before gather");
+    assert!(error.message().contains("resident arguments"));
+    assert!(!error.message().to_ascii_lowercase().contains("provider"));
 }
 
 #[test]
@@ -2342,6 +2378,57 @@ fn categorical_dictionary_and_selector_objects_materialize() {
         block_on(vartype_builtin(Value::from("numeric"))).unwrap(),
         Value::Object(obj) if obj.class_name == VARTYPE_CLASS
     ));
+}
+
+#[test]
+fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gather() {
+    assert_eq!(DICTIONARY_INTEGER_CAPABILITIES.len(), 2);
+    assert_eq!(DICTIONARY_EXTENSIONS.len(), 1);
+    let labels = DICTIONARY_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|signature| signature.label)
+        .collect::<Vec<_>>();
+    assert!(labels.contains(&"d = dictionary()"));
+    assert!(labels.contains(&"d = dictionary(keys, values)"));
+    assert!(labels.contains(&"d = dictionary(k1, v1, ..., kN, vN)"));
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(dictionary_builtin(vec![
+            Value::GpuTensor(handle),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        ]))
+        .expect_err("resident dictionary input must be gated before gather");
+        assert_eq!(
+            error.identifier(),
+            DICTIONARY_GPU_INPUT_EXTENSION.error_identifier
+        );
+    });
+
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+    });
+    let nested = crate::make_cell(vec![resident], 1, 1).unwrap();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(dictionary_builtin(vec![
+        nested,
+        Value::Int(runmat_builtins::IntValue::U8(1)),
+    ]))
+    .expect_err("nested resident dictionary input must be gated before gather");
+    assert_eq!(
+        error.identifier(),
+        DICTIONARY_GPU_INPUT_EXTENSION.error_identifier
+    );
+    assert!(!error.message().to_ascii_lowercase().contains("provider"));
 }
 
 #[test]

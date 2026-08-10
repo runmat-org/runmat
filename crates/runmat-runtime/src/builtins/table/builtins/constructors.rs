@@ -180,6 +180,61 @@ pub const CATEGORICAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
     },
 ];
 
+pub(crate) const DICTIONARY_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "dictionary-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "dictionary with an interactive resident argument is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DictionaryGpuInputExtension"),
+    };
+pub const DICTIONARY_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [DICTIONARY_GPU_INPUT_EXTENSION];
+const DICTIONARY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "keys",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Dictionary keys accept every numeric integer class and retain exact configured-class identity, including wide uint64 values.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Dictionary values accept every numeric integer class and retain exact configured-class storage.",
+    },
+];
+const DICTIONARY_RESIDENT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "resident keys or values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Interactive resident input is not a documented gpuArray overload and is gated before exact gather into the host dictionary object.",
+    }];
+pub const DICTIONARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "d = dictionary(integer_keys, integer_values)",
+        inputs: &DICTIONARY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Construction, duplicate resolution, lookup, assignment, and removal compare authoritative configured-class integer values without a binary64 mirror; the result is a host dictionary object.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "d = dictionary(gpuArray(integer_keys_or_values), ...)",
+        inputs: &DICTIONARY_RESIDENT_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat mode gathers admitted resident inputs through the owning provider and preserves exact typed values in the host object.",
+    },
+];
+
 #[runtime_builtin(
     name = "table",
     category = "table",
@@ -217,10 +272,7 @@ pub(crate) async fn table_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 pub(crate) async fn categorical_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
-    if args
-        .iter()
-        .any(|value| matches!(value, Value::GpuTensor(_)))
-    {
+    if args.iter().any(crate::value_contains_gpu) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &CATEGORICAL_GPU_INPUT_EXTENSION,
             "categorical",
@@ -251,11 +303,24 @@ pub(crate) async fn ordinal_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Create a key-value dictionary object.",
     keywords = "dictionary,containers.Map,key,value,map",
     accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
+    descriptor(crate::builtins::table::DICTIONARY_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::constructors::DICTIONARY_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::constructors::DICTIONARY_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn dictionary_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DICTIONARY_GPU_INPUT_EXTENSION,
+            "dictionary",
+        )?;
+    }
     let args = gather_values(&args).await?;
     dictionary_from_args(args)
 }

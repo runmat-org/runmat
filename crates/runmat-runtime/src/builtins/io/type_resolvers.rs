@@ -221,8 +221,8 @@ pub fn copyfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn delete_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
+pub fn delete_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Void
 }
 
 pub fn dir_type(args: &[Type], ctx: &ResolveContext) -> Type {
@@ -567,7 +567,7 @@ mod tests {
     assert_resolver!(addpath_type_resolver, addpath_type, &[], Type::String);
     assert_resolver!(cd_type_resolver, cd_type, &[], Type::String);
     assert_resolver!(copyfile_type_resolver, copyfile_type, &[], Type::Num);
-    assert_resolver!(delete_type_resolver, delete_type, &[], Type::Num);
+    assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
     assert_resolver!(
         dir_type_resolver,
         dir_type,

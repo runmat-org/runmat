@@ -323,12 +323,121 @@ descriptor!(
     &IN_TEXT,
     &OUT_ANY
 );
-descriptor!(
-    DIGITS_PATTERN_DESCRIPTOR,
-    "pat = digitsPattern(N)",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
+const DIGITS_PATTERN_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "N",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Exact nonnegative number of Unicode digit characters to match.",
+}];
+const DIGITS_PATTERN_RANGE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "minCharacters",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Minimum nonnegative number of Unicode digit characters to match.",
+    },
+    BuiltinParamDescriptor {
+        name: "maxCharacters",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Maximum nonnegative count, or positive infinity for no upper bound.",
+    },
+];
+const DIGITS_PATTERN_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "pat = digitsPattern",
+        inputs: &[],
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pat = digitsPattern(N)",
+        inputs: &DIGITS_PATTERN_N_INPUTS,
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pat = digitsPattern(minCharacters, maxCharacters)",
+        inputs: &DIGITS_PATTERN_RANGE_INPUTS,
+        outputs: &OUT_ANY,
+    },
+];
+const DIGITS_PATTERN_ERROR_ARGUMENT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIGITS_PATTERN.ARGUMENT_COUNT",
+    identifier: Some("RunMat:digitsPattern:ArgumentCount"),
+    when: "More than two count arguments are supplied.",
+    message: "digitsPattern: expected zero, one, or two input arguments",
+};
+const DIGITS_PATTERN_ERROR_INVALID_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIGITS_PATTERN.INVALID_COUNT",
+    identifier: Some("RunMat:digitsPattern:InvalidCount"),
+    when: "A count is not a host nonnegative numeric integer scalar or positive infinity in the maximum position.",
+    message: "digitsPattern: invalid character count",
+};
+const DIGITS_PATTERN_ERROR_INVALID_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIGITS_PATTERN.INVALID_RANGE",
+    identifier: Some("RunMat:digitsPattern:InvalidRange"),
+    when: "minCharacters exceeds maxCharacters.",
+    message: "digitsPattern: minCharacters must not exceed maxCharacters",
+};
+const DIGITS_PATTERN_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DIGITS_PATTERN_ERROR_ARGUMENT_COUNT,
+    DIGITS_PATTERN_ERROR_INVALID_COUNT,
+    DIGITS_PATTERN_ERROR_INVALID_RANGE,
+];
+pub const DIGITS_PATTERN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DIGITS_PATTERN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DIGITS_PATTERN_ERRORS,
+};
+const DIGITS_PATTERN_INTEGER_N_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every built-in integer class plus integer-valued host single or double can specify the exact nonnegative digit count.",
+    }];
+const DIGITS_PATTERN_INTEGER_RANGE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "minCharacters",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The inclusive lower bound is read exactly from every integer class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "maxCharacters",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The inclusive upper bound is read exactly from every integer class; positive host floating infinity separately denotes an unbounded maximum.",
+    },
+];
+pub const DIGITS_PATTERN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pat = digitsPattern(integer_N)",
+        inputs: &DIGITS_PATTERN_INTEGER_N_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "N controls only the exact Unicode-digit repetition bound of the returned host pattern object.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pat = digitsPattern(integer_minCharacters, integer_maxCharacters)",
+        inputs: &DIGITS_PATTERN_INTEGER_RANGE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The inclusive bounds are structural controls, min must not exceed max, and the returned pattern greedily matches toward max.",
+    },
+];
 descriptor!(
     LETTERS_PATTERN_DESCRIPTOR,
     "pat = lettersPattern(N)",
@@ -821,10 +930,84 @@ async fn regexp_pattern_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::DIGITS_PATTERN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::compat::DIGITS_PATTERN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn digits_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    bounded_pattern(rest, "\\d", "digitsPattern").await
+    if rest.len() > 2 {
+        return Err(digits_pattern_error(
+            &DIGITS_PATTERN_ERROR_ARGUMENT_COUNT,
+            DIGITS_PATTERN_ERROR_ARGUMENT_COUNT.message,
+        ));
+    }
+    if rest.iter().any(|value| {
+        matches!(
+            value,
+            Value::Bool(_) | Value::LogicalArray(_) | Value::GpuTensor(_)
+        )
+    }) {
+        return Err(digits_pattern_error(
+            &DIGITS_PATTERN_ERROR_INVALID_COUNT,
+            "digitsPattern: counts must be host nonnegative numeric integer scalars",
+        ));
+    }
+    let regex = match rest.as_slice() {
+        [] => "\\d+".to_string(),
+        [count] => {
+            let count = parse_digits_pattern_count(count)?;
+            format!("\\d{{{count}}}")
+        }
+        [minimum, maximum] => {
+            let minimum = parse_digits_pattern_count(minimum)?;
+            if is_positive_infinity_scalar(maximum) {
+                format!("\\d{{{minimum},}}")
+            } else {
+                let maximum = parse_digits_pattern_count(maximum)?;
+                if minimum > maximum {
+                    return Err(digits_pattern_error(
+                        &DIGITS_PATTERN_ERROR_INVALID_RANGE,
+                        DIGITS_PATTERN_ERROR_INVALID_RANGE.message,
+                    ));
+                }
+                format!("\\d{{{minimum},{maximum}}}")
+            }
+        }
+        _ => unreachable!("argument count was validated"),
+    };
+    Ok(pattern_object(&regex))
+}
+
+fn parse_digits_pattern_count(value: &Value) -> BuiltinResult<usize> {
+    parse_nonnegative_usize(value, "digitsPattern").map_err(|error| {
+        digits_pattern_error(
+            &DIGITS_PATTERN_ERROR_INVALID_COUNT,
+            error.message().to_owned(),
+        )
+    })
+}
+
+fn digits_pattern_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("digitsPattern");
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn is_positive_infinity_scalar(value: &Value) -> bool {
+    match value {
+        Value::Num(value) => value.is_infinite() && value.is_sign_positive(),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            matches!(tensor.numeric_value_at(0), Some(NumericScalar::F64(value)) if value.is_infinite() && value.is_sign_positive())
+                || matches!(tensor.numeric_value_at(0), Some(NumericScalar::F32(value)) if value.is_infinite() && value.is_sign_positive())
+        }
+        _ => false,
+    }
 }
 
 #[runtime_builtin(
@@ -2387,8 +2570,24 @@ mod tests {
 
     #[test]
     fn pattern_constructors_store_regex() {
+        assert_eq!(
+            pattern_regex(&block(digits_pattern_builtin(Vec::new())).unwrap(), "test").unwrap(),
+            r"\d+"
+        );
         let value = block(digits_pattern_builtin(vec![Value::Num(2.0)])).unwrap();
         assert_eq!(pattern_regex(&value, "test").unwrap(), "\\d{2}");
+        let bounded = block(digits_pattern_builtin(vec![
+            Value::Int(IntValue::U8(2)),
+            Value::Int(IntValue::U16(4)),
+        ]))
+        .unwrap();
+        assert_eq!(pattern_regex(&bounded, "test").unwrap(), r"\d{2,4}");
+        let unbounded = block(digits_pattern_builtin(vec![
+            Value::Int(IntValue::I8(3)),
+            Value::Num(f64::INFINITY),
+        ]))
+        .unwrap();
+        assert_eq!(pattern_regex(&unbounded, "test").unwrap(), r"\d{3,}");
         assert_eq!(
             pattern_regex(&block(letters_pattern_builtin(Vec::new())).unwrap(), "test").unwrap(),
             r"\p{Alphabetic}+"
@@ -2421,6 +2620,81 @@ mod tests {
             .unwrap(),
             r"$"
         );
+    }
+
+    #[test]
+    fn digits_pattern_validates_range_controls_and_argument_count() {
+        let zero = block(digits_pattern_builtin(vec![Value::Int(IntValue::U64(0))])).unwrap();
+        assert_eq!(pattern_regex(&zero, "test").unwrap(), r"\d{0}");
+        for args in [
+            vec![Value::Num(-1.0)],
+            vec![Value::Num(1.5)],
+            vec![Value::Num(1.0), Value::Num(f64::NEG_INFINITY)],
+            vec![Value::Bool(true)],
+        ] {
+            let error = block(digits_pattern_builtin(args)).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                DIGITS_PATTERN_ERROR_INVALID_COUNT.identifier
+            );
+        }
+        let range_error = block(digits_pattern_builtin(vec![
+            Value::Num(4.0),
+            Value::Num(3.0),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            range_error.identifier(),
+            DIGITS_PATTERN_ERROR_INVALID_RANGE.identifier
+        );
+        let arity_error = block(digits_pattern_builtin(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            arity_error.identifier(),
+            DIGITS_PATTERN_ERROR_ARGUMENT_COUNT.identifier
+        );
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let resident_error = block(digits_pattern_builtin(vec![resident])).unwrap_err();
+        assert_eq!(
+            resident_error.identifier(),
+            DIGITS_PATTERN_ERROR_INVALID_COUNT.identifier
+        );
+    }
+
+    #[test]
+    fn digits_pattern_range_reads_all_integer_classes_exactly() {
+        for (minimum, maximum) in [
+            (IntValue::I8(2), IntValue::I8(4)),
+            (IntValue::I16(2), IntValue::I16(4)),
+            (IntValue::I32(2), IntValue::I32(4)),
+            (IntValue::I64(2), IntValue::I64(4)),
+            (IntValue::U8(2), IntValue::U8(4)),
+            (IntValue::U16(2), IntValue::U16(4)),
+            (IntValue::U32(2), IntValue::U32(4)),
+            (IntValue::U64(2), IntValue::U64(4)),
+        ] {
+            let pattern = block(digits_pattern_builtin(vec![
+                Value::Int(minimum),
+                Value::Int(maximum),
+            ]))
+            .unwrap();
+            assert_eq!(pattern_regex(&pattern, "test").unwrap(), r"\d{2,4}");
+        }
+    }
+
+    #[test]
+    fn digits_pattern_descriptor_declares_all_public_forms() {
+        assert_eq!(DIGITS_PATTERN_DESCRIPTOR.signatures.len(), 3);
+        assert_eq!(DIGITS_PATTERN_DESCRIPTOR.errors.len(), 3);
+        assert_eq!(DIGITS_PATTERN_INTEGER_CAPABILITIES.len(), 2);
     }
 
     #[test]

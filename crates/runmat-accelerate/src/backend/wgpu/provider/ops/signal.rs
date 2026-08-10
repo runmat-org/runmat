@@ -1196,6 +1196,10 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         dim: usize,
     ) -> Result<GpuTensorHandle> {
+        ensure!(
+            runmat_accelerate_api::handle_integer_type(handle).is_none(),
+            "diff: typed-integer buffers require the exact typed fallback"
+        );
         let entry = self.get_entry(handle)?;
 
         let mut ext_shape = if entry.shape.is_empty() {

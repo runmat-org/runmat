@@ -463,6 +463,55 @@ const DETECT_IMPORT_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &DETECT_IMPORT_OPTIONS_OUTPUT,
     },
 ];
+const DICTIONARY_KEYS_VALUES_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "keys",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Uniform or cell-wrapped dictionary keys.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Uniform, scalar-expanded, or cell-wrapped dictionary values.",
+    },
+];
+const DICTIONARY_PAIR_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "keyValuePair1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First key/value argument pair.",
+    },
+    BuiltinParamDescriptor {
+        name: "keyValuePairN",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional key/value argument pairs.",
+    },
+];
+const DICTIONARY_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "d = dictionary()",
+        inputs: &[],
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = dictionary(keys, values)",
+        inputs: &DICTIONARY_KEYS_VALUES_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = dictionary(k1, v1, ..., kN, vN)",
+        inputs: &DICTIONARY_PAIR_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+];
 const PARQUETREAD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "T = parquetread(filename)",
@@ -646,6 +695,12 @@ pub const SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDesc
 };
 pub const DETECT_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DETECT_IMPORT_OPTIONS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const DICTIONARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DICTIONARY_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,

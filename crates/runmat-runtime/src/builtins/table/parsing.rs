@@ -32,6 +32,36 @@ pub(super) fn bool_scalar(value: &Value, context: &str) -> BuiltinResult<bool> {
     }
 }
 
+pub(super) fn zero_one_bool_scalar(value: &Value, context: &str) -> BuiltinResult<bool> {
+    match value {
+        Value::Bool(flag) => Ok(*flag),
+        Value::Int(value) if value.is_zero() => Ok(false),
+        Value::Int(value) if value.try_to_u64() == Some(1) => Ok(true),
+        Value::Num(value) if *value == 0.0 => Ok(false),
+        Value::Num(value) if *value == 1.0 => Ok(true),
+        Value::Tensor(tensor) if tensor.len() == 1 => match tensor.numeric_value_at(0) {
+            Some(runmat_builtins::NumericScalar::F64(value)) if value == 0.0 => Ok(false),
+            Some(runmat_builtins::NumericScalar::F64(value)) if value == 1.0 => Ok(true),
+            Some(runmat_builtins::NumericScalar::F32(value)) if value == 0.0 => Ok(false),
+            Some(runmat_builtins::NumericScalar::F32(value)) if value == 1.0 => Ok(true),
+            Some(value) if value.into_int_value().is_some_and(|value| value.is_zero()) => Ok(false),
+            Some(value)
+                if value
+                    .into_int_value()
+                    .is_some_and(|value| value.try_to_u64() == Some(1)) =>
+            {
+                Ok(true)
+            }
+            _ => Err(invalid_argument(format!(
+                "table: {context} must be scalar logical or numeric 0 or 1"
+            ))),
+        },
+        _ => Err(invalid_argument(format!(
+            "table: {context} must be scalar logical or numeric 0 or 1"
+        ))),
+    }
+}
+
 pub(super) fn nonnegative_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
     match value {
         Value::Int(value) => value.try_to_usize().ok_or_else(|| {
@@ -170,14 +200,6 @@ pub(super) fn variable_type_names(value: &Value) -> BuiltinResult<Vec<String>> {
         .iter()
         .map(|raw| ImportVariableType::canonical_label(raw))
         .collect()
-}
-
-pub(super) fn optional_range_spec(value: &Value) -> BuiltinResult<Option<RangeSpec>> {
-    if option_value_is_empty(value) {
-        Ok(None)
-    } else {
-        RangeSpec::parse(value).map(Some)
-    }
 }
 
 pub(super) fn optional_sheet_selector(value: &Value) -> BuiltinResult<Option<SheetSelector>> {

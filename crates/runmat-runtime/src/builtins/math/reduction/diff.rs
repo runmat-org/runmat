@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage,
     ResolveContext, Tensor, Type, Value,
@@ -23,6 +27,87 @@ use crate::builtins::math::symbolic::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
+
+const DIFF_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "diff-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "diff with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DiffCharacterInputExtension"),
+};
+const DIFF_ZERO_ORDER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "diff-zero-order",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "diff with zero difference order is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DiffZeroOrderExtension"),
+};
+const DIFF_EMPTY_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "diff-empty-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "diff with an empty order or dimension placeholder is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DiffEmptyControlExtension"),
+};
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    DIFF_CHARACTER_INPUT_EXTENSION,
+    DIFF_ZERO_ORDER_EXTENSION,
+    DIFF_EMPTY_CONTROL_EXTENSION,
+];
+
+const DIFF_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents every integer class for finite-difference data.",
+    }];
+const DIFF_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented for the positive scalar difference order.",
+    }];
+const DIFF_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are documented for the positive scalar dimension.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = diff(integer_X, n?, dim?)",
+        inputs: &DIFF_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Each recursive adjacent subtraction preserves X's integer class and saturates at that class's bounds. Resident integer data uses an exact typed fallback and returns to the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = diff(X, integer_n)",
+        inputs: &DIFF_INTEGER_ORDER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The positive scalar order is decoded exactly before host or provider execution.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Y = diff(X, n, integer_dim)",
+        inputs: &DIFF_INTEGER_DIM_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The positive one-based dimension is decoded exactly before host or provider execution.",
+    },
+];
 
 fn diff_type(args: &[Type], ctx: &ResolveContext) -> Type {
     diff_numeric_type(args, ctx)
@@ -123,11 +208,18 @@ const DIFF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Finite-difference execution fails due to conversion, gather, allocation, or reshape operations.",
     message: "diff: internal failure",
 };
+const DIFF_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIFF.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:diff:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "diff: too many output arguments",
+};
 
-const DIFF_ERRORS: [BuiltinErrorDescriptor; 3] = [
+const DIFF_ERRORS: [BuiltinErrorDescriptor; 4] = [
     DIFF_ERROR_INVALID_ARGUMENT,
     DIFF_ERROR_INVALID_INPUT,
     DIFF_ERROR_INTERNAL,
+    DIFF_ERROR_TOO_MANY_OUTPUTS,
 ];
 
 pub const DIFF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -150,7 +242,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers surface finite-difference kernels through `diff_dim`; the WGPU backend keeps tensors on the device.",
+    notes: "Providers surface floating finite-difference kernels through `diff_dim`; resident typed integers gather exactly, use class-preserving saturating subtraction, and return to their owning provider/device.",
 };
 
 fn diff_descriptor_error_with_message(
@@ -201,6 +293,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "diff,difference,finite difference,nth difference,gpu",
     accel = "diff",
     type_resolver(diff_type),
+    extensions(EXTENSIONS),
+    integer_capabilities(INTEGER_CAPABILITIES),
     descriptor(crate::builtins::math::reduction::diff::DIFF_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::diff"
 )]
@@ -209,8 +303,22 @@ async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         return diff_symbolic(expr, &rest);
     }
 
+    crate::builtins::math::trigonometry::inverse_helpers::reject_excess_outputs(NAME)?;
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DIFF_CHARACTER_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if rest.iter().any(is_empty_array) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DIFF_EMPTY_CONTROL_EXTENSION,
+            NAME,
+        )?;
+    }
     let (order, dim) = parse_arguments(&rest)?;
     if order == 0 {
+        crate::compatibility::ensure_builtin_extension_enabled(&DIFF_ZERO_ORDER_EXTENSION, NAME)?;
         return Ok(value);
     }
 
@@ -351,7 +459,6 @@ fn parse_order(value: &Value) -> BuiltinResult<Option<usize>> {
         }),
         Value::Num(n) => parse_numeric_order(*n).map(Some),
         Value::Tensor(t) if tensor_element_len(t) == 1 => parse_tensor_order(t).map(Some),
-        Value::Bool(b) => Ok(Some(if *b { 1 } else { 0 })),
         other => Err(diff_invalid_argument(format!(
             "diff: order must be a non-negative integer scalar, got {:?}",
             other
@@ -429,17 +536,94 @@ async fn diff_gpu(
         return Err(diff_invalid_argument("diff: dimension must be >= 1"));
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(device_result) = provider.diff_dim(&handle, order, working_dim.saturating_sub(1))
-        {
-            return Ok(Value::GpuTensor(device_result));
+    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+        .ok_or_else(|| diff_internal_error("diff: GPU input has no owning provider"))?;
+    let exact_or_nonreal = runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_storage(&handle)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
+    if exact_or_nonreal {
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+            .await
+            .map_err(|e| diff_internal_error(format!("diff: {e}")))?;
+        let gathered =
+            crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
+                gathered, &handle, NAME,
+            )?;
+        let output = match gathered {
+            Value::ComplexTensor(tensor) => {
+                Value::ComplexTensor(diff_complex_tensor(tensor, order, Some(working_dim))?)
+            }
+            Value::Complex(re, im) => {
+                let tensor =
+                    ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(diff_internal_error)?;
+                complex_tensor_into_value(diff_complex_tensor(tensor, order, Some(working_dim))?)
+            }
+            Value::LogicalArray(logical) => {
+                let tensor = tensor::logical_to_tensor(&logical).map_err(diff_invalid_input)?;
+                tensor::tensor_into_value(diff_tensor_host(tensor, order, Some(working_dim))?)
+            }
+            Value::Bool(flag) => {
+                let tensor = tensor::value_into_tensor_for(NAME, Value::Bool(flag))
+                    .map_err(diff_invalid_input)?;
+                tensor::tensor_into_value(diff_tensor_host(tensor, order, Some(working_dim))?)
+            }
+            Value::Tensor(tensor) => {
+                tensor::tensor_into_value(diff_tensor_host(tensor, order, Some(working_dim))?)
+            }
+            other => {
+                return Err(diff_invalid_input(format!(
+                    "unsupported gathered resident input {other:?}"
+                )))
+            }
+        };
+        return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+            provider, output, NAME, &handle,
+        );
+    }
+
+    if let Ok(device_result) = provider.diff_dim(&handle, order, working_dim.saturating_sub(1)) {
+        let mut expected_shape = handle.shape.clone();
+        if expected_shape.len() < working_dim {
+            expected_shape.resize(working_dim, 1);
         }
+        expected_shape[working_dim - 1] = expected_shape[working_dim - 1].saturating_sub(order);
+        let valid = device_result.shape == expected_shape
+            && device_result.device_id == handle.device_id
+            && runmat_accelerate_api::handle_storage(&device_result)
+                == runmat_accelerate_api::handle_storage(&handle)
+            && runmat_accelerate_api::handle_precision(&device_result)
+                == runmat_accelerate_api::handle_precision(&handle)
+            && runmat_accelerate_api::handle_integer_type(&device_result).is_none()
+            && !runmat_accelerate_api::handle_is_logical(&device_result)
+            && runmat_accelerate_api::provider_for_handle(&device_result)
+                .is_some_and(|owner| std::ptr::eq(owner, provider));
+        if valid {
+            return Ok(gpu_helpers::resident_gpu_value(device_result));
+        }
+        let owner = runmat_accelerate_api::provider_for_handle(&device_result).unwrap_or(provider);
+        let _ = owner.free(&device_result);
     }
 
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|e| diff_internal_error(format!("diff: {e}")))?;
-    diff_tensor_host(tensor, order, Some(working_dim)).map(tensor::tensor_into_value)
+    let Value::Tensor(tensor) =
+        crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
+            Value::Tensor(tensor),
+            &handle,
+            NAME,
+        )?
+    else {
+        unreachable!("real floating gather remains a tensor")
+    };
+    let output = diff_tensor_host(tensor, order, Some(working_dim))?;
+    crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+        provider,
+        tensor::tensor_into_value(output),
+        NAME,
+        &handle,
+    )
 }
 
 fn diff_char_array(chars: CharArray, order: usize, dim: Option<usize>) -> BuiltinResult<Value> {
@@ -454,15 +638,11 @@ fn diff_char_array(chars: CharArray, order: usize, dim: Option<usize>) -> Builti
 
 pub fn diff_tensor_host(tensor: Tensor, order: usize, dim: Option<usize>) -> BuiltinResult<Tensor> {
     let mut current = tensor;
-    let mut working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
+    let working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
     for _ in 0..order {
         current = diff_tensor_once(current, working_dim)?;
         if tensor::tensor_element_len(&current) == 0 {
             break;
-        }
-        // Preserve explicit dimension if the caller provided one; update when defaulting and shape shrinks.
-        if dim.is_none() && dimension_length(&current.shape, working_dim) == 0 {
-            working_dim = default_dimension(&current.shape);
         }
     }
     Ok(current)
@@ -474,14 +654,11 @@ fn diff_complex_tensor(
     dim: Option<usize>,
 ) -> BuiltinResult<ComplexTensor> {
     let mut current = tensor;
-    let mut working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
+    let working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
     for _ in 0..order {
         current = diff_complex_tensor_once(current, working_dim)?;
         if current.materialize_f64().is_empty() {
             break;
-        }
-        if dim.is_none() && dimension_length(&current.shape, working_dim) == 0 {
-            working_dim = default_dimension(&current.shape);
         }
     }
     Ok(current)
@@ -644,15 +821,6 @@ fn default_dimension(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
-fn dimension_length(shape: &[usize], dim: usize) -> usize {
-    let dim_index = dim.saturating_sub(1);
-    if dim_index < shape.len() {
-        shape[dim_index]
-    } else {
-        1
-    }
-}
-
 fn product(dims: &[usize]) -> usize {
     dims.iter()
         .copied()
@@ -756,6 +924,10 @@ pub(crate) mod tests {
             .errors
             .iter()
             .any(|error| error.code == DIFF_ERROR_INTERNAL.code));
+        assert!(DIFF_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == DIFF_ERROR_TOO_MANY_OUTPUTS.code));
     }
 
     #[test]
@@ -846,9 +1018,18 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn diff_high_order_does_not_cascade_to_later_dimensions() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("matrix");
+        let output = diff_tensor_host(tensor, 3, None).expect("diff");
+        assert_eq!(output.shape, vec![0, 3]);
+        assert!(output.materialize_f64().is_empty());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_char_array_promotes_to_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("ACEG".chars().collect(), 1, 4).unwrap();
         let result = diff_builtin(Value::CharArray(chars), Vec::new()).expect("diff");
         match result {
@@ -878,6 +1059,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_zero_order_returns_input() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![Value::Int(IntValue::I32(0))];
         let result = diff_builtin(Value::Tensor(tensor.clone()), args).expect("diff");
@@ -979,6 +1161,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_accepts_empty_order_argument() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![3, 1]).unwrap();
         let baseline = diff_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("diff");
         let empty = Tensor::new(vec![], vec![0, 0]).unwrap();
@@ -989,6 +1172,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_accepts_empty_dimension_argument() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 16.0], vec![1, 4]).unwrap();
         let baseline = diff_builtin(
             Value::Tensor(tensor.clone()),
@@ -1024,6 +1208,19 @@ pub(crate) mod tests {
         assert!(err.message().contains("non-negative integer"));
     }
 
+    #[test]
+    fn diff_rejects_logical_order_but_accepts_logical_data() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
+        let error = diff_builtin(Value::Tensor(tensor), vec![Value::Bool(true)])
+            .expect_err("logical order is unsupported");
+        assert_eq!(error.identifier(), DIFF_ERROR_INVALID_ARGUMENT.identifier);
+
+        match diff_builtin(Value::Bool(true), Vec::new()).expect("logical data") {
+            Value::Tensor(output) => assert!(output.materialize_f64().is_empty()),
+            other => panic!("expected empty tensor, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn diff_rejects_invalid_dimension() {
@@ -1048,6 +1245,37 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![3.0, 5.0]);
+        });
+    }
+
+    #[test]
+    fn diff_resident_complex_uses_owner_resolved_exact_fallback() {
+        test_support::with_test_provider(|provider| {
+            let tensor = ComplexTensor::new(vec![(1.0, 1.0), (3.0, 2.0), (6.0, 5.0)], vec![1, 3])
+                .expect("complex double");
+            let input = gpu_helpers::upload_complex_tensor(provider, &tensor).expect("upload");
+            let output = diff_builtin(Value::GpuTensor(input.clone()), Vec::new()).expect("diff");
+            let Value::GpuTensor(handle) = &output else {
+                panic!("expected resident result")
+            };
+            assert_eq!(handle.shape, vec![1, 2]);
+            assert_eq!(handle.device_id, input.device_id);
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(handle),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            match block_on(gpu_helpers::gather_value_async(&output)).expect("gather") {
+                Value::ComplexTensor(result) => {
+                    assert_eq!(result.materialize_f64(), vec![(2.0, 1.0), (3.0, 3.0)])
+                }
+                other => panic!("expected complex tensor, got {other:?}"),
+            }
         });
     }
 

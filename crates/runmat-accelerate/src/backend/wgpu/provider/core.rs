@@ -4,7 +4,9 @@ use bytemuck::{bytes_of, Pod};
 use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, IntegerElementType};
+use runmat_accelerate_api::{
+    GpuTensorHandle, GpuTensorStorage, IntegerElementType, ProviderPrecision,
+};
 #[cfg(target_arch = "wasm32")]
 use runmat_time::Instant;
 use std::sync::atomic::Ordering as AtomicOrdering;
@@ -17,6 +19,7 @@ use wgpu::util::DeviceExt;
 use super::backend_shared::NEXT_SUBMISSION_ID;
 use super::backend_types::{BufferEntry, WgpuProvider};
 use crate::backend::wgpu::residency::BufferUsageClass;
+use crate::backend::wgpu::types::NumericPrecision;
 use crate::fusion::active_fusion;
 
 impl WgpuProvider {
@@ -153,6 +156,13 @@ impl WgpuProvider {
         };
         runmat_accelerate_api::set_handle_logical(&handle, false);
         runmat_accelerate_api::set_handle_storage(&handle, storage);
+        runmat_accelerate_api::set_handle_precision(
+            &handle,
+            match self.precision {
+                NumericPrecision::F32 => ProviderPrecision::F32,
+                NumericPrecision::F64 => ProviderPrecision::F64,
+            },
+        );
         runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
     }

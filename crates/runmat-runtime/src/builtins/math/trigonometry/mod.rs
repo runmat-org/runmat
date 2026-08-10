@@ -12,7 +12,7 @@ pub(crate) mod cosh;
 pub(crate) mod cospi;
 pub(crate) mod deg2rad;
 mod degree_helpers;
-mod inverse_helpers;
+pub(crate) mod inverse_helpers;
 pub(crate) mod pi_helpers;
 pub(crate) mod pol2cart;
 pub(crate) mod rad2deg;

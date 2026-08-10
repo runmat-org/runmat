@@ -25,10 +25,12 @@
   "tested": {
     "unit": "builtins::math::symbolic::digits::tests"
   },
-  "description": "`digits` returns the current default precision for `vpa`. `digits(d)` sets the precision and returns the previous value. `digits('default')` resets the setting to 32.",
+  "description": "`digits` returns the current default precision for `vpa`. `digits(d)` rounds a finite numeric scalar to the nearest integer, sets that precision, and returns the previous value as a double scalar. RunMat mode additionally supports `digits('default')` as an explicitly gated reset extension.",
   "behaviors": [
     "The default value is 32 significant digits.",
-    "Accepted digit counts are positive integer scalar values in the supported range.",
+    "The public precision range is 2 through 100000000 significant digits, inclusive, and noninteger floating controls round to the nearest integer.",
+    "Host controls can use single, double, or any of the eight built-in integer classes; logical and resident controls reject.",
+    "Numeric text and the `'default'` reset are named RunMat-only extensions and reject in MATLAB-compatible mode.",
     "The setting affects later `vpa(x)` calls that omit an explicit precision."
   ],
   "examples": [

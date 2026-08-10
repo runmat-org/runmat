@@ -64,7 +64,29 @@ where
     })?;
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let output = compute(tensor)?;
-    upload_value(provider, output, builtin)
+    upload_value_like(provider, output, builtin, &handle)
+}
+
+pub(crate) fn upload_value_like(
+    provider: &dyn AccelProvider,
+    value: Value,
+    builtin: &str,
+    prototype: &GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    let output = upload_value(provider, value, builtin)?;
+    let Value::GpuTensor(handle) = &output else {
+        unreachable!("upload_value always returns a resident value")
+    };
+    if handle.device_id != prototype.device_id {
+        let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(provider);
+        let _ = owner.free(handle);
+        return Err(build_runtime_error(format!(
+            "{builtin}: provider restored the result on the wrong device"
+        ))
+        .with_builtin(builtin)
+        .build());
+    }
+    Ok(output)
 }
 
 pub(crate) fn upload_value(
@@ -72,6 +94,59 @@ pub(crate) fn upload_value(
     value: Value,
     builtin: &str,
 ) -> BuiltinResult<Value> {
+    let (expected_shape, expected_storage, expected_integer_type, expected_precision) = match &value
+    {
+        Value::Num(_) => (
+            vec![1, 1],
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            None,
+            Some(runmat_accelerate_api::ProviderPrecision::F64),
+        ),
+        Value::Tensor(tensor) => (
+            tensor.shape.clone(),
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            tensor.integer_storage().map(integer_storage_type),
+            if tensor.integer_storage().is_some() {
+                None
+            } else if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            } else {
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            },
+        ),
+        Value::Complex(_, _) => (
+            vec![1, 1],
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            None,
+            Some(runmat_accelerate_api::ProviderPrecision::F64),
+        ),
+        Value::ComplexTensor(tensor) => (
+            tensor.shape.clone(),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            None,
+            Some(
+                if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+                    runmat_accelerate_api::ProviderPrecision::F32
+                } else {
+                    runmat_accelerate_api::ProviderPrecision::F64
+                },
+            ),
+        ),
+        other => {
+            return Err(build_runtime_error(format!(
+                "{builtin}: cannot restore unsupported result {other:?} to provider"
+            ))
+            .with_builtin(builtin)
+            .build())
+        }
+    };
+    if expected_precision.is_some_and(|precision| provider.precision() != precision) {
+        return Err(build_runtime_error(format!(
+            "{builtin}: input provider cannot restore the requested result precision"
+        ))
+        .with_builtin(builtin)
+        .build());
+    }
     let handle = match value {
         Value::Num(value) => {
             let tensor = Tensor::new(vec![value], vec![1, 1]).map_err(|error| {
@@ -102,18 +177,174 @@ pub(crate) fn upload_value(
                     .with_builtin(builtin)
                     .build()
             })?;
-            gpu_helpers::upload_complex_tensor(provider, &tensor)?
+            upload_complex_without_precision_override(provider, &tensor, builtin)?
         }
-        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)?,
-        other => {
-            return Err(build_runtime_error(format!(
-                "{builtin}: cannot restore unsupported result {other:?} to provider"
+        Value::ComplexTensor(tensor) => {
+            upload_complex_without_precision_override(provider, &tensor, builtin)?
+        }
+        other => unreachable!("validated restore value {other:?}"),
+    };
+    let valid = handle.shape == expected_shape
+        && runmat_accelerate_api::handle_storage(&handle) == expected_storage
+        && runmat_accelerate_api::handle_integer_type(&handle) == expected_integer_type
+        && !runmat_accelerate_api::handle_is_logical(&handle)
+        && (expected_integer_type.is_some()
+            || runmat_accelerate_api::handle_precision(&handle) == expected_precision)
+        && runmat_accelerate_api::provider_for_handle(&handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider));
+    if !valid {
+        let owner = runmat_accelerate_api::provider_for_handle(&handle).unwrap_or(provider);
+        let _ = owner.free(&handle);
+        return Err(build_runtime_error(format!(
+            "{builtin}: provider returned an incompatible restored result"
+        ))
+        .with_builtin(builtin)
+        .build());
+    }
+    Ok(gpu_helpers::resident_gpu_value(handle))
+}
+
+fn upload_complex_without_precision_override(
+    provider: &dyn AccelProvider,
+    tensor: &ComplexTensor,
+    builtin: &str,
+) -> BuiltinResult<GpuTensorHandle> {
+    if tensor.integer_storage().is_some() {
+        return Err(build_runtime_error(format!(
+            "{builtin}: typed complex integer GPU buffers are not supported"
+        ))
+        .with_builtin(builtin)
+        .build());
+    }
+    let mut interleaved = Vec::with_capacity(tensor.len().saturating_mul(2));
+    for &(real, imag) in tensor.materialize_f64().iter() {
+        interleaved.push(real);
+        interleaved.push(imag);
+    }
+    let handle = provider
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &interleaved,
+            shape: &tensor.shape,
+        })
+        .map_err(|error| {
+            build_runtime_error(format!(
+                "{builtin}: failed to restore result to input provider: {error}"
             ))
             .with_builtin(builtin)
-            .build())
-        }
+            .build()
+        })?;
+    runmat_accelerate_api::set_handle_logical(&handle, false);
+    runmat_accelerate_api::set_handle_storage(
+        &handle,
+        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+    );
+    Ok(handle)
+}
+
+fn integer_storage_type(
+    storage: &runmat_builtins::IntegerStorage,
+) -> runmat_accelerate_api::IntegerElementType {
+    use runmat_accelerate_api::IntegerElementType;
+    use runmat_builtins::IntegerStorage;
+    match storage {
+        IntegerStorage::I8(_) => IntegerElementType::I8,
+        IntegerStorage::I16(_) => IntegerElementType::I16,
+        IntegerStorage::I32(_) => IntegerElementType::I32,
+        IntegerStorage::I64(_) => IntegerElementType::I64,
+        IntegerStorage::U8(_) => IntegerElementType::U8,
+        IntegerStorage::U16(_) => IntegerElementType::U16,
+        IntegerStorage::U32(_) => IntegerElementType::U32,
+        IntegerStorage::U64(_) => IntegerElementType::U64,
+    }
+}
+
+pub(crate) fn ensure_integer_exact_f64(value: &Value, builtin: &str) -> BuiltinResult<()> {
+    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let valid = match value {
+        Value::Int(value) => exact(value),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .is_none_or(|storage| storage.exact_values().iter().all(exact)),
+        _ => true,
     };
-    Ok(gpu_helpers::resident_gpu_value(handle))
+    if valid {
+        Ok(())
+    } else {
+        Err(build_runtime_error(format!(
+            "{builtin}: integer input must be exactly representable as double"
+        ))
+        .with_builtin(builtin)
+        .with_identifier(format!("RunMat:{builtin}:InvalidInput"))
+        .build())
+    }
+}
+
+pub(crate) fn align_floating_value_precision(
+    value: Value,
+    prototype: &GpuTensorHandle,
+    builtin: &str,
+) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(prototype).is_some()
+        || runmat_accelerate_api::handle_is_logical(prototype)
+    {
+        return Ok(value);
+    }
+    let dtype = match runmat_accelerate_api::handle_precision(prototype) {
+        Some(runmat_accelerate_api::ProviderPrecision::F32) => runmat_builtins::NumericDType::F32,
+        _ => runmat_builtins::NumericDType::F64,
+    };
+    match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_none() => {
+            let shape = tensor.shape.clone();
+            let values = tensor.materialize_f64();
+            let tensor = if dtype == runmat_builtins::NumericDType::F32 {
+                Tensor::from_f32(
+                    values.into_iter().map(|value| value as f32).collect(),
+                    shape,
+                )
+            } else {
+                Tensor::new(values, shape)
+            }
+            .map_err(|error| {
+                build_runtime_error(format!("{builtin}: {error}"))
+                    .with_builtin(builtin)
+                    .build()
+            })?;
+            Ok(Value::Tensor(tensor))
+        }
+        Value::ComplexTensor(tensor) => {
+            let tensor = runmat_builtins::ComplexTensor::from_f64_values_with_dtype(
+                tensor.materialize_f64(),
+                tensor.shape.clone(),
+                dtype,
+            )
+            .map_err(|error| {
+                build_runtime_error(format!("{builtin}: {error}"))
+                    .with_builtin(builtin)
+                    .build()
+            })?;
+            Ok(Value::ComplexTensor(tensor))
+        }
+        Value::Num(value) if dtype == runmat_builtins::NumericDType::F32 => {
+            Tensor::from_f32(vec![value as f32], vec![1, 1])
+                .map(Value::Tensor)
+                .map_err(|error| {
+                    build_runtime_error(format!("{builtin}: {error}"))
+                        .with_builtin(builtin)
+                        .build()
+                })
+        }
+        Value::Complex(re, im) if dtype == runmat_builtins::NumericDType::F32 => {
+            runmat_builtins::ComplexTensor::from_f32(vec![(re as f32, im as f32)], vec![1, 1])
+                .map(Value::ComplexTensor)
+                .map_err(|error| {
+                    build_runtime_error(format!("{builtin}: {error}"))
+                        .with_builtin(builtin)
+                        .build()
+                })
+        }
+        other => Ok(other),
+    }
 }
 
 pub(crate) fn map_real_tensor<F64, F32>(
@@ -301,7 +532,43 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::{IntegerStorage, NumericDType};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct F32OnlyProvider {
+        upload_calls: AtomicUsize,
+    }
+
+    impl runmat_accelerate_api::AccelProvider for F32OnlyProvider {
+        fn upload(
+            &self,
+            _host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            self.upload_calls.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::anyhow!("unexpected upload"))
+        }
+
+        fn download<'a>(
+            &'a self,
+            _handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow::anyhow!("download unsupported")) })
+        }
+
+        fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "f32-only-test".to_string()
+        }
+
+        fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+            runmat_accelerate_api::ProviderPrecision::F32
+        }
+    }
 
     #[test]
     fn real_boundary_promotes_all_eight_integer_classes_to_double() {
@@ -323,5 +590,44 @@ mod tests {
             assert_eq!(output.numeric_dtype(), NumericDType::F64);
             assert_eq!(output.shape, vec![2, 1]);
         }
+    }
+
+    #[test]
+    fn restore_preserves_non_f32_exact_double_without_metadata_relabeling() {
+        test_support::with_test_provider(|provider| {
+            let value = 1.0000000000000002_f64;
+            let output =
+                upload_value(provider, Value::Num(value), "restore-test").expect("double restore");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident output")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            let downloaded = block_on(provider.download(&handle)).expect("download");
+            assert_eq!(downloaded.data, vec![value]);
+        });
+    }
+
+    #[test]
+    fn restore_rejects_double_before_upload_on_f32_only_provider() {
+        let provider = F32OnlyProvider {
+            upload_calls: AtomicUsize::new(0),
+        };
+        let error = upload_value(&provider, Value::Num(1.0000000000000002), "restore-test")
+            .expect_err("f32-only provider cannot supply a double result");
+        assert!(error.message().contains("requested result precision"));
+        assert_eq!(provider.upload_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn restore_rejects_single_before_upload_on_f64_only_provider() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::from_f32(vec![1.0000001], vec![1, 1]).expect("single");
+            let error = upload_value(provider, Value::Tensor(tensor), "restore-test")
+                .expect_err("f64-only provider cannot supply a single result");
+            assert!(error.message().contains("requested result precision"));
+        });
     }
 }
