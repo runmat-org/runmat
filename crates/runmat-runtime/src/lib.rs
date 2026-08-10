@@ -467,19 +467,34 @@ pub(crate) async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinRes
 }
 
 pub(crate) async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        if out_count > 1 {
-            return Ok(crate::output_count::output_list_with_padding(
-                out_count, rest,
-            ));
-        }
+    let out_count = crate::output_count::current_output_count().unwrap_or(1);
+    let valid_count = rest.len() == 1 || rest.len() == out_count;
+    if !valid_count {
+        return Err(build_runtime_error(
+            "deal: the number of outputs must match the number of inputs unless there is exactly one input",
+        )
+        .with_builtin("deal")
+        .with_identifier("RunMat:deal:InputOutputCountMismatch")
+        .build());
     }
-    // Return cell row vector of inputs for expansion
-    let cols = rest.len();
-    make_cell(rest, 1, cols).map_err(Into::into)
+    if rest.iter().any(crate::value_contains_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &crate::builtins::common::deal::DEAL_RESIDENT_INPUT_EXTENSION,
+            "deal",
+        )?;
+    }
+    if out_count == 0 {
+        return Ok(Value::OutputList(Vec::new()));
+    }
+    if rest.len() == 1 {
+        let value = rest.into_iter().next().expect("one deal input");
+        return if out_count == 1 {
+            Ok(value)
+        } else {
+            Ok(Value::OutputList(vec![value; out_count]))
+        };
+    }
+    Ok(Value::OutputList(rest))
 }
 
 // Object/handle utilities used by interpreter lowering for OOP/func handles
@@ -2776,7 +2791,7 @@ mod tests {
 
     #[test]
     fn call_method_fallback_preserves_requested_outputs() {
-        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let _output_guard = crate::output_count::push_output_count(Some(3));
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
@@ -2790,9 +2805,10 @@ mod tests {
         .expect("call_method fallback should succeed");
         match result {
             Value::OutputList(values) => {
-                assert!(values.len() >= 2);
+                assert_eq!(values.len(), 3);
                 assert_eq!(values[0], base);
                 assert_eq!(values[1], Value::Num(9.0));
+                assert_eq!(values[2], Value::Num(10.0));
             }
             other => {
                 panic!("expected output list from multi-output call_method fallback, got {other:?}")
@@ -2802,7 +2818,7 @@ mod tests {
 
     #[test]
     fn call_method_trims_method_name_for_resolution() {
-        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let _output_guard = crate::output_count::push_output_count(Some(3));
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
@@ -2816,9 +2832,10 @@ mod tests {
         .expect("call_method fallback should succeed after method-name trimming");
         match result {
             Value::OutputList(values) => {
-                assert!(values.len() >= 2);
+                assert_eq!(values.len(), 3);
                 assert_eq!(values[0], base);
                 assert_eq!(values[1], Value::Num(9.0));
+                assert_eq!(values[2], Value::Num(10.0));
             }
             other => {
                 panic!("expected output list from trimmed-name call_method fallback, got {other:?}")
@@ -2828,7 +2845,7 @@ mod tests {
 
     #[test]
     fn feval_call_method_closure_fast_path_preserves_requested_outputs() {
-        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let _output_guard = crate::output_count::push_output_count(Some(3));
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
@@ -2845,9 +2862,10 @@ mod tests {
             .expect("feval call_method closure should succeed");
         match result {
             Value::OutputList(values) => {
-                assert!(values.len() >= 2);
+                assert_eq!(values.len(), 3);
                 assert_eq!(values[0], base);
                 assert_eq!(values[1], Value::Num(9.0));
+                assert_eq!(values[2], Value::Num(10.0));
             }
             other => {
                 panic!(
@@ -2859,7 +2877,7 @@ mod tests {
 
     #[test]
     fn feval_call_method_closure_fast_path_trims_method_name_for_resolution() {
-        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let _output_guard = crate::output_count::push_output_count(Some(3));
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
@@ -2876,9 +2894,10 @@ mod tests {
             .expect("feval call_method closure should succeed after method-name trimming");
         match result {
             Value::OutputList(values) => {
-                assert!(values.len() >= 2);
+                assert_eq!(values.len(), 3);
                 assert_eq!(values[0], base);
                 assert_eq!(values[1], Value::Num(9.0));
+                assert_eq!(values[2], Value::Num(10.0));
             }
             other => {
                 panic!(

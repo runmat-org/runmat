@@ -32980,7 +32980,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+              "description": "Shift form: 'start', 'end', or 'dayofweek'."
             },
             {
               "name": "unit",
@@ -32990,11 +32990,11 @@
               "description": "Calendar/time unit."
             },
             {
-              "name": "weekdayOrOption",
+              "name": "rule",
               "ty": "Any",
               "arity": "Optional",
               "default": null,
-              "description": "Optional weekday for week-based shifts."
+              "description": "Optional current/next/previous/nearest or integer occurrence rule."
             }
           ],
           "outputs": [
@@ -33008,7 +33008,7 @@
           ]
         },
         {
-          "label": "t2 = dateshift(t, boundary, \"week\", weekday)",
+          "label": "t2 = dateshift(t, boundary, unit, rule)",
           "inputs": [
             {
               "name": "t",
@@ -33022,7 +33022,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+              "description": "Shift form: 'start', 'end', or 'dayofweek'."
             },
             {
               "name": "unit",
@@ -33032,11 +33032,11 @@
               "description": "Calendar/time unit."
             },
             {
-              "name": "weekdayOrOption",
+              "name": "rule",
               "ty": "Any",
               "arity": "Optional",
               "default": null,
-              "description": "Optional weekday for week-based shifts."
+              "description": "Optional current/next/previous/nearest or integer occurrence rule."
             }
           ],
           "outputs": [
@@ -33064,7 +33064,7 @@
               "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Shift boundary: 'start', 'end', or 'nearest'."
+              "description": "Shift form: 'start', 'end', or 'dayofweek'."
             },
             {
               "name": "unit",
@@ -33074,11 +33074,11 @@
               "description": "Calendar/time unit."
             },
             {
-              "name": "weekdayOrOption",
+              "name": "rule",
               "ty": "Any",
               "arity": "Optional",
               "default": null,
-              "description": "Optional weekday for week-based shifts."
+              "description": "Optional current/next/previous/nearest or integer occurrence rule."
             }
           ],
           "outputs": [
@@ -33110,6 +33110,43 @@
           "identifier": "RunMat:datetime:Internal",
           "when": "Internal datetime state or indexing/evaluation failed unexpectedly.",
           "message": "datetime: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "datetime-resident-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Gathering resident numeric input into a host datetime object is a RunMat-only extension",
+          "error_identifier": "RunMat:compatibility:DatetimeGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dateshift(t, ..., integer_weekday_or_rule)",
+          "inputs": [
+            {
+              "name": "integer-valued weekday or occurrence rule",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public API documents integer-valued numeric controls without a per-storage-class table. RunMat's settled compatibility coverage accepts all eight integer classes, reads them exactly before calendar shifting, and also accepts ordinary integer-valued doubles."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The documented contract is the integer-valued numeric control form, not an explicit per-class matrix. RunMat's settled all-eight-class coverage is exact, scalar-expands against datetime arrays, and produces host datetime objects."
         }
       ]
     },
@@ -33153,14 +33190,14 @@
           ]
         },
         {
-          "label": "t = datetime(serialDateNumbers)",
+          "label": "t = datetime(dateVectors)",
           "inputs": [
             {
-              "name": "serialDateNumbers",
+              "name": "dateVectors",
               "ty": "NumericArray",
               "arity": "Required",
               "default": null,
-              "description": "Numeric serial date input."
+              "description": "An m-by-3 or m-by-6 numeric date-vector matrix."
             }
           ],
           "outputs": [
@@ -33196,97 +33233,6 @@
               "arity": "Required",
               "default": null,
               "description": "Day component."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "t",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Datetime object result."
-            }
-          ]
-        },
-        {
-          "label": "t = datetime(year, month, day, hour)",
-          "inputs": [
-            {
-              "name": "year",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Year component."
-            },
-            {
-              "name": "month",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Month component."
-            },
-            {
-              "name": "day",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Day component."
-            },
-            {
-              "name": "hour",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Hour component."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "t",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Datetime object result."
-            }
-          ]
-        },
-        {
-          "label": "t = datetime(year, month, day, hour, minute)",
-          "inputs": [
-            {
-              "name": "year",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Year component."
-            },
-            {
-              "name": "month",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Month component."
-            },
-            {
-              "name": "day",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Day component."
-            },
-            {
-              "name": "hour",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Hour component."
-            },
-            {
-              "name": "minute",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Minute component."
             }
           ],
           "outputs": [
@@ -33343,6 +33289,27 @@
               "arity": "Required",
               "default": null,
               "description": "Second component."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime object result."
+            }
+          ]
+        },
+        {
+          "label": "t = datetime(year, month, day, hour, minute, second, millisecond)",
+          "inputs": [
+            {
+              "name": "args",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Datetime constructor arguments."
             }
           ],
           "outputs": [
@@ -33459,6 +33426,115 @@
           "when": "Internal datetime state or indexing/evaluation failed unexpectedly.",
           "message": "datetime: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "datetime-implicit-datenum",
+          "mode": "RunMatOnly",
+          "description": "A one-argument numeric value that is not an m-by-3 or m-by-6 date vector is interpreted as a serial date number only in RunMat compatibility-extension mode",
+          "error_identifier": "RunMat:compatibility:DatetimeImplicitDatenumExtension"
+        },
+        {
+          "id": "datetime-four-five-components",
+          "mode": "RunMatOnly",
+          "description": "Four- and five-component datetime constructor forms are retained only in RunMat compatibility-extension mode",
+          "error_identifier": "RunMat:compatibility:DatetimeLegacyComponentArityExtension"
+        },
+        {
+          "id": "datetime-logical-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Logical values in datetime numeric positions are a RunMat-only compatibility extension",
+          "error_identifier": "RunMat:compatibility:DatetimeLogicalInputExtension"
+        },
+        {
+          "id": "datetime-resident-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Gathering resident numeric input into a host datetime object is a RunMat-only extension",
+          "error_identifier": "RunMat:compatibility:DatetimeGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "datetime(integer_date_vector_or_components)",
+          "inputs": [
+            {
+              "name": "date vectors and Y/M/D/H/M/S/MS components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are read from authoritative storage and validated before conversion at the internal serial-date boundary."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Calendar structure is resolved exactly before the representable instant is stored at RunMat's current floating serial-date boundary."
+        },
+        {
+          "form": "datetime(integer_X, 'ConvertFrom', dateType)",
+          "inputs": [
+            {
+              "name": "X with ConvertFrom",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer conversion input is documented; RunMat currently implements datenum only and reports other conversion epochs explicitly."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The output is a host datetime object. TT2000 and other conversion epochs remain explicit implementation gaps; no false nanosecond-precision claim is made."
+        },
+        {
+          "form": "datetime(resident_integer, ...)",
+          "inputs": [
+            {
+              "name": "resident numeric input",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident input is gated before provider access and gathered only when RunMat extensions are enabled."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "MATLAB-compatible mode rejects resident numeric input before provider lookup; extension mode gathers and returns a host datetime object."
+        }
       ]
     },
     {
@@ -33486,6 +33562,34 @@
               "description": "Numeric scalar/tensor result."
             }
           ]
+        },
+        {
+          "label": "X = day(t, dayType)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Datetime, legacy serial date number, or date text."
+            },
+            {
+              "name": "dayType",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "dayofmonth, dayofweek, iso-dayofweek, dayofyear, name, or shortname."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "out",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Method result."
+            }
+          ]
         }
       ],
       "errors": [
@@ -33506,6 +33610,49 @@
           "identifier": "RunMat:datetime:Internal",
           "when": "Internal datetime state or indexing/evaluation failed unexpectedly.",
           "message": "datetime: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "datetime-logical-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Logical values in datetime numeric positions are a RunMat-only compatibility extension",
+          "error_identifier": "RunMat:compatibility:DatetimeLogicalInputExtension"
+        },
+        {
+          "id": "datetime-resident-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Gathering resident numeric input into a host datetime object is a RunMat-only extension",
+          "error_identifier": "RunMat:compatibility:DatetimeGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "day(integer_serial, dayType)",
+          "inputs": [
+            {
+              "name": "legacy serial date number",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Legacy numeric input is interpreted at the serial-date boundary and day returns double numeric results or cell-character names."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "All integer classes enter through authoritative storage; numeric outputs are MATLAB-compatible double arrays. Name modes return cell arrays of character vectors."
         }
       ]
     },
@@ -34297,6 +34444,26 @@
           "when": "Gain evaluation failed internally.",
           "message": "dcgain: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "k = dcgain(integer_sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "dcgain accepts an LTI model object. Integer coefficient support belongs to model constructors and does not make an integer array a valid sys input."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer input is inapplicable at the dynamic-system object boundary and rejects before provider access. Coefficients have already crossed the constructor's model-numeric boundary."
+        }
       ]
     },
     {
@@ -34326,7 +34493,78 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.DEAL.INPUT_OUTPUT_COUNT_MISMATCH",
+          "identifier": "RunMat:deal:InputOutputCountMismatch",
+          "when": "The call has multiple inputs and the requested output count differs from the input count, or has no input and a nonzero output count.",
+          "message": "deal: the number of outputs must match the number of inputs unless there is exactly one input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "deal-resident-input",
+          "mode": "RunMatOnly",
+          "description": "deal with a resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DealResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[B1,...,Bn] = deal(integer_A1,...,integer_An) or deal(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "deal copies input arrays to outputs without numeric conversion; every integer class, shape, and value is preserved."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Matching inputs are distributed positionally; one input is replicated to every requested output. No integer arithmetic or floating materialization occurs."
+        },
+        {
+          "form": "[B1,...,Bn] = deal(resident_integer_A1,...,resident_integer_An) or deal(resident_integer_A)",
+          "inputs": [
+            {
+              "name": "resident integer A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode passes resident integer handles through structurally without gather, allocation, provider dispatch, or floating conversion."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "This RunMat-only form is gated before provider access and retains each input's original resident handle and owner."
+        }
+      ]
     },
     {
       "name": "deblank",
@@ -34477,6 +34715,101 @@
           "mode": "RunMatOnly",
           "description": "decomposition with a gpuArray argument is a RunMat extension",
           "error_identifier": "RunMat:compatibility:DecompositionGpuInputExtension"
+        },
+        {
+          "id": "decomposition-integer-check-condition",
+          "mode": "RunMatOnly",
+          "description": "decomposition with an integer CheckCondition value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionIntegerCheckConditionExtension"
+        },
+        {
+          "id": "decomposition-integer-rank-tolerance",
+          "mode": "RunMatOnly",
+          "description": "decomposition with an integer RankTolerance value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionIntegerRankToleranceExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dA = decomposition(integer_A,...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer coefficient classes are stored exactly behind the RunMat compatibility gate and are promoted to double only at the solve boundary."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Construction and structural metadata retain exact integer storage; resident coefficients gather through their owner into host object storage."
+        },
+        {
+          "form": "dA = decomposition(A,...,'CheckCondition',integer_value)",
+          "inputs": [
+            {
+              "name": "CheckCondition",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents CheckCondition as logical. RunMat mode additionally accepts an integer scalar and interprets zero as false and nonzero as true."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The compatibility gate runs before any resident control value is gathered."
+        },
+        {
+          "form": "dA = decomposition(A,...,'RankTolerance',integer_value)",
+          "inputs": [
+            {
+              "name": "RankTolerance",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer RankTolerance is gated and must be exactly representable before the binary64 option boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "RunMat-only typed-integer RankTolerance crosses an explicit exact binary64 boundary after the compatibility gate."
         }
       ]
     },
@@ -34520,54 +34853,42 @@
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
         }
-      ]
-    },
-    {
-      "name": "decomposition.ldivide",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
+      ],
+      "extensions": [
         {
-          "label": "X = decomposition.solve(lhs, rhs)",
-          "inputs": [
-            {
-              "name": "lhs",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Left operand."
-            },
-            {
-              "name": "rhs",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Right operand."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric solution."
-            }
-          ]
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
         }
       ],
-      "errors": [
+      "integer_capabilities": [
         {
-          "code": "RM.DECOMPOSITION.INVALID_INPUT",
-          "identifier": "RunMat:decomposition:InvalidInput",
-          "when": "The matrix, type, option, or object operation is invalid.",
-          "message": "decomposition: invalid input"
-        },
-        {
-          "code": "RM.DECOMPOSITION.INTERNAL",
-          "identifier": "RunMat:decomposition:Internal",
-          "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
-          "message": "decomposition: internal runtime failure"
+          "form": "out = ctranspose(integer_decomposition)",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Transpose and conjugation retain the exact coefficient class; signed/unsigned integer conjugation uses the class assignment saturation rule."
         }
       ]
     },
@@ -34618,6 +34939,49 @@
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        },
+        {
+          "id": "decomposition-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a gpuArray argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = integer_decomposition \\ B or X = B / integer_decomposition",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Exact integer coefficients are explicitly promoted to binary64 at the solve boundary; the solution is double or complex double."
+        }
       ]
     },
     {
@@ -34666,6 +35030,49 @@
           "identifier": "RunMat:decomposition:Internal",
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        },
+        {
+          "id": "decomposition-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a gpuArray argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = integer_decomposition \\ B or X = B / integer_decomposition",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Exact integer coefficients are explicitly promoted to binary64 at the solve boundary; the solution is double or complex double."
         }
       ]
     },
@@ -34716,6 +35123,115 @@
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        },
+        {
+          "id": "decomposition-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a gpuArray argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionGpuInputExtension"
+        },
+        {
+          "id": "decomposition-integer-scale-factor",
+          "mode": "RunMatOnly",
+          "description": "scaling a decomposition by a real typed-integer scalar is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionIntegerScaleFactorExtension"
+        },
+        {
+          "id": "decomposition-complex-integer-scale-factor",
+          "mode": "RunMatOnly",
+          "description": "scaling a decomposition by a paired complex typed-integer scalar is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionComplexIntegerScaleFactorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "out = integer_decomposition scaled by a floating scalar",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The exact coefficient matrix is retained while decomposition scale metadata changes."
+        },
+        {
+          "form": "out = dA .* integer_scale or integer_scale .* dA",
+          "inputs": [
+            {
+              "name": "scaleFactor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "A real typed-integer scale or divisor is gated independently and must be exactly representable before conversion to decomposition scale metadata."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-only real integer factor must be exactly representable at the binary64 scale-metadata boundary."
+        },
+        {
+          "form": "out = dA .* complex_integer_scale or complex_integer_scale .* dA",
+          "inputs": [
+            {
+              "name": "complexScaleFactor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Paired real and imaginary typed-integer components are gated and each must be exactly representable before conversion to complex scale metadata."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Both RunMat-only paired integer components must be exactly representable at the complex binary64 scale-metadata boundary."
+        }
       ]
     },
     {
@@ -34764,6 +35280,142 @@
           "identifier": "RunMat:decomposition:Internal",
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        },
+        {
+          "id": "decomposition-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a gpuArray argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionGpuInputExtension"
+        },
+        {
+          "id": "decomposition-integer-scale-factor",
+          "mode": "RunMatOnly",
+          "description": "scaling a decomposition by a real typed-integer scalar is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionIntegerScaleFactorExtension"
+        },
+        {
+          "id": "decomposition-complex-integer-scale-factor",
+          "mode": "RunMatOnly",
+          "description": "scaling a decomposition by a paired complex typed-integer scalar is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionComplexIntegerScaleFactorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "out = integer_decomposition / scalar",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Scalar division retains the exact coefficient matrix and updates only decomposition metadata; every persisted-object entry point rechecks the RunMat extension gate."
+        },
+        {
+          "form": "X = B / integer_decomposition",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Exact integer coefficients are explicitly promoted to binary64 at the solve boundary; the solution is double or complex double."
+        },
+        {
+          "form": "out = dA / integer_scale",
+          "inputs": [
+            {
+              "name": "scaleFactor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "A real typed-integer scale or divisor is gated independently and must be exactly representable before conversion to decomposition scale metadata."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-only real integer divisor must be exactly representable at the binary64 scale-metadata boundary."
+        },
+        {
+          "form": "out = dA / complex_integer_scale",
+          "inputs": [
+            {
+              "name": "complexScaleFactor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Paired real and imaginary typed-integer components are gated and each must be exactly representable before conversion to complex scale metadata."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Both RunMat-only paired integer divisor components must be exactly representable at the complex binary64 scale-metadata boundary."
         }
       ]
     },
@@ -34821,6 +35473,43 @@
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "property = integer_decomposition.Property",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Property access reads metadata from an exact RunMat-only integer decomposition object and remains gated whenever that persisted object is consumed."
+        }
       ]
     },
     {
@@ -34870,6 +35559,115 @@
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        },
+        {
+          "id": "decomposition-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a gpuArray argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionGpuInputExtension"
+        },
+        {
+          "id": "decomposition-integer-scale-factor",
+          "mode": "RunMatOnly",
+          "description": "scaling a decomposition by a real typed-integer scalar is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionIntegerScaleFactorExtension"
+        },
+        {
+          "id": "decomposition-complex-integer-scale-factor",
+          "mode": "RunMatOnly",
+          "description": "scaling a decomposition by a paired complex typed-integer scalar is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionComplexIntegerScaleFactorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "out = integer_decomposition scaled by a floating scalar",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The exact coefficient matrix is retained while decomposition scale metadata changes."
+        },
+        {
+          "form": "out = dA .* integer_scale or integer_scale .* dA",
+          "inputs": [
+            {
+              "name": "scaleFactor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "A real typed-integer scale or divisor is gated independently and must be exactly representable before conversion to decomposition scale metadata."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-only real integer factor must be exactly representable at the binary64 scale-metadata boundary."
+        },
+        {
+          "form": "out = dA .* complex_integer_scale or complex_integer_scale .* dA",
+          "inputs": [
+            {
+              "name": "complexScaleFactor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Paired real and imaginary typed-integer components are gated and each must be exactly representable before conversion to complex scale metadata."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Both RunMat-only paired integer components must be exactly representable at the complex binary64 scale-metadata boundary."
+        }
       ]
     },
     {
@@ -34912,6 +35710,43 @@
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "out = +integer_decomposition, -integer_decomposition, or scalar scaling",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unary and scalar transforms retain the exact coefficient matrix and update only decomposition metadata; every persisted-object entry point rechecks the RunMat extension gate."
+        }
       ]
     },
     {
@@ -34953,6 +35788,43 @@
           "identifier": "RunMat:decomposition:Internal",
           "when": "Runtime cannot materialize a decomposition object or transformed coefficient matrix.",
           "message": "decomposition: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "decomposition-nonfloating-input",
+          "mode": "RunMatOnly",
+          "description": "decomposition with a non-single/non-double coefficient matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DecompositionNonfloatingInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "out = +integer_decomposition, -integer_decomposition, or scalar scaling",
+          "inputs": [
+            {
+              "name": "dA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The decomposition object contains an exact RunMat-only integer coefficient matrix."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unary and scalar transforms retain the exact coefficient matrix and update only decomposition metadata; every persisted-object entry point rechecks the RunMat extension gate."
         }
       ]
     },
@@ -77056,6 +77928,51 @@
           "when": "Runtime cannot materialize left-division outputs.",
           "message": "mldivide: internal runtime failure"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = scalar_A \\ integer_B",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "When an integer participates, A must be scalar; same-class integer and scalar-double forms follow scalar element-wise division."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The nonscalar integer right-hand side supplies the preserved output class and shape."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Integer matrix left division is unsupported; the documented scalar-left form is exact class-preserving element-wise division, and resident results return to the first input owner."
+        }
       ]
     },
     {
@@ -81289,6 +82206,51 @@
           "identifier": "RunMat:mrdivide:Internal",
           "when": "Runtime cannot materialize right-division outputs.",
           "message": "mrdivide: internal runtime failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = integer_A / scalar_B",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The integer numerator supplies the preserved output class and shape."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "When an integer participates, B must be scalar; same-class integer and scalar-double forms follow scalar element-wise division."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Integer linear-system solving is unsupported; the documented scalar-right form is exact class-preserving element-wise division, and resident results return to the first input owner."
         }
       ]
     },

@@ -434,10 +434,9 @@ fn unresolved_external_function_handle_multi_output_feval_fails_without_legacy_f
 
 #[test]
 fn unresolved_external_function_handle_expand_feval_fails_without_legacy_fallback() {
-    let err = execute_source_result(
-        "h = @definitely_missing_callback; C = deal(1,2); y = feval(h, C{:});",
-    )
-    .expect_err("unresolved external expanded callback should fail");
+    let err =
+        execute_source_result("h = @definitely_missing_callback; C = {1,2}; y = feval(h, C{:});")
+            .expect_err("unresolved external expanded callback should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -448,9 +447,8 @@ fn unresolved_external_function_handle_expand_feval_fails_without_legacy_fallbac
 
 #[test]
 fn unresolved_external_function_handle_expand_zero_output_feval_fails_without_legacy_fallback() {
-    let err =
-        execute_source_result("h = @definitely_missing_callback; C = deal(1,2); feval(h, C{:});")
-            .expect_err("unresolved external expanded callback should fail");
+    let err = execute_source_result("h = @definitely_missing_callback; C = {1,2}; feval(h, C{:});")
+        .expect_err("unresolved external expanded callback should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -462,7 +460,7 @@ fn unresolved_external_function_handle_expand_zero_output_feval_fails_without_le
 #[test]
 fn unresolved_external_function_handle_expand_multi_output_feval_fails_without_legacy_fallback() {
     let err = execute_source_result(
-        "h = @definitely_missing_callback; C = deal(1,2); [a,b] = feval(h, C{:});",
+        "h = @definitely_missing_callback; C = {1,2}; [a,b] = feval(h, C{:});",
     )
     .expect_err("unresolved external expanded callback should fail");
     assert_eq!(
@@ -535,7 +533,7 @@ fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instructio
 
 #[test]
 fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); feval(h, C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
@@ -558,7 +556,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_inst
 
 #[test]
 fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); y = feval(h, C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; y = feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded feval source should compile");
     assert!(bytecode.instructions.iter().any(
@@ -580,7 +578,7 @@ fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
 
 #[test]
 fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = feval(h, C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; [a,b] = feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
@@ -665,7 +663,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_feval_uses_typed_ins
 
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typed_instruction() {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); feval(h, C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output feval compiles");
     assert!(bytecode.instructions.iter().any(
@@ -689,7 +687,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typ
 
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_typed_instruction() {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); y = feval(h, C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; y = feval(h, C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded single-output feval compiles");
     assert!(bytecode.instructions.iter().any(
@@ -713,7 +711,7 @@ fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_t
 
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instruction() {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); [a,b] = feval(h, C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; [a,b] = feval(h, C{:});";
     let bytecode =
         compile_source(source).expect("nested qualified external handle expanded feval compiles");
     assert!(bytecode.instructions.iter().any(
@@ -802,7 +800,7 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
 
 #[test]
 fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); h(C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; h(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -825,7 +823,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_type
 
 #[test]
 fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); y = h(C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; y = h(C{:});";
     let bytecode =
         compile_source(source).expect("qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -848,7 +846,7 @@ fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instructio
 
 #[test]
 fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction() {
-    let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = h(C{:});";
+    let source = "h = @pkg.remote_inc; C = {1,2}; [a,b] = h(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -941,7 +939,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typ
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction(
 ) {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); h(C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; h(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -965,7 +963,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_us
 
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_instruction() {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); y = h(C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; y = h(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -989,7 +987,7 @@ fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_ins
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction(
 ) {
-    let source = "h = @pkg.sub.remote; C = deal(1,2); [a,b] = h(C{:});";
+    let source = "h = @pkg.sub.remote; C = {1,2}; [a,b] = h(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
@@ -1114,7 +1112,7 @@ fn unresolved_qualified_direct_call_multi_output_uses_external_boundary_typed_in
 
 #[test]
 fn unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction() {
-    let source = "C = deal(1,2); pkg.remote_inc(C{:});";
+    let source = "C = {1,2}; pkg.remote_inc(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified expanded zero-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1147,7 +1145,7 @@ fn unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_ty
 
 #[test]
 fn unresolved_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction() {
-    let source = "C = deal(1,2); [a,b] = pkg.remote_inc(C{:});";
+    let source = "C = {1,2}; [a,b] = pkg.remote_inc(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified expanded multi-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1274,7 +1272,7 @@ fn unresolved_nested_qualified_direct_call_multi_output_uses_external_boundary_t
 #[test]
 fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction(
 ) {
-    let source = "C = deal(1,2); pkg.sub.remote(C{:});";
+    let source = "C = {1,2}; pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded zero-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1309,7 +1307,7 @@ fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boun
 #[test]
 fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_boundary_typed_instruction(
 ) {
-    let source = "C = deal(1,2); a = pkg.sub.remote(C{:});";
+    let source = "C = {1,2}; a = pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded single-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -1344,7 +1342,7 @@ fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_bo
 #[test]
 fn unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction(
 ) {
-    let source = "C = deal(1,2); [a,b] = pkg.sub.remote(C{:});";
+    let source = "C = {1,2}; [a,b] = pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded multi-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -2474,7 +2472,7 @@ fn feval_expand_multi_assign_uses_typed_instruction() {
             a = x;
             b = y;
         end
-        C = deal(7,8);
+        C = {7,8};
         h = @pair;
         [u,v] = feval(h, C{:});
         s = u + v;
@@ -2499,7 +2497,7 @@ fn feval_expand_zero_output_uses_typed_instruction() {
             a = x;
             b = y;
         end
-        C = deal(7,8);
+        C = {7,8};
         h = @pair;
         feval(h, C{:});
     "#;
@@ -2519,7 +2517,7 @@ fn feval_expand_single_output_uses_typed_instruction() {
             a = x;
             b = y;
         end
-        C = deal(7,8);
+        C = {7,8};
         h = @pair;
         u = feval(h, C{:});
     "#;
@@ -4667,9 +4665,9 @@ end
 
 #[test]
 fn builtin_call_with_expanded_middle_argument() {
-    // Use deal to produce a cell row and index into it to pass as middle arg
+    // Use a cell row and index into it to pass as middle arg
     // max(a,b) with b coming from C{1}
-    let program = "C = deal(10, 20); r = max(5, C{1});";
+    let program = "C = {10, 20}; r = max(5, C{1});";
     let vars = execute_source(program);
     // Expect 10 as result appears in vars somewhere
     assert!(vars
@@ -4679,7 +4677,7 @@ fn builtin_call_with_expanded_middle_argument() {
 
 #[test]
 fn builtin_call_with_two_expanded_args() {
-    let program = "C = deal(3, 4); D = deal(5, 6); r = max(C{1}, D{1});";
+    let program = "C = {3, 4}; D = {5, 6}; r = max(C{1}, D{1});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
@@ -4688,7 +4686,8 @@ fn builtin_call_with_two_expanded_args() {
 
 #[test]
 fn user_function_with_two_expanded_args() {
-    let program = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); D = deal(11,12); r = sum2(C{2}, D{1});";
+    let program =
+        "function y = sum2(a,b); y = a + b; end; C = {7,8}; D = {11,12}; r = sum2(C{2}, D{1});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
@@ -4716,12 +4715,12 @@ fn object_cell_expansion_via_subsref() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_expand_multi_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); C = deal(7, 3); [a,b] = obj.deal(C{:}); s = b;";
+    let source = "obj = new_object('Point'); C = {7, 3}; [a,b,c] = obj.deal(C{:}); s = b;";
     let bytecode = compile_source(source).expect("compile method expand multi-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
-            if *out_count == 2 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
+            if *out_count == 3 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
     )));
 
     let vars = interpret(&bytecode).expect("execute method expand multi-output");
@@ -4734,7 +4733,7 @@ fn method_expand_multi_output_uses_typed_instruction() {
 fn expand_all_elements_in_args() {
     // C{:} expands all elements of C into separate arguments
     // max takes two args; here C has more; we only assert no crash and presence of some expected nums
-    let program = "C = deal(1,2); a = max(C{:});";
+    let program = "C = {1,2}; a = max(C{:});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
@@ -4756,7 +4755,7 @@ fn mixed_cell_colon_expansion_in_call_args() {
 
 #[test]
 fn builtin_expand_multi_output_uses_typed_instruction() {
-    let source = "C = deal(7,3); [a,b] = deal(C{:}); s = a + b;";
+    let source = "C = {7,3}; [a,b] = deal(C{:}); s = a + b;";
     let bytecode = compile_source(source).expect("compile builtin expand multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4772,7 +4771,7 @@ fn builtin_expand_multi_output_uses_typed_instruction() {
 
 #[test]
 fn builtin_expand_single_output_uses_typed_instruction() {
-    let source = "C = deal(7,3); a = max(C{:});";
+    let source = "C = {7,3}; a = max(C{:});";
     let bytecode = compile_source(source).expect("compile builtin expand single output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4783,7 +4782,7 @@ fn builtin_expand_single_output_uses_typed_instruction() {
 
 #[test]
 fn expand_single_output_uses_typed_instruction() {
-    let source = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); r = sum2(C{:});";
+    let source = "function y = sum2(a,b); y = a + b; end; C = {7,8}; r = sum2(C{:});";
     let bytecode = compile_source(source).expect("compile semantic expand single output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4794,7 +4793,8 @@ fn expand_single_output_uses_typed_instruction() {
 
 #[test]
 fn expand_multi_output_uses_typed_instruction() {
-    let source = "function [u,v] = pair(a,b); u = a; v = b; end; C = deal(7,8); [x,y] = pair(C{:}); s = x + y;";
+    let source =
+        "function [u,v] = pair(a,b); u = a; v = b; end; C = {7,8}; [x,y] = pair(C{:}); s = x + y;";
     let bytecode = compile_source(source).expect("compile semantic expand multi-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4811,13 +4811,14 @@ fn expand_multi_output_uses_typed_instruction() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_expand_single_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); C = deal(7,3); a = obj.deal(C{:});";
+    let source = "obj = new_object('Point'); C = {}; a = obj.deal(C{:});";
     let bytecode = compile_source(source).expect("compile method expand single-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
             if *out_count == 1 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
     )));
+    interpret(&bytecode).expect("execute valid method expand single-output fallback");
 }
 
 #[test]
@@ -4850,7 +4851,7 @@ fn builtin_single_output_uses_typed_instruction() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_multi_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); [a,b] = obj.deal(7,3); s = b;";
+    let source = "obj = new_object('Point'); [a,b,c] = obj.deal(7,3); s = b;";
     let bytecode = compile_source(source).expect("compile method multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4858,7 +4859,7 @@ fn method_multi_output_uses_typed_instruction() {
             arg_count,
             out_count,
             ..
-        } if *arg_count == 2 && *out_count == 2
+        } if *arg_count == 2 && *out_count == 3
     )));
 
     let vars = interpret(&bytecode).expect("execute method multi-output");
@@ -4870,7 +4871,7 @@ fn method_multi_output_uses_typed_instruction() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_single_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); a = obj.deal(7,3);";
+    let source = "obj = new_object('Point'); a = obj.deal();";
     let bytecode = compile_source(source).expect("compile method single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4878,8 +4879,9 @@ fn method_single_output_uses_typed_instruction() {
             arg_count,
             out_count,
             ..
-        } if *arg_count == 2 && *out_count == 1
+        } if *arg_count == 0 && *out_count == 1
     )));
+    interpret(&bytecode).expect("execute valid method single-output fallback");
 }
 
 #[test]
@@ -4950,7 +4952,7 @@ fn unresolved_function_multi_output_uses_typed_instruction_and_errors() {
 
 #[test]
 fn unresolved_function_expand_single_output_uses_typed_instruction() {
-    let source = "C = deal(7,3); a = definitely_missing_callback(C{:});";
+    let source = "C = {7,3}; a = definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4974,7 +4976,7 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
 
 #[test]
 fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
-    let source = "C = deal(7,3); definitely_missing_callback(C{:});";
+    let source = "C = {7,3}; definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded zero-output call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -4998,7 +5000,7 @@ fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
 
 #[test]
 fn unresolved_function_expand_multi_output_uses_typed_instruction_and_errors() {
-    let source = "C = deal(7,3); [a,b] = definitely_missing_callback(C{:});";
+    let source = "C = {7,3}; [a,b] = definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -5022,7 +5024,7 @@ fn unresolved_function_expand_multi_output_uses_typed_instruction_and_errors() {
 
 #[test]
 fn builtin_vector_index_expansion() {
-    let program = "C = deal(9, 2); r = max(C{[1 2]});";
+    let program = "C = {9, 2}; r = max(C{[1 2]});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
@@ -5031,7 +5033,7 @@ fn builtin_vector_index_expansion() {
 
 #[test]
 fn user_function_vector_index_expansion() {
-    let program = "function y = sum2(a,b); y = a + b; end; C = deal(3,4); r = sum2(C{[1 2]});";
+    let program = "function y = sum2(a,b); y = a + b; end; C = {3,4}; r = sum2(C{[1 2]});";
     let vars = execute_source(program);
     assert!(vars
         .iter()
@@ -5234,7 +5236,7 @@ fn builtin_call_with_function_return_propagation() {
 #[test]
 fn function_call_base_expand_all() {
     let program = r#"
-        function y = sum2(a,b); y = a + b; end; r = sum2(deal(5,6){:});
+        function y = sum2(a,b); y = a + b; end; C = {5,6}; r = sum2(C{:});
     "#;
     let vars = execute_source(program);
     assert!(vars

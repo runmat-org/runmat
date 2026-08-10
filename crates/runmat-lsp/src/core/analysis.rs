@@ -6,7 +6,7 @@ use lsp_types::{
     CompletionItem, Diagnostic, DiagnosticSeverity, DocumentSymbol, Hover, Location, Position,
     Range, SignatureHelp, Url,
 };
-use runmat_builtins::{self, BuiltinFunction, Constant, Type};
+use runmat_builtins::{self, BuiltinCompletionPolicy, BuiltinFunction, Constant, Type};
 use runmat_hir::{
     CallKind, DefPath, FunctionKind, HirDiagnostic, HirDiagnosticSeverity, HirError,
     LoweringContext, LoweringResult, ReferenceKind,
@@ -1318,6 +1318,11 @@ fn completion_from_semantic(semantic: &AnalysisModel) -> Vec<CompletionItem> {
         items.push(function_completion(func));
     }
     for func in runmat_builtins::builtin_functions() {
+        if func.descriptor.is_some_and(|descriptor| {
+            descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal
+        }) {
+            continue;
+        }
         items.push(builtin_completion(func));
     }
     for constant in runmat_builtins::constants() {

@@ -426,7 +426,12 @@ impl TfModel {
             if num.norm() <= EPS {
                 Ok(Complex64::new(f64::NAN, f64::NAN))
             } else {
-                Ok(num / Complex64::new(0.0, 0.0))
+                // Direct division by a zero complex denominator produces a spurious NaN
+                // component. Factor the pole so the infinite result retains the local
+                // signed/complex-axis direction of the positive-real approach to the DC point.
+                let local_denominator =
+                    first_nonzero_local_polynomial_coefficient(&self.denominator, point);
+                Ok(complex_infinity_in_direction(num / local_denominator))
             }
         } else {
             Ok(num / den)
@@ -920,6 +925,52 @@ pub fn poly_eval(coeffs: &[Complex64], x: Complex64) -> Complex64 {
         .fold(Complex64::new(0.0, 0.0), |acc, coeff| acc * x + *coeff)
 }
 
+fn first_nonzero_local_polynomial_coefficient(coeffs: &[Complex64], point: Complex64) -> Complex64 {
+    // Synthetic division by (x - point) removes one zero at the evaluation point per pass.
+    let mut quotient = coeffs.to_vec();
+    while quotient.len() > 1 && poly_eval(&quotient, point).norm() <= EPS {
+        let mut reduced = Vec::with_capacity(quotient.len() - 1);
+        let mut synthetic = quotient[0];
+        reduced.push(synthetic);
+        for coefficient in quotient.iter().take(quotient.len() - 1).skip(1) {
+            synthetic = *coefficient + point * synthetic;
+            reduced.push(synthetic);
+        }
+        quotient = reduced;
+    }
+    poly_eval(&quotient, point)
+}
+
+fn complex_infinity_in_direction(direction: Complex64) -> Complex64 {
+    let scale = direction.re.abs().max(direction.im.abs());
+    if scale.is_nan() {
+        return Complex64::new(f64::NAN, f64::NAN);
+    }
+    if scale.is_infinite() {
+        let component = |value: f64| {
+            if value.is_nan() {
+                f64::NAN
+            } else if value.is_infinite() {
+                f64::INFINITY.copysign(value)
+            } else {
+                0.0
+            }
+        };
+        return Complex64::new(component(direction.re), component(direction.im));
+    }
+    if scale == 0.0 {
+        return Complex64::new(f64::NAN, f64::NAN);
+    }
+    let component = |value: f64| {
+        if value.abs() <= EPS * scale {
+            0.0
+        } else {
+            f64::INFINITY.copysign(value)
+        }
+    };
+    Complex64::new(component(direction.re), component(direction.im))
+}
+
 pub fn trim_leading_real_zeros(coeffs: Vec<f64>) -> Vec<f64> {
     let first_nonzero = coeffs
         .iter()
@@ -1250,6 +1301,96 @@ mod tests {
         } else {
         }
         Value::ComplexTensor(tensor)
+    }
+
+    #[test]
+    fn dc_gain_returns_signed_infinity_for_continuous_integrators() {
+        for (numerator, denominator, expected_negative) in [
+            (
+                vec![Complex64::new(2.0, 0.0)],
+                vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+                false,
+            ),
+            (
+                vec![Complex64::new(-2.0, 0.0)],
+                vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+                true,
+            ),
+            (
+                vec![Complex64::new(2.0, 0.0)],
+                vec![Complex64::new(-1.0, 0.0), Complex64::new(0.0, 0.0)],
+                true,
+            ),
+            (
+                vec![Complex64::new(2.0, 0.0)],
+                vec![
+                    Complex64::new(1.0, 0.0),
+                    Complex64::new(0.0, 0.0),
+                    Complex64::new(0.0, 0.0),
+                ],
+                false,
+            ),
+        ] {
+            let model = TfModel::new(numerator, denominator, TfOptions::default()).unwrap();
+            let gain = model.dc_gain().unwrap();
+            assert!(gain.re.is_infinite());
+            assert_eq!(gain.re.is_sign_negative(), expected_negative);
+            assert_eq!(gain.im, 0.0);
+        }
+    }
+
+    #[test]
+    fn dc_gain_preserves_complex_axis_and_handles_discrete_integrators() {
+        let complex_model = TfModel::new(
+            vec![Complex64::new(0.0, -3.0)],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            TfOptions::default(),
+        )
+        .unwrap();
+        let complex_gain = complex_model.dc_gain().unwrap();
+        assert_eq!(complex_gain.re, 0.0);
+        assert!(complex_gain.im.is_infinite() && complex_gain.im.is_sign_negative());
+
+        let discrete_model = TfModel::new(
+            vec![Complex64::new(4.0, 0.0)],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(-1.0, 0.0)],
+            TfOptions {
+                variable: DEFAULT_DISCRETE_VARIABLE.to_string(),
+                sample_time: 0.25,
+            },
+        )
+        .unwrap();
+        let discrete_gain = discrete_model.dc_gain().unwrap();
+        assert!(discrete_gain.re.is_infinite() && discrete_gain.re.is_sign_positive());
+        assert_eq!(discrete_gain.im, 0.0);
+    }
+
+    #[test]
+    fn complex_infinity_direction_survives_overflowed_components() {
+        let finite_overflow = complex_infinity_in_direction(Complex64::new(f64::MAX, -f64::MAX));
+        assert!(finite_overflow.re.is_infinite() && finite_overflow.re.is_sign_positive());
+        assert!(finite_overflow.im.is_infinite() && finite_overflow.im.is_sign_negative());
+
+        let nonfinite =
+            complex_infinity_in_direction(Complex64::new(f64::INFINITY, -f64::INFINITY));
+        assert!(nonfinite.re.is_infinite() && nonfinite.re.is_sign_positive());
+        assert!(nonfinite.im.is_infinite() && nonfinite.im.is_sign_negative());
+
+        let axis = complex_infinity_in_direction(Complex64::new(f64::INFINITY, 1.0));
+        assert!(axis.re.is_infinite() && axis.re.is_sign_positive());
+        assert_eq!(axis.im, 0.0);
+    }
+
+    #[test]
+    fn dc_gain_keeps_exact_evaluation_point_cancellation_indeterminate() {
+        let model = TfModel::new(
+            vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            TfOptions::default(),
+        )
+        .unwrap();
+        let gain = model.dc_gain().unwrap();
+        assert!(gain.re.is_nan() && gain.im.is_nan());
     }
 
     #[test]

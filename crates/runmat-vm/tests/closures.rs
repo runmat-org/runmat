@@ -69,21 +69,21 @@ fn feval_with_unresolved_string_handle_multi_output_errors() {
 
 #[test]
 fn feval_with_unresolved_string_handle_expand_errors() {
-    let err = execute_source("C = deal(1,2); y = feval('@definitely_missing_callback', C{:});")
+    let err = execute_source("C = {1,2}; y = feval('@definitely_missing_callback', C{:});")
         .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_string_handle_expand_zero_output_errors() {
-    let err = execute_source("C = deal(1,2); feval('@definitely_missing_callback', C{:});")
+    let err = execute_source("C = {1,2}; feval('@definitely_missing_callback', C{:});")
         .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_string_handle_expand_multi_output_errors() {
-    let err = execute_source("C = deal(1,2); [a,b] = feval('@definitely_missing_callback', C{:});")
+    let err = execute_source("C = {1,2}; [a,b] = feval('@definitely_missing_callback', C{:});")
         .expect_err("unresolved @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
@@ -111,21 +111,21 @@ fn feval_with_unresolved_qualified_string_handle_multi_output_errors() {
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_expand_errors() {
-    let err = execute_source("C = deal(1,2); y = feval('@pkg.remote_inc', C{:});")
+    let err = execute_source("C = {1,2}; y = feval('@pkg.remote_inc', C{:});")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_expand_zero_output_errors() {
-    let err = execute_source("C = deal(1,2); feval('@pkg.remote_inc', C{:});")
+    let err = execute_source("C = {1,2}; feval('@pkg.remote_inc', C{:});")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn feval_with_unresolved_qualified_string_handle_expand_multi_output_errors() {
-    let err = execute_source("C = deal(1,2); [a,b] = feval('@pkg.remote_inc', C{:});")
+    let err = execute_source("C = {1,2}; [a,b] = feval('@pkg.remote_inc', C{:});")
         .expect_err("unresolved qualified @string handle should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
@@ -198,7 +198,7 @@ fn str2func_unresolved_external_callback_multi_output_errors_without_legacy_fall
 #[test]
 fn str2func_unresolved_external_expand_callback_errors_without_legacy_fallback() {
     let err = execute_source(
-        "f = str2func('definitely_missing_callback'); C = deal(1,2); y = feval(f, C{:});",
+        "f = str2func('definitely_missing_callback'); C = {1,2}; y = feval(f, C{:});",
     )
     .expect_err("unresolved str2func expanded callback should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
@@ -250,17 +250,16 @@ fn str2func_unresolved_external_expand_direct_call_multi_output_errors_without_l
 
 #[test]
 fn str2func_unresolved_external_expand_zero_output_callback_errors_without_legacy_fallback() {
-    let err = execute_source(
-        "f = str2func('definitely_missing_callback'); C = deal(1,2); feval(f, C{:});",
-    )
-    .expect_err("unresolved str2func expanded callback should fail");
+    let err =
+        execute_source("f = str2func('definitely_missing_callback'); C = {1,2}; feval(f, C{:});")
+            .expect_err("unresolved str2func expanded callback should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn str2func_unresolved_external_expand_multi_output_callback_errors_without_legacy_fallback() {
     let err = execute_source(
-        "f = str2func('definitely_missing_callback'); C = deal(1,2); [a,b] = feval(f, C{:});",
+        "f = str2func('definitely_missing_callback'); C = {1,2}; [a,b] = feval(f, C{:});",
     )
     .expect_err("unresolved str2func expanded callback should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
@@ -289,23 +288,22 @@ fn str2func_qualified_external_callback_multi_output_errors_without_legacy_fallb
 
 #[test]
 fn str2func_qualified_external_expand_callback_errors_without_legacy_fallback() {
-    let err = execute_source("f = str2func('pkg.remote_inc'); C = deal(1,2); y = feval(f, C{:});")
+    let err = execute_source("f = str2func('pkg.remote_inc'); C = {1,2}; y = feval(f, C{:});")
         .expect_err("unresolved qualified str2func expanded callback should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn str2func_qualified_external_expand_zero_output_callback_errors_without_legacy_fallback() {
-    let err = execute_source("f = str2func('pkg.remote_inc'); C = deal(1,2); feval(f, C{:});")
+    let err = execute_source("f = str2func('pkg.remote_inc'); C = {1,2}; feval(f, C{:});")
         .expect_err("unresolved qualified str2func expanded callback should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
 fn str2func_qualified_external_expand_multi_output_callback_errors_without_legacy_fallback() {
-    let err =
-        execute_source("f = str2func('pkg.remote_inc'); C = deal(1,2); [a,b] = feval(f, C{:});")
-            .expect_err("unresolved qualified str2func expanded callback should fail");
+    let err = execute_source("f = str2func('pkg.remote_inc'); C = {1,2}; [a,b] = feval(f, C{:});")
+        .expect_err("unresolved qualified str2func expanded callback should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 

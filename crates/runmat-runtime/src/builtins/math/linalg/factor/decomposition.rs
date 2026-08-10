@@ -7,13 +7,18 @@ use std::collections::HashMap;
 use num_complex::Complex64;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ClassDef, ComplexTensor,
-    MethodDef, NumericDType, ObjectInstance, PropertyDef, Tensor, Value,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ClassDef, ComplexTensor, IntValue, IntegerComplexStorage,
+    IntegerStorage, LogicalArray, MethodDef, NumericDType, ObjectInstance, PropertyDef, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::{random_args::complex_tensor_into_value, tensor};
+use crate::builtins::common::tensor;
 use crate::builtins::math::linalg::ops::{mldivide::mldivide_eval, mrdivide::mrdivide_eval};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER};
 
@@ -36,10 +41,273 @@ const DECOMPOSITION_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExt
     error_identifier: Some("RunMat:compatibility:DecompositionGpuInputExtension"),
 };
 
-pub const DECOMPOSITION_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+const DECOMPOSITION_INTEGER_CHECK_CONDITION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "decomposition-integer-check-condition",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "decomposition with an integer CheckCondition value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DecompositionIntegerCheckConditionExtension"),
+    };
+
+const DECOMPOSITION_INTEGER_RANK_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "decomposition-integer-rank-tolerance",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "decomposition with an integer RankTolerance value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DecompositionIntegerRankToleranceExtension"),
+    };
+
+const DECOMPOSITION_INTEGER_SCALE_FACTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "decomposition-integer-scale-factor",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "scaling a decomposition by a real typed-integer scalar is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DecompositionIntegerScaleFactorExtension"),
+    };
+
+const DECOMPOSITION_COMPLEX_INTEGER_SCALE_FACTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "decomposition-complex-integer-scale-factor",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "scaling a decomposition by a paired complex typed-integer scalar is a RunMat extension",
+        error_identifier: Some(
+            "RunMat:compatibility:DecompositionComplexIntegerScaleFactorExtension",
+        ),
+    };
+
+pub const DECOMPOSITION_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    DECOMPOSITION_NONFLOATING_INPUT_EXTENSION,
+    DECOMPOSITION_GPU_INPUT_EXTENSION,
+    DECOMPOSITION_INTEGER_CHECK_CONDITION_EXTENSION,
+    DECOMPOSITION_INTEGER_RANK_TOLERANCE_EXTENSION,
+];
+
+pub const DECOMPOSITION_METHOD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [DECOMPOSITION_NONFLOATING_INPUT_EXTENSION];
+
+pub const DECOMPOSITION_SCALAR_TRANSFORM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
     DECOMPOSITION_NONFLOATING_INPUT_EXTENSION,
     DECOMPOSITION_GPU_INPUT_EXTENSION,
 ];
+
+pub const DECOMPOSITION_SCALE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    DECOMPOSITION_NONFLOATING_INPUT_EXTENSION,
+    DECOMPOSITION_GPU_INPUT_EXTENSION,
+    DECOMPOSITION_INTEGER_SCALE_FACTOR_EXTENSION,
+    DECOMPOSITION_COMPLEX_INTEGER_SCALE_FACTOR_EXTENSION,
+];
+
+const DECOMPOSITION_INTEGER_COEFFICIENT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer coefficient classes are stored exactly behind the RunMat compatibility gate and are promoted to double only at the solve boundary.",
+    }];
+
+const DECOMPOSITION_INTEGER_OBJECT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dA",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The decomposition object contains an exact RunMat-only integer coefficient matrix.",
+    }];
+
+const DECOMPOSITION_INTEGER_CHECK_CONDITION: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "CheckCondition",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB documents CheckCondition as logical. RunMat mode additionally accepts an integer scalar and interprets zero as false and nonzero as true.",
+    }];
+
+const DECOMPOSITION_INTEGER_RANK_TOLERANCE: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "RankTolerance",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer RankTolerance is gated and must be exactly representable before the binary64 option boundary.",
+    }];
+
+const DECOMPOSITION_INTEGER_SCALE_FACTOR: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "scaleFactor",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A real typed-integer scale or divisor is gated independently and must be exactly representable before conversion to decomposition scale metadata.",
+    }];
+
+const DECOMPOSITION_COMPLEX_INTEGER_SCALE_FACTOR: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "complexScaleFactor",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Paired real and imaginary typed-integer components are gated and each must be exactly representable before conversion to complex scale metadata.",
+    }];
+
+pub const DECOMPOSITION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "dA = decomposition(integer_A,...)",
+        inputs: &DECOMPOSITION_INTEGER_COEFFICIENT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Construction and structural metadata retain exact integer storage; resident coefficients gather through their owner into host object storage.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "dA = decomposition(A,...,'CheckCondition',integer_value)",
+        inputs: &DECOMPOSITION_INTEGER_CHECK_CONDITION,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The compatibility gate runs before any resident control value is gathered.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "dA = decomposition(A,...,'RankTolerance',integer_value)",
+        inputs: &DECOMPOSITION_INTEGER_RANK_TOLERANCE,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "RunMat-only typed-integer RankTolerance crosses an explicit exact binary64 boundary after the compatibility gate.",
+    },
+];
+
+pub const DECOMPOSITION_CTRANSPOSE_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "out = ctranspose(integer_decomposition)",
+    inputs: &DECOMPOSITION_INTEGER_OBJECT,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+    overflow: BuiltinIntegerOverflowRule::Saturate,
+    backend: BuiltinIntegerBackendRule::HostOnly,
+    overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+    notes: "Transpose and conjugation retain the exact coefficient class; signed/unsigned integer conjugation uses the class assignment saturation rule.",
+}];
+
+pub const DECOMPOSITION_PROPERTY_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "property = integer_decomposition.Property",
+    inputs: &DECOMPOSITION_INTEGER_OBJECT,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostOnly,
+    overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+    notes: "Property access reads metadata from an exact RunMat-only integer decomposition object and remains gated whenever that persisted object is consumed.",
+}];
+
+pub const DECOMPOSITION_TRANSFORM_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "out = +integer_decomposition, -integer_decomposition, or scalar scaling",
+    inputs: &DECOMPOSITION_INTEGER_OBJECT,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostOnly,
+    overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+    notes: "Unary and scalar transforms retain the exact coefficient matrix and update only decomposition metadata; every persisted-object entry point rechecks the RunMat extension gate.",
+}];
+
+pub const DECOMPOSITION_SCALE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "out = integer_decomposition scaled by a floating scalar",
+        inputs: &DECOMPOSITION_INTEGER_OBJECT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The exact coefficient matrix is retained while decomposition scale metadata changes.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "out = dA .* integer_scale or integer_scale .* dA",
+        inputs: &DECOMPOSITION_INTEGER_SCALE_FACTOR,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The RunMat-only real integer factor must be exactly representable at the binary64 scale-metadata boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "out = dA .* complex_integer_scale or complex_integer_scale .* dA",
+        inputs: &DECOMPOSITION_COMPLEX_INTEGER_SCALE_FACTOR,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Both RunMat-only paired integer components must be exactly representable at the complex binary64 scale-metadata boundary.",
+    },
+];
+
+pub const DECOMPOSITION_RDIVIDE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "out = integer_decomposition / scalar",
+        inputs: &DECOMPOSITION_INTEGER_OBJECT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Scalar division retains the exact coefficient matrix and updates only decomposition metadata; every persisted-object entry point rechecks the RunMat extension gate.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = B / integer_decomposition",
+        inputs: &DECOMPOSITION_INTEGER_OBJECT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Exact integer coefficients are explicitly promoted to binary64 at the solve boundary; the solution is double or complex double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "out = dA / integer_scale",
+        inputs: &DECOMPOSITION_INTEGER_SCALE_FACTOR,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The RunMat-only real integer divisor must be exactly representable at the binary64 scale-metadata boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "out = dA / complex_integer_scale",
+        inputs: &DECOMPOSITION_COMPLEX_INTEGER_SCALE_FACTOR,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Both RunMat-only paired integer divisor components must be exactly representable at the complex binary64 scale-metadata boundary.",
+    },
+];
+
+pub const DECOMPOSITION_SOLVE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "X = integer_decomposition \\ B or X = B / integer_decomposition",
+        inputs: &DECOMPOSITION_INTEGER_OBJECT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Exact integer coefficients are explicitly promoted to binary64 at the solve boundary; the solution is double or complex double.",
+    }];
 
 const MATRIX_FIELD: &str = "__matrix";
 const TYPE_FIELD: &str = "Type";
@@ -320,7 +588,6 @@ fn ensure_decomposition_class_registered() {
             "mtimes",
             "rdivide",
             "mrdivide",
-            "ldivide",
             "mldivide",
         ] {
             methods.insert(
@@ -354,6 +621,9 @@ fn ensure_decomposition_class_registered() {
     keywords = "decomposition,linear solve,lu,qr,chol,triangular,diagonal",
     descriptor(crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_DESCRIPTOR),
     extensions(crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
 async fn decomposition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -363,6 +633,18 @@ async fn decomposition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DECOMPOSITION_GPU_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    if has_integer_check_condition(&args) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DECOMPOSITION_INTEGER_CHECK_CONDITION_EXTENSION,
+            NAME,
+        )?;
+    }
+    if has_integer_named_option(&args, "RankTolerance") {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DECOMPOSITION_INTEGER_RANK_TOLERANCE_EXTENSION,
             NAME,
         )?;
     }
@@ -377,15 +659,36 @@ async fn decomposition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::Object(spec_to_object(&spec)?))
 }
 
+fn has_integer_check_condition(args: &[Value]) -> bool {
+    has_integer_named_option(args, "CheckCondition")
+}
+
+fn has_integer_named_option(args: &[Value], option: &str) -> bool {
+    args.windows(2).any(|pair| {
+        text_from_value(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case(option))
+            && is_integer_value(&pair[1])
+    })
+}
+
+fn is_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
 fn is_nonfloating_coefficient_matrix(value: &Value) -> bool {
     match value {
-        Value::Int(_) | Value::Bool(_) => true,
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
         Value::Tensor(tensor) => !matches!(
             tensor.numeric_dtype(),
             NumericDType::F64 | NumericDType::F32
         ),
         Value::ComplexTensor(tensor) => tensor.integer_storage().is_some(),
-        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+        }
         _ => false,
     }
 }
@@ -394,6 +697,12 @@ fn is_nonfloating_coefficient_matrix(value: &Value) -> bool {
     name = "decomposition.subsref",
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SUBSREF_DESCRIPTOR
+    ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_METHOD_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_PROPERTY_INTEGER_CAPABILITIES
     ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
@@ -405,6 +714,8 @@ async fn decomposition_subsref(obj: Value, kind: String, payload: Value) -> Buil
     }
     let field = text_from_value(&payload)
         .ok_or_else(|| invalid("decomposition property name must be a text scalar"))?;
+    let spec = object_to_spec(&obj)?;
+    ensure_nonfloating_object_enabled(&spec)?;
     let object = expect_object(&obj)?;
     public_property_value(object, &field)
 }
@@ -414,10 +725,17 @@ async fn decomposition_subsref(obj: Value, kind: String, payload: Value) -> Buil
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_UNARY_DESCRIPTOR
     ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_METHOD_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_TRANSFORM_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
 async fn decomposition_uplus(d_a: Value) -> BuiltinResult<Value> {
     let spec = object_to_spec(&d_a)?;
+    ensure_nonfloating_object_enabled(&spec)?;
     Ok(Value::Object(spec_to_object(&spec)?))
 }
 
@@ -426,10 +744,17 @@ async fn decomposition_uplus(d_a: Value) -> BuiltinResult<Value> {
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_UNARY_DESCRIPTOR
     ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_METHOD_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_TRANSFORM_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
 async fn decomposition_uminus(d_a: Value) -> BuiltinResult<Value> {
     let mut spec = object_to_spec(&d_a)?;
+    ensure_nonfloating_object_enabled(&spec)?;
     spec.scale = complex_mul(spec.scale, (-1.0, 0.0));
     Ok(Value::Object(spec_to_object(&spec)?))
 }
@@ -439,10 +764,17 @@ async fn decomposition_uminus(d_a: Value) -> BuiltinResult<Value> {
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_UNARY_DESCRIPTOR
     ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_METHOD_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_CTRANSPOSE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
 async fn decomposition_ctranspose(d_a: Value) -> BuiltinResult<Value> {
     let mut spec = object_to_spec(&d_a)?;
+    ensure_nonfloating_object_enabled(&spec)?;
     spec.is_conjugate_transposed = !spec.is_conjugate_transposed;
     spec.scale = complex_conj(spec.scale);
     Ok(Value::Object(spec_to_object(&spec)?))
@@ -452,6 +784,12 @@ async fn decomposition_ctranspose(d_a: Value) -> BuiltinResult<Value> {
     name = "decomposition.times",
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_BINARY_DESCRIPTOR
+    ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SCALE_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SCALE_INTEGER_CAPABILITIES
     ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
@@ -464,6 +802,12 @@ async fn decomposition_times(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_BINARY_DESCRIPTOR
     ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SCALE_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SCALE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
 async fn decomposition_mtimes(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -474,6 +818,12 @@ async fn decomposition_mtimes(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     name = "decomposition.rdivide",
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_BINARY_DESCRIPTOR
+    ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SCALE_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_RDIVIDE_INTEGER_CAPABILITIES
     ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
@@ -486,6 +836,12 @@ async fn decomposition_rdivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SOLVE_DESCRIPTOR
     ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SCALAR_TRANSFORM_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SOLVE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
 async fn decomposition_mrdivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -493,20 +849,15 @@ async fn decomposition_mrdivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> 
 }
 
 #[runtime_builtin(
-    name = "decomposition.ldivide",
-    descriptor(
-        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SOLVE_DESCRIPTOR
-    ),
-    builtin_path = "crate::builtins::math::linalg::factor::decomposition"
-)]
-async fn decomposition_ldivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    left_solve(lhs, rhs).await
-}
-
-#[runtime_builtin(
     name = "decomposition.mldivide",
     descriptor(
         crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SOLVE_DESCRIPTOR
+    ),
+    extensions(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SCALAR_TRANSFORM_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_SOLVE_INTEGER_CAPABILITIES
     ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
@@ -602,6 +953,10 @@ fn normalize_matrix(value: Value) -> BuiltinResult<(Value, bool)> {
             validate_matrix_shape(&tensor.shape)?;
             Ok((Value::ComplexTensor(tensor), false))
         }
+        Value::LogicalArray(array) => {
+            validate_matrix_shape(&array.shape)?;
+            Ok((Value::LogicalArray(array), false))
+        }
         Value::SparseTensor(_) => Err(invalid(
             "decomposition: sparse coefficient matrices are not supported yet",
         )),
@@ -614,14 +969,14 @@ fn normalize_matrix(value: Value) -> BuiltinResult<(Value, bool)> {
         )),
         Value::Int(i) => Ok((
             Value::Tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1])
+                Tensor::new_integer(IntegerStorage::from_scalar(i), vec![1, 1])
                     .map_err(|e| internal(format!("decomposition: {e}")))?,
             ),
             false,
         )),
         Value::Bool(b) => Ok((
-            Value::Tensor(
-                Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
+            Value::LogicalArray(
+                LogicalArray::new(vec![u8::from(b)], vec![1, 1])
                     .map_err(|e| internal(format!("decomposition: {e}")))?,
             ),
             false,
@@ -663,6 +1018,12 @@ fn parse_options(args: &[Value]) -> BuiltinResult<(bool, Option<f64>)> {
         match name.to_ascii_lowercase().as_str() {
             "checkcondition" => check_condition = bool_scalar(&args[idx + 1], "CheckCondition")?,
             "ranktolerance" => {
+                if crate::builtins::common::validation::is_typed_complex_integer(&args[idx + 1]) {
+                    return Err(invalid(
+                        "decomposition: RankTolerance must be a real scalar, not a paired complex integer",
+                    ));
+                }
+                ensure_exact_integer_scalar_boundary(&args[idx + 1], "RankTolerance")?;
                 let tol = real_scalar(&args[idx + 1], "RankTolerance")?;
                 if tol < 0.0 || tol.is_nan() {
                     return Err(invalid(
@@ -770,6 +1131,22 @@ fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResult<Value> {
             }
             Ok(Value::Tensor(tensor))
         }
+        Value::LogicalArray(mut array) => {
+            let rows = logical_rows(&array);
+            let cols = logical_cols(&array);
+            for col in 0..cols {
+                for row in 0..rows {
+                    let zero = match flag {
+                        TriangularFlag::Upper => row > col,
+                        TriangularFlag::Lower => row < col,
+                    };
+                    if zero {
+                        array.data[row + col * rows] = 0;
+                    }
+                }
+            }
+            Ok(Value::LogicalArray(array))
+        }
         Value::ComplexTensor(mut tensor) if tensor.integer_storage().is_none() => {
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
@@ -787,7 +1164,16 @@ fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResult<Value> {
             Ok(Value::ComplexTensor(tensor))
         }
         Value::ComplexTensor(tensor) => {
-            let mut values = complex_tensor_values_pair_cow(&tensor).into_owned();
+            let shape = tensor.shape.clone();
+            let rows = tensor.rows;
+            let storage = tensor
+                .integer_storage()
+                .cloned()
+                .expect("integer complex branch");
+            let mut real = storage.real.exact_values();
+            let mut imag = storage.imag.exact_values();
+            let real_zero = zero_int_like(&storage.real);
+            let imag_zero = zero_int_like(&storage.imag);
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
                     let zero = match flag {
@@ -795,13 +1181,28 @@ fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResult<Value> {
                         TriangularFlag::Lower => row < col,
                     };
                     if zero {
-                        values[row + col * tensor.rows] = (0.0, 0.0);
+                        let index = row + col * rows;
+                        real[index] = real_zero.clone();
+                        imag[index] = imag_zero.clone();
                     }
                 }
             }
             Ok(Value::ComplexTensor(
-                ComplexTensor::new(values, tensor.shape)
-                    .map_err(|e| internal(format!("decomposition: {e}")))?,
+                ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        storage
+                            .real
+                            .from_exact_values_like(real)
+                            .map_err(internal)?,
+                        storage
+                            .imag
+                            .from_exact_values_like(imag)
+                            .map_err(internal)?,
+                    )
+                    .map_err(internal)?,
+                    shape,
+                )
+                .map_err(|e| internal(format!("decomposition: {e}")))?,
             ))
         }
         other => Err(invalid(format!(
@@ -829,6 +1230,26 @@ fn symmetrize_from_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
             }
             Ok(Value::Tensor(tensor))
         }
+        Value::LogicalArray(mut array) => {
+            let rows = logical_rows(&array);
+            let cols = logical_cols(&array);
+            for col in 0..cols {
+                for row in 0..rows {
+                    if row == col {
+                        continue;
+                    }
+                    let source = match flag {
+                        TriangularFlag::Upper if row > col => Some(col + row * rows),
+                        TriangularFlag::Lower if row < col => Some(col + row * rows),
+                        _ => None,
+                    };
+                    if let Some(source) = source {
+                        array.data[row + col * rows] = array.data[source];
+                    }
+                }
+            }
+            Ok(Value::LogicalArray(array))
+        }
         Value::ComplexTensor(mut tensor) if tensor.integer_storage().is_none() => {
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
@@ -854,7 +1275,14 @@ fn symmetrize_from_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
             Ok(Value::ComplexTensor(tensor))
         }
         Value::ComplexTensor(tensor) => {
-            let mut values = complex_tensor_values_pair_cow(&tensor).into_owned();
+            let shape = tensor.shape.clone();
+            let rows = tensor.rows;
+            let storage = tensor
+                .integer_storage()
+                .cloned()
+                .expect("integer complex branch");
+            let mut real = storage.real.exact_values();
+            let mut imag = storage.imag.exact_values();
             for col in 0..tensor.cols {
                 for row in 0..tensor.rows {
                     if row == col {
@@ -862,23 +1290,38 @@ fn symmetrize_from_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
                     }
                     let maybe_value = match flag {
                         TriangularFlag::Upper if row > col => {
-                            let (re, im) = values[col + row * tensor.rows];
-                            Some((re, -im))
+                            let source = col + row * rows;
+                            Some((real[source].clone(), negate_int_saturating(&imag[source])))
                         }
                         TriangularFlag::Lower if row < col => {
-                            let (re, im) = values[col + row * tensor.rows];
-                            Some((re, -im))
+                            let source = col + row * rows;
+                            Some((real[source].clone(), negate_int_saturating(&imag[source])))
                         }
                         _ => None,
                     };
                     if let Some(value) = maybe_value {
-                        values[row + col * tensor.rows] = value;
+                        let target = row + col * rows;
+                        real[target] = value.0;
+                        imag[target] = value.1;
                     }
                 }
             }
             Ok(Value::ComplexTensor(
-                ComplexTensor::new(values, tensor.shape)
-                    .map_err(|e| internal(format!("decomposition: {e}")))?,
+                ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        storage
+                            .real
+                            .from_exact_values_like(real)
+                            .map_err(internal)?,
+                        storage
+                            .imag
+                            .from_exact_values_like(imag)
+                            .map_err(internal)?,
+                    )
+                    .map_err(internal)?,
+                    shape,
+                )
+                .map_err(|e| internal(format!("decomposition: {e}")))?,
             ))
         }
         other => Err(invalid(format!(
@@ -943,6 +1386,7 @@ fn matrix_dims(matrix: &Value) -> (usize, usize) {
     match matrix {
         Value::Tensor(tensor) => (tensor.rows(), tensor.cols()),
         Value::ComplexTensor(tensor) => (tensor.rows, tensor.cols),
+        Value::LogicalArray(array) => (logical_rows(array), logical_cols(array)),
         _ => (1, 1),
     }
 }
@@ -978,6 +1422,12 @@ fn is_diagonal_matrix(matrix: &Value) -> bool {
             }
             true
         }
+        Value::LogicalArray(array) => {
+            let rows = logical_rows(array);
+            let cols = logical_cols(array);
+            (0..cols)
+                .all(|col| (0..rows).all(|row| row == col || array.data[row + col * rows] == 0))
+        }
         _ => true,
     }
 }
@@ -1010,6 +1460,11 @@ fn is_upper_triangular(matrix: &Value) -> bool {
             }
             true
         }
+        Value::LogicalArray(array) => {
+            let rows = logical_rows(array);
+            let cols = logical_cols(array);
+            (0..cols).all(|col| ((col + 1)..rows).all(|row| array.data[row + col * rows] == 0))
+        }
         _ => true,
     }
 }
@@ -1037,6 +1492,11 @@ fn is_lower_triangular(matrix: &Value) -> bool {
                 }
             }
             true
+        }
+        Value::LogicalArray(array) => {
+            let rows = logical_rows(array);
+            let cols = logical_cols(array);
+            (0..cols).all(|col| (0..col.min(rows)).all(|row| array.data[row + col * rows] == 0))
         }
         _ => true,
     }
@@ -1072,6 +1532,9 @@ fn is_hermitian_matrix(matrix: &Value) -> bool {
             }
             true
         }
+        Value::LogicalArray(array) => (0..cols).all(|col| {
+            (0..rows).all(|row| array.data[row + col * rows] == array.data[col + row * rows])
+        }),
         _ => false,
     }
 }
@@ -1203,13 +1666,15 @@ fn expect_object(value: &Value) -> BuiltinResult<&ObjectInstance> {
 async fn scale_product(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if is_decomposition_value(&lhs) {
         let mut spec = object_to_spec(&lhs)?;
-        let scalar = complex_scalar_async(&rhs, "scale factor").await?;
+        ensure_nonfloating_object_enabled(&spec)?;
+        let scalar = decomposition_scale_scalar_async(&rhs, "scale factor").await?;
         spec.scale = complex_mul(spec.scale, scalar);
         return Ok(Value::Object(spec_to_object(&spec)?));
     }
     if is_decomposition_value(&rhs) {
         let mut spec = object_to_spec(&rhs)?;
-        let scalar = complex_scalar_async(&lhs, "scale factor").await?;
+        ensure_nonfloating_object_enabled(&spec)?;
+        let scalar = decomposition_scale_scalar_async(&lhs, "scale factor").await?;
         spec.scale = complex_mul(scalar, spec.scale);
         return Ok(Value::Object(spec_to_object(&spec)?));
     }
@@ -1221,13 +1686,21 @@ async fn scale_product(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 async fn divide_or_solve(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if is_decomposition_value(&lhs) {
         let mut spec = object_to_spec(&lhs)?;
-        let scalar = complex_scalar_async(&rhs, "scale divisor").await?;
+        ensure_nonfloating_object_enabled(&spec)?;
+        let scalar = decomposition_scale_scalar_async(&rhs, "scale divisor").await?;
         spec.scale = complex_div(spec.scale, scalar)?;
         return Ok(Value::Object(spec_to_object(&spec)?));
     }
     if is_decomposition_value(&rhs) {
         let spec = object_to_spec(&rhs)?;
+        ensure_nonfloating_object_enabled(&spec)?;
+        ensure_gpu_operand_enabled(&lhs)?;
         let matrix = effective_matrix(&spec)?;
+        let lhs = if is_nonfloating_coefficient_matrix(&spec.matrix) {
+            floating_solve_operand(&lhs).await?
+        } else {
+            lhs
+        };
         return mrdivide_eval(&lhs, &matrix).await;
     }
     Err(invalid(
@@ -1242,7 +1715,14 @@ async fn left_solve(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         ));
     }
     let spec = object_to_spec(&lhs)?;
+    ensure_nonfloating_object_enabled(&spec)?;
+    ensure_gpu_operand_enabled(&rhs)?;
     let matrix = effective_matrix(&spec)?;
+    let rhs = if is_nonfloating_coefficient_matrix(&spec.matrix) {
+        floating_solve_operand(&rhs).await?
+    } else {
+        rhs
+    };
     mldivide_eval(&matrix, &rhs).await
 }
 
@@ -1252,7 +1732,85 @@ fn is_decomposition_value(value: &Value) -> bool {
 
 fn effective_matrix(spec: &DecompositionSpec) -> BuiltinResult<Value> {
     let matrix = oriented_matrix(spec)?;
-    scale_matrix(matrix, spec.scale)
+    scale_matrix(promote_coefficient_to_floating(matrix)?, spec.scale)
+}
+
+fn ensure_nonfloating_object_enabled(spec: &DecompositionSpec) -> BuiltinResult<()> {
+    if is_nonfloating_coefficient_matrix(&spec.matrix) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DECOMPOSITION_NONFLOATING_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_gpu_operand_enabled(value: &Value) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DECOMPOSITION_GPU_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_scale_operand_extensions_enabled(value: &Value) -> BuiltinResult<()> {
+    ensure_gpu_operand_enabled(value)?;
+    if crate::builtins::common::validation::is_typed_complex_integer(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DECOMPOSITION_COMPLEX_INTEGER_SCALE_FACTOR_EXTENSION,
+            NAME,
+        )?;
+    } else if is_integer_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DECOMPOSITION_INTEGER_SCALE_FACTOR_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+async fn floating_solve_operand(value: &Value) -> BuiltinResult<Value> {
+    if !is_nonfloating_coefficient_matrix(value) {
+        return Ok(value.clone());
+    }
+    let host = crate::dispatcher::gather_if_needed_async(value)
+        .await
+        .map_err(|err| {
+            build_runtime_error(err.message())
+                .with_builtin(NAME)
+                .with_source(err)
+                .build()
+        })?;
+    promote_coefficient_to_floating(host)
+}
+
+fn promote_coefficient_to_floating(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let shape = tensor.shape.clone();
+            Ok(Value::Tensor(
+                Tensor::new(tensor::tensor_into_values_f64(tensor), shape).map_err(internal)?,
+            ))
+        }
+        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
+            let shape = tensor.shape.clone();
+            Ok(Value::ComplexTensor(
+                ComplexTensor::new(tensor.materialize_f64(), shape).map_err(internal)?,
+            ))
+        }
+        Value::LogicalArray(array) => Ok(Value::Tensor(
+            Tensor::new(
+                array.data.iter().map(|&value| f64::from(value)).collect(),
+                array.shape,
+            )
+            .map_err(internal)?,
+        )),
+        Value::Int(value) => Ok(Value::Num(value.to_f64())),
+        Value::Bool(value) => Ok(Value::Num(if value { 1.0 } else { 0.0 })),
+        other => Ok(other),
+    }
 }
 
 fn oriented_matrix(spec: &DecompositionSpec) -> BuiltinResult<Value> {
@@ -1287,17 +1845,71 @@ fn conjugate_transpose(value: Value) -> BuiltinResult<Value> {
         Value::ComplexTensor(tensor) => {
             let rows = tensor.rows;
             let cols = tensor.cols;
-            let values = tensor::complex_tensor_into_values_complex64(tensor);
-            let mut data = vec![(0.0, 0.0); values.len()];
+            let dtype = tensor.numeric_dtype();
+            let shape = vec![cols, rows];
+            let mut indices = vec![0; tensor.len()];
             for row in 0..rows {
                 for col in 0..cols {
-                    let value = values[row + col * rows];
-                    data[col + row * cols] = (value.re, -value.im);
+                    indices[col + row * cols] = row + col * rows;
                 }
             }
+            if let Some(storage) = tensor.integer_storage().cloned() {
+                let real = storage
+                    .real
+                    .from_exact_values_like(
+                        indices
+                            .iter()
+                            .map(|&index| {
+                                storage
+                                    .real
+                                    .value_at(index)
+                                    .expect("transpose index is in bounds")
+                            })
+                            .collect(),
+                    )
+                    .map_err(internal)?;
+                let imag_values = storage.imag.exact_values();
+                let imag = storage
+                    .imag
+                    .from_exact_values_like(
+                        indices
+                            .iter()
+                            .map(|&index| negate_int_saturating(&imag_values[index]))
+                            .collect(),
+                    )
+                    .map_err(internal)?;
+                return Ok(Value::ComplexTensor(
+                    ComplexTensor::new_integer(
+                        IntegerComplexStorage::new(real, imag).map_err(internal)?,
+                        shape,
+                    )
+                    .map_err(internal)?,
+                ));
+            }
+            let values = tensor::complex_tensor_into_values_complex64(tensor);
+            let data = indices
+                .into_iter()
+                .map(|index| {
+                    let value = values[index];
+                    (value.re, -value.im)
+                })
+                .collect();
             Ok(Value::ComplexTensor(
-                ComplexTensor::new(data, vec![cols, rows])
+                ComplexTensor::from_f64_values_with_dtype(data, shape, dtype)
                     .map_err(|e| internal(format!("decomposition: {e}")))?,
+            ))
+        }
+        Value::LogicalArray(array) => {
+            let rows = logical_rows(&array);
+            let cols = logical_cols(&array);
+            let mut data = vec![0; array.data.len()];
+            for row in 0..rows {
+                for col in 0..cols {
+                    data[col + row * cols] = array.data[row + col * rows];
+                }
+            }
+            Ok(Value::LogicalArray(
+                LogicalArray::new(data, vec![cols, rows]).map_err(internal)?,
             ))
         }
         other => Err(internal(format!(
@@ -1313,7 +1925,7 @@ fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) if scale.1 == 0.0 => {
             let shape = tensor.shape.clone();
-            let dtype = tensor.numeric_dtype();
+            let dtype = floating_scale_dtype(tensor.numeric_dtype());
             Ok(Value::Tensor(
                 Tensor::new_with_dtype(
                     tensor::tensor_into_values_f64(tensor)
@@ -1328,25 +1940,28 @@ fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Value> {
         }
         Value::Tensor(tensor) => {
             let shape = tensor.shape.clone();
+            let dtype = floating_scale_dtype(tensor.numeric_dtype());
             Ok(Value::ComplexTensor(
-                ComplexTensor::new(
+                ComplexTensor::from_f64_values_with_dtype(
                     tensor::tensor_into_values_f64(tensor)
                         .into_iter()
                         .map(|value| complex_mul((value, 0.0), scale))
                         .collect(),
                     shape,
+                    dtype,
                 )
                 .map_err(|e| internal(format!("decomposition: {e}")))?,
             ))
         }
         Value::ComplexTensor(tensor) => {
             let shape = tensor.shape.clone();
+            let dtype = floating_scale_dtype(tensor.numeric_dtype());
             let data = tensor::complex_tensor_into_values_complex64(tensor)
                 .into_iter()
                 .map(|value| complex_mul((value.re, value.im), scale))
                 .collect();
-            Ok(complex_tensor_into_value(
-                ComplexTensor::new(data, shape)
+            Ok(Value::ComplexTensor(
+                ComplexTensor::from_f64_values_with_dtype(data, shape, dtype)
                     .map_err(|e| internal(format!("decomposition: {e}")))?,
             ))
         }
@@ -1356,9 +1971,18 @@ fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Value> {
     }
 }
 
+fn floating_scale_dtype(dtype: NumericDType) -> NumericDType {
+    if dtype == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
+}
+
 fn matrix_datatype(matrix: &Value) -> &'static str {
     match matrix {
         Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => "single",
+        Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => "single",
         _ => "double",
     }
 }
@@ -1385,7 +2009,8 @@ fn complex_tensor_values_pair_cow(tensor: &ComplexTensor) -> Cow<'_, [(f64, f64)
     }
 }
 
-async fn complex_scalar_async(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
+async fn decomposition_scale_scalar_async(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
+    ensure_scale_operand_extensions_enabled(value)?;
     let host = crate::dispatcher::gather_if_needed_async(value)
         .await
         .map_err(|err| {
@@ -1394,7 +2019,42 @@ async fn complex_scalar_async(value: &Value, label: &str) -> BuiltinResult<(f64,
                 .with_source(err)
                 .build()
         })?;
+    ensure_exact_integer_scalar_boundary(&host, label)?;
     complex_scalar(&host, label)
+}
+
+fn ensure_exact_integer_scalar_boundary(value: &Value, label: &str) -> BuiltinResult<()> {
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    let exact_values: Vec<IntValue> = match value {
+        Value::Int(value) => vec![value.clone()],
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .map_or_else(Vec::new, IntegerStorage::exact_values),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().map_or_else(Vec::new, |storage| {
+            let mut values = storage.real.exact_values();
+            values.extend(storage.imag.exact_values());
+            values
+        }),
+        _ => Vec::new(),
+    };
+    if exact_values.into_iter().any(|value| {
+        let exact = match value {
+            IntValue::I8(value) => i128::from(value),
+            IntValue::I16(value) => i128::from(value),
+            IntValue::I32(value) => i128::from(value),
+            IntValue::I64(value) => i128::from(value),
+            IntValue::U8(value) => i128::from(value),
+            IntValue::U16(value) => i128::from(value),
+            IntValue::U32(value) => i128::from(value),
+            IntValue::U64(value) => i128::from(value),
+        };
+        !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact)
+    }) {
+        return Err(invalid(format!(
+            "decomposition: integer {label} must be exactly representable as double"
+        )));
+    }
+    Ok(())
 }
 
 fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, f64)> {
@@ -1484,6 +2144,31 @@ fn complex_conj(value: (f64, f64)) -> (f64, f64) {
     (value.0, -value.1)
 }
 
+fn logical_rows(array: &LogicalArray) -> usize {
+    array.shape.first().copied().unwrap_or(1)
+}
+
+fn logical_cols(array: &LogicalArray) -> usize {
+    array.shape.get(1).copied().unwrap_or(1)
+}
+
+fn zero_int_like(storage: &IntegerStorage) -> IntValue {
+    storage.cast_f64_assignment(0.0)
+}
+
+fn negate_int_saturating(value: &IntValue) -> IntValue {
+    match value {
+        IntValue::I8(value) => IntValue::I8(value.saturating_neg()),
+        IntValue::I16(value) => IntValue::I16(value.saturating_neg()),
+        IntValue::I32(value) => IntValue::I32(value.saturating_neg()),
+        IntValue::I64(value) => IntValue::I64(value.saturating_neg()),
+        IntValue::U8(_) => IntValue::U8(0),
+        IntValue::U16(_) => IntValue::U16(0),
+        IntValue::U32(_) => IntValue::U32(0),
+        IntValue::U64(_) => IntValue::U64(0),
+    }
+}
+
 fn complex_mul(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
     (
         lhs.0.mul_add(rhs.0, -(lhs.1 * rhs.1)),
@@ -1502,6 +2187,7 @@ fn complex_div(lhs: (f64, f64), rhs: (f64, f64)) -> BuiltinResult<(f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericScalar};
 
@@ -1526,6 +2212,19 @@ mod tests {
             ComplexTensor::new_integer(IntegerComplexStorage::new(real, imag).unwrap(), shape)
                 .unwrap();
         Value::ComplexTensor(tensor)
+    }
+
+    fn all_integer_coefficient_storages() -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![2, 0, 0, 4]),
+            IntegerStorage::I16(vec![2, 0, 0, 4]),
+            IntegerStorage::I32(vec![2, 0, 0, 4]),
+            IntegerStorage::I64(vec![2, 0, 0, 4]),
+            IntegerStorage::U8(vec![2, 0, 0, 4]),
+            IntegerStorage::U16(vec![2, 0, 0, 4]),
+            IntegerStorage::U32(vec![2, 0, 0, 4]),
+            IntegerStorage::U64(vec![2, 0, 0, 4]),
+        ]
     }
 
     fn call_constructor(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1556,6 +2255,9 @@ mod tests {
         match value {
             Value::Num(n) => vec![n],
             Value::Tensor(t) => t.materialize_f64(),
+            Value::GpuTensor(handle) => test_support::gather(Value::GpuTensor(handle))
+                .expect("gather decomposition solve result")
+                .materialize_f64(),
             other => panic!("expected real tensor, got {other:?}"),
         }
     }
@@ -1599,6 +2301,244 @@ mod tests {
             );
         }
         runmat_accelerate_api::clear_handle_integer_type(&handle);
+    }
+
+    #[test]
+    fn integer_check_condition_has_an_independent_strict_mode_gate() {
+        let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
+        let args = || {
+            vec![
+                a.clone(),
+                Value::String("CheckCondition".to_string()),
+                Value::Int(IntValue::U8(1)),
+            ]
+        };
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call_constructor(args()).expect_err("strict mode must reject extension");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DecompositionIntegerCheckConditionExtension")
+            );
+        }
+        {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call_constructor(args()).is_ok());
+        }
+    }
+
+    #[test]
+    fn all_integer_classes_and_logical_coefficients_solve_only_in_runmat_mode() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_coefficient_storages() {
+            let class = storage.class_name();
+            let d = call_constructor(vec![typed_int_tensor(storage, vec![2, 2])])
+                .unwrap_or_else(|error| panic!("{class} construction failed: {error}"));
+            let stored = object_to_spec(&d).expect("stored decomposition").matrix;
+            assert!(
+                matches!(stored, Value::Tensor(ref tensor) if tensor.integer_storage().is_some_and(|storage| storage.class_name() == class)),
+                "{class} must remain exact before solve"
+            );
+            let result = call_mldivide(d, tensor(&[8.0, 12.0], 2, 1))
+                .unwrap_or_else(|error| panic!("{class} solve failed: {error}"));
+            assert_eq!(approx_vec(result), vec![4.0, 3.0], "{class}");
+        }
+
+        let logical = Value::LogicalArray(
+            LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical identity"),
+        );
+        let d = call_constructor(vec![logical]).expect("logical decomposition");
+        assert!(matches!(
+            object_to_spec(&d).expect("stored decomposition").matrix,
+            Value::LogicalArray(_)
+        ));
+        assert_eq!(
+            approx_vec(call_mldivide(d, tensor(&[8.0, 12.0], 2, 1)).expect("logical solve")),
+            vec![8.0, 12.0]
+        );
+    }
+
+    #[test]
+    fn integer_decomposition_right_solve_promotes_at_the_solve_boundary() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let d = call_constructor(vec![typed_int_tensor(
+            IntegerStorage::U64(vec![2, 0, 0, 4]),
+            vec![2, 2],
+        )])
+        .expect("integer decomposition");
+        let result = call_mrdivide(tensor(&[8.0, 12.0], 1, 2), d).expect("right solve");
+        let Value::Tensor(result) = result else {
+            panic!("expected promoted double tensor")
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F64);
+        assert_eq!(result.materialize_f64(), vec![4.0, 3.0]);
+    }
+
+    #[test]
+    fn nonfloating_object_methods_recheck_the_compatibility_gate() {
+        let d = {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            call_constructor(vec![typed_int_tensor(
+                IntegerStorage::I32(vec![2, 0, 0, 4]),
+                vec![2, 2],
+            )])
+            .expect("integer decomposition")
+        };
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let errors = vec![
+            block_on(decomposition_subsref(
+                d.clone(),
+                OBJECT_INDEX_MEMBER.to_string(),
+                Value::String(TYPE_FIELD.to_string()),
+            ))
+            .expect_err("property access must recheck gate"),
+            block_on(decomposition_uplus(d.clone())).expect_err("uplus must recheck gate"),
+            block_on(decomposition_uminus(d.clone())).expect_err("uminus must recheck gate"),
+            block_on(decomposition_times(d.clone(), Value::Num(2.0)))
+                .expect_err("times must recheck gate"),
+            block_on(decomposition_mtimes(Value::Num(2.0), d.clone()))
+                .expect_err("mtimes must recheck gate"),
+            call_rdivide(d.clone(), Value::Num(2.0)).expect_err("rdivide must recheck gate"),
+            call_ctranspose(d.clone()).expect_err("ctranspose must recheck gate"),
+            call_mldivide(d.clone(), tensor(&[8.0, 12.0], 2, 1))
+                .expect_err("mldivide must recheck gate"),
+            call_mrdivide(tensor(&[8.0, 12.0], 1, 2), d).expect_err("mrdivide must recheck gate"),
+        ];
+        for error in errors {
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DecompositionNonfloatingInputExtension")
+            );
+        }
+    }
+
+    #[test]
+    fn every_nonfloating_object_entry_point_declares_extension_metadata() {
+        for name in [
+            "decomposition.subsref",
+            "decomposition.uplus",
+            "decomposition.uminus",
+            "decomposition.ctranspose",
+            "decomposition.times",
+            "decomposition.mtimes",
+            "decomposition.rdivide",
+            "decomposition.mrdivide",
+            "decomposition.mldivide",
+        ] {
+            let builtin = runmat_builtins::builtin_function_by_name(name)
+                .unwrap_or_else(|| panic!("registered {name}"));
+            assert!(
+                builtin
+                    .extensions
+                    .iter()
+                    .any(|extension| extension.id == "decomposition-nonfloating-input"),
+                "{name} extension"
+            );
+            assert!(
+                !builtin.integer_capabilities.is_empty(),
+                "{name} integer capability disposition"
+            );
+        }
+    }
+
+    #[test]
+    fn gpu_object_operands_are_gated_before_provider_access() {
+        let d = call_constructor(vec![tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2)])
+            .expect("floating decomposition");
+        let gpu_scalar = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX - 397,
+            buffer_id: u64::MAX - 397,
+        });
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for error in [
+            block_on(decomposition_times(d.clone(), gpu_scalar.clone()))
+                .expect_err("times gpu gate"),
+            block_on(decomposition_mtimes(gpu_scalar.clone(), d.clone()))
+                .expect_err("mtimes gpu gate"),
+            call_rdivide(d.clone(), gpu_scalar.clone()).expect_err("rdivide gpu gate"),
+            call_mldivide(d.clone(), gpu_scalar.clone()).expect_err("mldivide gpu gate"),
+            call_mrdivide(gpu_scalar.clone(), d).expect_err("mrdivide gpu gate"),
+        ] {
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DecompositionGpuInputExtension")
+            );
+        }
+    }
+
+    #[test]
+    fn scale_and_rank_integer_controls_gate_and_reject_inexact_binary64_values() {
+        let d = call_constructor(vec![tensor(&[2.0], 1, 1)]).expect("decomposition");
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(decomposition_times(d.clone(), Value::Int(IntValue::U64(2))))
+                .expect_err("integer scale gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DecompositionIntegerScaleFactorExtension")
+            );
+            let complex_factor = mirrorless_complex_int_tensor(
+                IntegerStorage::I16(vec![2]),
+                IntegerStorage::I16(vec![1]),
+                vec![1, 1],
+            );
+            let error = block_on(decomposition_times(d.clone(), complex_factor))
+                .expect_err("complex integer scale gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DecompositionComplexIntegerScaleFactorExtension")
+            );
+            let error = call_constructor(vec![
+                tensor(&[2.0], 1, 1),
+                Value::String("RankTolerance".to_string()),
+                Value::Int(IntValue::I64(1)),
+            ])
+            .expect_err("integer rank gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DecompositionIntegerRankToleranceExtension")
+            );
+        }
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for factor in [
+            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+            Value::Int(IntValue::I64(-((1_i64 << 53) + 1))),
+            mirrorless_complex_int_tensor(
+                IntegerStorage::U64(vec![1]),
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+                vec![1, 1],
+            ),
+        ] {
+            let error = block_on(decomposition_times(d.clone(), factor))
+                .expect_err("inexact integer scale boundary");
+            assert!(error.message().contains("exactly representable as double"));
+        }
+        let rank_error = call_constructor(vec![
+            tensor(&[2.0], 1, 1),
+            Value::String("RankTolerance".to_string()),
+            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+        ])
+        .expect_err("inexact rank boundary");
+        assert!(rank_error
+            .message()
+            .contains("exactly representable as double"));
+
+        block_on(decomposition_times(
+            d,
+            Value::Int(IntValue::U64(1_u64 << 53)),
+        ))
+        .expect("exact endpoint scale");
+    }
+
+    #[test]
+    fn decomposition_ldivide_is_not_a_public_method() {
+        let _ = call_constructor(vec![tensor(&[1.0], 1, 1)]).expect("register class");
+        let class = runmat_builtins::get_class(CLASS_NAME).expect("decomposition class");
+        assert!(!class.methods.contains_key("ldivide"));
+
+        assert!(runmat_builtins::builtin_function_by_name("decomposition.ldivide").is_none());
     }
 
     #[test]
@@ -1743,6 +2683,21 @@ mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+
+        let wide = (1_i64 << 53) + 1;
+        let matrix = mirrorless_complex_int_tensor(
+            IntegerStorage::I64(vec![wide, 2, 3, 4]),
+            IntegerStorage::I64(vec![5, -6, 7, -8]),
+            vec![2, 2],
+        );
+        let Value::ComplexTensor(transposed) =
+            conjugate_transpose(matrix).expect("wide complex ctranspose")
+        else {
+            panic!("expected exact complex integer tensor")
+        };
+        let storage = transposed.integer_storage().expect("exact storage");
+        assert_eq!(storage.real, IntegerStorage::I64(vec![wide, 3, 2, 4]));
+        assert_eq!(storage.imag, IntegerStorage::I64(vec![-5, -7, 6, 8]));
     }
 
     #[test]
@@ -1892,6 +2847,7 @@ mod tests {
 
     #[test]
     fn decomposition_scalar_operands_read_typed_integer_storage_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
         let d = call_constructor(vec![a]).expect("decomposition");
         let scale = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("scale");
@@ -2024,5 +2980,55 @@ mod tests {
         .expect("IsReal");
 
         assert_eq!(is_real, Value::Bool(false));
+    }
+
+    #[test]
+    fn complex_single_decomposition_reports_single_datatype() {
+        let matrix = Value::ComplexTensor(
+            ComplexTensor::from_f32(
+                vec![(2.0, 1.0), (0.0, 0.0), (0.0, 0.0), (4.0, -1.0)],
+                vec![2, 2],
+            )
+            .expect("complex single matrix"),
+        );
+        let d = call_constructor(vec![matrix]).expect("complex single decomposition");
+        let datatype = block_on(decomposition_subsref(
+            d,
+            OBJECT_INDEX_MEMBER.to_string(),
+            Value::String(DATATYPE_FIELD.to_string()),
+        ))
+        .expect("Datatype");
+        assert_eq!(datatype, Value::String("single".to_string()));
+    }
+
+    #[test]
+    fn decomposition_scaling_preserves_complex_single_storage_through_solve() {
+        let coefficient = Value::ComplexTensor(
+            ComplexTensor::from_f32(
+                vec![(2.0, 1.0), (0.0, 0.0), (0.0, 0.0), (4.0, -1.0)],
+                vec![2, 2],
+            )
+            .expect("single coefficient"),
+        );
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::from_f32(vec![(8.0, 2.0), (12.0, -3.0)], vec![2, 1])
+                .expect("single rhs"),
+        );
+        let d = call_constructor(vec![coefficient]).expect("decomposition");
+        let scaled = call_mtimes(Value::Complex(2.0, -1.0), d).expect("scale");
+        let Value::ComplexTensor(result) = call_mldivide(scaled, rhs).expect("solve") else {
+            panic!("expected complex tensor")
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+
+        let real_single = Value::Tensor(
+            Tensor::from_f32(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("single matrix"),
+        );
+        let Value::ComplexTensor(scaled) =
+            scale_matrix(real_single, (1.0, 1.0)).expect("complex scale")
+        else {
+            panic!("expected complex tensor")
+        };
+        assert_eq!(scaled.numeric_dtype(), NumericDType::F32);
     }
 }
