@@ -37,6 +37,8 @@
     "Returns poles as an `N x 1` real vector when all poles are real, or an `N x 1` complex vector when any pole has a nonzero imaginary part.",
     "For continuous-time models, `wn = abs(p)` and `zeta = -real(p) / wn`.",
     "For discrete-time models, damping metrics use the equivalent continuous pole `log(p) / Ts`, while the `p` output preserves the original discrete pole.",
+    "R2023b special-pole semantics are explicit: continuous zero and infinity have damping ratio -1; discrete zero has damping ratio +1, while discrete one and infinity have damping ratio -1.",
+    "Integer, logical, complex, and GPU arrays are not direct `sys` inputs. Numeric-class support belongs to the dynamic-system constructor before `damp` receives the model object.",
     "Static-gain transfer functions return empty column vectors."
   ],
   "examples": [
@@ -93,4 +95,9 @@
     }
   },
   "gpu_residency": "`damp` returns host-resident vectors."
+  ,"limitations": [
+    "RunMat currently supports local `tf` and `ss` model objects, not `zpk`, generalized, uncertain, `sparss`, or `mechss` models.",
+    "The R2025a sparse-model Focus, MaxNumber, Shift, Tolerance, and Display options are not implemented.",
+    "Statement-form `damp(sys)` does not yet render MATLAB's diagnostic table; use one to three outputs."
+  ]
 }

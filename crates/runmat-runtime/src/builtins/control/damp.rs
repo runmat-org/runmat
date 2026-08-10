@@ -2,9 +2,12 @@
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -17,7 +20,7 @@ use crate::builtins::control::tf_model::{
     SS_CLASS, TF_CLASS,
 };
 use crate::builtins::control::type_resolvers::damp_type;
-use crate::{dispatcher, BuiltinResult};
+use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "damp";
 const DAMP_PARAM_WN: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -102,6 +105,26 @@ pub const DAMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DAMP_ERRORS,
 };
 
+const DAMP_INTEGER_SYS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "sys",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "damp accepts a dynamic-system object. Integer coefficient support belongs to the tf/ss constructors and does not make an integer array a valid sys input.",
+}];
+
+pub const DAMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[wn, zeta, p] = damp(integer_sys)",
+        inputs: &DAMP_INTEGER_SYS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer input is inapplicable at the object boundary and rejects without provider dispatch. Model coefficients have already crossed their constructor's documented numeric boundary.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::damp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "damp",
@@ -136,6 +159,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "damp,damping ratio,natural frequency,poles,control system,tf,ss",
     type_resolver(damp_type),
     descriptor(crate::builtins::control::damp::DAMP_DESCRIPTOR),
+    integer_capabilities(crate::builtins::control::damp::DAMP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::damp"
 )]
 async fn damp_builtin(sys: Value) -> BuiltinResult<Value> {
@@ -174,8 +198,7 @@ struct DampingMode {
 
 impl DampingEval {
     async fn from_value(value: Value) -> BuiltinResult<Self> {
-        let gathered = dispatcher::gather_if_needed_async(&value).await?;
-        match gathered {
+        match value {
             Value::Object(object) if object.is_class(TF_CLASS) => {
                 let model = TfModel::from_value(Value::Object(object), BUILTIN_NAME)?;
                 let poles = polynomial_roots(&model.denominator, BUILTIN_NAME)?;
@@ -203,11 +226,42 @@ impl DampingEval {
         let mut modes = poles
             .into_iter()
             .map(|pole| {
-                if sample_time > 0.0 && pole.norm() <= EPS {
+                let is_zero = pole.re == 0.0 && pole.im == 0.0;
+                let is_one = pole.re == 1.0 && pole.im == 0.0;
+                let is_infinite = pole.re.is_infinite() || pole.im.is_infinite();
+                if sample_time > 0.0 {
+                    if is_zero {
+                        return DampingMode {
+                            pole,
+                            wn: f64::INFINITY,
+                            zeta: 1.0,
+                        };
+                    }
+                    if is_one {
+                        return DampingMode {
+                            pole,
+                            wn: 0.0,
+                            zeta: -1.0,
+                        };
+                    }
+                    if is_infinite {
+                        return DampingMode {
+                            pole,
+                            wn: f64::INFINITY,
+                            zeta: -1.0,
+                        };
+                    }
+                } else if is_zero {
+                    return DampingMode {
+                        pole,
+                        wn: 0.0,
+                        zeta: -1.0,
+                    };
+                } else if is_infinite {
                     return DampingMode {
                         pole,
                         wn: f64::INFINITY,
-                        zeta: 1.0,
+                        zeta: -1.0,
                     };
                 }
                 let equivalent = if sample_time > 0.0 {
@@ -386,6 +440,85 @@ mod tests {
         assert_eq!(report.modes.len(), 1);
         assert!(report.modes[0].wn.is_infinite());
         assert_eq!(report.modes[0].zeta, 1.0);
+    }
+
+    #[test]
+    fn damp_matches_r2023b_zero_and_infinite_pole_semantics() {
+        fn mode_for(report: &DampingEval, pole: Complex64) -> &DampingMode {
+            report
+                .modes
+                .iter()
+                .find(|mode| mode.pole == pole)
+                .expect("pole must retain its wn/zeta pair")
+        }
+
+        let zero = Complex64::new(0.0, 0.0);
+        let one = Complex64::new(1.0, 0.0);
+        let infinite = Complex64::new(f64::INFINITY, 0.0);
+        let continuous = DampingEval::from_poles(vec![zero, infinite], 0.0);
+        let continuous_zero = mode_for(&continuous, zero);
+        assert_eq!((continuous_zero.wn, continuous_zero.zeta), (0.0, -1.0));
+        let continuous_infinite = mode_for(&continuous, infinite);
+        assert!(continuous_infinite.wn.is_infinite());
+        assert_eq!(continuous_infinite.zeta, -1.0);
+
+        let discrete = DampingEval::from_poles(vec![one, zero, infinite], 0.1);
+        let discrete_one = mode_for(&discrete, one);
+        assert_eq!((discrete_one.wn, discrete_one.zeta), (0.0, -1.0));
+        let discrete_zero = mode_for(&discrete, zero);
+        assert!(discrete_zero.wn.is_infinite());
+        assert_eq!(discrete_zero.zeta, 1.0);
+        let discrete_infinite = mode_for(&discrete, infinite);
+        assert!(discrete_infinite.wn.is_infinite());
+        assert_eq!(discrete_infinite.zeta, -1.0);
+    }
+
+    #[test]
+    fn damp_integer_capability_marks_object_input_inapplicable() {
+        assert_eq!(DAMP_INTEGER_CAPABILITIES.len(), 1);
+        assert!(DAMP_INTEGER_CAPABILITIES[0].inputs[0].classes.is_empty());
+        assert_eq!(
+            DAMP_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Rejected
+        );
+        for value in [
+            runmat_builtins::IntValue::I8(1),
+            runmat_builtins::IntValue::I16(1),
+            runmat_builtins::IntValue::I32(1),
+            runmat_builtins::IntValue::I64(1),
+            runmat_builtins::IntValue::U8(1),
+            runmat_builtins::IntValue::U16(1),
+            runmat_builtins::IntValue::U32(1),
+            runmat_builtins::IntValue::U64(1),
+        ] {
+            let error = block_on(damp_builtin(Value::Int(value))).expect_err("object input only");
+            assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
+        }
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 398,
+        });
+        let error = block_on(damp_builtin(resident)).expect_err("resident object input rejection");
+        assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
+    }
+
+    #[test]
+    fn damp_rejects_registered_resident_input_without_provider_access() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            provider.reset_telemetry();
+            let error = block_on(damp_builtin(Value::GpuTensor(handle.clone())))
+                .expect_err("dynamic-system object required");
+            assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            let _ = provider.free(&handle);
+        });
     }
 
     #[test]

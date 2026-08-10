@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the CPU. gpuArray inputs are gathered before serialisation."
+    "notes": "Runs entirely on the CPU. Direct resident input is a compatibility-gated RunMat extension and is gathered through the handle's owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -39,11 +39,12 @@
   },
   "description": "`csvwrite(filename, M)` writes numeric matrices to comma-separated text files. Legacy row/column offset arguments follow MATLAB and RunMat compatibility semantics.",
   "behaviors": [
-    "Only real numeric or logical inputs are accepted. Logical values are converted to `0` and `1` before writing. Complex and textual inputs raise descriptive errors.",
+    "Real or complex single/double data, all eight real integer classes, and logical matrices are accepted. Integer values serialize directly from authoritative storage; logical values serialize as `0` and `1`.",
     "`csvwrite(filename, M, row, col)` starts writing at zero-based row `row` and column `col`, leaving earlier rows blank and earlier columns empty within each row. Offsets must be non-negative integers.",
     "Matrices must be 2-D (trailing singleton dimensions are ignored). Column-major ordering is respected when serialising to text.",
     "Numbers are emitted using MATLAB-compatible short `g` formatting (`%.5g`). `NaN`, `Inf`, and `-Inf` tokens are written verbatim.",
-    "Existing files are overwritten. `csvwrite` does not support appending; switch to `writematrix` with `'WriteMode','append'` when the behaviour is required.",
+    "Each row ends with LF (`\\n`) on every platform. Existing files are overwritten; use `writematrix` with `'WriteMode','append'` when append behavior is required.",
+    "The documented form has no output. RunMat can return a bytes-written output only when the `csvwrite-bytes-written-output` extension is enabled.",
     "Paths that begin with `~` expand to the user's home directory before writing."
   ],
   "examples": [
@@ -64,8 +65,8 @@
       "input": "mask = [true false true; false true false];\ncsvwrite(\"mask.csv\", mask)"
     },
     {
-      "description": "Writing GPU-resident data without manual gather",
-      "input": "G = gpuArray(single([0.1 0.2 0.3]));\nbytes = csvwrite(\"gpu_values.csv\", G)",
+      "description": "RunMat extensions: writing resident data and returning a byte count",
+      "input": "% Requires both csvwrite-resident-input and csvwrite-bytes-written-output.\nG = gpuArray(single([0.1 0.2 0.3]));\nbytes = csvwrite(\"gpu_values.csv\", G)",
       "output": "bytes = 12"
     },
     {
@@ -92,7 +93,7 @@
     },
     {
       "question": "What line ending does `csvwrite` use?",
-      "answer": "The builtin uses the platform default (`\\r\\n` on Windows, `\\n` elsewhere). Most CSV consumers handle either convention transparently."
+      "answer": "The builtin always writes LF (`\\n`), including on Windows."
     }
   ],
   "links": [
@@ -133,8 +134,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/tabular/csvwrite.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvwrite.rs"
   },
-  "gpu_residency": "No additional steps are necessary. `csvwrite` treats GPU arrays as residency sinks: data is gathered back to host memory prior to writing. This matches MATLAB's behaviour, where file I/O always operates on host-resident values.",
+  "gpu_residency": "With the `csvwrite-resident-input` extension enabled, resident data is gathered through the handle's owning provider before host file I/O. Strict compatibility mode rejects the extension before provider access or file mutation.",
   "gpu_behavior": [
-    "`csvwrite` always executes on the host CPU. When the matrix resides on the GPU, RunMat gathers the data through the active acceleration provider before serialisation. No provider hooks are required, and the return value reports the number of bytes written after the gather completes."
+    "`csvwrite` always executes on the host CPU. With the resident-input extension enabled, RunMat gathers through the handle owner before serialisation. A bytes-written return value is a separately gated extension."
   ]
 }

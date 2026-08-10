@@ -275,6 +275,142 @@ const DATASAMPLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
+pub const DATASAMPLE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "datasample-integer-data",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "datasample with typed-integer population data is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DatasampleIntegerDataExtension"),
+    };
+pub const DATASAMPLE_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "datasample-integer-k",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "datasample with a typed-integer sample count is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DatasampleIntegerKExtension"),
+};
+pub const DATASAMPLE_INTEGER_DIM_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "datasample-integer-dim",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "datasample with a typed-integer dimension is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DatasampleIntegerDimExtension"),
+    };
+pub const DATASAMPLE_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "datasample-integer-weights",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "datasample with typed-integer weights is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DatasampleIntegerWeightsExtension"),
+    };
+pub const DATASAMPLE_LOGICAL_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "datasample-logical-weights",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "datasample with logical weights is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DatasampleLogicalWeightsExtension"),
+    };
+pub const DATASAMPLE_NUMERIC_REPLACE_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "datasample-numeric-replace",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "datasample with a numeric Replace value is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DatasampleNumericReplaceExtension"),
+    };
+pub const DATASAMPLE_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "datasample-resident-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "datasample with resident accelerator input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DatasampleResidentInputExtension"),
+    };
+pub const DATASAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    DATASAMPLE_INTEGER_DATA_EXTENSION,
+    DATASAMPLE_INTEGER_K_EXTENSION,
+    DATASAMPLE_INTEGER_DIM_EXTENSION,
+    DATASAMPLE_INTEGER_WEIGHTS_EXTENSION,
+    DATASAMPLE_LOGICAL_WEIGHTS_EXTENSION,
+    DATASAMPLE_NUMERIC_REPLACE_EXTENSION,
+    DATASAMPLE_RESIDENT_INPUT_EXTENSION,
+];
+
+const DATASAMPLE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are sampled by exact storage indexing; the documented ordinary numeric population classes are single and double.",
+    }];
+const DATASAMPLE_INTEGER_K_INPUTS: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes:
+            "Typed k is independently gated and read exactly as a positive structural sample count.",
+    },
+];
+const DATASAMPLE_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed dim is independently gated and read exactly as a positive one-based structural dimension.",
+    }];
+const DATASAMPLE_INTEGER_WEIGHTS_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Weights",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed nonnegative weights are independently gated and converted only at the floating probability boundary.",
+    }];
+pub const DATASAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = datasample(integer_data,k,___)",
+        inputs: &DATASAMPLE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Sampling preserves the exact selected integer values and native integer class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = datasample(data,integer_k,___)",
+        inputs: &DATASAMPLE_INTEGER_K_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed k controls output extent and never determines the sampled value class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = datasample(data,k,integer_dim,___)",
+        inputs: &DATASAMPLE_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed dim selects an axis and never determines the sampled value class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "y = datasample(data,k,Weights=integer_weights,___)",
+        inputs: &DATASAMPLE_INTEGER_WEIGHTS_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes:
+            "Weights affect selection probabilities only; sampled data retains its ordinary class.",
+    },
+];
+
 const RANDSAMPLE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "y = randsample(n, k)",
@@ -961,6 +1097,71 @@ struct DatasampleArgs {
     weights: Option<Vec<f64>>,
 }
 
+fn datasample_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(value_tensor) if value_tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn datasample_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn datasample_numeric_replace(value: &Value) -> bool {
+    matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
+        || matches!(value, Value::GpuTensor(handle) if !runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn ensure_datasample_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(extension, "datasample")
+}
+
+fn ensure_datasample_extensions(data: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if datasample_integer_value(data) {
+        ensure_datasample_extension(&DATASAMPLE_INTEGER_DATA_EXTENSION)?;
+    }
+    if matches!(data, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        ensure_datasample_extension(&DATASAMPLE_RESIDENT_INPUT_EXTENSION)?;
+    }
+    if let Some(k) = rest.first() {
+        if datasample_integer_value(k) {
+            ensure_datasample_extension(&DATASAMPLE_INTEGER_K_EXTENSION)?;
+        }
+    }
+    let mut index = 1usize;
+    while index < rest.len() {
+        if let Some(keyword) = keyword_of(&rest[index]) {
+            let Some(value) = rest.get(index + 1) else {
+                break;
+            };
+            match keyword.as_str() {
+                "replace" if datasample_numeric_replace(value) => {
+                    ensure_datasample_extension(&DATASAMPLE_NUMERIC_REPLACE_EXTENSION)?;
+                }
+                "weights" if datasample_integer_value(value) => {
+                    ensure_datasample_extension(&DATASAMPLE_INTEGER_WEIGHTS_EXTENSION)?;
+                }
+                "weights" if datasample_logical_value(value) => {
+                    ensure_datasample_extension(&DATASAMPLE_LOGICAL_WEIGHTS_EXTENSION)?;
+                }
+                _ => {}
+            }
+            index += 2;
+        } else {
+            if datasample_integer_value(&rest[index]) {
+                ensure_datasample_extension(&DATASAMPLE_INTEGER_DIM_EXTENSION)?;
+            }
+            index += 1;
+        }
+    }
+    Ok(())
+}
+
 async fn parse_datasample_args(data: Value, rest: Vec<Value>) -> BuiltinResult<DatasampleArgs> {
     if rest.is_empty() {
         return Err(sampling_error("datasample", "datasample: k is required"));
@@ -1066,10 +1267,18 @@ pub mod datasample {
         keywords = "datasample,random,sample,replacement,weights,statistics",
         type_resolver(super::sampling_type),
         descriptor(self::DESCRIPTOR),
+        extensions(super::DATASAMPLE_EXTENSIONS),
+        integer_capabilities(super::DATASAMPLE_INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::random::sampling::datasample"
     )]
     pub(crate) async fn datasample_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::parse_datasample_args(value, rest).await?;
+        super::ensure_datasample_extensions(&value, &rest)?;
+        let value = super::gathered(value, "datasample").await?;
+        let mut gathered_rest = Vec::with_capacity(rest.len());
+        for argument in rest {
+            gathered_rest.push(super::gathered(argument, "datasample").await?);
+        }
+        let args = super::parse_datasample_args(value, gathered_rest).await?;
         let (sample, idx) = super::datasample_compute(args)?;
         match crate::output_count::current_output_count() {
             Some(0) => Ok(Value::OutputList(Vec::new())),
@@ -2159,6 +2368,116 @@ mod tests {
             }
             other => panic!("expected cell array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn datasample_extensions_are_independently_mode_gated() {
+        let integer_data = || {
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![2, 1]).unwrap())
+        };
+        let data = || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let integer_weights = || {
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1, 1]), vec![2, 1]).unwrap())
+        };
+        let logical_weights =
+            || Value::LogicalArray(LogicalArray::new(vec![1, 1], vec![2, 1]).unwrap());
+        let cases = [
+            (
+                integer_data(),
+                vec![Value::Num(1.0)],
+                DATASAMPLE_INTEGER_DATA_EXTENSION.error_identifier,
+            ),
+            (
+                data(),
+                vec![Value::Int(IntValue::U8(1))],
+                DATASAMPLE_INTEGER_K_EXTENSION.error_identifier,
+            ),
+            (
+                data(),
+                vec![Value::Num(1.0), Value::Int(IntValue::U8(1))],
+                DATASAMPLE_INTEGER_DIM_EXTENSION.error_identifier,
+            ),
+            (
+                data(),
+                vec![Value::Num(1.0), Value::from("Weights"), integer_weights()],
+                DATASAMPLE_INTEGER_WEIGHTS_EXTENSION.error_identifier,
+            ),
+            (
+                data(),
+                vec![Value::Num(1.0), Value::from("Weights"), logical_weights()],
+                DATASAMPLE_LOGICAL_WEIGHTS_EXTENSION.error_identifier,
+            ),
+            (
+                data(),
+                vec![Value::Num(1.0), Value::from("Replace"), Value::Num(0.0)],
+                DATASAMPLE_NUMERIC_REPLACE_EXTENSION.error_identifier,
+            ),
+        ];
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (population, rest, identifier) in cases {
+            let error = block_on(datasample::datasample_builtin(population, rest))
+                .expect_err("strict rejection");
+            assert_eq!(error.identifier(), identifier);
+        }
+    }
+
+    #[test]
+    fn datasample_preserves_every_integer_class_exactly() {
+        let _lock = random::test_lock().lock().unwrap();
+        random::set_seed(396).unwrap();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = [
+            IntegerStorage::I8(vec![-8, 7]),
+            IntegerStorage::I16(vec![-16, 15]),
+            IntegerStorage::I32(vec![-32, 31]),
+            IntegerStorage::I64(vec![-9_007_199_254_740_993, 7]),
+            IntegerStorage::U8(vec![8, 7]),
+            IntegerStorage::U16(vec![16, 15]),
+            IntegerStorage::U32(vec![32, 31]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 7]),
+        ];
+        for storage in storages {
+            let expected = storage.value_at(0).unwrap();
+            let population = Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap());
+            let weights = Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap());
+            let Value::Tensor(output) = block_on(datasample::datasample_builtin(
+                population,
+                vec![Value::Num(3.0), Value::from("Weights"), weights],
+            ))
+            .unwrap() else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(
+                output.integer_storage().unwrap().exact_values(),
+                vec![expected; 3]
+            );
+        }
+    }
+
+    #[test]
+    fn datasample_capabilities_and_resident_gate_are_auditable() {
+        assert_eq!(DATASAMPLE_INTEGER_CAPABILITIES.len(), 4);
+        assert!(DATASAMPLE_INTEGER_CAPABILITIES
+            .iter()
+            .all(|capability| capability.inputs[0].classes.len() == 8));
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0, 2.0],
+                    shape: &[2, 1],
+                })
+                .unwrap();
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(datasample::datasample_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Num(1.0)],
+            ))
+            .expect_err("resident input gate must run before gather");
+            assert_eq!(
+                error.identifier(),
+                DATASAMPLE_RESIDENT_INPUT_EXTENSION.error_identifier
+            );
+        });
     }
 
     #[test]

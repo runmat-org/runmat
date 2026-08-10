@@ -31,10 +31,11 @@
   },
   "description": "`dataTipTextRow(label, value)` creates a MATLAB-compatible `matlab.graphics.datatip.DataTipTextRow` handle object with `Label`, `Value`, and `Format` properties. Use these rows with plot data-tip templates as RunMat's graphics template support expands.",
   "behaviors": [
-    "`dataTipTextRow(label, value)` creates a handle-class row object and stores an empty `Format` property so the renderer or host can use its default formatting.",
+    "`dataTipTextRow(label, value)` creates a handle-class row object and stores the documented default `Format` value `auto`.",
     "`dataTipTextRow(label, value, format)` stores the supplied display format string.",
     "`label` and `format` accept character vectors, string scalars, and scalar string arrays.",
-    "`Value` is preserved without reinterpretation, so property names such as `'YData'`, numeric vectors, string values, function handles, and GPU-resident values remain available to downstream graphics code.",
+    "Documented text, scalar/vector, and function-handle Value sources are preserved without reinterpretation. Integer-vector support is classified as an evidence-based inference from the documented vector contract because the public page has no per-class data-type table.",
+    "GPU-resident Value sources require the `data-tip-text-row-resident-value` extension and remain untouched. Host nonvector numeric sources independently require `data-tip-text-row-nonvector-value`.",
     "Returned rows support dot-property access and mutation for `Label`, `Value`, and `Format`; aliases refer to the same underlying handle object."
   ],
   "options": [
@@ -61,7 +62,7 @@
     },
     {
       "question": "Does it gather GPU data?",
-      "answer": "No. RunMat preserves the supplied `Value` property as metadata, including GPU tensor handles, so constructing a row does not force a host round trip."
+      "answer": "Not in strict compatibility mode. With the `data-tip-text-row-resident-value` extension enabled, RunMat preserves the supplied GPU handle as metadata without a host round trip."
     }
   ],
   "links": [
@@ -85,6 +86,10 @@
   "gpu_residency": "`dataTipTextRow` is metadata-only. It does not inspect, gather, or convert the supplied `Value` property, so GPU-resident values remain represented by their existing handles.",
   "gpu_behavior": [
     "Object construction terminates numeric fusion because the result is a graphics metadata object.",
-    "Supplying a GPU-resident value preserves the handle in the returned object's `Value` property."
+    "Supplying a GPU-resident value preserves the handle in the returned object's `Value` property only when the resident-value extension is enabled."
+  ],
+  "limitations": [
+    "DataTipTemplate attachment, source-length validation against chart data, and final numeric/datetime/duration rendering remain graphics-host integration work.",
+    "The public documentation does not resolve per-class complex-vector or GPU Value support; RunMat treats resident values as an explicit extension."
   ]
 }

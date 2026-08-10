@@ -26435,6 +26435,87 @@
           "when": "Internal tensor materialization for csvread output fails.",
           "message": "csvread: unable to construct output matrix"
         }
+      ],
+      "extensions": [
+        {
+          "id": "csvread-colon-range",
+          "mode": "RunMatOnly",
+          "description": "csvread A1 ranges separated by ':' are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CsvreadColonRangeExtension"
+        },
+        {
+          "id": "csvread-two-vector-range",
+          "mode": "RunMatOnly",
+          "description": "csvread two-element numeric ranges are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CsvreadTwoVectorRangeExtension"
+        },
+        {
+          "id": "csvread-resident-control-inputs",
+          "mode": "RunMatOnly",
+          "description": "csvread resident filename, offset, or range controls are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CsvreadResidentControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "M = csvread(filename, integer_row, integer_col, integer_range?)",
+          "inputs": [
+            {
+              "name": "row",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for the zero-based row control and are validated from authoritative storage."
+            },
+            {
+              "name": "col",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for the zero-based column control and are validated from authoritative storage."
+            },
+            {
+              "name": "range",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented four-element numeric range accepts all eight integer classes without materializing a lossy double mirror."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Integer inputs control file selection only. Values are read exactly from authoritative integer storage; the CSV result remains double or complex double."
+        }
       ]
     },
     {
@@ -26443,7 +26524,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "bytesWritten = csvwrite(filename, M)",
+          "label": "csvwrite(filename, M)",
           "inputs": [
             {
               "name": "filename",
@@ -26460,18 +26541,10 @@
               "description": "Numeric/logical matrix data to write."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written to the output file."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "bytesWritten = csvwrite(filename, M, row, col)",
+          "label": "csvwrite(filename, M, row, col)",
           "inputs": [
             {
               "name": "filename",
@@ -26502,15 +26575,7 @@
               "description": "Zero-based column offset before writing values."
             }
           ],
-          "outputs": [
-            {
-              "name": "bytesWritten",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Number of bytes written to the output file."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -26556,6 +26621,81 @@
           "when": "Output file write/flush fails.",
           "message": "csvwrite: write failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "csvwrite-bytes-written-output",
+          "mode": "RunMatOnly",
+          "description": "requesting a bytes-written output from csvwrite is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CsvwriteBytesOutputExtension"
+        },
+        {
+          "id": "csvwrite-resident-input",
+          "mode": "RunMatOnly",
+          "description": "direct csvwrite of resident data or controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CsvwriteResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "csvwrite(filename, integer_M, integer_row?, integer_col?)",
+          "inputs": [
+            {
+              "name": "M",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight real integer classes are documented and serialize directly from authoritative storage."
+            },
+            {
+              "name": "row",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The zero-based row offset accepts all eight integer classes and is checked exactly."
+            },
+            {
+              "name": "col",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The zero-based column offset accepts all eight integer classes and is checked exactly."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer matrix elements serialize exactly without crossing an f64 mirror. Resident input is independently gated and gathered through the handle owner."
+        }
       ]
     },
     {
@@ -26595,7 +26735,7 @@
         {
           "code": "RM.CTRANSPOSE.INVALID_INPUT",
           "identifier": "RunMat:ctranspose:InvalidInput",
-          "when": "Input type is unsupported for conjugate transpose.",
+          "when": "Input type is unsupported for conjugate transpose, the input has a nonsingleton dimension above two, or the input uses complex integer storage.",
           "message": "ctranspose: unsupported input type"
         },
         {
@@ -26603,6 +26743,70 @@
           "identifier": "RunMat:ctranspose:Internal",
           "when": "Runtime cannot materialize conjugate-transpose output.",
           "message": "ctranspose: internal runtime failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ctranspose-integer-sparse",
+          "mode": "RunMatOnly",
+          "description": "ctranspose of integer-valued sparse storage is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CtransposeIntegerSparseExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = ctranspose(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight real dense integer classes are documented and transpose without conversion."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Dense real integer storage, shape, and GPU residency are preserved exactly. Complex integer storage is rejected."
+        },
+        {
+          "form": "B = ctranspose(sparse(integer_A))",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer-valued sparse storage is a gated RunMat extension; MATLAB sparse value classes are floating or logical."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The sparse CSC structure and authoritative integer values are transposed exactly after the RunMat extension gate."
         }
       ]
     },
@@ -30681,6 +30885,127 @@
           "when": "Integration execution fails during gather, allocation, or provider promotion.",
           "message": "cumtrapz: internal integration failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "cumtrapz-integer-y",
+          "mode": "RunMatOnly",
+          "description": "cumtrapz with typed-integer sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CumtrapzIntegerYExtension"
+        },
+        {
+          "id": "cumtrapz-logical-y",
+          "mode": "RunMatOnly",
+          "description": "cumtrapz with logical sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CumtrapzLogicalYExtension"
+        },
+        {
+          "id": "cumtrapz-integer-spacing",
+          "mode": "RunMatOnly",
+          "description": "cumtrapz with typed-integer spacing is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CumtrapzIntegerSpacingExtension"
+        },
+        {
+          "id": "cumtrapz-logical-spacing",
+          "mode": "RunMatOnly",
+          "description": "cumtrapz with logical spacing is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CumtrapzLogicalSpacingExtension"
+        },
+        {
+          "id": "cumtrapz-integer-dim",
+          "mode": "RunMatOnly",
+          "description": "cumtrapz with a typed-integer dimension is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CumtrapzIntegerDimExtension"
+        },
+        {
+          "id": "cumtrapz-tensor-spacing",
+          "mode": "RunMatOnly",
+          "description": "cumtrapz with same-size tensor spacing is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CumtrapzTensorSpacingExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Q = cumtrapz(integer_Y, dim?)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes cross an explicitly gated binary64 integration boundary after exact-representability validation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer samples remain authoritative through validation, then produce shape-preserving double output; eligible resident fallback returns through the first resident owner."
+        },
+        {
+          "form": "Q = cumtrapz(integer_X, Y, dim?)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer spacing classes are independently gated and validated before binary64 coordinate differences are formed."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer coordinates are independently gated and cross the floating spacing boundary; Y controls shape and documented floating precision."
+        },
+        {
+          "form": "Q = cumtrapz(___, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public contract accepts a positive integer-valued scalar but does not list typed integer classes; ordinary double dim remains documented."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Typed dim is read exactly and controls traversal only; it does not determine the numeric result class."
+        }
       ]
     },
     {
@@ -30870,6 +31195,148 @@
           "when": "RunMat cannot allocate or construct a partition output.",
           "message": "cvpartition: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "cvpartition-integer-observation-count",
+          "mode": "RunMatOnly",
+          "description": "cvpartition with a typed-integer observation count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionIntegerObservationCountExtension"
+        },
+        {
+          "id": "cvpartition-integer-partition-control",
+          "mode": "RunMatOnly",
+          "description": "cvpartition with typed-integer KFold or Holdout control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionIntegerPartitionControlExtension"
+        },
+        {
+          "id": "cvpartition-integer-stratification",
+          "mode": "RunMatOnly",
+          "description": "cvpartition with typed-integer stratification labels is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionIntegerStratificationExtension"
+        },
+        {
+          "id": "cvpartition-integer-custom-testsets",
+          "mode": "RunMatOnly",
+          "description": "cvpartition with typed-integer custom test sets is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionIntegerCustomTestsetsExtension"
+        },
+        {
+          "id": "cvpartition-nonlogical-stratify-option",
+          "mode": "RunMatOnly",
+          "description": "cvpartition with a nonlogical Stratify option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:CvpartitionNonlogicalStratifyOptionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "c = cvpartition(integer_n, ___)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The public observation count lists single and double; all eight typed integer scalar classes are independently gated and read exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed n determines object and mask sizes only; public count properties remain double and mask properties remain logical."
+        },
+        {
+          "form": "c = cvpartition(___, integer_kOrP)",
+          "inputs": [
+            {
+              "name": "kOrP",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed KFold and integer-count Holdout controls are independently gated; documented single/double integer-valued controls remain accepted."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed partition controls are validated exactly before random assignment and do not determine property classes."
+        },
+        {
+          "form": "c = cvpartition(integer_stratvar, ___)",
+          "inputs": [
+            {
+              "name": "stratvar",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public numeric stratification class list is single/double; RunMat mode additionally preserves all eight integer label classes through structural grouping."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer labels are compared structurally from authoritative storage and never treated as floating observations."
+        },
+        {
+          "form": "c = cvpartition(CustomPartition=integer_testSets)",
+          "inputs": [
+            {
+              "name": "testSets",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The public custom-test-set class list is single/double/logical; typed integer assignment vectors or 0/1 masks are independently gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer test-set identifiers and 0/1 masks are interpreted exactly before logical mask construction."
+        }
       ]
     },
     {
@@ -30987,11 +31454,31 @@
           "when": "Pole extraction or output construction failed.",
           "message": "damp: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[wn, zeta, p] = damp(integer_sys)",
+          "inputs": [
+            {
+              "name": "sys",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "damp accepts a dynamic-system object. Integer coefficient support belongs to the tf/ss constructors and does not make an integer array a valid sys input."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer input is inapplicable at the object boundary and rejects without provider dispatch. Model coefficients have already crossed their constructor's documented numeric boundary."
+        }
       ]
     },
     {
       "name": "daspect",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
@@ -31008,7 +31495,7 @@
           ]
         },
         {
-          "label": "ratio = daspect(ratio)",
+          "label": "daspect(ratio)",
           "inputs": [
             {
               "name": "ratio",
@@ -31018,18 +31505,10 @@
               "description": "Three-element positive numeric data aspect ratio."
             }
           ],
-          "outputs": [
-            {
-              "name": "ratio",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Current data aspect ratio [dx dy dz]."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "mode = daspect(mode)",
+          "label": "mode = daspect('mode')",
           "inputs": [
             {
               "name": "mode",
@@ -31048,6 +31527,19 @@
               "description": "Current data aspect ratio mode, 'auto' or 'manual'."
             }
           ]
+        },
+        {
+          "label": "daspect(mode)",
+          "inputs": [
+            {
+              "name": "mode",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Mode string: 'auto', 'manual', or 'mode'."
+            }
+          ],
+          "outputs": []
         },
         {
           "label": "ratio = daspect(ax)",
@@ -31071,7 +31563,7 @@
           ]
         },
         {
-          "label": "ratio = daspect(ax, ratio_or_mode)",
+          "label": "mode = daspect(ax, 'mode')",
           "inputs": [
             {
               "name": "ax",
@@ -31090,13 +31582,33 @@
           ],
           "outputs": [
             {
-              "name": "ratio",
-              "ty": "NumericArray",
+              "name": "mode",
+              "ty": "StringScalar",
               "arity": "Required",
               "default": null,
-              "description": "Current data aspect ratio [dx dy dz]."
+              "description": "Current data aspect ratio mode, 'auto' or 'manual'."
             }
           ]
+        },
+        {
+          "label": "daspect(ax, ratio_or_mode)",
+          "inputs": [
+            {
+              "name": "ax",
+              "ty": "AxesHandle",
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle."
+            },
+            {
+              "name": "ratio_or_mode",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Ratio vector or mode string."
+            }
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -31111,6 +31623,88 @@
           "identifier": "RunMat:daspect:Internal",
           "when": "Internal plotting state update fails.",
           "message": "daspect: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "daspect-numeric-axes-handle-alias",
+          "mode": "RunMatOnly",
+          "description": "daspect with RunMat's numeric encoded axes handle is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DaspectNumericAxesAliasExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "daspect(integer_ratio)",
+          "inputs": [
+            {
+              "name": "ratio",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight positive integer classes are documented. Shape and positivity are checked from authoritative integer storage before conversion to the host double graphics-property boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The documented integer vector is validated exactly, then converted once into the double-valued DataAspectRatio property; the setter returns no value."
+        },
+        {
+          "form": "daspect(integer_ax, ratio_or_mode)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed integers are accepted only as exact scalar aliases for RunMat's encoded axes handles and are separately compatibility gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "RunMat-only exact numeric handle alias; the public contract accepts an Axes object."
+        },
+        {
+          "form": "daspect(resident_integer, ...)",
+          "inputs": [
+            {
+              "name": "resident ratio or ax",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident numeric arrays are rejected without provider lookup, download, or upload."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Graphics metadata control never gathers a resident numeric array to reinterpret it as a ratio or handle."
         }
       ]
     },
@@ -31778,7 +32372,7 @@
               "name": "format",
               "ty": "StringScalar",
               "arity": "Optional",
-              "default": "\"\"",
+              "default": "\"auto\"",
               "description": "Optional numeric, datetime, duration, or text display format."
             }
           ],
@@ -31806,6 +32400,103 @@
           "when": "Internal data-tip row object construction fails.",
           "message": "dataTipTextRow: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "data-tip-text-row-resident-value",
+          "mode": "RunMatOnly",
+          "description": "dataTipTextRow preserving a resident numeric Value source is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DataTipTextRowResidentValueExtension"
+        },
+        {
+          "id": "data-tip-text-row-nonvector-value",
+          "mode": "RunMatOnly",
+          "description": "dataTipTextRow with a nonvector numeric Value source is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DataTipTextRowNonvectorValueExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "row = dataTipTextRow(label, integer_vector, format?)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The public Value contract says vector without a per-class table. RunMat classifies integer vectors as an evidence-based inference and preserves authoritative storage structurally without conversion."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Inferred vector support stores the exact integer Value object as metadata; formatting occurs later in the data-tip renderer."
+        },
+        {
+          "form": "row = dataTipTextRow(label, integer_nonvector, format?)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Nonvector integer Value sources are preserved only behind the separate RunMat extension gate."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only nonvector metadata preservation is independently gated."
+        },
+        {
+          "form": "row = dataTipTextRow(label, resident_integer, format?)",
+          "inputs": [
+            {
+              "name": "resident value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident integer Value metadata is preserved without provider access only behind the separate resident-value extension gate."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "RunMat-only resident metadata preservation performs no gather, upload, or provider dispatch."
+        }
       ]
     },
     {
@@ -31832,7 +32523,7 @@
           "outputs": []
         },
         {
-          "label": "status = datacursormode(option)",
+          "label": "datacursormode(option)",
           "inputs": [
             {
               "name": "option",
@@ -31842,64 +32533,7 @@
               "description": "Mode option: on, off, or toggle."
             }
           ],
-          "outputs": [
-            {
-              "name": "status",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Returns \"ok\" when the command succeeds."
-            }
-          ]
-        },
-        {
-          "label": "dcm = datacursormode(fig)",
-          "inputs": [
-            {
-              "name": "fig",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Target figure handle."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "dcm",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Data cursor mode object for the current or specified figure."
-            }
-          ]
-        },
-        {
-          "label": "status = datacursormode(fig, option)",
-          "inputs": [
-            {
-              "name": "fig",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Target figure handle."
-            },
-            {
-              "name": "option",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Mode option: on, off, or toggle."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "status",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Returns \"ok\" when the command succeeds."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -31914,6 +32548,100 @@
           "identifier": "RunMat:datacursormode:Internal",
           "when": "Internal data cursor state or handle-object update fails.",
           "message": "datacursormode: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "datacursormode-numeric-handle-alias",
+          "mode": "RunMatOnly",
+          "description": "datacursormode with RunMat numeric graphics-handle aliases is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatacursormodeNumericHandleExtension"
+        },
+        {
+          "id": "datacursormode-status-output",
+          "mode": "RunMatOnly",
+          "description": "status output from a datacursormode command form is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatacursormodeStatusOutputExtension"
+        },
+        {
+          "id": "datacursormode-onoff-aliases",
+          "mode": "RunMatOnly",
+          "description": "nonstandard datacursormode on/off numeric and text aliases are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatacursormodeOnOffAliasesExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dcm = datacursormode(integer_fig)",
+          "inputs": [
+            {
+              "name": "fig",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed integers are exact scalar aliases for RunMat's numeric figure registry and are separately compatibility gated; this extension-only form is not advertised as a public signature."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "RunMat-only exact numeric handle alias for the current numeric graphics registry; native Figure-object admission is not implemented."
+        },
+        {
+          "form": "set(dcm, 'Enable', integer_state)",
+          "inputs": [
+            {
+              "name": "Enable",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented numeric on/off property accepts only exact scalar 0 or 1; other numeric truthiness is a separately gated alias."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "All eight classes are admitted only for authoritative scalar zero or one."
+        },
+        {
+          "form": "datacursormode(resident_integer, ...)",
+          "inputs": [
+            {
+              "name": "resident fig or property",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Resident numeric arrays reject without provider access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Interaction metadata never gathers a resident array to reinterpret it as a handle or switch."
         }
       ]
     },
@@ -32075,6 +32803,160 @@
           "identifier": "RunMat:datasample:Internal",
           "when": "Internal conversion or allocation fails.",
           "message": "sampling: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "datasample-integer-data",
+          "mode": "RunMatOnly",
+          "description": "datasample with typed-integer population data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatasampleIntegerDataExtension"
+        },
+        {
+          "id": "datasample-integer-k",
+          "mode": "RunMatOnly",
+          "description": "datasample with a typed-integer sample count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatasampleIntegerKExtension"
+        },
+        {
+          "id": "datasample-integer-dim",
+          "mode": "RunMatOnly",
+          "description": "datasample with a typed-integer dimension is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatasampleIntegerDimExtension"
+        },
+        {
+          "id": "datasample-integer-weights",
+          "mode": "RunMatOnly",
+          "description": "datasample with typed-integer weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatasampleIntegerWeightsExtension"
+        },
+        {
+          "id": "datasample-logical-weights",
+          "mode": "RunMatOnly",
+          "description": "datasample with logical weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatasampleLogicalWeightsExtension"
+        },
+        {
+          "id": "datasample-numeric-replace",
+          "mode": "RunMatOnly",
+          "description": "datasample with a numeric Replace value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatasampleNumericReplaceExtension"
+        },
+        {
+          "id": "datasample-resident-input",
+          "mode": "RunMatOnly",
+          "description": "datasample with resident accelerator input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:DatasampleResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "y = datasample(integer_data,k,___)",
+          "inputs": [
+            {
+              "name": "data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are sampled by exact storage indexing; the documented ordinary numeric population classes are single and double."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Sampling preserves the exact selected integer values and native integer class."
+        },
+        {
+          "form": "y = datasample(data,integer_k,___)",
+          "inputs": [
+            {
+              "name": "k",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed k is independently gated and read exactly as a positive structural sample count."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed k controls output extent and never determines the sampled value class."
+        },
+        {
+          "form": "y = datasample(data,k,integer_dim,___)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed dim is independently gated and read exactly as a positive one-based structural dimension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed dim selects an axis and never determines the sampled value class."
+        },
+        {
+          "form": "y = datasample(data,k,Weights=integer_weights,___)",
+          "inputs": [
+            {
+              "name": "Weights",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed nonnegative weights are independently gated and converted only at the floating probability boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Weights affect selection probabilities only; sampled data retains its ordinary class."
         }
       ]
     },
