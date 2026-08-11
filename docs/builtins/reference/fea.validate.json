@@ -1,0 +1,18 @@
+{
+  "title": "fea.validate",
+  "category": "fea",
+  "keywords": ["fea", "validate", "study", "sweep"],
+  "summary": "Validate a RunMat FEA study or sweep without solving.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_load_validate_and_plan_document_workflow", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
+  "description": "`fea.validate(studyOrSweepOrPath)` validates one typed study, a sweep, or a `.fea` document and writes validation evidence.",
+  "behaviors": [
+    "Exactly one `.fea` path, `fea.Study`, or `fea.Sweep` input is required. Direct integer and resident numeric inputs have no role and reject before document resolution.",
+    "Study validation returns validity, issue codes/details, and an evidence path. Sweep validation additionally returns per-study entries. These public results contain logical and text data rather than numeric measurements.",
+    "Validation does not execute the solver or a numeric provider. Existing typed, STL-backed, or synthetic geometry does not intrinsically require native OCCT; resolving topology-bearing CAD from a path may require its configured importer."
+  ],
+  "examples": [{ "description": "Validate before solving", "input": "validation = fea.validate(study);\nassert(validation.valid);" }],
+  "faqs": [{ "question": "Does validation allocate solver results?", "answer": "No. It checks the study or sweep and records evidence without planning or solving." }],
+  "links": [{ "label": "FEA validation", "url": "../../fea/validation" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

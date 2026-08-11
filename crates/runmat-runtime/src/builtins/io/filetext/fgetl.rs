@@ -225,6 +225,10 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
         .ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
     let read = read_text_line(file, None, BUILTIN_NAME)
         .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
+    drop(guard);
+    if read.encountered_eof {
+        registry::mark_eof_encountered(fid);
+    }
     if read.eof_before_any {
         return Ok(FgetlEval::end_of_file());
     }

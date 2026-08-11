@@ -21,7 +21,7 @@ use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -34,7 +34,8 @@ use crate::analysis::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions,
     AnalysisFieldDescriptor, AnalysisFsiRunOptions, AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
-    AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec, AnalysisStudySweepSpec,
+    AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec, AnalysisStudySweepData,
+    AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepSpec,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendsQuery,
     FeaResolvedDocument,
 };
@@ -279,6 +280,86 @@ const INTERFACE_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Interface kind and numeric fields.",
     },
 ];
+const STEP_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Analysis-step id.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description:
+            "Static, modal, transient, thermal, nonlinear, electromagnetic, or CFD step kind.",
+    },
+];
+const RUN_OPTIONS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "solver",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "FEA solver family.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Family-specific structural, tolerance, timing, precision, and quality options.",
+    },
+];
+const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sweep id.",
+    },
+    BuiltinParamDescriptor {
+        name: "studies",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "A fea.Study or cell array of fea.Study objects.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional logical FailFast control.",
+    },
+];
+const RESULTS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "runOrRunId",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Persisted run id, fea.RunResult, or fea.Results object.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Field, diagnostic, one-based mode/snapshot selector, and inclusion options.",
+    },
+];
+const TRENDS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Name, Value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Optional positive integer WindowSize.",
+}];
 const FIELD_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "resultsOrRun",
@@ -370,13 +451,20 @@ const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     inputs: &IN_PATH,
     outputs: &OUT_ANY,
 }];
-const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "study = fea.study(id, geometry, Name, Value, ...)",
-    inputs: &IN_STUDY_ARGS,
-    outputs: &OUT_ANY,
-}];
+const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "study = fea.study(path)",
+        inputs: &IN_PATH,
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "study = fea.study(id, geometry, Name, Value, ...)",
+        inputs: &IN_STUDY_ARGS,
+        outputs: &OUT_ANY,
+    },
+];
 const VALIDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "result = fea.validate(study)",
+    label: "result = fea.validate(studyOrSweepOrPath)",
     inputs: &IN_INPUT,
     outputs: &OUT_ANY,
 }];
@@ -386,13 +474,13 @@ const PLAN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     outputs: &OUT_ANY,
 }];
 const RUN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "run = fea.run(study)",
+    label: "run = fea.run(studyOrSweepOrPath)",
     inputs: &IN_INPUT,
     outputs: &OUT_ANY,
 }];
 const SWEEP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "sweep = fea.sweep(id, studies, Name, Value, ...)",
-    inputs: &IN_VARIADIC_ARGS,
+    inputs: &SWEEP_INPUTS,
     outputs: &OUT_ANY,
 }];
 const MODEL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -429,6 +517,16 @@ const INTERFACE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
 const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "component = fea.component(args, ...)",
     inputs: &IN_VARIADIC_ARGS,
+    outputs: &OUT_ANY,
+}];
+const STEP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "step = fea.step(id, kind)",
+    inputs: &STEP_INPUTS,
+    outputs: &OUT_ANY,
+}];
+const RUN_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "options = fea.runOptions(solver, Name, Value, ...)",
+    inputs: &RUN_OPTIONS_INPUTS,
     outputs: &OUT_ANY,
 }];
 const BOUNDARY_CONDITION_INPUTS: [BuiltinParamDescriptor; 4] = [
@@ -469,7 +567,7 @@ const BOUNDARY_CONDITION_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
     }];
 const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "results = fea.results(runOrRunId, Name, Value, ...)",
-    inputs: &IN_VARIADIC_ARGS,
+    inputs: &RESULTS_INPUTS,
     outputs: &OUT_ANY,
 }];
 const FIELD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -496,7 +594,7 @@ const COMPARE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDes
 }];
 const TRENDS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "trends = fea.trends(Name, Value, ...)",
-    inputs: &IN_VARIADIC_ARGS,
+    inputs: &TRENDS_INPUTS,
     outputs: &OUT_ANY,
 }];
 
@@ -515,7 +613,7 @@ const ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 const ERROR_OPERATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FEA.BUILTIN.OPERATION_FAILED",
     identifier: Some("RunMat:fea:OperationFailed"),
-    when: "The validation, planning, or run operation fails.",
+    when: "A validation, planning, run, result-query, comparison, or trend operation fails.",
     message: "fea: operation failed",
 };
 const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -601,6 +699,18 @@ pub const FEA_INTERFACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &COMPONENT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+pub const FEA_STEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STEP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+pub const FEA_RUN_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RUN_OPTIONS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -797,6 +907,99 @@ pub const FEA_STRUCTURAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinI
     canonical_builtin: None,
     notes: "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs.",
 };
+
+const RUN_OPTIONS_EXACT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "structural iteration, step, retry, mode, and refresh counts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected.",
+    }];
+const RUN_OPTIONS_FLOATING_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "tolerance, timing, residual, convergence, and frequency fields",
+    BuiltinIntegerScalarDoubleRule::Allowed,
+)];
+
+const fn run_options_exact_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs: &RUN_OPTIONS_EXACT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The exact count is preserved in the typed run-options payload and public object representation.",
+    }
+}
+
+const fn run_options_floating_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs: &RUN_OPTIONS_FLOATING_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact.",
+    }
+}
+
+pub const FEA_RUN_OPTIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 18] = [
+    run_options_exact_capability("modal structural controls"),
+    run_options_floating_capability("modal floating controls"),
+    run_options_exact_capability("acoustic structural controls"),
+    run_options_floating_capability("acoustic floating controls"),
+    run_options_exact_capability("thermal structural controls"),
+    run_options_floating_capability("thermal floating controls"),
+    run_options_exact_capability("transient structural controls"),
+    run_options_floating_capability("transient floating controls"),
+    run_options_exact_capability("CFD structural controls"),
+    run_options_floating_capability("CFD floating controls"),
+    run_options_exact_capability("CHT structural controls"),
+    run_options_floating_capability("CHT floating controls"),
+    run_options_exact_capability("FSI structural controls"),
+    run_options_floating_capability("FSI floating controls"),
+    run_options_exact_capability("nonlinear structural controls"),
+    run_options_floating_capability("nonlinear floating controls"),
+    run_options_exact_capability("electromagnetic structural controls"),
+    run_options_floating_capability("electromagnetic floating controls"),
+];
+
+const RESULTS_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "one-based result indices",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Host numeric scalars or vectors are decoded exactly, require positive one-based indices, preserve order and duplicates, and reject matrix and provider-resident inputs.",
+    }];
+const RESULTS_FLAG_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "numeric inclusion predicate",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Host scalar logical values and exact numeric zero or one are accepted; every other numeric value and provider-resident input is rejected.",
+    }];
+pub const FEA_RESULTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor { form: "ModeIndices", inputs: &RESULTS_SELECTOR_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The one-based public selector is translated once to the operation layer's zero-based index and public structural result fields remain exact." },
+    BuiltinIntegerCapabilityDescriptor { form: "TransientSnapshotIndices", inputs: &RESULTS_SELECTOR_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The one-based public selector is translated once to the operation layer's zero-based index and public structural result fields remain exact." },
+    BuiltinIntegerCapabilityDescriptor { form: "numeric inclusion predicates", inputs: &RESULTS_FLAG_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Logical and numeric zero/one select query projections without converting provider data." },
+];
+
+const TRENDS_WINDOW_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "WindowSize",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A positive host integer scalar or integral scalar double is decoded exactly as usize; provider-resident values are rejected.",
+    }];
+pub const FEA_TRENDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "WindowSize", inputs: &TRENDS_WINDOW_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The positive window size and structural trend counts remain exact in the public result object; time and rate fields remain binary64." }];
 pub const FEA_BOUNDARY_CONDITION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &BOUNDARY_CONDITION_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -929,6 +1132,7 @@ pub async fn fea_load_builtin(path: String) -> BuiltinResult<Value> {
     summary = "Create a typed FEA study from geometry, model data, and run settings.",
     keywords = "fea,study,geometry,run",
     descriptor(crate::builtins::fea::FEA_STUDY_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -945,6 +1149,7 @@ pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Create a FEA study sweep from study objects.",
     keywords = "fea,sweep,study,run",
     descriptor(crate::builtins::fea::FEA_SWEEP_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_sweep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1021,7 +1226,8 @@ pub async fn fea_load_case_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     category = "fea",
     summary = "Create a typed FEA analysis step.",
     keywords = "fea,step,static,modal,transient",
-    descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
+    descriptor(crate::builtins::fea::FEA_STEP_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_step_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1059,7 +1265,8 @@ pub async fn fea_interface_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     category = "fea",
     summary = "Create typed FEA run options for a solver.",
     keywords = "fea,run,options,solver,quality",
-    descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
+    descriptor(crate::builtins::fea::FEA_RUN_OPTIONS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_RUN_OPTIONS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_run_options_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1072,6 +1279,7 @@ pub async fn fea_run_options_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Validate a FEA study or sweep without planning or solving.",
     keywords = "fea,validate,study,sweep",
     descriptor(crate::builtins::fea::FEA_VALIDATE_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
@@ -1114,20 +1322,8 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
             analysis_plan_study_op(&spec, OperationContext::new(None, None)),
             None,
         ),
-        FeaResolvedDocument::Sweep(spec) => operation_result_to_object_preserving_integers(
-            PLAN_NAME,
-            &ERROR_OPERATION,
-            &ERROR_INTERNAL,
-            FEA_PLAN_CLASS,
+        FeaResolvedDocument::Sweep(spec) => sweep_plan_result_to_object(
             analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None)),
-            None,
-            &[],
-            &[
-                "study_count",
-                "planned_count",
-                "failed_count",
-                "study_index",
-            ],
         ),
     }
 }
@@ -1138,18 +1334,14 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
     summary = "Run a FEA study or sweep.",
     keywords = "fea,run,study,sweep,solve",
     descriptor(crate::builtins::fea::FEA_RUN_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
     match resolve_document_input(input, RUN_NAME).await? {
         FeaResolvedDocument::Study(spec) => run_study_result_to_object(&spec),
-        FeaResolvedDocument::Sweep(spec) => operation_result_to_object(
-            RUN_NAME,
-            &ERROR_OPERATION,
-            &ERROR_INTERNAL,
-            FEA_RUN_RESULT_CLASS,
+        FeaResolvedDocument::Sweep(spec) => sweep_run_result_to_object(
             analysis_run_study_sweep_op(&spec, OperationContext::new(None, None)),
-            Some(FEA_PAYLOAD_JSON_PROPERTY),
         ),
     }
 }
@@ -1160,6 +1352,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
     summary = "Load or project FEA run results for post-processing.",
     keywords = "fea,results,run_id,fields,diagnostics",
     descriptor(crate::builtins::fea::FEA_RESULTS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_RESULTS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1211,6 +1404,7 @@ pub async fn fea_compare_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Summarize recent persisted FEA run trends.",
     keywords = "fea,trends,history,quality",
     descriptor(crate::builtins::fea::FEA_TRENDS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_TRENDS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_trends_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1377,8 +1571,24 @@ impl StudyConstructorOptions {
             ));
         }
         let mut options = Self::default();
+        let mut seen = HashSet::new();
         for pair in args.chunks(2) {
             let key = option_key(&pair[0], STUDY_NAME)?;
+            let canonical = match key.as_str() {
+                "runkind" | "kind" => "runkind",
+                "materialassignments" | "assignments" => "materialassignments",
+                "boundaryconditions" | "bcs" => "boundaryconditions",
+                "loads" | "loadcases" => "loads",
+                "runoptions" | "options" => "runoptions",
+                other => other,
+            };
+            if !seen.insert(canonical.to_string()) {
+                return Err(builtin_error(
+                    STUDY_NAME,
+                    &ERROR_INPUT,
+                    format!("duplicate fea.study option `{canonical}`"),
+                ));
+            }
             match key.as_str() {
                 "runkind" | "kind" => {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
@@ -1493,9 +1703,20 @@ fn create_sweep_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let sweep_id = scalar_string(&args[0], SWEEP_NAME, &ERROR_INPUT)?;
     let studies = study_vec_from_value(SWEEP_NAME, &args[1])?;
     let mut fail_fast = true;
+    let mut fail_fast_seen = false;
     for pair in expect_name_value_tail(SWEEP_NAME, &args[2..])? {
         match pair.key.as_str() {
-            "failfast" => fail_fast = bool_from_value(SWEEP_NAME, pair.value)?,
+            "failfast" => {
+                if fail_fast_seen {
+                    return Err(builtin_error(
+                        SWEEP_NAME,
+                        &ERROR_INPUT,
+                        "duplicate fea.sweep option `failfast`",
+                    ));
+                }
+                fail_fast_seen = true;
+                fail_fast = logical_from_value(SWEEP_NAME, pair.value)?;
+            }
             other => {
                 return Err(builtin_error(
                     SWEEP_NAME,
@@ -2017,11 +2238,11 @@ fn create_load_case_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn create_step_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() < 2 {
+    if args.len() != 2 {
         return Err(builtin_error(
             STEP_NAME,
             &ERROR_INPUT,
-            "fea.step requires id and kind arguments",
+            "fea.step requires exactly id and kind arguments",
         ));
     }
     let step_id = scalar_string(&args[0], STEP_NAME, &ERROR_INPUT)?;
@@ -2244,12 +2465,53 @@ fn create_run_options_object_from_args(args: Vec<Value>) -> BuiltinResult<Value>
     }
     let kind_text = scalar_string(&args[0], RUN_OPTIONS_NAME, &ERROR_INPUT)?;
     let run_kind = parse_scalar_enum::<AnalysisRunKind>(&kind_text, "solver")?;
-    let fields = json_fields_from_name_values(RUN_OPTIONS_NAME, &args[1..])?;
+    let fields = run_options_fields_from_name_values(&args[1..])?;
     let data = run_options_json_for_kind(RUN_OPTIONS_NAME, run_kind, fields)?;
     run_options_to_object(RunOptionsPayload {
         run_kind,
         options: data,
     })
+}
+
+fn run_options_fields_from_name_values(
+    args: &[Value],
+) -> BuiltinResult<serde_json::Map<String, serde_json::Value>> {
+    const EXACT_FIELDS: &[&str] = &[
+        "mode_count",
+        "step_count",
+        "max_linear_iters",
+        "max_step_retries",
+        "increment_count",
+        "max_newton_iters",
+        "max_line_search_backtracks",
+        "tangent_refresh_interval",
+        "harmonic_max_iterations",
+    ];
+    let mut fields = serde_json::Map::new();
+    for pair in expect_name_value_tail(RUN_OPTIONS_NAME, args)? {
+        let raw = scalar_string(pair.name, RUN_OPTIONS_NAME, &ERROR_INPUT)?;
+        let key = canonical_field_name(&raw);
+        if key == "prep_context" {
+            return Err(builtin_error(
+                RUN_OPTIONS_NAME,
+                &ERROR_INPUT,
+                "fea.runOptions does not expose the internal PrepContext; use PrepArtifactId or PrepCalibrationProfile",
+            ));
+        }
+        let value = if EXACT_FIELDS.contains(&key.as_str()) {
+            serde_json::Value::from(usize_from_value(RUN_OPTIONS_NAME, pair.value)? as u64)
+        } else {
+            value_to_json(RUN_OPTIONS_NAME, pair.value)?
+        };
+        if fields.insert(key.clone(), value).is_some() {
+            return Err(builtin_error(
+                RUN_OPTIONS_NAME,
+                &ERROR_INPUT,
+                format!("duplicate fea.runOptions option `{key}`"),
+            ));
+        }
+    }
+    Ok(fields)
 }
 
 fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -2269,13 +2531,60 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let query = results_query_from_args(&args[1..])?;
     let envelope = analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None))
         .map_err(|err| operation_error(RESULTS_NAME, &ERROR_OPERATION, err))?;
-    let mut object = serializable_to_object_value(
+    let mut public_data = envelope.data;
+    for index in &mut public_data.summary.available_mode_indices {
+        *index = index.checked_add(1).ok_or_else(|| {
+            builtin_error(
+                RESULTS_NAME,
+                &ERROR_INTERNAL,
+                "available mode index cannot be represented at the one-based public boundary",
+            )
+        })?;
+    }
+    let value = serializable_to_object_preserving_integers(
         RESULTS_NAME,
         &ERROR_INTERNAL,
         FEA_RESULTS_CLASS,
-        &envelope.data,
+        &public_data,
         Some(FEA_PAYLOAD_JSON_PROPERTY),
+        &[],
+        &[
+            "shape",
+            "element_count",
+            "component_count",
+            "size_bytes",
+            "solver_host_sync_count",
+            "field_count",
+            "total_elements",
+            "mode_count",
+            "available_mode_indices",
+            "snapshot_count",
+            "increment_count",
+            "failed_increment_count",
+            "max_nonlinear_iteration_count",
+            "nonlinear_line_search_backtracks",
+            "nonlinear_max_backtracks_per_increment",
+            "nonlinear_tangent_rebuild_count",
+            "nonlinear_iteration_spike_count",
+            "nonlinear_convergence_stall_count",
+            "nonlinear_backtrack_burst_count",
+            "prep_calibration_fingerprint",
+            "prep_acceptance_fingerprint",
+            "thermo_coupling_fingerprint",
+            "electro_thermal_coupling_fingerprint",
+            "iteration_counts",
+            "failed_increments",
+            "line_search_backtracks",
+            "max_line_search_backtracks_per_increment",
+            "tangent_rebuild_count",
+            "iteration_spike_count",
+            "convergence_stall_count",
+            "backtrack_burst_count",
+        ],
     )?;
+    let Value::Object(mut object) = value else {
+        unreachable!("integer-preserving FEA result serialization returns an object")
+    };
     object
         .properties
         .insert("run_id".to_string(), Value::String(run_id.clone()));
@@ -2396,9 +2705,27 @@ fn create_compare_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
 
 fn create_trends_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let mut window_size = AnalysisTrendsQuery::default().window_size;
+    let mut window_size_seen = false;
     for pair in expect_name_value_tail(TRENDS_NAME, args.as_slice())? {
         match pair.key.as_str() {
-            "windowsize" => window_size = usize_from_value(TRENDS_NAME, pair.value)?,
+            "windowsize" => {
+                if window_size_seen {
+                    return Err(builtin_error(
+                        TRENDS_NAME,
+                        &ERROR_INPUT,
+                        "duplicate fea.trends option `windowsize`",
+                    ));
+                }
+                window_size_seen = true;
+                window_size = usize_from_value(TRENDS_NAME, pair.value)?;
+                if window_size == 0 {
+                    return Err(builtin_error(
+                        TRENDS_NAME,
+                        &ERROR_INPUT,
+                        "fea.trends WindowSize must be positive",
+                    ));
+                }
+            }
             other => {
                 return Err(builtin_error(
                     TRENDS_NAME,
@@ -3006,37 +3333,52 @@ fn run_options_json_for_kind(
 
 fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery> {
     let mut query = AnalysisResultsQuery::default();
+    let mut seen = HashSet::new();
     for pair in expect_name_value_tail(RESULTS_NAME, args)? {
+        let canonical = match pair.key.as_str() {
+            "includefields" | "fields" => "includefields",
+            "includefieldvalues" | "fieldvalues" => "includefieldvalues",
+            other => other,
+        };
+        if !seen.insert(canonical.to_string()) {
+            return Err(builtin_error(
+                RESULTS_NAME,
+                &ERROR_INPUT,
+                format!("duplicate fea.results option `{canonical}`"),
+            ));
+        }
         match pair.key.as_str() {
             "includefields" | "fields" => {
                 query.include_fields = string_vec_from_value(RESULTS_NAME, pair.value)?;
             }
             "includefieldvalues" | "fieldvalues" => {
-                query.include_field_values = bool_from_value(RESULTS_NAME, pair.value)?;
+                query.include_field_values = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
             "includediagnostics" => {
-                query.include_diagnostics = bool_from_value(RESULTS_NAME, pair.value)?;
+                query.include_diagnostics = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
             "diagnosticcodes" => {
                 query.diagnostic_codes = string_vec_from_value(RESULTS_NAME, pair.value)?;
             }
             "includemodalresults" => {
-                query.include_modal_results = bool_from_value(RESULTS_NAME, pair.value)?;
+                query.include_modal_results = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
             "modeindices" => {
-                query.mode_indices = usize_vec_from_value(RESULTS_NAME, pair.value)?;
+                query.mode_indices = one_based_usize_vec_from_value(RESULTS_NAME, pair.value)?;
             }
             "includetransientresults" => {
-                query.include_transient_results = bool_from_value(RESULTS_NAME, pair.value)?;
+                query.include_transient_results = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
             "transientsnapshotindices" => {
-                query.transient_snapshot_indices = usize_vec_from_value(RESULTS_NAME, pair.value)?;
+                query.transient_snapshot_indices =
+                    one_based_usize_vec_from_value(RESULTS_NAME, pair.value)?;
             }
             "includenonlinearresults" => {
-                query.include_nonlinear_results = bool_from_value(RESULTS_NAME, pair.value)?;
+                query.include_nonlinear_results = exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
             "includeelectromagneticresults" => {
-                query.include_electromagnetic_results = bool_from_value(RESULTS_NAME, pair.value)?;
+                query.include_electromagnetic_results =
+                    exact_bool_from_value(RESULTS_NAME, pair.value)?;
             }
             other => {
                 return Err(builtin_error(
@@ -3795,7 +4137,10 @@ fn typed_json_with_overrides<T: Serialize + DeserializeOwned>(
 ) -> BuiltinResult<serde_json::Value> {
     let base = serde_json::to_value(default)
         .map_err(|err| builtin_error(builtin, &ERROR_INTERNAL, err.to_string()))?;
-    json_with_overrides(builtin, base, fields, label)
+    let merged = json_with_overrides(builtin, base, fields, label)?;
+    let typed: T = json_deserialize(builtin, merged, label)?;
+    serde_json::to_value(typed)
+        .map_err(|err| builtin_error_with_source(builtin, &ERROR_INTERNAL, err.to_string(), err))
 }
 
 fn json_with_overrides(
@@ -3952,8 +4297,42 @@ fn reject_unknown_fields(
     ))
 }
 
-fn bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<bool> {
-    bool::try_from(value).map_err(|err| builtin_error(builtin, &ERROR_INPUT, err))
+fn logical_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<bool> {
+    match value {
+        Value::Bool(value) => Ok(*value),
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
+        other => Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("expected logical scalar; got {other:?}"),
+        )),
+    }
+}
+
+fn exact_bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<bool> {
+    if let Ok(value) = logical_from_value(builtin, value) {
+        return Ok(value);
+    }
+    if let Some(integer) = tensor_utils::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                "numeric logical option must be exactly zero or one",
+            )),
+        };
+    }
+    match ordinary_double_scalar(value) {
+        Some(0.0) => Ok(false),
+        Some(1.0) => Ok(true),
+        _ => Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "logical option must be a logical scalar or exact numeric zero or one",
+        )),
+    }
 }
 
 fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
@@ -3966,22 +4345,35 @@ fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize
             )
         });
     }
-    match value {
-        Value::Num(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => {
-            if *n > usize::MAX as f64 || (usize::BITS == 64 && *n == usize::MAX as f64) {
+    match ordinary_double_scalar(value) {
+        Some(n) if n.is_finite() && n >= 0.0 && n.fract() == 0.0 => {
+            if n > usize::MAX as f64 || (usize::BITS == 64 && n == usize::MAX as f64) {
                 return Err(builtin_error(
                     builtin,
                     &ERROR_INPUT,
                     "expected non-negative integer value outside the platform range",
                 ));
             }
-            Ok(*n as usize)
+            Ok(n as usize)
         }
-        other => Err(builtin_error(
+        _ => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected non-negative integer value; got {other:?}"),
+            format!("expected non-negative integer value; got {value:?}"),
         )),
+    }
+}
+
+fn ordinary_double_scalar(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(value) => Some(*value),
+        Value::Tensor(tensor)
+            if tensor.len() == 1
+                && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 =>
+        {
+            Some(tensor_utils::tensor_value_f64(tensor, 0))
+        }
+        _ => None,
     }
 }
 
@@ -4006,22 +4398,64 @@ fn string_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
 
 fn usize_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(tensor) => tensor_utils::tensor_values_f64(tensor)
-            .into_iter()
-            .map(|value| usize_from_value(builtin, &Value::Num(value)))
-            .collect(),
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .map(|item| usize_from_value(builtin, item))
-            .collect(),
+        Value::Tensor(tensor) => {
+            if tensor
+                .shape
+                .iter()
+                .filter(|&&dimension| dimension > 1)
+                .count()
+                > 1
+            {
+                return Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    "expected a numeric scalar or vector of indices, not a matrix",
+                ));
+            }
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| usize_from_value(builtin, &Value::Int(value)))
+                    .collect();
+            }
+            if tensor.numeric_dtype() != runmat_builtins::NumericDType::F64 {
+                return Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    "floating index selectors must use ordinary double storage",
+                ));
+            }
+            tensor_utils::tensor_values_f64(tensor)
+                .into_iter()
+                .map(|value| usize_from_value(builtin, &Value::Num(value)))
+                .collect()
+        }
         Value::Int(_) | Value::Num(_) => Ok(vec![usize_from_value(builtin, value)?]),
         other => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected numeric vector or cell array of indices; got {other:?}"),
+            format!("expected numeric scalar or vector of indices; got {other:?}"),
         )),
     }
+}
+
+fn one_based_usize_vec_from_value(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<Vec<usize>> {
+    usize_vec_from_value(builtin, value)?
+        .into_iter()
+        .map(|value| {
+            value.checked_sub(1).ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    "result indices are one-based and must be positive",
+                )
+            })
+        })
+        .collect()
 }
 
 fn parse_model_defaults_mode(text: &str) -> BuiltinResult<ModelDefaultsMode> {
@@ -4061,7 +4495,7 @@ fn study_to_object(spec: AnalysisStudySpec) -> BuiltinResult<Value> {
 
 fn sweep_to_object(spec: AnalysisStudySweepSpec) -> BuiltinResult<Value> {
     let mut object = serializable_to_object(
-        LOAD_NAME,
+        SWEEP_NAME,
         &ERROR_INTERNAL,
         FEA_SWEEP_CLASS,
         &spec,
@@ -4115,6 +4549,88 @@ fn operation_result_to_object_preserving_integers<T: Serialize>(
         signed_fields,
         unsigned_fields,
     )
+}
+
+fn sweep_plan_result_to_object(
+    result: Result<OperationEnvelope<AnalysisStudySweepPlanData>, OperationErrorEnvelope>,
+) -> BuiltinResult<Value> {
+    let mut envelope = result
+        .map_err(|error| operation_error(PLAN_NAME, &ERROR_OPERATION, public_sweep_error(error)))?;
+    one_base_failure_entries(PLAN_NAME, &mut envelope.data.failure_entries)?;
+    serializable_to_object_preserving_integers(
+        PLAN_NAME,
+        &ERROR_INTERNAL,
+        FEA_PLAN_CLASS,
+        &envelope.data,
+        None,
+        &[],
+        &[
+            "study_count",
+            "planned_count",
+            "failed_count",
+            "study_index",
+        ],
+    )
+}
+
+fn sweep_run_result_to_object(
+    result: Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope>,
+) -> BuiltinResult<Value> {
+    let mut envelope = result
+        .map_err(|error| operation_error(RUN_NAME, &ERROR_OPERATION, public_sweep_error(error)))?;
+    one_base_failure_entries(RUN_NAME, &mut envelope.data.failure_entries)?;
+    serializable_to_object_preserving_integers(
+        RUN_NAME,
+        &ERROR_INTERNAL,
+        FEA_RUN_RESULT_CLASS,
+        &envelope.data,
+        Some(FEA_PAYLOAD_JSON_PROPERTY),
+        &[],
+        &[
+            "study_count",
+            "success_count",
+            "failed_count",
+            "study_index",
+        ],
+    )
+}
+
+fn one_base_failure_entries(
+    builtin: &'static str,
+    entries: &mut [AnalysisStudySweepFailureEntry],
+) -> BuiltinResult<()> {
+    for entry in entries {
+        entry.study_index = entry.study_index.checked_add(1).ok_or_else(|| {
+            builtin_error(
+                builtin,
+                &ERROR_INTERNAL,
+                "study index cannot be represented at the one-based public boundary",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn public_sweep_error(mut error: OperationErrorEnvelope) -> OperationErrorEnvelope {
+    let Some(index) = error
+        .context
+        .get("study_index")
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return error;
+    };
+    let Some(public_index) = index.checked_add(1) else {
+        return error;
+    };
+    error
+        .context
+        .insert("study_index".to_string(), public_index.to_string());
+    error.message = error.message.replacen(
+        &format!("at index {index} "),
+        &format!("at index {public_index} "),
+        1,
+    );
+    error
 }
 
 fn serializable_to_object<T: Serialize>(
@@ -4307,8 +4823,7 @@ fn serializable_to_value_preserving_integers<T: Serialize>(
 ) -> BuiltinResult<Value> {
     let json = serde_json::to_value(value)
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
-    let mut converted = value_from_json(&json)
-        .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
+    let mut converted = value_from_json_preserving_integer_kinds(builtin, error, &json)?;
     promote_named_integer_fields(
         builtin,
         error,
@@ -4318,6 +4833,125 @@ fn serializable_to_value_preserving_integers<T: Serialize>(
         unsigned_fields,
     )?;
     Ok(converted)
+}
+
+fn value_from_json_preserving_integer_kinds(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    json: &serde_json::Value,
+) -> BuiltinResult<Value> {
+    let mut converted = value_from_json(json)
+        .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
+    promote_json_integer_kinds(builtin, error, &mut converted, json)?;
+    Ok(converted)
+}
+
+fn promote_json_integer_kinds(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    value: &mut Value,
+    json: &serde_json::Value,
+) -> BuiltinResult<()> {
+    match (value, json) {
+        (target, serde_json::Value::Number(number)) if number.is_u64() => {
+            *target = Value::Int(IntValue::U64(
+                number.as_u64().expect("checked unsigned number"),
+            ));
+        }
+        (target, serde_json::Value::Number(number)) if number.is_i64() => {
+            *target = Value::Int(IntValue::I64(
+                number.as_i64().expect("checked signed number"),
+            ));
+        }
+        (Value::Tensor(tensor), serde_json::Value::Array(_)) => {
+            if let Some(storage) = exact_json_integer_array(json, &tensor.shape) {
+                *tensor = Tensor::new_integer(storage, tensor.shape.clone())
+                    .map_err(|message| builtin_error(builtin, error, message))?;
+            }
+        }
+        (Value::Struct(structure), serde_json::Value::Object(map)) => {
+            for (name, child) in map {
+                if let Some(target) = structure.fields.get_mut(name) {
+                    promote_json_integer_kinds(builtin, error, target, child)?;
+                }
+            }
+        }
+        (Value::Object(object), serde_json::Value::Object(map)) => {
+            for (name, child) in map {
+                if let Some(target) = object.properties.get_mut(name) {
+                    promote_json_integer_kinds(builtin, error, target, child)?;
+                }
+            }
+        }
+        (Value::Cell(cell), serde_json::Value::Array(items)) => {
+            for (target, child) in cell.data.iter_mut().zip(items) {
+                promote_json_integer_kinds(builtin, error, target, child)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn exact_json_integer_array(json: &serde_json::Value, shape: &[usize]) -> Option<IntegerStorage> {
+    fn collect<'a>(
+        json: &'a serde_json::Value,
+        numbers: &mut Vec<&'a serde_json::Number>,
+    ) -> Option<()> {
+        match json {
+            serde_json::Value::Number(number) if number.is_i64() || number.is_u64() => {
+                numbers.push(number);
+                Some(())
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    collect(item, numbers)?;
+                }
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    let mut numbers = Vec::new();
+    collect(json, &mut numbers)?;
+    if numbers.is_empty() || numbers.len() != shape.iter().product::<usize>() {
+        return None;
+    }
+    let row_major_index = |column_major_index: usize| {
+        let mut row_major_index = 0;
+        let mut column_stride = 1;
+        for (dimension_index, &dimension) in shape.iter().enumerate() {
+            let coordinate = (column_major_index / column_stride) % dimension;
+            let row_stride = shape[dimension_index + 1..].iter().product::<usize>();
+            row_major_index += coordinate * row_stride;
+            column_stride *= dimension;
+        }
+        row_major_index
+    };
+    if numbers.iter().all(|number| number.is_u64()) {
+        return Some(IntegerStorage::U64(
+            (0..numbers.len())
+                .map(|index| {
+                    numbers[row_major_index(index)]
+                        .as_u64()
+                        .expect("checked unsigned number")
+                })
+                .collect(),
+        ));
+    }
+    if numbers.iter().all(|number| number.is_i64()) {
+        return Some(IntegerStorage::I64(
+            (0..numbers.len())
+                .map(|index| {
+                    numbers[row_major_index(index)]
+                        .as_i64()
+                        .expect("checked signed number")
+                })
+                .collect(),
+        ));
+    }
+    None
 }
 
 fn serializable_to_object_value<T: Serialize>(
@@ -4330,8 +4964,7 @@ fn serializable_to_object_value<T: Serialize>(
     ensure_fea_classes_registered();
     let json = serde_json::to_value(value)
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
-    let converted = value_from_json(&json)
-        .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
+    let converted = value_from_json_preserving_integer_kinds(builtin, error, &json)?;
     let mut object = ObjectInstance::new(class_name.to_string());
     if let Value::Struct(fields) = converted {
         object.properties = fields.fields.into_iter().collect();
@@ -4761,6 +5394,272 @@ mod tests {
         } else {
             assert!(maximum.is_err());
         }
+    }
+
+    #[test]
+    fn fea_public_object_mirror_preserves_recursive_integer_kinds() {
+        #[derive(Serialize)]
+        struct IntegerMirror {
+            signed: i64,
+            unsigned: u64,
+            matrix: Vec<Vec<u64>>,
+            floating: f64,
+            floating_vector: Vec<f64>,
+        }
+
+        let object = serializable_to_object_value(
+            RUN_OPTIONS_NAME,
+            &ERROR_INTERNAL,
+            FEA_RUN_OPTIONS_CLASS,
+            &IntegerMirror {
+                signed: -9,
+                unsigned: u64::MAX,
+                matrix: vec![vec![1, 2], vec![3, 4]],
+                floating: 1.0,
+                floating_vector: vec![2.0, 3.0],
+            },
+            None,
+        )
+        .expect("integer-preserving public mirror");
+        assert!(matches!(
+            object.properties.get("signed"),
+            Some(Value::Int(IntValue::I64(-9)))
+        ));
+        assert!(matches!(
+            object.properties.get("unsigned"),
+            Some(Value::Int(IntValue::U64(u64::MAX)))
+        ));
+        let Some(Value::Tensor(matrix)) = object.properties.get("matrix") else {
+            panic!("exact integer matrix");
+        };
+        assert_eq!(matrix.shape, vec![2, 2]);
+        assert_eq!(
+            matrix
+                .integer_storage()
+                .expect("integer storage")
+                .exact_values(),
+            vec![
+                IntValue::U64(1),
+                IntValue::U64(3),
+                IntValue::U64(2),
+                IntValue::U64(4),
+            ]
+        );
+        assert!(matches!(
+            object.properties.get("floating"),
+            Some(Value::Num(1.0))
+        ));
+        assert!(matches!(
+            object.properties.get("floating_vector"),
+            Some(Value::Tensor(values)) if values.integer_storage().is_none()
+        ));
+
+        #[derive(Serialize)]
+        struct EmptyIntegerMirror {
+            available_mode_indices: Vec<usize>,
+            iteration_counts: Vec<usize>,
+        }
+        let empty = serializable_to_object_preserving_integers(
+            RESULTS_NAME,
+            &ERROR_INTERNAL,
+            FEA_RESULTS_CLASS,
+            &EmptyIntegerMirror {
+                available_mode_indices: Vec::new(),
+                iteration_counts: Vec::new(),
+            },
+            None,
+            &[],
+            &["available_mode_indices", "iteration_counts"],
+        )
+        .expect("schema-aware empty integer vectors");
+        let Value::Object(empty) = empty else {
+            panic!("results object");
+        };
+        for name in ["available_mode_indices", "iteration_counts"] {
+            let Some(Value::Tensor(values)) = empty.properties.get(name) else {
+                panic!("empty exact vector {name}");
+            };
+            assert!(values.integer_storage().is_some());
+            assert!(values.is_empty());
+        }
+    }
+
+    #[test]
+    fn fea_execution_controls_enforce_exact_structural_boundaries() {
+        let options = block_on(fea_run_options_builtin(vec![
+            Value::String("modal".into()),
+            Value::String("ModeCount".into()),
+            Value::Num(3.0),
+            Value::String("ResidualWarnThreshold".into()),
+            Value::Int(IntValue::U64(1)),
+        ]))
+        .expect("ordinary integral double count and typed floating control");
+        let Value::Object(options) = options else {
+            panic!("run options object");
+        };
+        let Some(Value::Struct(payload)) = options.properties.get("options") else {
+            panic!("run options payload");
+        };
+        assert!(matches!(
+            payload.fields.get("mode_count"),
+            Some(Value::Int(IntValue::U64(3)))
+        ));
+        assert!(matches!(
+            payload.fields.get("residual_warn_threshold"),
+            Some(Value::Num(1.0))
+        ));
+
+        for (solver, exact_field, floating_field) in [
+            ("modal", "ModeCount", "ResidualWarnThreshold"),
+            ("acoustic", "ModeCount", "ResidualWarnThreshold"),
+            ("thermal", "StepCount", "TimeStepS"),
+            ("transient", "MaxStepRetries", "Tolerance"),
+            ("cfd", "MaxLinearIters", "ResidualWarnThreshold"),
+            ("cht", "StepCount", "ResidualWarnThreshold"),
+            ("fsi", "MaxLinearIters", "Tolerance"),
+            ("nonlinear", "TangentRefreshInterval", "Tolerance"),
+            (
+                "electromagnetic",
+                "HarmonicMaxIterations",
+                "HarmonicTolerance",
+            ),
+        ] {
+            let value = block_on(fea_run_options_builtin(vec![
+                Value::String(solver.into()),
+                Value::String(exact_field.into()),
+                Value::Int(IntValue::U32(3)),
+                Value::String(floating_field.into()),
+                Value::Int(IntValue::I16(1)),
+            ]))
+            .unwrap_or_else(|error| panic!("{solver} typed run options: {error}"));
+            let Value::Object(object) = value else {
+                panic!("{solver} run options object");
+            };
+            let Some(Value::Struct(payload)) = object.properties.get("options") else {
+                panic!("{solver} run options payload");
+            };
+            let exact_field = canonical_field_name(exact_field);
+            let floating_field = canonical_field_name(floating_field);
+            assert!(matches!(
+                payload.fields.get(&exact_field),
+                Some(Value::Int(IntValue::U64(3)))
+            ));
+            assert!(matches!(
+                payload.fields.get(&floating_field),
+                Some(Value::Num(1.0))
+            ));
+        }
+
+        let prep_context = block_on(fea_run_options_builtin(vec![
+            Value::String("modal".into()),
+            Value::String("PrepContext".into()),
+            Value::String("internal".into()),
+        ]))
+        .expect_err("internal prep context must not be public");
+        assert_eq!(prep_context.identifier(), Some("RunMat:fea:InvalidInput"));
+
+        let extra_step = block_on(fea_step_builtin(vec![
+            Value::String("step".into()),
+            Value::String("modal".into()),
+            Value::Num(1.0),
+        ]))
+        .expect_err("step has exact arity");
+        assert_eq!(extra_step.identifier(), Some("RunMat:fea:InvalidInput"));
+
+        let zero_window = block_on(fea_trends_builtin(vec![
+            Value::String("WindowSize".into()),
+            Value::Int(IntValue::U8(0)),
+        ]))
+        .expect_err("trend window must be positive");
+        assert_eq!(zero_window.identifier(), Some("RunMat:fea:InvalidInput"));
+
+        let scalar_double = Tensor::new(vec![4.0], vec![1, 1]).expect("double scalar tensor");
+        assert_eq!(
+            usize_from_value(RUN_OPTIONS_NAME, &Value::Tensor(scalar_double.clone())).unwrap(),
+            4
+        );
+        assert!(exact_bool_from_value(
+            RESULTS_NAME,
+            &Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("double flag"))
+        )
+        .unwrap());
+
+        let scalar_single =
+            Tensor::new_with_dtype(vec![4.0], vec![1, 1], runmat_builtins::NumericDType::F32)
+                .expect("single scalar tensor");
+        assert!(usize_from_value(RUN_OPTIONS_NAME, &Value::Tensor(scalar_single)).is_err());
+    }
+
+    #[test]
+    fn fea_result_selectors_are_exact_one_based_vectors_and_flags_are_zero_one() {
+        let wide = 9_007_199_254_740_993_u64;
+        let selectors = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
+            .expect("wide selector vector");
+        let decoded = one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(selectors));
+        if usize::BITS == 64 {
+            assert_eq!(decoded.unwrap(), vec![(wide - 1) as usize]);
+        } else {
+            assert_eq!(
+                decoded.unwrap_err().identifier(),
+                Some("RunMat:fea:InvalidInput")
+            );
+        }
+
+        let selectors = Tensor::new_integer(IntegerStorage::U32(vec![3, 1, 3]), vec![3, 1])
+            .expect("selector vector");
+        assert_eq!(
+            one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(selectors)).unwrap(),
+            vec![2, 0, 2]
+        );
+        let matrix = Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 3, 4]), vec![2, 2])
+            .expect("selector matrix");
+        assert!(one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(matrix)).is_err());
+        assert!(!exact_bool_from_value(RESULTS_NAME, &Value::Int(IntValue::I8(0))).unwrap());
+        assert!(exact_bool_from_value(RESULTS_NAME, &Value::Int(IntValue::U64(1))).unwrap());
+        assert!(exact_bool_from_value(RESULTS_NAME, &Value::Int(IntValue::I16(2))).is_err());
+
+        let single_selectors = Tensor::new_with_dtype(
+            vec![1.0, 2.0],
+            vec![1, 2],
+            runmat_builtins::NumericDType::F32,
+        )
+        .expect("single selectors");
+        assert!(
+            one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(single_selectors)).is_err()
+        );
+    }
+
+    #[test]
+    fn fea_sweep_failures_cross_to_one_based_public_indices() {
+        let mut entries = vec![AnalysisStudySweepFailureEntry {
+            study_id: "bad-study".into(),
+            study_index: 0,
+            error_code: "RM.TEST".into(),
+            message: "failed".into(),
+        }];
+        one_base_failure_entries(RUN_NAME, &mut entries).expect("public index translation");
+        assert_eq!(entries[0].study_index, 1);
+
+        let mut context = std::collections::BTreeMap::new();
+        context.insert("study_index".into(), "0".into());
+        let error = public_sweep_error(OperationErrorEnvelope {
+            error_code: "RM.TEST".into(),
+            error_type: crate::operations::OperationErrorType::Validation,
+            message: "study sweep failed at index 0 for study_id bad-study".into(),
+            operation: "test".into(),
+            op_version: "1".into(),
+            retryable: false,
+            severity: crate::operations::OperationErrorSeverity::Error,
+            context,
+            trace_id: None,
+            request_id: None,
+            timestamp: "test".into(),
+        });
+        assert_eq!(
+            error.context.get("study_index").map(String::as_str),
+            Some("1")
+        );
+        assert!(error.message.contains("at index 1 "));
     }
 
     #[test]
@@ -5712,6 +6611,134 @@ run:
             Value::String(study_json),
         );
         (Value::Object(object), study)
+    }
+
+    fn persist_synthetic_indexed_results() -> String {
+        let indexed_fields = |prefix: &str| {
+            vec![
+                AnalysisField::host_f64(format!("{prefix}.0"), vec![1], vec![10.0]),
+                AnalysisField::host_f64(format!("{prefix}.1"), vec![1], vec![20.0]),
+            ]
+        };
+        let run_id = "synthetic_indexed_results".to_string();
+        let run = crate::analysis::AnalysisRunResult {
+            run_id: run_id.clone(),
+            run: runmat_analysis_fea::FeaRunResult {
+                backend: ComputeBackend::Cpu,
+                solver_backend: "synthetic".to_string(),
+                solver_device_apply_k_ratio: 0.0,
+                solver_method: "synthetic".to_string(),
+                preconditioner: "none".to_string(),
+                solver_host_sync_count: 0,
+                diagnostics: Vec::new(),
+                fields: Vec::new(),
+            },
+            render_topology: None,
+            modal_results: Some(crate::analysis::ModalResultsData {
+                modal_payload_version: "modal_results/v1".to_string(),
+                eigenvalues_hz: vec![10.0, 20.0],
+                mode_shapes: indexed_fields("mode_shape"),
+                residual_norms: vec![0.1, 0.2],
+                mode_units: crate::analysis::ModalFrequencyUnits::Hz,
+                frequency_basis: crate::analysis::ModalFrequencyBasis::NativeEigenSolve,
+            }),
+            thermal_results: None,
+            transient_results: Some(crate::analysis::TransientResultsData {
+                transient_payload_version: "transient_results/v1".to_string(),
+                time_points_s: vec![0.0, 1.0],
+                displacement_snapshots: indexed_fields("displacement"),
+                rotation_snapshots: Vec::new(),
+                velocity_snapshots: indexed_fields("velocity"),
+                angular_velocity_snapshots: Vec::new(),
+                acceleration_snapshots: indexed_fields("acceleration"),
+                angular_acceleration_snapshots: Vec::new(),
+                von_mises_snapshots: indexed_fields("von_mises"),
+                kinetic_energy_snapshots: indexed_fields("kinetic_energy"),
+                strain_energy_snapshots: indexed_fields("strain_energy"),
+                residual_norm_snapshots: indexed_fields("residual_norm"),
+                thermo_mechanical_temperature_snapshots: Vec::new(),
+                thermo_mechanical_thermal_strain_snapshots: Vec::new(),
+                thermo_mechanical_thermal_stress_snapshots: Vec::new(),
+                thermo_mechanical_displacement_snapshots: Vec::new(),
+                thermo_mechanical_von_mises_snapshots: Vec::new(),
+                thermo_mechanical_coupling_residual_snapshots: Vec::new(),
+                electro_thermal_temperature_snapshots: Vec::new(),
+                electro_thermal_thermal_residual_snapshots: Vec::new(),
+                residual_norms: vec![0.25],
+                integration_method: crate::analysis::TransientIntegrationMethod::ImplicitEuler,
+            }),
+            nonlinear_results: None,
+            electromagnetic_results: None,
+            model_validity: crate::analysis::QualityGate::Pass,
+            solver_convergence: crate::analysis::QualityGate::Pass,
+            result_quality: crate::analysis::QualityGate::Pass,
+            run_status: crate::analysis::RunStatus::Publishable,
+            publishable: true,
+            quality_reasons: Vec::new(),
+            provenance: crate::analysis::RunProvenance {
+                backend: ComputeBackend::Cpu,
+                solver_backend: "synthetic".to_string(),
+                solver_device_apply_k_ratio: 0.0,
+                solver_host_sync_count: 0,
+                precision_mode: "fp64".to_string(),
+                deterministic_mode: true,
+                solver_method: "synthetic".to_string(),
+                preconditioner: "none".to_string(),
+                quality_policy: "balanced".to_string(),
+                fallback_events: Vec::new(),
+            },
+        };
+        crate::analysis::storage::persist_run_result(&run).expect("indexed run should persist");
+        run_id
+    }
+
+    #[test]
+    fn fea_results_translates_successful_selectors_and_public_indices_once() {
+        let run_id = persist_synthetic_indexed_results();
+        let selected = block_on(fea_results_builtin(vec![
+            Value::String(run_id.clone()),
+            Value::String("ModeIndices".to_string()),
+            Value::Int(IntValue::U8(2)),
+            Value::String("TransientSnapshotIndices".to_string()),
+            Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).expect("double selector")),
+        ]))
+        .expect("one-based selectors should resolve the second stored entries");
+        let Value::Object(selected) = selected else {
+            panic!("results object");
+        };
+        let Some(Value::Struct(modal)) = selected.properties.get("modal_results") else {
+            panic!("modal results");
+        };
+        let Some(Value::Tensor(eigenvalues)) = modal.fields.get("eigenvalues_hz") else {
+            panic!("modal eigenvalues");
+        };
+        assert_eq!(eigenvalues.materialize_f64(), vec![20.0]);
+        let Some(Value::Struct(transient)) = selected.properties.get("transient_results") else {
+            panic!("transient results");
+        };
+        let Some(Value::Tensor(time_points)) = transient.fields.get("time_points_s") else {
+            panic!("transient time points");
+        };
+        assert_eq!(time_points.materialize_f64(), vec![1.0]);
+
+        let full = block_on(fea_results_builtin(vec![Value::String(run_id)]))
+            .expect("full indexed results");
+        let Value::Object(full) = full else {
+            panic!("results object");
+        };
+        let Some(Value::Struct(summary)) = full.properties.get("summary") else {
+            panic!("results summary");
+        };
+        let Some(Value::Tensor(indices)) = summary.fields.get("available_mode_indices") else {
+            panic!("available mode indices");
+        };
+        assert_eq!(
+            indices
+                .integer_storage()
+                .expect("exact public indices")
+                .exact_values(),
+            vec![IntValue::U64(1), IntValue::U64(2)]
+        );
     }
 
     fn assert_object_class(value: &Value, expected: &str) {

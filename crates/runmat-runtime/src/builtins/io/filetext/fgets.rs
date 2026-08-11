@@ -278,6 +278,10 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
         .ok_or_else(|| fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER))?;
     let read = read_text_line(file, max_bytes, BUILTIN_NAME)
         .map_err(|e| fgets_error_with_detail(&FGETS_ERROR_IO, e.message()))?;
+    drop(guard);
+    if read.encountered_eof {
+        registry::mark_eof_encountered(fid);
+    }
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }

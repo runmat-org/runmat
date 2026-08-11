@@ -4,11 +4,14 @@
 //! The implementation mirrors MATLAB semantics for host-side files and
 //! integrates with the shared registry used by the other text I/O builtins.
 
-use std::io::{ErrorKind, Seek, SeekFrom};
-
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -22,6 +25,50 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const IDENTIFIER_TYPE_ERROR_DETAIL: &str = "file identifier must be a numeric scalar";
 const BUILTIN_NAME: &str = "feof";
+
+const FEOF_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "feof-integer-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integer-class feof file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FeofIntegerIdExtension"),
+};
+const FEOF_LOGICAL_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "feof-logical-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "logical feof file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FeofLogicalIdExtension"),
+};
+const FEOF_RESIDENT_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "feof-resident-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident feof file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FeofResidentIdExtension"),
+};
+pub const FEOF_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    FEOF_INTEGER_ID_EXTENSION,
+    FEOF_LOGICAL_ID_EXTENSION,
+    FEOF_RESIDENT_ID_EXTENSION,
+];
+
+const FEOF_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB-compatible file IDs are integer-valued doubles; all eight typed integer classes are one gated RunMat extension and are checked exactly against i32 before registry access.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = feof(integer_fileID)",
+        inputs: &FEOF_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The identifier is validated exactly before the registry query; resident and logical identifiers have independent RunMat-only gates, and the result is a host logical scalar.",
+    }];
 
 const FEOF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -55,22 +102,15 @@ const FEOF_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescri
     when: "Identifier does not refer to an open file handle.",
     message: "feof: invalid file identifier. Use fopen to generate a valid file ID.",
 };
-const FEOF_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEOF.IO",
-    identifier: Some("RunMat:feof:IoFailure"),
-    when: "File-position or length query fails.",
-    message: "feof: file I/O query failed",
-};
 const FEOF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FEOF.INTERNAL",
     identifier: None,
     when: "Internal control-flow conversion failed.",
     message: "feof: internal error",
 };
-const FEOF_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const FEOF_ERRORS: [BuiltinErrorDescriptor; 3] = [
     FEOF_ERROR_INVALID_INPUT,
     FEOF_ERROR_INVALID_IDENTIFIER,
-    FEOF_ERROR_IO,
     FEOF_ERROR_INTERNAL,
 ];
 pub const FEOF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -118,32 +158,6 @@ fn feof_error_with_detail(
     feof_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
-fn feof_error_with_source(
-    message: impl Into<String>,
-    error: &'static BuiltinErrorDescriptor,
-    source: impl std::error::Error + Send + Sync + 'static,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_source(source);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn feof_error_with_source_detail(
-    error: &'static BuiltinErrorDescriptor,
-    detail: impl AsRef<str>,
-    source: impl std::error::Error + Send + Sync + 'static,
-) -> RuntimeError {
-    feof_error_with_source(
-        format!("{}: {}", error.message, detail.as_ref()),
-        error,
-        source,
-    )
-}
-
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
         .with_builtin(BUILTIN_NAME)
@@ -173,6 +187,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::feof_type),
     descriptor(crate::builtins::io::filetext::feof::FEOF_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::filetext::feof::INTEGER_CAPABILITIES),
+    extensions(crate::builtins::io::filetext::feof::FEOF_EXTENSIONS),
     builtin_path = "crate::builtins::io::filetext::feof"
 )]
 async fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {
@@ -182,9 +198,11 @@ async fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {
 
 /// Evaluate the `feof` builtin without invoking the runtime dispatcher.
 pub async fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
+    preflight_fid(fid_value)?;
     let fid_host = gather_if_needed_async(fid_value)
         .await
         .map_err(map_control_flow)?;
+    preflight_fid(&fid_host)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
         return Err(feof_error_with_detail(
@@ -196,50 +214,53 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
         return Ok(false);
     }
 
-    let handle =
-        registry::shared_handle(fid).ok_or_else(|| feof_error(&FEOF_ERROR_INVALID_IDENTIFIER))?;
-    let mut guard = handle.lock().map_err(|_| {
-        feof_error_with_detail(
-            &FEOF_ERROR_INTERNAL,
-            "failed to lock file handle (poisoned mutex)",
-        )
-    })?;
-    let file = guard
-        .as_mut()
-        .ok_or_else(|| feof_error(&FEOF_ERROR_INVALID_IDENTIFIER))?;
+    registry::eof_encountered(fid).ok_or_else(|| feof_error(&FEOF_ERROR_INVALID_IDENTIFIER))
+}
 
-    let position = file.stream_position().map_err(|err| {
-        feof_error_with_source_detail(
-            &FEOF_ERROR_IO,
-            format!("failed to query file position: {err}"),
-            err,
-        )
-    })?;
-
-    let end_position = match file.seek(SeekFrom::End(0)) {
-        Ok(pos) => pos,
-        Err(err) => {
-            if err.kind() == ErrorKind::Unsupported {
-                let _ = file.seek(SeekFrom::Start(position));
-                return Ok(false);
-            }
-            return Err(feof_error_with_source_detail(
-                &FEOF_ERROR_IO,
-                format!("failed to query file length: {err}"),
-                err,
-            ));
+fn preflight_fid(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Num(_) => Ok(()),
+        Value::Int(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FEOF_INTEGER_ID_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::Bool(_) | Value::LogicalArray(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FEOF_LOGICAL_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
         }
-    };
-
-    if let Err(err) = file.seek(SeekFrom::Start(position)) {
-        return Err(feof_error_with_source_detail(
-            &FEOF_ERROR_IO,
-            format!("failed to restore file position: {err}"),
-            err,
-        ));
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FEOF_INTEGER_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64 => Ok(()),
+        Value::Tensor(_) => Err(feof_error_with_detail(
+            &FEOF_ERROR_INVALID_INPUT,
+            "file identifier must be an integer-valued double scalar",
+        )),
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FEOF_RESIDENT_ID_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FEOF_INTEGER_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_is_logical(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FEOF_LOGICAL_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
-
-    Ok(position >= end_position)
 }
 
 fn parse_fid(value: &Value) -> BuiltinResult<i32> {
@@ -258,6 +279,12 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
                             "file identifier is out of range",
                         )
                     });
+                }
+                if t.numeric_dtype() != NumericDType::F64 {
+                    return Err(feof_error_with_detail(
+                        &FEOF_ERROR_INVALID_INPUT,
+                        "file identifier must be an integer-valued double scalar",
+                    ));
                 }
                 parse_scalar_fid(tensor::tensor_value_f64(t, 0))
             } else {
@@ -290,13 +317,13 @@ fn parse_scalar_fid(value: f64) -> BuiltinResult<i32> {
             "file identifier must be finite",
         ));
     }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
+    if value.fract() != 0.0 {
         return Err(feof_error_with_detail(
             &FEOF_ERROR_INVALID_INPUT,
             "file identifier must be an integer",
         ));
     }
+    let rounded = value;
     if rounded < i32::MIN as f64 || rounded > i32::MAX as f64 {
         return Err(feof_error_with_detail(
             &FEOF_ERROR_INVALID_INPUT,
@@ -310,7 +337,7 @@ fn parse_scalar_fid(value: f64) -> BuiltinResult<i32> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
+    use crate::builtins::io::filetext::{fclose, fgets, fopen, fread, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
@@ -366,6 +393,13 @@ pub(crate) mod tests {
         let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("typed fid tensor");
         assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
+
+        let single = Tensor::new_with_dtype(vec![7.0], vec![1, 1], NumericDType::F32)
+            .expect("single file identifier");
+        assert!(preflight_fid(&Value::Tensor(single.clone())).is_err());
+        assert!(parse_fid(&Value::Tensor(single)).is_err());
+
+        assert!(parse_scalar_fid(f64::from_bits(1.0_f64.to_bits() + 1)).is_err());
     }
 
     #[test]
@@ -413,7 +447,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn feof_returns_true_after_reading_to_end() {
+    fn feof_returns_true_after_a_read_encounters_end_of_file() {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_true_after_read");
@@ -429,7 +463,7 @@ pub(crate) mod tests {
         .expect("fopen");
         let fid = open.as_open().unwrap().fid as i32;
 
-        // Read the entire file to advance the file position to EOF.
+        // An unbounded read probes once beyond the available bytes.
         let _ = run_fread(&Value::Num(fid as f64), &Vec::new()).expect("fread");
 
         let at_end = run_evaluate(&Value::Num(fid as f64)).expect("feof");
@@ -441,7 +475,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn feof_empty_file_is_true() {
+    fn feof_newly_opened_empty_file_is_false_until_a_read_encounters_eof() {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_empty_file");
@@ -455,7 +489,10 @@ pub(crate) mod tests {
         let fid = open.as_open().unwrap().fid as i32;
 
         let at_end = run_evaluate(&Value::Num(fid as f64)).expect("feof");
-        assert!(at_end);
+        assert!(!at_end);
+
+        let _ = run_fread(&Value::Num(fid as f64), &Vec::new()).expect("fread");
+        assert!(run_evaluate(&Value::Num(fid as f64)).expect("feof"));
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
         test_support::fs::remove_file(path).unwrap();
@@ -610,8 +647,19 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let value = Value::GpuTensor(handle.clone());
 
-            let at_end = run_evaluate(&value).expect("feof");
-            assert!(!at_end);
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let err = run_evaluate(&value).expect_err("resident ID must be gated");
+                assert_eq!(
+                    err.identifier(),
+                    Some("RunMat:compatibility:FeofResidentIdExtension")
+                );
+            }
+            {
+                let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+                let at_end = run_evaluate(&value).expect("feof");
+                assert!(!at_end);
+            }
 
             provider.free(&handle).expect("free");
         });
@@ -627,6 +675,78 @@ pub(crate) mod tests {
         registry::reset_for_tests();
         let result = run_evaluate(&Value::Num(0.0)).expect("feof");
         assert!(!result);
+    }
+
+    #[test]
+    fn feof_exact_end_requires_a_subsequent_read_and_frewind_clears_state() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("feof_exact_end_then_rewind");
+        {
+            let mut file = File::create(&path).expect("create");
+            file.write_all(b"abc").expect("write");
+        }
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("rb"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid;
+
+        let _ = run_fread(&Value::Num(fid), &[Value::Num(3.0)]).expect("exact read");
+        assert!(!run_evaluate(&Value::Num(fid)).expect("feof at exact end"));
+        let _ = run_fread(&Value::Num(fid), &[Value::Num(1.0)]).expect("eof read");
+        assert!(run_evaluate(&Value::Num(fid)).expect("feof after eof read"));
+
+        futures::executor::block_on(crate::builtins::io::filetext::frewind::evaluate(
+            &Value::Num(fid),
+        ))
+        .expect("frewind");
+        assert!(!run_evaluate(&Value::Num(fid)).expect("feof after rewind"));
+
+        run_fclose(&[Value::Num(fid)]).unwrap();
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fgets_sets_eof_only_when_its_read_attempt_encounters_eof() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("feof_fgets_state");
+        {
+            let mut file = File::create(&path).expect("create");
+            file.write_all(b"line\n").expect("write");
+        }
+        let open = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("r"),
+        ])
+        .expect("fopen");
+        let fid = open.as_open().unwrap().fid;
+
+        futures::executor::block_on(fgets::evaluate(&Value::Num(fid), &[]))
+            .expect("newline-terminated line");
+        assert!(!run_evaluate(&Value::Num(fid)).expect("exact line end"));
+        futures::executor::block_on(fgets::evaluate(&Value::Num(fid), &[])).expect("read at eof");
+        assert!(run_evaluate(&Value::Num(fid)).expect("encountered eof"));
+
+        run_fclose(&[Value::Num(fid)]).unwrap();
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn feof_typed_and_logical_identifiers_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = run_evaluate(&Value::Int(IntValue::I32(3))).unwrap_err();
+        assert_eq!(
+            integer.identifier(),
+            Some("RunMat:compatibility:FeofIntegerIdExtension")
+        );
+        let logical = run_evaluate(&Value::Bool(true)).unwrap_err();
+        assert_eq!(
+            logical.identifier(),
+            Some("RunMat:compatibility:FeofLogicalIdExtension")
+        );
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

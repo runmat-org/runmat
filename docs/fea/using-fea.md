@@ -202,6 +202,10 @@ print("bracket_von_mises.png", "-dpng");
 
 The same host-only physical-value boundary applies to the documented numeric fields of `fea.material`, `fea.loadCase`, `fea.domain`, and `fea.interface`: field names, scalar/vector shape, finiteness, and kind-specific requirements are validated before one binary64 model-storage conversion, and sufficiently wide integers can round. Nested domain revision values, geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers instead; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
 
+`fea.runOptions` distinguishes structural controls from physical solver settings. Mode, step, iteration, retry, backtrack, and tangent-refresh counts accept all eight integer classes and ordinary integral doubles exactly; tolerances, time steps, scales, ratios, frequencies, and residual thresholds cross one checked binary64 boundary. Logical settings require logical scalars. Public `PrepContext` injection is rejected because it is internal runtime state, while `PrepArtifactId` and `PrepCalibrationProfile` remain optional text settings. The complete per-family option/default table is in the [operation reference](./operation-reference).
+
+`fea.results` uses positive one-based exact vectors for `ModeIndices` and `TransientSnapshotIndices`, matching normal RunMat indexing. Its inclusion flags accept logical scalars or exact numeric zero and one. Selector shape, positivity, integrality, and range are validated before artifact lookup; resident selectors reject without provider access. Structural result metadata such as shapes, counts, indexes, byte sizes, iteration counts, and fingerprints remains exact, while field values and physical/timing/residual quantities remain double. `fea.trends("WindowSize", n)` applies the same exact structural rule to a positive scalar and defaults to 16.
+
 `fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, `fea.plot`, and `fea.compare` have no integer-array input role. Their inputs are exact text identifiers, typed FEA or geometry objects, or document paths, while any integer-valued metadata they return follows the structural-output rule. `fea.compare` accepts exactly the baseline and candidate run identifiers and has no Name, Value options.
 
 Use `.fea` when the study definition should be checked in as a portable declarative artifact:
@@ -218,6 +222,8 @@ peakStressPa = max(stress.values);
 `fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. `fea.RunResult` objects expose `results()`, `field(fieldId)`, and `plot(fieldId)` methods. `fea.Field` objects expose script-friendly `values`, `shape`, `unit`, `location`, `kind`, `family`, and `quantity` properties.
 
 The typed constructors and post-processing helpers do not intrinsically require native OCCT. They can consume an existing `geometry.Asset`, STL-backed or synthetic geometry, and persisted mesh/result artifacts without OCCT; only an earlier import of topology-bearing CAD such as STEP, IGES, or BREP may require the configured OCCT geometry backend.
+
+Argument decoding for `fea.run`, and artifact filtering for `fea.results` and `fea.trends`, is host-side. The solver invoked by `fea.run` is different: it may execute through the CPU or configured GPU backend selected by the study. Result queries return stored device references as metadata and do not gather or execute them.
 
 For manual visualization, `geometry.meshes(asset)` returns patch-ready surface topology:
 

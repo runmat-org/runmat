@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`feedback` combines host-side transfer-function metadata. GPU-resident coefficient inputs are gathered when the source `tf` object is constructed."
+    "notes": "`feedback` combines host-side transfer-function metadata and always returns a host `tf` object. Resident numeric gains or signs are a separately gated RunMat extension and gather before model assembly."
   },
   "fusion": {
     "elementwise": false,
@@ -28,13 +28,15 @@
     "unit": "builtins::control::feedback::tests",
     "integration": "crates/runmat-vm/tests/control.rs"
   },
-  "description": "`feedback(sys1, sys2)` returns the closed-loop SISO transfer function for negative feedback. `sys2` may be another compatible `tf` object or a scalar gain.",
+  "description": "`feedback(sys1, sys2)` returns the closed-loop SISO transfer function for negative feedback. The current public MATLAB R2026a documentation covers dynamic-system inputs, an optional sign, feed-index forms, and signal-name forms. RunMat currently implements the SISO `tf` subset with an ordinary double scalar feedback gain; broader scalar, native-single, typed-integer, logical, and resident forms are explicit RunMat extensions.",
   "behaviors": [
     "Supports real or complex SISO `tf` objects represented by numerator and denominator coefficient vectors.",
-    "`feedback(sys1)` uses unity negative feedback.",
+    "`feedback(sys1)` uses unity negative feedback as a gated RunMat-only convenience form.",
     "`feedback(sys1, sys2)` computes `sys1/(1 + sys1*sys2)`.",
     "`feedback(sys1, sys2, +1)` computes positive feedback as `sys1/(1 - sys1*sys2)`.",
-    "Scalar gains are promoted to constant transfer functions using the other operand's variable and sample time.",
+    "An ordinary double scalar `sys2` is promoted to a constant transfer function using `sys1`'s variable and sample time; scalar `sys1` and scalar/scalar systems are independently gated RunMat extensions.",
+    "Typed-integer gains and typed-integer signs accept all eight integer classes only in RunMat extension mode. Gains cross once into the floating/complex coefficient domain, so wide `int64` and `uint64` values can round; signs retain the exact valid set -1 or +1.",
+    "Native-single, logical, and resident numeric inputs have separate RunMat-only gates. Resident inputs gather for host assembly, and the result remains a host `tf` object.",
     "Input systems must have compatible sample times.",
     "Nonzero input or output delays are rejected with a clear unsupported-model diagnostic."
   ],
@@ -58,6 +60,14 @@
     {
       "question": "Does it support state-space models?",
       "answer": "Not yet. The current model-family support is SISO `tf`."
+    },
+    {
+      "question": "Which documented feedback forms are still missing?",
+      "answer": "The current public MATLAB documentation includes `feedin`/`feedout` topology selection and signal-name selection. Those forms require general MIMO and named-I/O infrastructure that RunMat does not yet provide."
+    },
+    {
+      "question": "Are typed integer gains MATLAB-compatible?",
+      "answer": "Current public documentation does not establish typed-integer gains or signs. RunMat supports all eight classes as explicit extensions: gains enter floating coefficient arithmetic, while the sign must still be exactly -1 or +1."
     }
   ],
   "links": [
@@ -72,6 +82,10 @@
     {
       "label": "isstable",
       "url": "./isstable"
+    },
+    {
+      "label": "MATLAB feedback documentation (R2026a)",
+      "url": "https://www.mathworks.com/help/control/ref/inputoutputmodel.feedback.html"
     }
   ],
   "source": {
@@ -86,16 +100,17 @@
     },
     "points": [
       "`sign` must be `-1` for negative feedback or `+1` for positive feedback.",
-      "`sys1` and `sys2` must be compatible SISO `tf` models or scalar gains.",
+      "The compatibility path accepts compatible SISO `tf` models and an ordinary double scalar feedback-path gain; scalar-forward and scalar/scalar paths require RunMat extension mode.",
+      "Native-single, typed integer, logical, and resident numeric inputs require their corresponding RunMat extension gates.",
       "Sample times must match when both operands are transfer functions."
     ]
   },
   "validation": {
-    "summary": "`feedback` validates argument count, feedback sign, sample-time compatibility, zero-delay support, and transfer-function model shape. Tests cover unity negative feedback, positive feedback, scalar gains, and VM workflows using `tf('s')`.",
+    "summary": "`feedback` validates argument count, extension admission before resident gather or model dispatch, feedback sign, sample-time compatibility, zero-delay support, and transfer-function model shape. Source-local tests cover negative and positive feedback, all eight integer classes, wide-integer floating conversion, logical admission, stable extension identifiers, and resident rejection before provider access; VM workflows cover `tf('s')`.",
     "implementation": {
       "label": "`crates/runmat-runtime/src/builtins/control/feedback.rs`",
       "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/feedback.rs"
     }
   },
-  "gpu_residency": "`feedback` returns a host-side `tf` object. It does not preserve gpuArray residency."
+  "gpu_residency": "`feedback` returns a host-side `tf` object. Resident numeric gains and signs are a gated RunMat extension, gather before host model assembly, and do not preserve gpuArray residency."
 }

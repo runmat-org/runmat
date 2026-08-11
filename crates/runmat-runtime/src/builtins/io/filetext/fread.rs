@@ -574,10 +574,14 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         )
     })?;
 
-    let mut eval = map_string_result(
+    let (mut eval, encountered_eof) = map_string_result(
         read_from_handle(file, &size_spec, &precision, skip_bytes, machine_format),
         &FREAD_ERROR_IO,
     )?;
+    drop(guard);
+    if encountered_eof {
+        registry::mark_eof_encountered(fid);
+    }
     map_string_result(
         eval.apply_like(like_arg, precision),
         &FREAD_ERROR_INVALID_OPTION,
@@ -1240,12 +1244,12 @@ fn read_from_handle(
     precision: &PrecisionSpec,
     skip: usize,
     machine: MachineFormat,
-) -> Result<FreadEval, String> {
+) -> Result<(FreadEval, bool), String> {
     let endianness = machine.to_endianness();
     match precision.output {
         OutputKind::Numeric(output_dtype) => {
             let limit = size_spec.element_limit();
-            let (values, count) = read_numeric_values(
+            let (values, count, encountered_eof) = read_numeric_values(
                 file,
                 precision.input,
                 precision.repeat,
@@ -1261,11 +1265,14 @@ fn read_from_handle(
             } else {
                 tensor::coerce_tensor_dtype(tensor, output_dtype)
             };
-            Ok(FreadEval::new(Value::Tensor(tensor), count))
+            Ok((
+                FreadEval::new(Value::Tensor(tensor), count),
+                encountered_eof,
+            ))
         }
         OutputKind::Char => {
             let limit = size_spec.element_limit();
-            let (values, count) = read_char_values(
+            let (values, count, encountered_eof) = read_char_values(
                 file,
                 precision.input,
                 precision.repeat,
@@ -1276,7 +1283,10 @@ fn read_from_handle(
             let (row_major, rows, cols) = finalize_char(size_spec, count, values);
             let char_array =
                 CharArray::new(row_major, rows, cols).map_err(|e| format!("fread: {e}"))?;
-            Ok(FreadEval::new(Value::CharArray(char_array), count))
+            Ok((
+                FreadEval::new(Value::CharArray(char_array), count),
+                encountered_eof,
+            ))
         }
     }
 }
@@ -1407,15 +1417,16 @@ fn read_numeric_values<R: Read + Seek>(
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
-) -> Result<(NumericStorage, usize), String> {
+) -> Result<(NumericStorage, usize, bool), String> {
     if let Some(0) = limit {
-        return Ok((NumericStorage::zeros(input.numeric_dtype(), 0), 0));
+        return Ok((NumericStorage::zeros(input.numeric_dtype(), 0), 0, false));
     }
     let element_size = input.byte_len();
     let mut buffer = vec![0u8; element_size];
     let mut values = Vec::new();
     let mut count = 0usize;
     let target = limit.unwrap_or(usize::MAX);
+    let mut encountered_eof = false;
 
     'outer: loop {
         if count >= target {
@@ -1424,7 +1435,10 @@ fn read_numeric_values<R: Read + Seek>(
         let mut remaining = element_size;
         while remaining > 0 {
             match reader.read(&mut buffer[element_size - remaining..element_size]) {
-                Ok(0) => break 'outer,
+                Ok(0) => {
+                    encountered_eof = true;
+                    break 'outer;
+                }
                 Ok(n) => remaining -= n,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(err) => {
@@ -1444,7 +1458,11 @@ fn read_numeric_values<R: Read + Seek>(
                 .map_err(|err| format!("fread: failed to skip bytes ({err})"))?;
         }
     }
-    Ok((numeric_storage_from_scalars(input, values)?, count))
+    Ok((
+        numeric_storage_from_scalars(input, values)?,
+        count,
+        encountered_eof,
+    ))
 }
 
 fn read_char_values<R: Read + Seek>(
@@ -1454,15 +1472,16 @@ fn read_char_values<R: Read + Seek>(
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
-) -> Result<(Vec<char>, usize), String> {
+) -> Result<(Vec<char>, usize, bool), String> {
     if let Some(0) = limit {
-        return Ok((Vec::new(), 0));
+        return Ok((Vec::new(), 0, false));
     }
     let element_size = input.byte_len();
     let mut buffer = vec![0u8; element_size];
     let mut values = Vec::new();
     let mut count = 0usize;
     let target = limit.unwrap_or(usize::MAX);
+    let mut encountered_eof = false;
 
     'outer: loop {
         if count >= target {
@@ -1471,7 +1490,10 @@ fn read_char_values<R: Read + Seek>(
         let mut remaining = element_size;
         while remaining > 0 {
             match reader.read(&mut buffer[element_size - remaining..element_size]) {
-                Ok(0) => break 'outer,
+                Ok(0) => {
+                    encountered_eof = true;
+                    break 'outer;
+                }
                 Ok(n) => remaining -= n,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
                 Err(err) => {
@@ -1492,7 +1514,7 @@ fn read_char_values<R: Read + Seek>(
         }
     }
 
-    Ok((values, count))
+    Ok((values, count, encountered_eof))
 }
 
 fn decode_numeric_scalar(

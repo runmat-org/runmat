@@ -1,0 +1,20 @@
+{
+  "title": "fea.study",
+  "category": "fea",
+  "keywords": ["fea", "study", "model", "geometry"],
+  "summary": "Create or load a typed RunMat FEA study.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
+  "description": "`fea.study(path)` loads a study document, while `fea.study(id, geometry, Name, Value, ...)` assembles a typed `fea.Study`.",
+  "behaviors": [
+    "The path form requires one `.fea` text path that resolves to a study rather than a sweep. The constructor form requires a text id and `geometry.Asset`.",
+    "Constructor options are `RunKind` or `Kind`, `Profile`, `Backend`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments` or `Assignments`, `BoundaryConditions` or `BCs`, `Loads` or `LoadCases`, `Steps`, `Domains`, `Interfaces`, and `RunOptions` or `Options`.",
+    "Profile defaults to `linear_static_structural`, backend defaults to `cpu`, defaults mode is `profile_scaffold`, and model id defaults to the supplied model id or a sanitized `<study-id>_model`. An explicit run kind must agree with the profile-derived solver.",
+    "Direct integer inputs have no role. Nested typed components and run options retain their own exact structural or binary64 physics contracts. Public revision and count properties remain exact typed integers.",
+    "Object identity, option names, profile/run-kind agreement, and component classes are validated before study construction. Existing and STL/synthetic geometry require no native OCCT; loading topology CAD may require the configured importer."
+  ],
+  "examples": [{ "description": "Create a study", "input": "study = fea.study(\"bracket\", geom, \"Profile\", \"linear_static_structural\", \"Backend\", \"cpu\");" }],
+  "faqs": [{ "question": "Can numeric values stand in for a profile or backend?", "answer": "No. Structural identity fields are text or typed objects and are never numerically coerced." }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

@@ -47825,11 +47825,18 @@
           "label": "results = fea.results(runOrRunId, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "runOrRunId",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Persisted run id, fea.RunResult, or fea.Results object."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Field, diagnostic, one-based mode/snapshot selector, and inclusion options."
             }
           ],
           "outputs": [
@@ -47859,7 +47866,7 @@
         {
           "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
           "identifier": "RunMat:fea:OperationFailed",
-          "when": "The validation, planning, or run operation fails.",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
           "message": "fea: operation failed"
         },
         {
@@ -47867,6 +47874,89 @@
           "identifier": "RunMat:fea:Internal",
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ModeIndices",
+          "inputs": [
+            {
+              "name": "one-based result indices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host numeric scalars or vectors are decoded exactly, require positive one-based indices, preserve order and duplicates, and reject matrix and provider-resident inputs."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The one-based public selector is translated once to the operation layer's zero-based index and public structural result fields remain exact."
+        },
+        {
+          "form": "TransientSnapshotIndices",
+          "inputs": [
+            {
+              "name": "one-based result indices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host numeric scalars or vectors are decoded exactly, require positive one-based indices, preserve order and duplicates, and reject matrix and provider-resident inputs."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The one-based public selector is translated once to the operation layer's zero-based index and public structural result fields remain exact."
+        },
+        {
+          "form": "numeric inclusion predicates",
+          "inputs": [
+            {
+              "name": "numeric inclusion predicate",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host scalar logical values and exact numeric zero or one are accepted; every other numeric value and provider-resident input is rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Logical and numeric zero/one select query projections without converting provider data."
         }
       ]
     },
@@ -47876,7 +47966,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "run = fea.run(study)",
+          "label": "run = fea.run(studyOrSweepOrPath)",
           "inputs": [
             {
               "name": "study",
@@ -47913,7 +48003,7 @@
         {
           "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
           "identifier": "RunMat:fea:OperationFailed",
-          "when": "The validation, planning, or run operation fails.",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
           "message": "fea: operation failed"
         },
         {
@@ -47922,7 +48012,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.runOptions",
@@ -47930,14 +48024,21 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "component = fea.component(args, ...)",
+          "label": "options = fea.runOptions(solver, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "solver",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA solver family."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Family-specific structural, tolerance, timing, precision, and quality options."
             }
           ],
           "outputs": [
@@ -47967,7 +48068,7 @@
         {
           "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
           "identifier": "RunMat:fea:OperationFailed",
-          "when": "The validation, planning, or run operation fails.",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
           "message": "fea: operation failed"
         },
         {
@@ -47975,6 +48076,494 @@
           "identifier": "RunMat:fea:Internal",
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "modal structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "modal floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
+        },
+        {
+          "form": "acoustic structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "acoustic floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
+        },
+        {
+          "form": "thermal structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "thermal floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
+        },
+        {
+          "form": "transient structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "transient floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
+        },
+        {
+          "form": "CFD structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "CFD floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
+        },
+        {
+          "form": "CHT structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "CHT floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
+        },
+        {
+          "form": "FSI structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "FSI floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
+        },
+        {
+          "form": "nonlinear structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "nonlinear floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
+        },
+        {
+          "form": "electromagnetic structural controls",
+          "inputs": [
+            {
+              "name": "structural iteration, step, retry, mode, and refresh counts",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The exact count is preserved in the typed run-options payload and public object representation."
+        },
+        {
+          "form": "electromagnetic floating controls",
+          "inputs": [
+            {
+              "name": "tolerance, timing, residual, convergence, and frequency fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact."
         }
       ]
     },
@@ -47984,14 +48573,21 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "component = fea.component(args, ...)",
+          "label": "step = fea.step(id, kind)",
           "inputs": [
             {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Analysis-step id."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Static, modal, transient, thermal, nonlinear, electromagnetic, or CFD step kind."
             }
           ],
           "outputs": [
@@ -48021,7 +48617,7 @@
         {
           "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
           "identifier": "RunMat:fea:OperationFailed",
-          "when": "The validation, planning, or run operation fails.",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
           "message": "fea: operation failed"
         },
         {
@@ -48030,13 +48626,38 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.study",
       "output_mode": "Fixed",
       "completion_policy": "Public",
       "signatures": [
+        {
+          "label": "study = fea.study(path)",
+          "inputs": [
+            {
+              "name": "path",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Path to a .fea file."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        },
         {
           "label": "study = fea.study(id, geometry, Name, Value, ...)",
           "inputs": [
@@ -48089,7 +48710,7 @@
         {
           "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
           "identifier": "RunMat:fea:OperationFailed",
-          "when": "The validation, planning, or run operation fails.",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
           "message": "fea: operation failed"
         },
         {
@@ -48098,7 +48719,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.sweep",
@@ -48109,11 +48734,25 @@
           "label": "sweep = fea.sweep(id, studies, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Sweep id."
+            },
+            {
+              "name": "studies",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "A fea.Study or cell array of fea.Study objects."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Optional logical FailFast control."
             }
           ],
           "outputs": [
@@ -48143,7 +48782,7 @@
         {
           "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
           "identifier": "RunMat:fea:OperationFailed",
-          "when": "The validation, planning, or run operation fails.",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
           "message": "fea: operation failed"
         },
         {
@@ -48152,7 +48791,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.trends",
@@ -48163,11 +48806,11 @@
           "label": "trends = fea.trends(Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Optional positive integer WindowSize."
             }
           ],
           "outputs": [
@@ -48197,7 +48840,7 @@
         {
           "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
           "identifier": "RunMat:fea:OperationFailed",
-          "when": "The validation, planning, or run operation fails.",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
           "message": "fea: operation failed"
         },
         {
@@ -48205,6 +48848,35 @@
           "identifier": "RunMat:fea:Internal",
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "WindowSize",
+          "inputs": [
+            {
+              "name": "WindowSize",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A positive host integer scalar or integral scalar double is decoded exactly as usize; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The positive window size and structural trend counts remain exact in the public result object; time and rate fields remain binary64."
         }
       ]
     },
@@ -48214,7 +48886,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "result = fea.validate(study)",
+          "label": "result = fea.validate(studyOrSweepOrPath)",
           "inputs": [
             {
               "name": "study",
@@ -48251,7 +48923,7 @@
         {
           "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
           "identifier": "RunMat:fea:OperationFailed",
-          "when": "The validation, planning, or run operation fails.",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
           "message": "fea: operation failed"
         },
         {
@@ -48260,7 +48932,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "feedback",
@@ -48383,6 +49059,128 @@
           "when": "Closed-loop transfer-function assembly failed.",
           "message": "feedback: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "feedback-single-system",
+          "mode": "RunMatOnly",
+          "description": "feedback(sys1) with an implicit unity feedback path is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeedbackSingleSystemExtension"
+        },
+        {
+          "id": "feedback-scalar-forward-system",
+          "mode": "RunMatOnly",
+          "description": "feedback with a scalar forward-path system is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeedbackScalarForwardSystemExtension"
+        },
+        {
+          "id": "feedback-scalar-scalar-systems",
+          "mode": "RunMatOnly",
+          "description": "feedback with scalar forward and feedback-path systems is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeedbackScalarScalarSystemsExtension"
+        },
+        {
+          "id": "feedback-integer-scalar-gain",
+          "mode": "RunMatOnly",
+          "description": "feedback with a typed-integer scalar system gain is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeedbackIntegerScalarGainExtension"
+        },
+        {
+          "id": "feedback-integer-sign",
+          "mode": "RunMatOnly",
+          "description": "feedback with a typed-integer sign is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeedbackIntegerSignExtension"
+        },
+        {
+          "id": "feedback-logical-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "feedback with a logical numeric system or sign is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeedbackLogicalNumericInputExtension"
+        },
+        {
+          "id": "feedback-resident-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "feedback with a resident numeric system or sign is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeedbackResidentNumericInputExtension"
+        },
+        {
+          "id": "feedback-single-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "feedback with a native-single numeric system or sign is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeedbackSingleNumericInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "sys = feedback(integer_gain, sys2) or feedback(sys1, integer_gain)",
+          "inputs": [
+            {
+              "name": "sys1",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A typed-integer forward gain is independently gated, then converted once to the floating/complex tf coefficient domain."
+            },
+            {
+              "name": "sys2",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A typed-integer feedback-path gain is independently gated, then converted once to the floating/complex tf coefficient domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "All eight typed integer classes are RunMat-only scalar gains. The result is a host tf object; int64 and uint64 values outside binary64's exact integer range can round at the explicit floating boundary."
+        },
+        {
+          "form": "sys = feedback(sys1, sys2, integer_sign)",
+          "inputs": [
+            {
+              "name": "sign",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The typed-integer sign is independently gated and must be exactly -1 or +1; unsigned classes can express only +1."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "All eight typed integer classes are admitted as a RunMat-only sign control, but the exact valid set remains -1 or +1. The result is a host tf object."
+        }
       ]
     },
     {
@@ -48426,16 +49224,59 @@
           "message": "feof: invalid file identifier. Use fopen to generate a valid file ID."
         },
         {
-          "code": "RM.FEOF.IO",
-          "identifier": "RunMat:feof:IoFailure",
-          "when": "File-position or length query fails.",
-          "message": "feof: file I/O query failed"
-        },
-        {
           "code": "RM.FEOF.INTERNAL",
           "identifier": null,
           "when": "Internal control-flow conversion failed.",
           "message": "feof: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "feof-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class feof file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeofIntegerIdExtension"
+        },
+        {
+          "id": "feof-logical-fileid",
+          "mode": "RunMatOnly",
+          "description": "logical feof file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeofLogicalIdExtension"
+        },
+        {
+          "id": "feof-resident-fileid",
+          "mode": "RunMatOnly",
+          "description": "provider-resident feof file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FeofResidentIdExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tf = feof(integer_fileID)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB-compatible file IDs are integer-valued doubles; all eight typed integer classes are one gated RunMat extension and are checked exactly against i32 before registry access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The identifier is validated exactly before the registry query; resident and logical identifiers have independent RunMat-only gates, and the result is a host logical scalar."
         }
       ]
     },

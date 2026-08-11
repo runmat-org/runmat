@@ -209,6 +209,8 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
             err,
         )
     })?;
+    drop(guard);
+    registry::clear_eof_encountered(fid);
 
     Ok(())
 }
