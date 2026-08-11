@@ -1415,13 +1415,6 @@ const FEVAL_ERROR_HANDLE_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDesc
     message: "feval: function handle name must not be empty",
 };
 
-const FEVAL_ERROR_HANDLE_STRING_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEVAL.HANDLE_STRING_INVALID",
-    identifier: Some("RunMat:FevalHandleStringInvalid"),
-    when: "Text handle input does not start with '@'.",
-    message: "feval: expected function handle string starting with '@'",
-};
-
 const FEVAL_ERROR_HANDLE_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FEVAL.HANDLE_SHAPE_INVALID",
     identifier: Some("RunMat:FevalHandleShapeInvalid"),
@@ -1443,9 +1436,8 @@ const FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinEr
     message: "feval: unsupported function value",
 };
 
-pub(crate) const FEVAL_ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub(crate) const FEVAL_ERRORS: [BuiltinErrorDescriptor; 4] = [
     FEVAL_ERROR_HANDLE_NAME_INVALID,
-    FEVAL_ERROR_HANDLE_STRING_INVALID,
     FEVAL_ERROR_HANDLE_SHAPE_INVALID,
     FEVAL_ERROR_SEMANTIC_UNAVAILABLE,
     FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED,
@@ -1478,34 +1470,57 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
         call_by_identity(identity, fallback_policy, args, requested_outputs).await
     }
 
+    fn text_target_name(text: &str) -> Option<&str> {
+        let trimmed = text.trim();
+        let name = trimmed.strip_prefix('@').unwrap_or(trimmed).trim();
+        (!name.is_empty()).then_some(name)
+    }
+
+    fn is_at_prefixed_text_target(value: &Value) -> bool {
+        match value {
+            Value::String(text) => text.trim().starts_with('@'),
+            Value::CharArray(chars) if chars.rows == 1 => chars
+                .data
+                .iter()
+                .collect::<String>()
+                .trim()
+                .starts_with('@'),
+            Value::StringArray(strings) if strings.data.len() == 1 => {
+                strings.data[0].trim().starts_with('@')
+            }
+            _ => false,
+        }
+    }
+
+    if is_at_prefixed_text_target(&f) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &crate::builtins::introspection::feval::FEVAL_AT_PREFIXED_TEXT_EXTENSION,
+            "feval",
+        )?;
+    }
+    if matches!(&f, Value::Object(_) | Value::HandleObject(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &crate::builtins::introspection::feval::FEVAL_OBJECT_RECEIVER_EXTENSION,
+            "feval",
+        )?;
+    }
+
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
 
     match f {
-        // Function handle strings like "@sin"
         Value::String(s) => {
-            if let Some(name) = s.strip_prefix('@') {
-                call_by_name(name, &rest, requested_outputs).await
-            } else {
-                Err(runtime_descriptor_error_with_detail(
-                    "feval",
-                    &FEVAL_ERROR_HANDLE_STRING_INVALID,
-                    format!("got {s}"),
-                ))
-            }
+            let name = text_target_name(&s).ok_or_else(|| {
+                runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
+            })?;
+            call_by_name(name, &rest, requested_outputs).await
         }
-        // Also accept character row vector handles like '@max'
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 let s: String = ca.data.iter().collect();
-                if let Some(name) = s.strip_prefix('@') {
-                    call_by_name(name, &rest, requested_outputs).await
-                } else {
-                    Err(runtime_descriptor_error_with_detail(
-                        "feval",
-                        &FEVAL_ERROR_HANDLE_STRING_INVALID,
-                        format!("got {s}"),
-                    ))
-                }
+                let name = text_target_name(&s).ok_or_else(|| {
+                    runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
+                })?;
+                call_by_name(name, &rest, requested_outputs).await
             } else {
                 Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1517,15 +1532,10 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 let s = &sa.data[0];
-                if let Some(name) = s.strip_prefix('@') {
-                    call_by_name(name, &rest, requested_outputs).await
-                } else {
-                    Err(runtime_descriptor_error_with_detail(
-                        "feval",
-                        &FEVAL_ERROR_HANDLE_STRING_INVALID,
-                        format!("got {s}"),
-                    ))
-                }
+                let name = text_target_name(s).ok_or_else(|| {
+                    runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
+                })?;
+                call_by_name(name, &rest, requested_outputs).await
             } else {
                 Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1661,7 +1671,9 @@ mod tests {
     use super::*;
     use crate::builtins::introspection::test_methods::*;
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, Access, ClassDef, HandleRef, PropertyDef};
+    use runmat_builtins::{
+        register_class, Access, ClassDef, HandleRef, IntegerStorage, PropertyDef, Tensor,
+    };
     use std::collections::HashMap;
     use std::sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -1953,23 +1965,63 @@ mod tests {
     }
 
     #[test]
-    fn feval_rejects_string_without_at_with_identifier() {
-        let err = block_on(feval_builtin(
+    fn feval_accepts_documented_plain_string_function_name() {
+        let value = block_on(feval_builtin(
             Value::String("sin".to_string()),
             vec![Value::Num(0.0)],
         ))
-        .expect_err("feval string handle without @ should fail");
-        assert_eq!(err.identifier(), Some("RunMat:FevalHandleStringInvalid"));
+        .expect("plain string function name should resolve");
+        assert_eq!(value, Value::Num(0.0));
     }
 
     #[test]
-    fn feval_rejects_char_handle_without_at_with_identifier() {
-        let err = block_on(feval_builtin(
+    fn feval_accepts_documented_plain_char_function_name() {
+        let value = block_on(feval_builtin(
             Value::CharArray(runmat_builtins::CharArray::new_row("sin")),
             vec![Value::Num(0.0)],
         ))
-        .expect_err("feval char handle without @ should fail");
-        assert_eq!(err.identifier(), Some("RunMat:FevalHandleStringInvalid"));
+        .expect("plain character-vector function name should resolve");
+        assert_eq!(value, Value::Num(0.0));
+    }
+
+    #[test]
+    fn feval_forwards_all_integer_classes_without_conversion() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "integer_identity").then_some(654_321)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 654_321);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args.len(), 1);
+                let output = args[0].clone();
+                Box::pin(async move { Ok(output) })
+            }),
+        ));
+
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![0, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let input = Value::Tensor(
+                Tensor::new_integer(storage, vec![1, 2]).expect("integer forwarding input"),
+            );
+            let output = block_on(feval_builtin(
+                Value::CharArray(runmat_builtins::CharArray::new_row("integer_identity")),
+                vec![input.clone()],
+            ))
+            .expect("integer argument should be forwarded unchanged");
+            assert_eq!(output, input);
+        }
     }
 
     #[test]
@@ -1986,12 +2038,27 @@ mod tests {
 
     #[test]
     fn feval_rejects_empty_at_string_handle_with_identifier() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = block_on(feval_builtin(
             Value::String("@".to_string()),
             vec![Value::Num(0.0)],
         ))
         .expect_err("feval empty @string handle should fail");
         assert_eq!(err.identifier(), Some("RunMat:FevalHandleNameInvalid"));
+    }
+
+    #[test]
+    fn feval_strict_mode_rejects_at_prefixed_text_before_dispatch() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(feval_builtin(
+            Value::String("@sin".to_string()),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("@-prefixed text target should require RunMat mode");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:FevalAtPrefixedTextTargetExtension")
+        );
     }
 
     #[test]
@@ -2006,6 +2073,7 @@ mod tests {
 
     #[test]
     fn feval_trims_text_handle_name_for_resolution() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(9876)
@@ -2420,6 +2488,7 @@ mod tests {
 
     #[test]
     fn feval_qualified_at_handle_errors_as_unresolved_external() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let err = block_on(feval_builtin(
             Value::String("@missing.external".to_string()),
@@ -3072,6 +3141,7 @@ mod tests {
 
     #[test]
     fn feval_object_receiver_routes_to_subsref_identifier() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = block_on(feval_builtin(
             Value::Object(runmat_builtins::ObjectInstance::new(
                 "NoSubsrefProtocolClass".to_string(),
@@ -3080,6 +3150,22 @@ mod tests {
         ))
         .expect_err("feval(object, ...) should route through subsref dispatch");
         assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+    }
+
+    #[test]
+    fn feval_strict_mode_rejects_object_receiver_before_subsref_dispatch() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(feval_builtin(
+            Value::Object(runmat_builtins::ObjectInstance::new(
+                "NoSubsrefProtocolClass".to_string(),
+            )),
+            vec![Value::Num(1.0)],
+        ))
+        .expect_err("object receiver should require RunMat mode");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:FevalObjectReceiverExtension")
+        );
     }
 
     #[test]
@@ -3100,14 +3186,14 @@ mod tests {
     }
 
     #[test]
-    fn feval_accepts_scalar_string_array_handle() {
+    fn feval_accepts_scalar_string_array_function_name() {
         let handle =
-            runmat_builtins::StringArray::new(vec!["@sin".to_string()], vec![1, 1]).expect("sa");
+            runmat_builtins::StringArray::new(vec!["sin".to_string()], vec![1, 1]).expect("sa");
         let result = block_on(feval_builtin(
             Value::StringArray(handle),
             vec![Value::Num(0.0)],
         ))
-        .expect("string-array handle feval should succeed");
+        .expect("scalar string-array function name should succeed");
         assert_eq!(result, Value::Num(0.0));
     }
 

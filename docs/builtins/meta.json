@@ -49322,12 +49322,6 @@
           "message": "feval: function handle name must not be empty"
         },
         {
-          "code": "RM.FEVAL.HANDLE_STRING_INVALID",
-          "identifier": "RunMat:FevalHandleStringInvalid",
-          "when": "Text handle input does not start with '@'.",
-          "message": "feval: expected function handle string starting with '@'"
-        },
-        {
           "code": "RM.FEVAL.HANDLE_SHAPE_INVALID",
           "identifier": "RunMat:FevalHandleShapeInvalid",
           "when": "Text handle input has invalid char/string array shape.",
@@ -49344,6 +49338,49 @@
           "identifier": "RunMat:FevalFunctionValueUnsupported",
           "when": "The first argument is not a supported callable value.",
           "message": "feval: unsupported function value"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "feval-at-prefixed-text-target",
+          "mode": "RunMatOnly",
+          "description": "feval with an @-prefixed text target is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FevalAtPrefixedTextTargetExtension"
+        },
+        {
+          "id": "feval-object-receiver",
+          "mode": "RunMatOnly",
+          "description": "feval with an object receiver is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FevalObjectReceiverExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[varargout] = feval(fun,integer_varargin) with integer target arguments or results",
+          "inputs": [
+            {
+              "name": "varargin",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are forwarded unchanged when they are valid inputs for the function selected by name or handle; scalar-double and mixed-class rules belong to that target."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "FunctionSpecific",
+          "overload": "FunctionSpecific",
+          "notes": "feval performs no numeric conversion or arithmetic of its own; input admission, output count and class, overflow, shape, and host or provider behavior are inherited from the selected function."
         }
       ]
     },
@@ -50289,6 +50326,55 @@
           "when": "Internal control-flow conversion failed.",
           "message": "fgetl: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fgetl-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class fgetl file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetlIntegerIdExtension"
+        },
+        {
+          "id": "fgetl-single-fileid",
+          "mode": "RunMatOnly",
+          "description": "single-precision fgetl file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetlSingleIdExtension"
+        },
+        {
+          "id": "fgetl-resident-fileid",
+          "mode": "RunMatOnly",
+          "description": "provider-resident fgetl file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetlResidentIdExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tline = fgetl(integer_fileID)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB-compatible file identifiers are integer-valued doubles; all eight typed integer classes are one gated RunMat extension and are checked exactly against the registry identifier domain."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The identifier is validated exactly before registry access; a successful read returns a host character row and end-of-file returns the double sentinel -1."
+        }
       ]
     },
     {
@@ -50406,6 +50492,100 @@
           "when": "Internal control-flow conversion failed.",
           "message": "fgets: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fgets-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class fgets file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetsIntegerIdExtension"
+        },
+        {
+          "id": "fgets-integer-nchar",
+          "mode": "RunMatOnly",
+          "description": "integer-class fgets nchar values are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetsIntegerNcharExtension"
+        },
+        {
+          "id": "fgets-single-fileid",
+          "mode": "RunMatOnly",
+          "description": "single-precision fgets file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetsSingleIdExtension"
+        },
+        {
+          "id": "fgets-single-nchar",
+          "mode": "RunMatOnly",
+          "description": "single-precision fgets nchar values are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetsSingleNcharExtension"
+        },
+        {
+          "id": "fgets-resident-fileid",
+          "mode": "RunMatOnly",
+          "description": "provider-resident fgets file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetsResidentIdExtension"
+        },
+        {
+          "id": "fgets-resident-nchar",
+          "mode": "RunMatOnly",
+          "description": "provider-resident fgets nchar values are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FgetsResidentNcharExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "tline = fgets(integer_fileID, ...)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB-compatible file identifiers are integer-valued doubles; all eight typed integer classes are one independently gated RunMat extension and are checked exactly against the registry identifier domain."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The identifier is validated exactly before registry access; a successful read returns a host character row and end-of-file returns the double sentinel -1."
+        },
+        {
+          "form": "tline = fgets(fileID, integer_nchar)",
+          "inputs": [
+            {
+              "name": "nchar",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB-compatible nchar values are non-negative integer-valued doubles; all eight typed integer classes are one independently gated RunMat extension and are converted exactly to the runtime length domain."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The character limit is validated exactly before reading; line and terminator outputs remain host values independent of the nchar class."
+        }
       ]
     },
     {
@@ -50421,7 +50601,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Struct, struct array, or object input."
+              "description": "Struct, cell-backed struct array, or supported RunMat object input."
             }
           ],
           "outputs": [
@@ -50439,13 +50619,13 @@
         {
           "code": "RM.FIELDNAMES.INVALID_TARGET",
           "identifier": "RunMat:fieldnames:InvalidTarget",
-          "when": "Input is not a struct, struct array, or object value.",
-          "message": "fieldnames: expected struct, struct array, or object"
+          "when": "Input is not a struct, cell-backed struct array, or supported RunMat object value.",
+          "message": "fieldnames: expected struct, struct array, or supported object"
         },
         {
           "code": "RM.FIELDNAMES.STRUCT_ARRAY_CONTENTS",
           "identifier": "RunMat:fieldnames:StructArrayContents",
-          "when": "Struct-array backing cell contains non-struct elements.",
+          "when": "Cell-backed struct-array input contains a non-struct element.",
           "message": "fieldnames: expected struct array contents to be structs"
         },
         {
@@ -50454,7 +50634,19 @@
           "when": "Building the output cell array or internal metadata processing fails.",
           "message": "fieldnames: internal error"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "fieldnames-object-family",
+          "mode": "RunMatOnly",
+          "description": "fieldnames introspection for RunMat value, handle, and listener objects is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FieldnamesObjectFamilyExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "fieldnames accepts structures and RunMat's cell-backed structure arrays in the compatibility surface. Numeric, logical, and resident arrays are not structure metadata and reject without conversion or provider access; RunMat object-family introspection is independently extension gated."
+      }
     },
     {
       "name": "figure",
@@ -50470,7 +50662,7 @@
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Figure handle."
+              "description": "RunMat f64 graphics-handle encoding (not a MATLAB Figure object)."
             }
           ]
         },
@@ -50480,9 +50672,9 @@
             {
               "name": "h",
               "ty": "NumericScalar",
-              "arity": "Optional",
-              "default": "\"next\"",
-              "description": "Figure handle or 'next' to create/select the next figure."
+              "arity": "Required",
+              "default": null,
+              "description": "RunMat numeric figure identifier."
             }
           ],
           "outputs": [
@@ -50491,7 +50683,7 @@
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Figure handle."
+              "description": "RunMat f64 graphics-handle encoding (not a MATLAB Figure object)."
             }
           ]
         },
@@ -50512,7 +50704,7 @@
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Figure handle."
+              "description": "RunMat f64 graphics-handle encoding (not a MATLAB Figure object)."
             }
           ]
         },
@@ -50522,9 +50714,9 @@
             {
               "name": "h",
               "ty": "NumericScalar",
-              "arity": "Optional",
-              "default": "\"next\"",
-              "description": "Figure handle or 'next' to create/select the next figure."
+              "arity": "Required",
+              "default": null,
+              "description": "RunMat numeric figure identifier."
             },
             {
               "name": "properties",
@@ -50540,7 +50732,7 @@
               "ty": "NumericScalar",
               "arity": "Required",
               "default": null,
-              "description": "Figure handle."
+              "description": "RunMat f64 graphics-handle encoding (not a MATLAB Figure object)."
             }
           ]
         }
@@ -50551,6 +50743,196 @@
           "identifier": "RunMat:figure:InvalidArgument",
           "when": "Provided figure handle argument is invalid.",
           "message": "figure: invalid argument"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "figure-integer-target",
+          "mode": "RunMatOnly",
+          "description": "figure with a typed integer numeric target is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FigureIntegerTargetExtension"
+        },
+        {
+          "id": "figure-single-target",
+          "mode": "RunMatOnly",
+          "description": "figure with a single-precision numeric target is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FigureSingleTargetExtension"
+        },
+        {
+          "id": "figure-next-selector",
+          "mode": "RunMatOnly",
+          "description": "figure('next') is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FigureNextSelectorExtension"
+        },
+        {
+          "id": "figure-integer-property-value",
+          "mode": "RunMatOnly",
+          "description": "figure with typed integer property values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FigureIntegerPropertyValueExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "fig = figure(integer_h, ...)",
+          "inputs": [
+            {
+              "name": "h",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A host scalar from any built-in integer class is an exact RunMat numeric figure identifier and is independently compatibility gated. Logical and resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "RunMat reads the authoritative host integer directly and requires the identifier to be positive and representable as u32. The returned f64 is RunMat's current opaque numeric graphics-handle encoding; MATLAB returns a Figure object, so this is a general graphics representation gap rather than numeric MATLAB equivalence."
+        },
+        {
+          "form": "fig = figure(..., 'Position', integer_position, ...)",
+          "inputs": [
+            {
+              "name": "Position",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A four-element host integer vector is a RunMat-only geometry property value and must be exactly representable at the f64 figure-state boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "This independently gated RunMat extension reads authoritative integer storage, validates the four-element vector and exact f64 conversion before figure creation or selection, then stores host-double window geometry."
+        },
+        {
+          "form": "fig = figure(..., 'Color', integer_rgb, ...)",
+          "inputs": [
+            {
+              "name": "Color",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A three-element host integer RGB vector is a RunMat-only property value. The normal [0,1] color constraint means admitted integer components are exactly zero or one."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "This independently gated RunMat extension reads authoritative integer RGB storage before validation; the [0,1] range admits only exact zero/one components and renderer state is f32."
+        },
+        {
+          "form": "fig = figure(..., 'NumberTitle', integer_state, ...)",
+          "inputs": [
+            {
+              "name": "state",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat-only NumberTitle and Visible integer scalars use an exact zero test; zero is off and every nonzero value is on without binary64 conversion."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "This independently gated RunMat extension evaluates authoritative scalar integer zero/nonzero state without floating conversion before graphics mutation."
+        },
+        {
+          "form": "fig = figure(..., 'Visible', integer_state, ...)",
+          "inputs": [
+            {
+              "name": "state",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat-only NumberTitle and Visible integer scalars use an exact zero test; zero is off and every nonzero value is on without binary64 conversion."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "This independently gated RunMat extension evaluates authoritative scalar integer zero/nonzero state without floating conversion before graphics mutation."
+        },
+        {
+          "form": "fig = figure(..., 'CurrentAxes'|'SgTitle', integer_graphics_alias, ...)",
+          "inputs": [
+            {
+              "name": "graphics_alias",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "CurrentAxes and SgTitle typed integers are RunMat-only aliases for the current f64 graphics registry and require exact binary64 representation before object lookup."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "These independently gated RunMat aliases require an exactly representable host integer before lookup in RunMat's f64 graphics-object registry; they do not make numeric aliases MATLAB graphics objects."
         }
       ]
     },
@@ -50588,7 +50970,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "fileattrib accepts host-text paths and textual controls; numeric and provider-resident values are rejected before any gather, provider access, or filesystem operation, while numeric status and attribute fields are outputs only."
+      }
     },
     {
       "name": "fileparts",
@@ -50631,7 +51017,11 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "fileparts is a structural host-text parser with no numeric role; numeric and provider-resident values are rejected as invalid text before any gather or provider access."
+      }
     },
     {
       "name": "fileread",
@@ -50754,7 +51144,11 @@
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "fileread: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "fileread accepts host-text filename and Encoding inputs and returns a character row; numeric and provider-resident values are rejected before any gather, provider access, or filesystem read."
+      }
     },
     {
       "name": "filewrite",
@@ -50945,6 +51339,43 @@
           "identifier": null,
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "filewrite: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "filewrite-runmat-native",
+          "mode": "RunMatOnly",
+          "description": "filewrite is a RunMat-native file-writing API with no MATLAB builtin counterpart",
+          "error_identifier": "RunMat:compatibility:FilewriteNativeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "count = filewrite(filename, integer_data, ...)",
+          "inputs": [
+            {
+              "name": "data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are read from authoritative storage and each value must lie in the inclusive byte range 0..255."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The complete filewrite surface is a gated RunMat-native extension; integer data is validated exactly before encoding and host I/O, resident data gathers to the host, and the byte count is a host double scalar."
         }
       ]
     },

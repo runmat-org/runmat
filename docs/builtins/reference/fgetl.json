@@ -13,7 +13,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the host CPU. When the file identifier lives on the GPU, RunMat gathers it before performing host I/O."
+    "notes": "Runs entirely on the host CPU. Provider-resident file identifiers are a gated RunMat extension and are gathered before host I/O."
   },
   "fusion": {
     "elementwise": false,
@@ -28,10 +28,10 @@
   "description": "`fgetl(fid)` reads the next line from a text file and removes trailing line terminators from the returned character row vector. End-of-file signaling and file-position behavior follow MATLAB semantics, so empty lines remain distinguishable from EOF.",
   "behaviors": [
     "`tline = fgetl(fid)` reads from the current file position to the next line terminator or to end-of-file when no terminator is found.",
-    "Line terminators are consumed but not included in the returned character row vector. RunMat recognises `\\n`, `\\r\\n`, and `\\r`.",
+    "Line terminators are consumed but not included in the returned character row vector. RunMat recognises `\\n`, `\\r\\n`, `\\n\\r`, and `\\r`; the `\\n\\r` pair is consumed as one newline sequence.",
     "When the file is empty or the file position indicator is already at end-of-file, `fgetl` returns the numeric sentinel `-1`.",
     "An empty line returns an empty character row vector, not `-1`.",
-    "Lines are decoded using the text encoding recorded by `fopen`. UTF-8, US-ASCII, ISO-8859-1 (`latin1`), Windows-1252, Shift_JIS, and binary mode are recognised without additional user work."
+    "Lines are decoded using the text encoding recorded by `fopen`."
   ],
   "examples": [
     {
@@ -109,11 +109,11 @@
       "input": "line = fgetl(fileID)"
     },
     "points": [
-      "`fileID` is a file handle returned by `fopen`. The file must be opened with read permission (`'r'`, `'r+'`, `'w+'`, or `'a+'`).",
+      "`fileID` is an integer-valued double file handle returned by `fopen`. Typed-integer, single-precision, and provider-resident identifiers are independently gated RunMat extensions. The file must be opened with read permission (`'r'`, `'r+'`, `'w+'`, or `'a+'`).",
       "`line` is a character row vector without the trailing line terminator. When the file position is already at end-of-file, `fgetl` returns the numeric sentinel `-1`."
     ]
   },
   "gpu_behavior": [
-    "`fgetl` is a host-only operation. File identifiers live in the host registry created by `fopen`, so GPU-resident scalar arguments are gathered back to the CPU before the read occurs."
+    "`fgetl` is a host-only operation. Provider-resident identifiers are a gated RunMat extension; when enabled, RunMat gathers the scalar before reading and returns a regular host value."
   ]
 }

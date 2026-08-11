@@ -74,11 +74,36 @@ pub(crate) fn read_text_line(
         let byte = buffer[0];
 
         if byte == b'\n' {
-            if data.len().saturating_add(1) > max_bytes {
-                seek_current(file, -1, builtin_name)?;
+            let mut newline = [0u8; 2];
+            newline[0] = b'\n';
+            let mut newline_len = 1usize;
+            let mut consumed = 1i64;
+
+            let mut next = [0u8; 1];
+            let read_next = file.read(&mut next).map_err(|err| {
+                build_runtime_error(format!("{builtin_name}: failed to read from file: {err}"))
+                    .with_builtin(builtin_name)
+                    .with_source(err)
+                    .build()
+            })?;
+            if read_next == 0 {
+                encountered_eof = true;
+            } else if next[0] == b'\r' {
+                newline[1] = b'\r';
+                newline_len = 2;
+                consumed = 2;
             } else {
-                data.push(b'\n');
-                terminators.push(b'\n');
+                seek_current(file, -1, builtin_name)?;
+            }
+
+            if data.len().saturating_add(newline_len) > max_bytes {
+                seek_current(file, -consumed, builtin_name)?;
+                if read_next == 0 {
+                    encountered_eof = false;
+                }
+            } else {
+                data.extend_from_slice(&newline[..newline_len]);
+                terminators.extend_from_slice(&newline[..newline_len]);
             }
             break;
         } else if byte == b'\r' {
@@ -109,6 +134,9 @@ pub(crate) fn read_text_line(
 
             if data.len().saturating_add(newline_len) > max_bytes {
                 seek_current(file, -consumed, builtin_name)?;
+                if read_next == 0 {
+                    encountered_eof = false;
+                }
             } else {
                 data.extend_from_slice(&newline[..newline_len]);
                 terminators.extend_from_slice(&newline[..newline_len]);

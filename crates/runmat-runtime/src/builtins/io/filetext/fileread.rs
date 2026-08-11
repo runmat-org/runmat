@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CharArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_filesystem as fs;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fileread")]
@@ -160,6 +160,13 @@ pub const FILEREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &FILEREAD_ERRORS,
 };
 
+pub const FILEREAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "fileread accepts host-text filename and Encoding inputs and returns a character row; numeric and provider-resident values are rejected before any gather, provider access, or filesystem read.",
+    };
+
 fn fileread_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -187,16 +194,6 @@ fn fileread_error_with_source(
         .with_builtin(BUILTIN_NAME)
         .with_source(source);
     if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = FILEREAD_ERROR_INTERNAL.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -238,33 +235,18 @@ impl FileEncoding {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fileread_type),
     descriptor(crate::builtins::io::filetext::fileread::FILEREAD_DESCRIPTOR),
+    integer_audit(crate::builtins::io::filetext::fileread::FILEREAD_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::filetext::fileread"
 )]
 async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let gathered_path = gather_if_needed_async(&path)
-        .await
-        .map_err(map_control_flow)?;
-    let gathered_rest = gather_values(&rest).await?;
-    let encoding = parse_encoding_args(&gathered_rest)?;
-    let resolved = resolve_path(&gathered_path)?;
+    let encoding = parse_encoding_args(&rest)?;
+    let resolved = resolve_path(&path)?;
     let bytes = read_all(&resolved).await?;
     let chars = decode_bytes(bytes, encoding)?;
     let cols = chars.len();
     let char_array = CharArray::new(chars, 1, cols)
         .map_err(|e| fileread_error_with_detail(&FILEREAD_ERROR_INTERNAL, &e))?;
     Ok(Value::CharArray(char_array))
-}
-
-async fn gather_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(out)
 }
 
 fn parse_encoding_args(args: &[Value]) -> BuiltinResult<FileEncoding> {
@@ -464,6 +446,23 @@ pub(crate) mod tests {
         futures::executor::block_on(fileread_builtin(path, rest))
     }
 
+    fn unowned_resident_value() -> Value {
+        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        })
+    }
+
+    #[test]
+    fn fileread_descriptor_is_integer_inapplicable() {
+        assert_eq!(
+            FILEREAD_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(FILEREAD_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_descriptor_signatures_cover_core_forms() {
@@ -475,6 +474,37 @@ pub(crate) mod tests {
         assert!(labels.contains(&"text = fileread(filename)"));
         assert!(labels.contains(&"text = fileread(filename, encoding)"));
         assert!(labels.contains(&"text = fileread(filename, \"Encoding\", encoding)"));
+    }
+
+    #[test]
+    fn fileread_rejects_numeric_and_resident_paths_before_provider_access() {
+        for invalid in [Value::Num(1.0), unowned_resident_value()] {
+            let error = run_fileread(invalid, Vec::new()).expect_err("invalid filename");
+            assert_eq!(error.identifier(), FILEREAD_ERROR_INVALID_INPUT.identifier);
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
+    }
+
+    #[test]
+    fn fileread_rejects_numeric_and_resident_encoding_inputs_before_provider_access() {
+        let filename = Value::String("unused-fileread-path".to_string());
+        for invalid in [Value::Num(1.0), unowned_resident_value()] {
+            let error =
+                run_fileread(filename.clone(), vec![invalid]).expect_err("invalid encoding input");
+            assert_eq!(error.identifier(), FILEREAD_ERROR_INVALID_OPTION.identifier);
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
+
+        let error = run_fileread(
+            filename,
+            vec![
+                Value::String("Encoding".to_string()),
+                unowned_resident_value(),
+            ],
+        )
+        .expect_err("resident Encoding value");
+        assert_eq!(error.identifier(), FILEREAD_ERROR_INVALID_OPTION.identifier);
+        assert!(!error.message().to_ascii_lowercase().contains("provider"));
     }
 
     fn unique_path(prefix: &str) -> PathBuf {

@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
-    IntegerStorage, LogicalArray, NumericDType, NumericScalar, ObjectInstance, StructValue, Tensor,
-    Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray, IntegerStorage,
+    LogicalArray, NumericDType, NumericScalar, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
@@ -160,6 +160,13 @@ simple_descriptor!(
     &OUTPUT_THREE_TEXT,
     BuiltinOutputMode::ByRequestedOutputCount
 );
+
+pub const FILEPARTS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "fileparts is a structural host-text parser with no numeric role; numeric and provider-resident values are rejected as invalid text before any gather or provider access.",
+    };
 simple_descriptor!(
     ISFILE_SIGNATURES,
     ISFILE_DESCRIPTOR,
@@ -232,6 +239,13 @@ simple_descriptor!(
     &OUTPUT_STATUS_ATTRIB,
     BuiltinOutputMode::ByRequestedOutputCount
 );
+
+pub const FILEATTRIB_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "fileattrib accepts host-text paths and textual controls; numeric and provider-resident values are rejected before any gather, provider access, or filesystem operation, while numeric status and attribute fields are outputs only.",
+    };
 simple_descriptor!(
     GETPREF_SIGNATURES,
     GETPREF_DESCRIPTOR,
@@ -384,10 +398,10 @@ fn output_list_for_count(default: Vec<Value>) -> Value {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fileparts_type),
     descriptor(crate::builtins::io::repl_fs::compat::FILEPARTS_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::FILEPARTS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn fileparts_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("fileparts", &args).await?;
     if args.len() != 1 {
         return Err(compat_error(
             "fileparts",
@@ -737,10 +751,10 @@ fn cellstr(values: Vec<String>) -> BuiltinResult<Value> {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::fileattrib_type),
     descriptor(crate::builtins::io::repl_fs::compat::FILEATTRIB_DESCRIPTOR),
+    integer_audit(crate::builtins::io::repl_fs::compat::FILEATTRIB_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("fileattrib", &args).await?;
     if args.is_empty() || args.len() > 3 {
         return Err(compat_error(
             "fileattrib",
@@ -1491,6 +1505,26 @@ mod tests {
         futures::executor::block_on(value)
     }
 
+    fn unowned_resident_value() -> Value {
+        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        })
+    }
+
+    #[test]
+    fn textual_filesystem_apis_are_integer_inapplicable() {
+        assert_eq!(
+            FILEPARTS_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert_eq!(
+            FILEATTRIB_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+    }
+
     #[test]
     fn fileparts_splits_folder_name_and_extension() {
         let value = run(fileparts_builtin(vec![Value::String(
@@ -1504,6 +1538,28 @@ mod tests {
             }
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn fileparts_rejects_numeric_and_resident_inputs_before_provider_access() {
+        for invalid in [Value::Num(1.0), unowned_resident_value()] {
+            let error = run(fileparts_builtin(vec![invalid])).expect_err("invalid text input");
+            assert!(error.message().contains("filename must be"));
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
+    }
+
+    #[test]
+    fn fileparts_preserves_scalar_string_array_text_input() {
+        let input =
+            runmat_builtins::StringArray::new(vec!["folder/example.m".to_string()], vec![1, 1])
+                .expect("scalar string array");
+        let value = run(fileparts_builtin(vec![Value::StringArray(input)])).expect("fileparts");
+        let Value::OutputList(values) = value else {
+            panic!("expected output list");
+        };
+        assert_eq!(values[1], char_value("example"));
+        assert_eq!(values[2], char_value(".m"));
     }
 
     #[test]
@@ -1757,5 +1813,38 @@ mod tests {
         let readonly = std::fs::metadata(&path).unwrap().permissions().readonly();
         assert!(!readonly);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fileattrib_rejects_numeric_and_resident_inputs_before_external_access() {
+        let numeric =
+            run(fileattrib_builtin(vec![Value::Num(1.0)])).expect_err("numeric path must reject");
+        assert!(numeric.message().contains("path must be"));
+
+        let numeric_flag = run(fileattrib_builtin(vec![
+            Value::String("missing-fileattrib-path".to_string()),
+            Value::Num(1.0),
+        ]))
+        .expect_err("numeric attribute must reject");
+        assert!(numeric_flag.message().contains("attribute must be"));
+
+        let resident_path = run(fileattrib_builtin(vec![unowned_resident_value()]))
+            .expect_err("resident path must reject");
+        assert!(resident_path.message().contains("path must be"));
+        assert!(!resident_path
+            .message()
+            .to_ascii_lowercase()
+            .contains("provider"));
+
+        let resident_flag = run(fileattrib_builtin(vec![
+            Value::String("missing-fileattrib-path".to_string()),
+            unowned_resident_value(),
+        ]))
+        .expect_err("resident attribute must reject");
+        assert!(resident_flag.message().contains("attribute must be"));
+        assert!(!resident_flag
+            .message()
+            .to_ascii_lowercase()
+            .contains("provider"));
     }
 }

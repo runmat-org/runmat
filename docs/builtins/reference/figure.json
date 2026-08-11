@@ -7,7 +7,7 @@
     "graphics handle",
     "window selection"
   ],
-  "summary": "Create or select plotting figures in MATLAB and RunMat.",
+  "summary": "Create or select RunMat plotting figures.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -23,13 +23,19 @@
   },
   "requires_feature": null,
   "tested": {
+    "unit": "builtins::plotting::figure::tests",
     "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`figure` creates a new plotting figure or selects an existing one as current. With no arguments (or `'next'`) it allocates a fresh handle; passing a positive numeric handle selects that figure, creating it if needed. `figure` also accepts figure property/value pairs such as `'Name'`, `'NumberTitle'`, `'Visible'`, `'Position'`, and `'Color'`. Handle selection, creation, and property assignment behavior follow MATLAB semantics.",
+  "description": "`figure` creates a new plotting figure or selects an existing one as current. RunMat currently encodes graphics handles as host `f64` identifiers instead of MATLAB Figure objects; this is a general graphics-representation gap, not numeric MATLAB equivalence. Double numeric selection is the compatibility form, while typed-integer targets, single-precision targets, the `'next'` selector, and typed-integer property values are independently gated RunMat-only extensions.",
   "behaviors": [
-    "`figure()` creates a new figure and returns its numeric handle.",
+    "`figure()` creates a new figure and returns RunMat's current host `f64` graphics-handle encoding.",
     "`figure(n)` selects figure `n`. If that handle does not exist yet, RunMat creates it.",
-    "`figure('next')` creates a new figure instead of selecting an existing one.",
+    "In RunMat extension mode, `figure('next')` creates a new figure instead of selecting an existing one.",
+    "In RunMat extension mode, a positive scalar from any of the eight integer classes is read exactly as a figure identifier and must fit in `u32`.",
+    "In RunMat extension mode, a positive single-precision scalar can select a figure. Logical and GPU-resident numeric targets reject without provider access.",
+    "Typed-integer values for `Position`, `Color`, `NumberTitle`, `Visible`, `CurrentAxes`, and `SgTitle` are RunMat-only extensions and are rejected in compatibility mode before graphics state changes.",
+    "Integer `Position` values cross an explicit host `f64` geometry boundary only after every authoritative integer element is proved exactly representable. Integer RGB values are read authoritatively and the normal `[0,1]` constraint admits only exact zero and one components.",
+    "Integer `NumberTitle` and `Visible` values use an exact zero/nonzero predicate with no floating conversion. Integer `CurrentAxes` and `SgTitle` aliases must be exactly representable before lookup in RunMat's current `f64` graphics registry.",
     "`figure('Property', value, ...)` creates a fresh figure and applies the requested figure properties.",
     "`figure(n, 'Property', value, ...)` selects or creates figure `n` and applies the requested figure properties.",
     "`figure('Position', [left bottom width height])` stores MATLAB-style figure window geometry and makes it available through `get(f, 'Position')` and figure scene metadata.",
@@ -40,7 +46,7 @@
     "`'NumberTitle'` accepts logical values or MATLAB-style `'on'`/`'off'` strings.",
     "`'Visible'` accepts logical values or MATLAB-style `'on'`/`'off'` strings. Hidden figures keep their graphics state but do not open or update interactive windows until made visible again.",
     "`'Position'` accepts a finite four-element numeric vector `[left bottom width height]`; width and height must be positive.",
-    "`'Color'` and `'BackgroundColor'` accept exact MATLAB color letters, full color names such as `'black'`, or RGB triples, and update the figure background color."
+    "`'Color'` accepts supported color letters, full color names such as `'black'`, or RGB triples, and updates the figure background color."
   ],
   "examples": [
     {
@@ -49,7 +55,7 @@
       "output": "% f is a positive numeric figure handle"
     },
     {
-      "description": "Create another figure with the explicit 'next' selector",
+      "description": "Create another figure with the RunMat-only 'next' selector",
       "input": "f1 = figure();\nf2 = figure(\"next\")",
       "output": "% f2 is a different figure handle from f1"
     },
@@ -76,7 +82,7 @@
     },
     {
       "question": "What does `figure('next')` do?",
-      "answer": "It forces creation of a new figure rather than reusing an existing handle."
+      "answer": "In RunMat extension mode it forces creation of a new figure rather than reusing an existing handle. Compatibility mode rejects this selector before changing graphics state."
     },
     {
       "question": "Can `figure` set window properties at creation time?",
@@ -85,6 +91,18 @@
     {
       "question": "Does `figure` draw anything by itself?",
       "answer": "No. It only manages the active figure selection. Plotting happens when you call builtins like `plot`, `scatter`, or `surf`."
+    },
+    {
+      "question": "Why is the returned handle a double scalar?",
+      "answer": "RunMat's current graphics registry uses a host `f64` identifier. MATLAB uses Figure objects, so this representation is tracked as a general graphics-model gap rather than claimed as numeric compatibility."
+    },
+    {
+      "question": "Can integer, single, logical, or GPU-resident values select a figure?",
+      "answer": "Host scalar integers and singles are independent RunMat-only extensions. Integers are read from authoritative storage without a binary64 mirror and must be positive `u32` values. Logical and resident numeric targets reject."
+    },
+    {
+      "question": "Can figure property values use typed integers?",
+      "answer": "Only in RunMat extension mode. `Position` and graphics-object aliases reject integer values that would round at an `f64` boundary, `Color` accepts only the usual zero/one integer RGB components, and `NumberTitle`/`Visible` use exact zero/nonzero tests. These gates run before figure creation, selection, or property mutation."
     }
   ],
   "links": [
@@ -125,7 +143,7 @@
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/figure.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/figure.rs"
   },
-  "gpu_residency": "`figure` only updates plotting state and returns a host-side numeric handle. It does not affect array residency.",
+  "gpu_residency": "`figure` only updates plotting state and returns RunMat's host-side `f64` handle encoding. Resident numeric values are not admitted as figure targets and are not gathered.",
   "gpu_behavior": [
     "`figure` performs no provider dispatch. GPU-resident arrays passed to later plotting calls may still remain on device when the renderer supports that path."
   ]

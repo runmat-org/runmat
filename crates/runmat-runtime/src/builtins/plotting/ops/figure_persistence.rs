@@ -1327,6 +1327,7 @@ mod tests {
 
     #[test]
     fn savefig_round_trips_multiple_figures() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = setup();
         let first = figure_builtin(vec![]).expect("figure one");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot one");
@@ -1359,6 +1360,7 @@ mod tests {
 
     #[test]
     fn savefig_reads_typed_integer_handle_arrays_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = setup();
         let first = figure_builtin(vec![]).expect("figure one");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot one");

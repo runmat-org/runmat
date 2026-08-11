@@ -709,7 +709,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fgets_sets_eof_only_when_its_read_attempt_encounters_eof() {
+    fn fgets_marks_eof_when_final_newline_lookahead_reaches_end() {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("feof_fgets_state");
@@ -726,9 +726,7 @@ pub(crate) mod tests {
 
         futures::executor::block_on(fgets::evaluate(&Value::Num(fid), &[]))
             .expect("newline-terminated line");
-        assert!(!run_evaluate(&Value::Num(fid)).expect("exact line end"));
-        futures::executor::block_on(fgets::evaluate(&Value::Num(fid), &[])).expect("read at eof");
-        assert!(run_evaluate(&Value::Num(fid)).expect("encountered eof"));
+        assert!(run_evaluate(&Value::Num(fid)).expect("final newline lookahead reached eof"));
 
         run_fclose(&[Value::Num(fid)]).unwrap();
         test_support::fs::remove_file(path).unwrap();
