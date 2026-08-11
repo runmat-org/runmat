@@ -28,10 +28,12 @@
     "unit": "builtins::array::creation::full::tests",
     "integration": "crates/runmat-vm/tests/logic.rs::full_densifies_sparse_storage_through_vm_dispatch"
   },
-  "description": "`A = full(S)` converts a RunMat sparse double matrix to dense full storage. Inputs that are already full numeric, logical, character, complex, or gpuArray values are returned unchanged.",
+  "description": "`A = full(S)` converts a sparse double, single, or logical matrix to dense full storage. Inputs that are already full numeric, logical, character, complex, or gpuArray values are returned unchanged. RunMat also supports exact sparse integer value storage behind the independently gated `full-integer-sparse` extension.",
   "behaviors": [
-    "`full(S)` converts `SparseTensor` values to dense double tensors with the same row and column shape.",
+    "`full(S)` converts sparse double, single, and logical values to dense values with the same class, row count, and column count.",
     "Stored sparse values are materialized in column-major order and unstored entries become explicit zeros.",
+    "Every already-full integer class passes through exactly on the host, while already-full resident integer values retain the same owning-provider handle without ambient-provider dispatch.",
+    "In `runmat` compatibility mode, sparse matrices may carry any of the eight integer value classes and `full` densifies them without binary64 conversion; MATLAB-compatible modes reject this RunMat-only storage form before materialization.",
     "Empty sparse matrices such as `sparse(m,n)` become dense `m`-by-`n` zero tensors.",
     "Dense numeric tensors, scalar numeric/logical values, logical arrays, character arrays, complex arrays, and dense `gpuArray` handles pass through unchanged.",
     "Cells, structs, strings, objects, function handles, symbolic expressions, classes, and exceptions raise `RunMat:full:InvalidInput`."
@@ -61,6 +63,10 @@
     {
       "question": "Does `full` gather dense gpuArray values?",
       "answer": "No. Dense gpuArray handles are already full, so RunMat returns the existing GPU handle unchanged."
+    },
+    {
+      "question": "Does `full` preserve integer classes?",
+      "answer": "Yes. Already-full integer arrays are identity operations for all eight integer classes. RunMat can also densify exact sparse integer storage in `runmat` compatibility mode; that sparse integer representation is an explicitly gated extension because MATLAB sparse value storage is double, single, or logical."
     },
     {
       "question": "Can `full` create native sparse GPU output?",
@@ -97,6 +103,7 @@
     },
     "points": [
       "`S` may be a sparse matrix or an already-full matrix value.",
+      "Already-full integer values preserve their exact class, shape, storage, and residency. Sparse integer value storage requires `runmat` compatibility mode.",
       "`full` has one input and one output."
     ]
   },

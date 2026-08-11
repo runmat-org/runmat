@@ -108,8 +108,8 @@ pub fn fread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
 }
 
-pub fn frewind_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
+pub fn frewind_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Void
 }
 
 pub fn fwrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
@@ -284,7 +284,7 @@ pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 
 pub fn getenv_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.is_empty() {
-        return struct_type(args, _ctx);
+        return Type::Unknown;
     }
     match args.first() {
         Some(Type::Cell { .. }) => Type::cell_of(Type::String),

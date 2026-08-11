@@ -14,10 +14,14 @@ use crate::{
     BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
-    NumericScalar, ObjectInstance, StructValue, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, HandleRef, Listener,
+    LogicalArray, MException, NumericScalar, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -34,7 +38,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Pure metadata operation; acceleration providers do not participate.",
+    notes: "Direct field retrieval is metadata-only and preserves resident handles. The independently gated indexed-resident form gathers authoritative storage through the owning provider and returns host data.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::structs::core::getfield")]
@@ -45,7 +49,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Acts as a fusion barrier because it inspects metadata on the host.",
+    notes: "Acts as a fusion barrier because it inspects host metadata and can perform explicit indexed resident gather in RunMat mode.",
 };
 
 const BUILTIN_NAME: &str = "getfield";
@@ -249,6 +253,78 @@ pub const GETFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &GETFIELD_ERRORS,
 };
 
+pub const GETFIELD_TEXTUAL_INDEX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "getfield-textual-index",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "getfield with an end or numeric text index is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:GetfieldTextualIndexExtension"),
+    };
+
+pub const GETFIELD_OBJECT_FAMILY_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "getfield-object-family",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "getfield access to RunMat object, handle, listener, and exception values is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:GetfieldObjectFamilyExtension"),
+    };
+
+pub const GETFIELD_INDEXED_RESIDENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "getfield-indexed-resident-field",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "getfield indexing into a resident field with typed host gather is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:GetfieldIndexedResidentFieldExtension"),
+    };
+
+pub const GETFIELD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    GETFIELD_TEXTUAL_INDEX_EXTENSION,
+    GETFIELD_OBJECT_FAMILY_EXTENSION,
+    GETFIELD_INDEXED_RESIDENT_EXTENSION,
+];
+
+const GETFIELD_INTEGER_PAYLOAD_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "field payload",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A structure field can contain every integer class; direct access and host indexing preserve exact payload storage, class, shape, and magnitude.",
+    }];
+
+const GETFIELD_INTEGER_INDEX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "idx",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Each numeric index-cell component accepts exact positive scalar or vector values from every integer class; integral doubles remain accepted by the documented numeric index form.",
+    }];
+
+pub const GETFIELD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "value = getfield(S, field, ...) with integer field payload",
+        inputs: &GETFIELD_INTEGER_PAYLOAD_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Direct field retrieval clones the stored value without numeric conversion or provider access. Host subarray selection gathers native numeric storage rather than a floating mirror.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "value = getfield(S, {integer_idx}, field, ..., {integer_idxN})",
+        inputs: &GETFIELD_INTEGER_INDEX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Indices are decoded exactly to checked one-based host positions. The selected field determines output class; the selector class never does.",
+    },
+];
+
 fn getfield_flow(message: impl Into<String>) -> RuntimeError {
     getfield_error_with_message(message, &GETFIELD_ERROR_INTERNAL)
 }
@@ -297,6 +373,8 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     keywords = "getfield,struct,object,field access",
     type_resolver(getfield_type),
     descriptor(crate::builtins::structs::core::getfield::GETFIELD_DESCRIPTOR),
+    extensions(crate::builtins::structs::core::getfield::GETFIELD_EXTENSIONS),
+    integer_capabilities(crate::builtins::structs::core::getfield::GETFIELD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
 async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -304,13 +382,14 @@ async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult
 
     let mut current = base;
     if let Some(index) = parsed.leading_index {
-        current = apply_indices(current, &index).await?;
+        current = apply_indices(current, &index, true).await?;
     }
 
-    for step in parsed.fields {
+    let field_count = parsed.fields.len();
+    for (field_index, step) in parsed.fields.into_iter().enumerate() {
         current = get_field_value(current, &step.name).await?;
         if let Some(index) = step.index {
-            current = apply_indices(current, &index).await?;
+            current = apply_indices(current, &index, field_index + 1 < field_count).await?;
         }
     }
 
@@ -337,6 +416,7 @@ struct IndexSelector {
 enum IndexComponent {
     Scalar(usize),
     Vector(Vec<usize>, Vec<usize>),
+    Logical(Vec<u8>, Vec<usize>),
     End,
 }
 
@@ -403,13 +483,18 @@ fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
 
 fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
     match value {
+        Value::Bool(value) => Ok(IndexComponent::Logical(vec![u8::from(*value)], vec![1, 1])),
+        Value::LogicalArray(logical) => Ok(IndexComponent::Logical(
+            logical.data.clone(),
+            logical.shape.clone(),
+        )),
         Value::CharArray(ca) => {
             let text: String = ca.data.iter().collect();
             parse_index_text(text.trim())
         }
         Value::String(s) => parse_index_text(s.trim()),
         Value::StringArray(sa) if sa.data.len() == 1 => parse_index_text(sa.data[0].trim()),
-        Value::Tensor(tensor) if tensor.len() > 1 => {
+        Value::Tensor(tensor) if tensor.len() != 1 => {
             let indices = if let Some(indices) =
                 tensor::integer_tensor_dimension_vector(tensor, "getfield", false)
             {
@@ -461,6 +546,10 @@ fn parse_positive_numeric_scalar(value: NumericScalar) -> BuiltinResult<usize> {
 }
 
 fn parse_index_text(text: &str) -> BuiltinResult<IndexComponent> {
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &GETFIELD_TEXTUAL_INDEX_EXTENSION,
+        BUILTIN_NAME,
+    )?;
     if text.eq_ignore_ascii_case("end") {
         return Ok(IndexComponent::End);
     }
@@ -586,7 +675,11 @@ fn parse_field_name(value: Value) -> BuiltinResult<String> {
     }
 }
 
-async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<Value> {
+async fn apply_indices(
+    value: Value,
+    selector: &IndexSelector,
+    unwrap_cell_element: bool,
+) -> BuiltinResult<Value> {
     if selector.components.is_empty() {
         return Err(getfield_error_with_message(
             "getfield: index cell must contain at least one element",
@@ -595,13 +688,23 @@ async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<
     }
 
     let value = match value {
-        Value::GpuTensor(handle) => gather_if_needed_async(&Value::GpuTensor(handle))
-            .await
-            .map_err(|flow| remap_getfield_flow(flow, Some("getfield: ")))?,
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &GETFIELD_INDEXED_RESIDENT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            gather_if_needed_async(&Value::GpuTensor(handle))
+                .await
+                .map_err(|flow| remap_getfield_flow(flow, Some("getfield: ")))?
+        }
         other => other,
     };
 
-    if let Some(indexed) = apply_vector_index(&value, selector)? {
+    if let Some(indexed) = apply_logical_index(&value, selector, unwrap_cell_element)? {
+        return Ok(indexed);
+    }
+
+    if let Some(indexed) = apply_vector_index(&value, selector, unwrap_cell_element)? {
         return Ok(indexed);
     }
 
@@ -636,6 +739,7 @@ async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<
         }
         Value::CharArray(array) => index_char_array(array, &resolved),
         Value::ComplexTensor(tensor) => index_complex_tensor(tensor, &resolved),
+        Value::Cell(cell) if !unwrap_cell_element => index_cell_parentheses(cell, &resolved),
         Value::Tensor(_)
         | Value::StringArray(_)
         | Value::Cell(_)
@@ -654,7 +758,11 @@ async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<
     }
 }
 
-fn apply_vector_index(value: &Value, selector: &IndexSelector) -> BuiltinResult<Option<Value>> {
+fn apply_vector_index(
+    value: &Value,
+    selector: &IndexSelector,
+    unwrap_cell_element: bool,
+) -> BuiltinResult<Option<Value>> {
     let [IndexComponent::Vector(indices, shape)] = selector.components.as_slice() else {
         return Ok(None);
     };
@@ -672,12 +780,208 @@ fn apply_vector_index(value: &Value, selector: &IndexSelector) -> BuiltinResult<
                 .into_numeric_storage()
                 .and_then(|storage| storage.gather(&zero_based))
                 .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
-            let tensor = Tensor::from_numeric_storage(storage, shape.clone())
+            let output_shape = numeric_linear_selection_shape(&tensor.shape, shape, indices.len());
+            let tensor = Tensor::from_numeric_storage(storage, output_shape)
                 .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
             Ok(Some(Value::Tensor(tensor)))
         }
+        Value::Cell(cell) => {
+            let mut values = Vec::with_capacity(indices.len());
+            for &index in indices {
+                if index < 1 || index > cell.data.len() {
+                    return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
+                }
+                let position = cell_linear_position(cell, index - 1)
+                    .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?;
+                values.push(
+                    cell.data
+                        .get(position)
+                        .cloned()
+                        .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?,
+                );
+            }
+            if unwrap_cell_element {
+                if values.len() != 1 {
+                    return Err(getfield_error_with_message(
+                        "getfield: structure-array indices must select one element",
+                        &GETFIELD_ERROR_INDEX_SHAPE,
+                    ));
+                }
+                Ok(values.pop().map(Some).unwrap_or(None))
+            } else {
+                let output_shape =
+                    numeric_linear_selection_shape(&cell.shape, shape, indices.len());
+                let cell = CellArray::from_column_major(values, output_shape)
+                    .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+                Ok(Some(Value::Cell(cell)))
+            }
+        }
         _ => Ok(None),
     }
+}
+
+fn apply_logical_index(
+    value: &Value,
+    selector: &IndexSelector,
+    unwrap_cell_element: bool,
+) -> BuiltinResult<Option<Value>> {
+    let [IndexComponent::Logical(mask, index_shape)] = selector.components.as_slice() else {
+        return Ok(None);
+    };
+    let target_len = match value {
+        Value::Tensor(tensor) => tensor.len(),
+        Value::Cell(cell) => cell.data.len(),
+        Value::LogicalArray(logical) => logical.data.len(),
+        _ => return Ok(None),
+    };
+    if mask
+        .iter()
+        .enumerate()
+        .any(|(index, &bit)| bit != 0 && index >= target_len)
+    {
+        return Err(getfield_error_with_message(
+            "getfield: logical index contains a true value outside the target bounds",
+            &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
+        ));
+    }
+    let selected: Vec<usize> = mask
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &bit)| (bit != 0).then_some(index))
+        .collect();
+    let selected_len = selected.len();
+    match value {
+        Value::Tensor(tensor) => {
+            let storage = tensor
+                .clone()
+                .into_numeric_storage()
+                .and_then(|storage| storage.gather(&selected))
+                .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+            let shape = logical_linear_selection_shape(&tensor.shape, index_shape, selected_len);
+            let tensor = Tensor::from_numeric_storage(storage, shape)
+                .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+            Ok(Some(Value::Tensor(tensor)))
+        }
+        Value::LogicalArray(logical) => {
+            let data = selected.iter().map(|&index| logical.data[index]).collect();
+            let shape = logical_linear_selection_shape(&logical.shape, index_shape, selected_len);
+            let logical = LogicalArray::new(data, shape)
+                .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+            Ok(Some(Value::LogicalArray(logical)))
+        }
+        Value::Cell(cell) => {
+            let values: Vec<Value> = selected
+                .iter()
+                .map(|&index| {
+                    cell_linear_position(cell, index)
+                        .and_then(|position| cell.data.get(position))
+                        .cloned()
+                        .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))
+                })
+                .collect::<BuiltinResult<_>>()?;
+            if unwrap_cell_element {
+                if values.len() != 1 {
+                    return Err(getfield_error_with_message(
+                        "getfield: structure-array logical indices must select one element",
+                        &GETFIELD_ERROR_INDEX_SHAPE,
+                    ));
+                }
+                Ok(values.into_iter().next().map(Some).unwrap_or(None))
+            } else {
+                let shape = logical_linear_selection_shape(&cell.shape, index_shape, selected_len);
+                let cell = CellArray::from_column_major(values, shape)
+                    .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+                Ok(Some(Value::Cell(cell)))
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+fn numeric_linear_selection_shape(
+    target_shape: &[usize],
+    index_shape: &[usize],
+    selected_len: usize,
+) -> Vec<usize> {
+    if is_matlab_vector_shape(target_shape) && is_matlab_vector_shape(index_shape) {
+        if shape_element_count(target_shape) == 1 {
+            return resize_vector_shape(index_shape, selected_len);
+        }
+        return resize_vector_shape(target_shape, selected_len);
+    }
+    index_shape.to_vec()
+}
+
+fn logical_linear_selection_shape(
+    target_shape: &[usize],
+    index_shape: &[usize],
+    selected_len: usize,
+) -> Vec<usize> {
+    if is_matlab_vector_shape(target_shape) && is_matlab_vector_shape(index_shape) {
+        if shape_element_count(target_shape) == 1 {
+            return resize_vector_shape(index_shape, selected_len);
+        }
+        return resize_vector_shape(target_shape, selected_len);
+    }
+    vec![selected_len, 1]
+}
+
+fn is_matlab_vector_shape(shape: &[usize]) -> bool {
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
+    shape.iter().skip(2).all(|&dim| dim == 1) && (rows == 1 || cols == 1)
+}
+
+fn shape_element_count(shape: &[usize]) -> usize {
+    shape.iter().copied().product()
+}
+
+fn resize_vector_shape(shape: &[usize], len: usize) -> Vec<usize> {
+    let rows = shape.first().copied().unwrap_or(1);
+    if rows == 1 {
+        vec![1, len]
+    } else {
+        vec![len, 1]
+    }
+}
+
+fn cell_linear_position(cell: &CellArray, zero_based: usize) -> Option<usize> {
+    let rows = cell.rows.max(1);
+    let page_len = rows.checked_mul(cell.cols)?;
+    if page_len == 0 {
+        return None;
+    }
+    let page = zero_based / page_len;
+    let within_page = zero_based % page_len;
+    let row = within_page % rows;
+    let col = within_page / rows;
+    page.checked_mul(page_len)?
+        .checked_add(row.checked_mul(cell.cols)?)?
+        .checked_add(col)
+}
+
+fn index_cell_parentheses(cell: &CellArray, indices: &[usize]) -> BuiltinResult<Value> {
+    let position = match indices {
+        [index] => {
+            if *index < 1 || *index > cell.data.len() {
+                return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
+            }
+            cell_linear_position(cell, index - 1)
+        }
+        [row, col] if *row >= 1 && *row <= cell.rows && *col >= 1 && *col <= cell.cols => (row - 1)
+            .checked_mul(cell.cols)
+            .and_then(|base| base.checked_add(col - 1)),
+        _ => None,
+    }
+    .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?;
+    let value = cell
+        .data
+        .get(position)
+        .cloned()
+        .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?;
+    let result = CellArray::new_with_shape(vec![value], vec![1, 1])
+        .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+    Ok(Value::Cell(result))
 }
 
 fn resolve_indices(value: &Value, selector: &IndexSelector) -> BuiltinResult<Vec<usize>> {
@@ -689,6 +993,12 @@ fn resolve_indices(value: &Value, selector: &IndexSelector) -> BuiltinResult<Vec
             IndexComponent::Vector(_, _) => {
                 return Err(getfield_error_with_message(
                     "getfield: vector indices are only supported for one-dimensional indexing",
+                    &GETFIELD_ERROR_INDEX_SHAPE,
+                ))
+            }
+            IndexComponent::Logical(_, _) => {
+                return Err(getfield_error_with_message(
+                    "getfield: logical indices are only supported for one-dimensional indexing",
                     &GETFIELD_ERROR_INDEX_SHAPE,
                 ))
             }
@@ -1002,6 +1312,15 @@ fn index_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> BuiltinRes
 
 #[async_recursion::async_recursion(?Send)]
 async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
+    if matches!(
+        &value,
+        Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) | Value::MException(_)
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GETFIELD_OBJECT_FAMILY_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     match value {
         Value::Struct(st) => get_struct_field(&st, name),
         Value::Object(obj) => get_object_field(&obj, name).await,
@@ -1381,9 +1700,408 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn getfield_linear_indexing_follows_matlab_orientation_rules() {
+        fn select_numeric(
+            target_values: Vec<u64>,
+            target_shape: Vec<usize>,
+            selector_values: Vec<u64>,
+            selector_shape: Vec<usize>,
+        ) -> Tensor {
+            let target = Tensor::new_integer(IntegerStorage::U64(target_values), target_shape)
+                .expect("target");
+            let selector =
+                Tensor::new_integer(IntegerStorage::U64(selector_values), selector_shape)
+                    .expect("selector");
+            let mut st = StructValue::new();
+            st.fields
+                .insert("values".to_string(), Value::Tensor(target));
+            let index = CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1])
+                .expect("index cell");
+            let result = run_getfield(
+                Value::Struct(st),
+                vec![Value::from("values"), Value::Cell(index)],
+            )
+            .expect("numeric linear selection");
+            let Value::Tensor(tensor) = result else {
+                panic!("expected tensor result");
+            };
+            tensor
+        }
+
+        fn select_logical(
+            target_shape: Vec<usize>,
+            mask: Vec<u8>,
+            mask_shape: Vec<usize>,
+        ) -> Tensor {
+            let target = Tensor::new_integer(
+                IntegerStorage::U64(vec![u64::MAX - 3, u64::MAX - 2, u64::MAX - 1, u64::MAX]),
+                target_shape,
+            )
+            .expect("target");
+            let mask = LogicalArray::new(mask, mask_shape).expect("mask");
+            let mut st = StructValue::new();
+            st.fields
+                .insert("values".to_string(), Value::Tensor(target));
+            let index = CellArray::new_with_shape(vec![Value::LogicalArray(mask)], vec![1, 1])
+                .expect("index cell");
+            let result = run_getfield(
+                Value::Struct(st),
+                vec![Value::from("values"), Value::Cell(index)],
+            )
+            .expect("logical linear selection");
+            let Value::Tensor(tensor) = result else {
+                panic!("expected tensor result");
+            };
+            tensor
+        }
+
+        let row_from_column = select_numeric(
+            vec![u64::MAX - 2, u64::MAX - 1, u64::MAX],
+            vec![1, 3],
+            vec![3, 1],
+            vec![2, 1],
+        );
+        assert_eq!(row_from_column.shape, vec![1, 2]);
+        assert_eq!(
+            row_from_column.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX - 2]))
+        );
+
+        let column_from_row = select_numeric(
+            vec![u64::MAX - 2, u64::MAX - 1, u64::MAX],
+            vec![3, 1],
+            vec![3, 1],
+            vec![1, 2],
+        );
+        assert_eq!(column_from_row.shape, vec![2, 1]);
+
+        let matrix_from_row = select_numeric(
+            vec![u64::MAX - 3, u64::MAX - 2, u64::MAX - 1, u64::MAX],
+            vec![2, 2],
+            vec![4, 1],
+            vec![1, 2],
+        );
+        assert_eq!(matrix_from_row.shape, vec![1, 2]);
+        let matrix_from_column = select_numeric(
+            vec![u64::MAX - 3, u64::MAX - 2, u64::MAX - 1, u64::MAX],
+            vec![2, 2],
+            vec![4, 1],
+            vec![2, 1],
+        );
+        assert_eq!(matrix_from_column.shape, vec![2, 1]);
+        let matrix_from_matrix = select_numeric(
+            vec![u64::MAX - 3, u64::MAX - 2, u64::MAX - 1, u64::MAX],
+            vec![2, 2],
+            vec![1, 2, 3, 4],
+            vec![2, 2],
+        );
+        assert_eq!(matrix_from_matrix.shape, vec![2, 2]);
+
+        let scalar_from_row = select_numeric(vec![u64::MAX], vec![1, 1], vec![1, 1], vec![1, 2]);
+        assert_eq!(scalar_from_row.shape, vec![1, 2]);
+        let scalar_from_column = select_numeric(vec![u64::MAX], vec![1, 1], vec![1, 1], vec![2, 1]);
+        assert_eq!(scalar_from_column.shape, vec![2, 1]);
+
+        let empty_from_row = select_numeric(
+            vec![u64::MAX - 2, u64::MAX - 1, u64::MAX],
+            vec![1, 3],
+            Vec::new(),
+            vec![0, 1],
+        );
+        assert_eq!(empty_from_row.shape, vec![1, 0]);
+        assert_eq!(
+            empty_from_row.integer_storage(),
+            Some(&IntegerStorage::U64(Vec::new()))
+        );
+        let empty_from_matrix = select_numeric(
+            vec![u64::MAX - 3, u64::MAX - 2, u64::MAX - 1, u64::MAX],
+            vec![2, 2],
+            Vec::new(),
+            vec![1, 0],
+        );
+        assert_eq!(empty_from_matrix.shape, vec![1, 0]);
+
+        let logical_row = select_logical(vec![1, 4], vec![1, 0, 1, 0], vec![4, 1]);
+        assert_eq!(logical_row.shape, vec![1, 2]);
+        assert_eq!(
+            logical_row.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX - 3, u64::MAX - 1]))
+        );
+        let logical_column = select_logical(vec![4, 1], vec![1, 0, 1, 0], vec![1, 4]);
+        assert_eq!(logical_column.shape, vec![2, 1]);
+        let logical_matrix = select_logical(vec![2, 2], vec![1, 0, 1, 0], vec![2, 2]);
+        assert_eq!(logical_matrix.shape, vec![2, 1]);
+        let logical_empty_row = select_logical(vec![1, 4], vec![0, 0, 0, 0], vec![4, 1]);
+        assert_eq!(logical_empty_row.shape, vec![1, 0]);
+        let logical_empty_matrix = select_logical(vec![2, 2], vec![0, 0, 0, 0], vec![2, 2]);
+        assert_eq!(logical_empty_matrix.shape, vec![0, 1]);
+    }
+
+    #[test]
+    fn getfield_logical_index_selectors_preserve_integer_target_storage() {
+        let values = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX - 1, u64::MAX]),
+            vec![1, 3],
+        )
+        .expect("typed target");
+        let mut st = StructValue::new();
+        st.fields
+            .insert("values".to_string(), Value::Tensor(values));
+        let mask = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).expect("logical mask");
+        let index = CellArray::new_with_shape(vec![Value::LogicalArray(mask)], vec![1, 1])
+            .expect("index cell");
+
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("logical index");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX]))
+        );
+
+        let values = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX - 1, u64::MAX]),
+            vec![1, 3],
+        )
+        .expect("typed target");
+        let mut st = StructValue::new();
+        st.fields
+            .insert("values".to_string(), Value::Tensor(values));
+        let index = CellArray::new_with_shape(vec![Value::Bool(true)], vec![1, 1])
+            .expect("scalar logical index");
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("short logical index");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX - 2]))
+        );
+    }
+
+    #[test]
+    fn getfield_cell_field_parentheses_indexing_preserves_cell_container() {
+        let payload = CellArray::new_with_shape(
+            vec![Value::from("first"), Value::from("second")],
+            vec![1, 2],
+        )
+        .expect("payload cell");
+        let mut st = StructValue::new();
+        st.fields.insert("values".to_string(), Value::Cell(payload));
+        let index = CellArray::new_with_shape(vec![Value::Int(IntValue::U8(2))], vec![1, 1])
+            .expect("index cell");
+
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("cell parentheses index");
+        let Value::Cell(cell) = result else {
+            panic!("expected one-element cell result");
+        };
+        assert_eq!((cell.rows, cell.cols), (1, 1));
+        assert_eq!(cell.data, vec![Value::from("second")]);
+    }
+
+    #[test]
+    fn getfield_logical_cell_indexing_uses_column_major_linear_positions() {
+        let payload = CellArray::new_with_shape(
+            vec![
+                Value::from("row1-col1"),
+                Value::from("row1-col2"),
+                Value::from("row2-col1"),
+                Value::from("row2-col2"),
+            ],
+            vec![2, 2],
+        )
+        .expect("payload cell");
+        let mut st = StructValue::new();
+        st.fields.insert("values".to_string(), Value::Cell(payload));
+        let mask = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).expect("logical mask");
+        let index = CellArray::new_with_shape(vec![Value::LogicalArray(mask)], vec![1, 1])
+            .expect("index cell");
+
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("logical cell index");
+        let Value::Cell(cell) = result else {
+            panic!("expected cell result");
+        };
+        assert_eq!((cell.rows, cell.cols), (2, 1));
+        assert_eq!(
+            cell.data,
+            vec![Value::from("row2-col1"), Value::from("row1-col2")]
+        );
+    }
+
+    #[test]
+    fn getfield_matrix_shaped_cell_selection_rebuilds_row_major_storage() {
+        let payload = CellArray::new_with_shape(
+            vec![
+                Value::from("a"),
+                Value::from("b"),
+                Value::from("c"),
+                Value::from("d"),
+            ],
+            vec![2, 2],
+        )
+        .expect("payload cell");
+        let selector = Tensor::new_integer(IntegerStorage::U8(vec![4, 2, 3, 1]), vec![2, 2])
+            .expect("matrix selector");
+        let index = CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1])
+            .expect("index cell");
+        let mut st = StructValue::new();
+        st.fields.insert("values".to_string(), Value::Cell(payload));
+
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("matrix-shaped cell selection");
+        let Value::Cell(cell) = result else {
+            panic!("expected cell result");
+        };
+        assert_eq!(cell.shape, vec![2, 2]);
+        assert_eq!(
+            cell.data,
+            vec![
+                Value::from("d"),
+                Value::from("b"),
+                Value::from("c"),
+                Value::from("a")
+            ]
+        );
+    }
+
+    #[test]
+    fn getfield_linear_cell_selection_accounts_for_nd_page_offsets() {
+        let payload = CellArray::new_with_shape(
+            vec![
+                Value::from("page1-row1-col1"),
+                Value::from("page1-row1-col2"),
+                Value::from("page1-row2-col1"),
+                Value::from("page1-row2-col2"),
+                Value::from("page2-row1-col1"),
+                Value::from("page2-row1-col2"),
+                Value::from("page2-row2-col1"),
+                Value::from("page2-row2-col2"),
+            ],
+            vec![2, 2, 2],
+        )
+        .expect("N-D payload cell");
+        let selector =
+            Tensor::new_integer(IntegerStorage::U8(vec![2, 6]), vec![1, 2]).expect("page selector");
+        let index = CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1])
+            .expect("index cell");
+        let mut st = StructValue::new();
+        st.fields.insert("values".to_string(), Value::Cell(payload));
+
+        let result = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect("N-D page selection");
+        let Value::Cell(cell) = result else {
+            panic!("expected cell result");
+        };
+        assert_eq!(cell.shape, vec![1, 2]);
+        assert_eq!(
+            cell.data,
+            vec![
+                Value::from("page1-row2-col1"),
+                Value::from("page2-row2-col1")
+            ]
+        );
+    }
+
+    #[test]
+    fn getfield_direct_resident_integer_field_preserves_handle_without_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: u32::MAX - 1,
+            buffer_id: u64::MAX - 1,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::U64,
+        );
+        let mut st = StructValue::new();
+        st.fields
+            .insert("values".to_string(), Value::GpuTensor(handle.clone()));
+
+        let result = run_getfield(Value::Struct(st), vec![Value::from("values")])
+            .expect("direct resident field");
+        assert_eq!(result, Value::GpuTensor(handle.clone()));
+        runmat_accelerate_api::clear_handle_integer_type(&handle);
+    }
+
+    #[test]
+    fn getfield_integer_capabilities_cover_payloads_and_structural_indices() {
+        assert_eq!(GETFIELD_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(GETFIELD_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(GETFIELD_INTEGER_CAPABILITIES[1].inputs[0].classes.len(), 8);
+        assert_eq!(
+            GETFIELD_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+        assert_eq!(
+            GETFIELD_INTEGER_CAPABILITIES[1].overload,
+            BuiltinIntegerOverloadKind::StructuralParameter
+        );
+    }
+
+    #[test]
+    fn getfield_textual_index_and_object_family_extensions_are_mode_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let mut st = StructValue::new();
+        st.fields.insert(
+            "values".to_string(),
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("tensor")),
+        );
+        let index = CellArray::new_with_shape(
+            vec![Value::CharArray(CharArray::new_row("end"))],
+            vec![1, 1],
+        )
+        .expect("index cell");
+        let err = run_getfield(
+            Value::Struct(st),
+            vec![Value::from("values"), Value::Cell(index)],
+        )
+        .expect_err("textual index extension");
+        assert_eq!(
+            err.identifier(),
+            GETFIELD_TEXTUAL_INDEX_EXTENSION.error_identifier
+        );
+
+        let mut object = ObjectInstance::new("TestClass".to_string());
+        object
+            .properties
+            .insert("value".to_string(), Value::Num(1.0));
+        let err = run_getfield(Value::Object(object), vec![Value::from("value")])
+            .expect_err("object extension");
+        assert_eq!(
+            err.identifier(),
+            GETFIELD_OBJECT_FAMILY_EXTENSION.error_identifier
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_object_property() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let mut obj = ObjectInstance::new("TestClass".to_string());
         obj.properties.insert("value".to_string(), Value::Num(7.0));
         let result = run_getfield(Value::Object(obj), vec![Value::from("value")]).expect("object");
@@ -1403,6 +2121,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_exception_fields() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let ex = MException::new("RunMat:Test".to_string(), "failure".to_string());
         let msg = run_getfield(Value::MException(ex.clone()), vec![Value::from("message")])
             .expect("message");
@@ -1415,6 +2134,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_exception_stack_cell() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let mut ex = MException::new("RunMat:Test".to_string(), "failure".to_string());
         ex.stack.push("demo.m:5".to_string());
         ex.stack.push("main.m:1".to_string());
@@ -1444,6 +2164,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_supports_end_index() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let mut st = StructValue::new();
         st.fields
@@ -1522,6 +2243,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_dependent_property_invokes_getter() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let class_name = "runmat.unittest.GetfieldDependent";
         let mut def = ClassDef {
             name: class_name.to_string(),
@@ -1554,6 +2276,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_inherited_dependent_property_uses_parent_metadata() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let parent_name = "runmat.unittest.GetfieldDependentParent";
         let child_name = "runmat.unittest.GetfieldDependentChild";
 
@@ -1596,6 +2319,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_invalid_handle_errors() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let target = runmat_gc::gc_allocate(Value::Num(1.0)).expect("gc allocate target");
         let handle = HandleRef {
             class_name: "Demo".to_string(),
@@ -1611,6 +2335,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_listener_fields_resolved() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("gc allocate target");
         let callback = runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string()))
             .expect("gc allocate callback");
@@ -1643,6 +2368,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_invalid_listener_rejects_rooted_fields() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("gc allocate target");
         let callback = runmat_gc::gc_allocate(Value::FunctionHandle("cb".to_string()))
             .expect("gc allocate callback");
@@ -1675,6 +2401,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn getfield_gpu_tensor_indexing() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ = wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default());
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
 

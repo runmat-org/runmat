@@ -3,8 +3,12 @@ use std::io::{Seek, SeekFrom, Write};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, CharArray, IntValue, Value,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, IntValue, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -23,8 +27,109 @@ const FWRITE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionD
     description: "direct fwrite of gpuArray input is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:FwriteGpuInputExtension"),
 };
+const FWRITE_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-integer-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integer-class fwrite file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteIntegerIdExtension"),
+};
+const FWRITE_INTEGER_SKIP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-integer-skip",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "typed integer fwrite skip controls are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteIntegerSkipExtension"),
+};
+const FWRITE_LOGICAL_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-logical-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "logical fwrite file identifiers and skips are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteLogicalControlExtension"),
+};
+const FWRITE_SINGLE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-single-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "single-precision fwrite file identifiers and skips are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteSingleControlExtension"),
+};
+const FWRITE_RESIDENT_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-resident-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident fwrite control arguments are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteResidentControlExtension"),
+};
+const FWRITE_ARROW_PRECISION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fwrite-arrow-precision",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fread-style source=>output fwrite precision syntax is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FwriteArrowPrecisionExtension"),
+};
 
-pub const FWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FWRITE_GPU_INPUT_EXTENSION];
+pub const FWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    FWRITE_GPU_INPUT_EXTENSION,
+    FWRITE_INTEGER_ID_EXTENSION,
+    FWRITE_INTEGER_SKIP_EXTENSION,
+    FWRITE_LOGICAL_CONTROL_EXTENSION,
+    FWRITE_SINGLE_CONTROL_EXTENSION,
+    FWRITE_RESIDENT_CONTROL_EXTENSION,
+    FWRITE_ARROW_PRECISION_EXTENSION,
+];
+
+const FWRITE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents all eight integer data classes; exact source values convert directly to the selected binary precision.",
+    }];
+const FWRITE_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents double identifiers; typed integer identifiers are independently gated.",
+    }];
+const FWRITE_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "skip",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents a double skip scalar; typed integer skips are independently gated and range-checked exactly.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fwrite(fileID, integer_A, precision, ...)",
+        inputs: &FWRITE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer data remains authoritative through binary encoding; narrowing saturates and count is double.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fwrite(integer_fileID, A, ...)",
+        inputs: &FWRITE_INTEGER_ID_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The identifier is validated exactly before registry access.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "count = fwrite(fileID, A, precision, integer_skip, ...)",
+        inputs: &FWRITE_INTEGER_SKIP_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The skip is validated exactly in the host seek domain.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -316,6 +421,7 @@ fn map_string_result<T>(
     type_resolver(crate::builtins::io::type_resolvers::fwrite_type),
     descriptor(crate::builtins::io::filetext::fwrite::FWRITE_DESCRIPTOR),
     extensions(crate::builtins::io::filetext::fwrite::FWRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::filetext::fwrite::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
 async fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -351,6 +457,26 @@ pub async fn evaluate(
             &FWRITE_GPU_INPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
+    }
+    preflight_control(fid_value, ControlRole::FileId)?;
+    let raw_refs: Vec<Value> = rest.to_vec();
+    let (raw_precision, raw_skip, _) =
+        map_string_result(classify_arguments(&raw_refs), &FWRITE_ERROR_INVALID_INPUT)?;
+    if let Some(skip) = raw_skip {
+        preflight_control(skip, ControlRole::Skip)?;
+    }
+    if let Some(precision) = raw_precision {
+        if scalar_string(
+            precision,
+            "fwrite: precision argument must be a string scalar or character vector",
+        )
+        .is_ok_and(|value| value.contains("=>"))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FWRITE_ARROW_PRECISION_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
     }
     let fid_host = gather_value(fid_value).await?;
     let fid = map_string_result(parse_fid(&fid_host), &FWRITE_ERROR_INVALID_INPUT)?;
@@ -430,6 +556,65 @@ async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
         );
     }
     Ok(gathered)
+}
+
+#[derive(Clone, Copy)]
+enum ControlRole {
+    FileId,
+    Skip,
+}
+
+fn preflight_control(value: &Value, role: ControlRole) -> BuiltinResult<()> {
+    let integer_extension = match role {
+        ControlRole::FileId => &FWRITE_INTEGER_ID_EXTENSION,
+        ControlRole::Skip => &FWRITE_INTEGER_SKIP_EXTENSION,
+    };
+    match value {
+        Value::Int(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
+        }
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
+        }
+        Value::Bool(_) | Value::LogicalArray(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FWRITE_LOGICAL_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FWRITE_SINGLE_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FWRITE_RESIDENT_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FWRITE_LOGICAL_CONTROL_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    integer_extension,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FWRITE_SINGLE_CONTROL_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn parse_fid(value: &Value) -> Result<i32, String> {
@@ -517,6 +702,7 @@ fn is_numeric_like(value: &Value) -> bool {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(la) => la.data.len() == 1,
+        Value::GpuTensor(handle) => handle.shape.iter().product::<usize>() == 1,
         _ => false,
     }
 }
@@ -944,6 +1130,9 @@ fn write_bytes(file: &mut File, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn to_u8(value: f64) -> u8 {
+    if value.is_nan() {
+        return 0;
+    }
     if !value.is_finite() {
         return if value.is_sign_negative() { 0 } else { u8::MAX };
     }
@@ -1044,6 +1233,9 @@ fn encode_f64(value: f64, endianness: Endianness) -> [u8; 8] {
 }
 
 fn saturating_round(value: f64, min: f64, max: f64) -> f64 {
+    if value.is_nan() {
+        return 0.0;
+    }
     if !value.is_finite() {
         return if value.is_sign_negative() { min } else { max };
     }
@@ -1145,6 +1337,50 @@ pub(crate) mod tests {
         assert!(labels.contains(&"count = fwrite(fid, data, precision, skip)"));
         assert!(labels.contains(&"count = fwrite(fid, data, precision, machinefmt)"));
         assert!(labels.contains(&"count = fwrite(fid, data, precision, skip, machinefmt)"));
+    }
+
+    #[test]
+    fn fwrite_integer_capabilities_and_control_roles_are_independently_gated() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 3);
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let fid =
+            preflight_control(&Value::Int(IntValue::I32(3)), ControlRole::FileId).unwrap_err();
+        assert_eq!(
+            fid.identifier(),
+            Some("RunMat:compatibility:FwriteIntegerIdExtension")
+        );
+        let skip = preflight_control(&Value::Int(IntValue::U16(2)), ControlRole::Skip).unwrap_err();
+        assert_eq!(
+            skip.identifier(),
+            Some("RunMat:compatibility:FwriteIntegerSkipExtension")
+        );
+    }
+
+    #[test]
+    fn fwrite_classifies_resident_skip_before_gathering() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 903,
+            buffer_id: 903,
+        });
+        let args = vec![Value::from("uint8"), resident];
+        let (_, skip, _) = classify_arguments(&args).expect("classified controls");
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = preflight_control(skip.expect("skip"), ControlRole::Skip).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FwriteResidentControlExtension")
+        );
+    }
+
+    #[test]
+    fn fwrite_nan_to_integer_precision_writes_zero() {
+        assert_eq!(to_u8(f64::NAN), 0);
+        assert_eq!(
+            encode_i16(f64::NAN, Endianness::Little),
+            0_i16.to_le_bytes()
+        );
+        assert_eq!(encode_u64(f64::NAN, Endianness::Big), 0_u64.to_be_bytes());
     }
 
     #[test]

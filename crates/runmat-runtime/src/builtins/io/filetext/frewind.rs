@@ -6,8 +6,13 @@
 use std::io::{Seek, SeekFrom};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +26,56 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const IDENTIFIER_TYPE_ERROR_DETAIL: &str = "file identifier must be a numeric scalar";
 const BUILTIN_NAME: &str = "frewind";
+
+const FREWIND_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "frewind-integer-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integer-class frewind file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FrewindIntegerIdExtension"),
+};
+const FREWIND_SINGLE_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "frewind-single-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "single-precision frewind file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FrewindSingleIdExtension"),
+};
+const FREWIND_LOGICAL_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "frewind-logical-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "logical frewind file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FrewindLogicalIdExtension"),
+};
+const FREWIND_RESIDENT_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "frewind-resident-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident frewind file identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FrewindResidentIdExtension"),
+};
+pub const FREWIND_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FREWIND_INTEGER_ID_EXTENSION,
+    FREWIND_SINGLE_ID_EXTENSION,
+    FREWIND_LOGICAL_ID_EXTENSION,
+    FREWIND_RESIDENT_ID_EXTENSION,
+];
+const FREWIND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents double identifiers; all eight typed integer classes are one exact, independently gated extension.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "frewind(integer_fileID)",
+        inputs: &FREWIND_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The identifier is decoded exactly before the host registry seek and the builtin returns no output.",
+    }];
 
 const FREWIND_OUTPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 const FREWIND_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -167,6 +222,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::frewind_type),
     descriptor(crate::builtins::io::filetext::frewind::FREWIND_DESCRIPTOR),
+    extensions(crate::builtins::io::filetext::frewind::FREWIND_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::filetext::frewind::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::filetext::frewind"
 )]
 async fn frewind_builtin(fid: Value) -> crate::BuiltinResult<Value> {
@@ -176,6 +233,7 @@ async fn frewind_builtin(fid: Value) -> crate::BuiltinResult<Value> {
 
 /// Evaluate the `frewind` builtin without invoking the runtime dispatcher.
 pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
+    preflight_fid(fid_value)?;
     let fid_host = gather_if_needed_async(fid_value)
         .await
         .map_err(map_control_flow)?;
@@ -213,6 +271,54 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
     registry::clear_eof_encountered(fid);
 
     Ok(())
+}
+
+fn preflight_fid(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Int(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FREWIND_INTEGER_ID_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FREWIND_INTEGER_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Bool(_) | Value::LogicalArray(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FREWIND_LOGICAL_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FREWIND_SINGLE_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FREWIND_RESIDENT_ID_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FREWIND_INTEGER_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FREWIND_SINGLE_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn parse_fid(value: &Value) -> BuiltinResult<i32> {
@@ -328,6 +434,23 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"frewind(fid)"));
+    }
+
+    #[test]
+    fn frewind_integer_capability_and_identifier_roles_are_independently_gated() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = preflight_fid(&Value::Int(IntValue::I32(3))).unwrap_err();
+        assert_eq!(
+            integer.identifier(),
+            Some("RunMat:compatibility:FrewindIntegerIdExtension")
+        );
+        let logical = preflight_fid(&Value::Bool(true)).unwrap_err();
+        assert_eq!(
+            logical.identifier(),
+            Some("RunMat:compatibility:FrewindLogicalIdExtension")
+        );
     }
 
     #[test]

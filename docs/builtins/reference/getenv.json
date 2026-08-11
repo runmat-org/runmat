@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-only operation. RunMat gathers GPU-resident arguments before querying the process environment; providers do not implement hooks for this builtin."
+    "notes": "Host-only operation. Resident numeric arguments are invalid environment names and reject before provider access; providers do not implement hooks for this builtin."
   },
   "fusion": {
     "elementwise": false,
@@ -25,17 +25,17 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::io::repl_fs::getenv::tests",
-    "integration": "builtins::io::repl_fs::getenv::tests::getenv_returns_struct_with_all_variables"
+    "integration": "builtins::io::repl_fs::getenv::tests::getenv_no_argument_returns_string_dictionary"
   },
-  "description": "`getenv(name)` returns the value of environment variable `name` visible to the current process. Calling `getenv` with no arguments returns a struct of available variables, consistent with MATLAB semantics.",
+  "description": "`getenv(name)` returns the value of environment variable `name` visible to the current process. Calling `getenv` with no arguments returns a dictionary of string names and values.",
   "behaviors": [
-    "Accepts character vectors (`'PATH'`) or string scalars (`\"PATH\"`). Character vector inputs return character vectors; string inputs return string scalars.",
+    "Accepts character vectors (`'PATH'`) or string scalars (`\"PATH\"`). Both scalar forms return character vectors.",
     "Vectorised calls are supported: pass a string array to receive a string array of values, or a cell array of character vectors to receive a cell array of character vectors.",
-    "When the requested variable is not defined, `getenv` returns an empty character vector or an empty string scalar (depending on the input type). This matches MATLAB’s “variable not found” semantics.",
-    "Calling `getenv` with no arguments returns a scalar struct. Field names are the environment variable names; field values are character vectors containing each variable’s value.",
+    "When a scalar requested variable is not defined, `getenv` returns an empty character vector. Nonscalar string and cell containers retain their documented container type and dimensions.",
+    "Calling `getenv` with no arguments returns a dictionary whose keys and values are strings.",
     "On Windows, environment variable lookups are case-insensitive, mirroring the operating system. On Unix-like systems, lookups are case-sensitive.",
-    "Trailing spaces in character matrix inputs are ignored so that padded rows created with MATLAB’s string manipulation functions remain compatible.",
-    "The builtin rejects non-text inputs (numeric arrays, logicals, GPU tensors, etc.) with a clear MATLAB-style diagnostic."
+    "RunMat mode additionally accepts padded multirow character matrices and cells containing string scalars; both conveniences are independently disabled in MATLAB-compatible modes.",
+    "The builtin rejects non-text inputs, including every integer class and resident numeric handles, before provider access or environment lookup."
   ],
   "examples": [
     {
@@ -60,19 +60,19 @@
     },
     {
       "description": "Inspect All Environment Variables",
-      "input": "env = getenv();\ndisp(env.USER)",
-      "output": "env =\n  struct with fields:\n    HOME: '/'\n    PATH: '/usr/local/bin:/usr/bin:/bin'\n    USER: 'user'"
+      "input": "env = getenv();\ndisp(env(\"USER\"))",
+      "output": "\"user\""
     },
     {
       "description": "Cache The Environment For Repeated Access",
-      "input": "env = getenv();\nresultsFolder = fullfile(env.HOME, \"results\")",
+      "input": "env = getenv();\nresultsFolder = fullfile(env(\"HOME\"), \"results\")",
       "output": "resultsFolder =\n    \"//results\""
     }
   ],
   "faqs": [
     {
       "question": "What does `getenv` return when the variable is missing?",
-      "answer": "An empty character vector (`''`) for character inputs, or an empty string scalar (`\"\"`) for string inputs. You can test for a missing variable with `isempty(value)` or `value == \"\"`."
+      "answer": "A scalar character-vector or string-scalar query returns an empty character vector (`''`). You can test for a missing variable with `isempty(value)`."
     },
     {
       "question": "Does `getenv` support vectorised inputs?",
@@ -88,15 +88,15 @@
     },
     {
       "question": "Can I call `getenv` from GPU-accelerated code?",
-      "answer": "Yes. Inputs originating on the GPU are gathered automatically. The builtin still executes on the CPU, and the output lives on the host."
+      "answer": "The environment lookup always executes on the host and accepts textual names. Resident numeric values are not converted into names and reject before provider access."
     },
     {
       "question": "How do I access all environment variables at once?",
-      "answer": "Call `getenv()` with no arguments. The result is a struct whose fields contain character vectors for each environment variable."
+      "answer": "Call `getenv()` with no arguments. The result is a dictionary with string keys and values."
     },
     {
-      "question": "What happens if an environment variable name is not a valid struct field?",
-      "answer": "RunMat preserves the exact name as a struct field. Access it via dynamic field references when the name contains characters that cannot be used in dot notation."
+      "question": "What happens if an environment variable name contains punctuation?",
+      "answer": "The no-argument dictionary preserves the exact string key, so names do not need to be valid structure field identifiers."
     },
     {
       "question": "Are trailing spaces in character inputs significant?",
@@ -189,8 +189,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/getenv.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/getenv.rs"
   },
-  "gpu_residency": "No. `getenv` has no GPU implementation and simply queries the host environment. Passing GPU-resident values is supported (RunMat gathers them automatically), but there is no benefit to calling `gpuArray` yourself.",
+  "gpu_residency": "No. `getenv` is a host environment query with textual inputs. Resident numeric values are invalid names and reject before provider access.",
   "gpu_behavior": [
-    "`getenv` always runs on the CPU. If the argument originates from the GPU—for example, a string scalar produced by an accelerated builtin—RunMat gathers it to host memory before reading the environment. No GPU kernels are launched, and acceleration providers do not need to implement hooks for this builtin."
+    "`getenv` always runs on the CPU. No GPU kernels, downloads, or acceleration-provider hooks participate."
   ]
 }

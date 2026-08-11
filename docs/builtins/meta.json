@@ -57834,6 +57834,61 @@
           "when": "Internal runtime conversion/control-flow operation fails.",
           "message": "fopen: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fopen-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class fopen query identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FopenIntegerIdExtension"
+        },
+        {
+          "id": "fopen-single-fileid",
+          "mode": "RunMatOnly",
+          "description": "single-precision fopen query identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FopenSingleIdExtension"
+        },
+        {
+          "id": "fopen-resident-fileid",
+          "mode": "RunMatOnly",
+          "description": "provider-resident fopen query identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FopenResidentIdExtension"
+        },
+        {
+          "id": "fopen-legacy-all",
+          "mode": "RunMatOnly",
+          "description": "legacy fopen no-argument and 'all' listing forms are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FopenLegacyAllExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "filename = fopen(integer_fileID)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents double query identifiers; typed integer identifiers are checked exactly as one gated RunMat extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "A successful query returns host character metadata; integer identifiers never cross a floating mirror."
+        }
       ]
     },
     {
@@ -57997,6 +58052,133 @@
           "when": "Internal runtime control-flow or conversion fails.",
           "message": "fprintf: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fprintf-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class fprintf file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FprintfIntegerIdExtension"
+        },
+        {
+          "id": "fprintf-single-fileid",
+          "mode": "RunMatOnly",
+          "description": "single-precision fprintf file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FprintfSingleIdExtension"
+        },
+        {
+          "id": "fprintf-resident-fileid",
+          "mode": "RunMatOnly",
+          "description": "provider-resident fprintf file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FprintfResidentIdExtension"
+        },
+        {
+          "id": "fprintf-integer-format",
+          "mode": "RunMatOnly",
+          "description": "numeric integer-code fprintf format specifications are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FprintfIntegerFormatExtension"
+        },
+        {
+          "id": "fprintf-numeric-format",
+          "mode": "RunMatOnly",
+          "description": "numeric-code fprintf format tensors are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FprintfNumericFormatExtension"
+        },
+        {
+          "id": "fprintf-resident-format",
+          "mode": "RunMatOnly",
+          "description": "provider-resident fprintf format specifications are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FprintfResidentFormatExtension"
+        },
+        {
+          "id": "fprintf-stream-label",
+          "mode": "RunMatOnly",
+          "description": "textual stdout and stderr fprintf targets are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FprintfStreamLabelExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "count = fprintf(formatSpec, integer_data...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer classes; integer conversions format authoritative values exactly and arrays traverse in column-major order."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "The host sink returns a double byte count; documented resident data gathers without changing the caller-owned value."
+        },
+        {
+          "form": "count = fprintf(integer_fileID, formatSpec, A...)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents double identifiers; typed integer identifiers are an independently gated extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The identifier is range-checked exactly before registry access."
+        },
+        {
+          "form": "count = fprintf(integer_formatSpec, A...)",
+          "inputs": [
+            {
+              "name": "formatSpec",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Rejected",
+              "notes": "R2026a documents character or string format specifications; numeric code vectors are a gated RunMat extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Integer code points are validated exactly before conversion to a host format string."
+        }
       ]
     },
     {
@@ -58074,7 +58256,7 @@
               "name": "precision",
               "ty": "StringScalar",
               "arity": "Optional",
-              "default": "\"double\"",
+              "default": "\"uint8=>double\"",
               "description": "Read precision label (for example \"double\", \"uint8\", \"*char\")."
             }
           ],
@@ -58400,6 +58582,162 @@
           "mode": "RunMatOnly",
           "description": "the fread \"like\" prototype selector is a RunMat extension",
           "error_identifier": "RunMat:compatibility:FreadLikeExtension"
+        },
+        {
+          "id": "fread-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class fread file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreadIntegerIdExtension"
+        },
+        {
+          "id": "fread-integer-size",
+          "mode": "RunMatOnly",
+          "description": "typed integer fread size controls are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreadIntegerSizeExtension"
+        },
+        {
+          "id": "fread-integer-skip",
+          "mode": "RunMatOnly",
+          "description": "typed integer fread skip controls are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreadIntegerSkipExtension"
+        },
+        {
+          "id": "fread-logical-control",
+          "mode": "RunMatOnly",
+          "description": "logical fread file identifiers, sizes, and skips are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreadLogicalControlExtension"
+        },
+        {
+          "id": "fread-single-control",
+          "mode": "RunMatOnly",
+          "description": "single-precision fread file identifiers, sizes, and skips are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreadSingleControlExtension"
+        },
+        {
+          "id": "fread-resident-control",
+          "mode": "RunMatOnly",
+          "description": "provider-resident fread control arguments are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreadResidentControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = fread(fileID, ..., integer_output_precision)",
+          "inputs": [],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Documented source=>output and *source precision forms produce the requested exact integer storage; the count output remains double."
+        },
+        {
+          "form": "A = fread(integer_fileID, ...)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents double file identifiers; typed integer identifiers are independently gated and checked exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The registry identifier is validated without a floating mirror."
+        },
+        {
+          "form": "A = fread(fileID, integer_sizeA, ...)",
+          "inputs": [
+            {
+              "name": "sizeA",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents double size values; typed integer scalar and two-element size controls are independently gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Scalar and two-element sizes are decoded exactly and bounded before allocation or file access."
+        },
+        {
+          "form": "A = fread(fileID, ..., integer_skip, ...)",
+          "inputs": [
+            {
+              "name": "skip",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents a double skip scalar; typed integer skip values are independently gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The skip is decoded exactly and bounded to the seek domain."
+        },
+        {
+          "form": "A = fread(fileID, ..., \"like\", integer_prototype)",
+          "inputs": [
+            {
+              "name": "prototype",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Rejected",
+              "notes": "A typed integer host or resident prototype selects the exact output class; this like form is a RunMat extension."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "FunctionSpecific",
+          "overload": "FunctionSpecific",
+          "notes": "The prototype determines one of all eight integer output classes. Host prototypes return exact host storage; resident prototypes upload through their actual owning provider after saturating conversion and strict output validation."
         }
       ]
     },
@@ -58957,6 +59295,61 @@
           "identifier": null,
           "when": "Internal runtime control-flow or conversion failed.",
           "message": "frewind: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "frewind-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class frewind file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FrewindIntegerIdExtension"
+        },
+        {
+          "id": "frewind-single-fileid",
+          "mode": "RunMatOnly",
+          "description": "single-precision frewind file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FrewindSingleIdExtension"
+        },
+        {
+          "id": "frewind-logical-fileid",
+          "mode": "RunMatOnly",
+          "description": "logical frewind file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FrewindLogicalIdExtension"
+        },
+        {
+          "id": "frewind-resident-fileid",
+          "mode": "RunMatOnly",
+          "description": "provider-resident frewind file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FrewindResidentIdExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "frewind(integer_fileID)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents double identifiers; all eight typed integer classes are one exact, independently gated extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The identifier is decoded exactly before the host registry seek and the builtin returns no output."
         }
       ]
     },
@@ -59957,6 +60350,70 @@
           "when": "Sparse-to-full materialisation fails internally.",
           "message": "full: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "full-integer-sparse",
+          "mode": "RunMatOnly",
+          "description": "sparse matrices with integer value storage are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FullIntegerSparseExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "A = full(S) with already-full integer S",
+          "inputs": [
+            {
+              "name": "S",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An already-full integer matrix is returned identically, preserving exact class, shape, values, storage, and residency."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host values pass through unchanged. Resident values retain the original handle and owning provider without dispatch through the ambient provider."
+        },
+        {
+          "form": "A = full(S) with RunMat sparse integer S",
+          "inputs": [
+            {
+              "name": "S",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat sparse integer CSC storage densifies exactly to the same integer class; public sparse value storage is limited to double, single, and logical."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The host CSC payload is expanded into exact dense integer storage after the independent full-integer-sparse compatibility gate."
+        }
       ]
     },
     {
@@ -60063,7 +60520,11 @@
           "when": "Input is not a supported function handle value.",
           "message": "func2str: expected function handle"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "func2str accepts only function-handle values and returns handle text; integer, numeric, and provider-resident values reject before provider access."
+      }
     },
     {
       "name": "functions",
@@ -60099,7 +60560,11 @@
           "when": "The input is not a supported function handle value.",
           "message": "functions: expected a function handle"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "functions accepts only function-handle values and returns a metadata struct; integer, numeric, and provider-resident values reject before provider access. Captured values in future workspace metadata are opaque closure state rather than integer signature positions and must remain exact."
+      }
     },
     {
       "name": "fwrite",
@@ -60341,6 +60806,125 @@
           "mode": "RunMatOnly",
           "description": "direct fwrite of gpuArray input is a RunMat extension",
           "error_identifier": "RunMat:compatibility:FwriteGpuInputExtension"
+        },
+        {
+          "id": "fwrite-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class fwrite file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FwriteIntegerIdExtension"
+        },
+        {
+          "id": "fwrite-integer-skip",
+          "mode": "RunMatOnly",
+          "description": "typed integer fwrite skip controls are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FwriteIntegerSkipExtension"
+        },
+        {
+          "id": "fwrite-logical-control",
+          "mode": "RunMatOnly",
+          "description": "logical fwrite file identifiers and skips are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FwriteLogicalControlExtension"
+        },
+        {
+          "id": "fwrite-single-control",
+          "mode": "RunMatOnly",
+          "description": "single-precision fwrite file identifiers and skips are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FwriteSingleControlExtension"
+        },
+        {
+          "id": "fwrite-resident-control",
+          "mode": "RunMatOnly",
+          "description": "provider-resident fwrite control arguments are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FwriteResidentControlExtension"
+        },
+        {
+          "id": "fwrite-arrow-precision",
+          "mode": "RunMatOnly",
+          "description": "fread-style source=>output fwrite precision syntax is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FwriteArrowPrecisionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "count = fwrite(fileID, integer_A, precision, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer data classes; exact source values convert directly to the selected binary precision."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer data remains authoritative through binary encoding; narrowing saturates and count is double."
+        },
+        {
+          "form": "count = fwrite(integer_fileID, A, ...)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents double identifiers; typed integer identifiers are independently gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The identifier is validated exactly before registry access."
+        },
+        {
+          "form": "count = fwrite(fileID, A, precision, integer_skip, ...)",
+          "inputs": [
+            {
+              "name": "skip",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents a double skip scalar; typed integer skips are independently gated and range-checked exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The skip is validated exactly in the host seek domain."
         }
       ]
     },
@@ -62540,7 +63124,25 @@
           "when": "Internal conversion of environment query outputs fails.",
           "message": "getenv: internal conversion failure"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "getenv-character-matrix-name",
+          "mode": "RunMatOnly",
+          "description": "getenv with a multirow character-matrix name is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GetenvCharacterMatrixNameExtension"
+        },
+        {
+          "id": "getenv-cell-string-name",
+          "mode": "RunMatOnly",
+          "description": "getenv with string scalars inside a cell-array name is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GetenvCellStringNameExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "getenv accepts host text names and returns text or a string dictionary. All eight integer classes and provider-resident numeric values reject without implicit text conversion, gather, provider access, or environment lookup."
+      }
     },
     {
       "name": "getfield",
@@ -62717,6 +63319,82 @@
           "identifier": "RunMat:getfield:InternalError",
           "when": "Internal value conversion or output assembly failed.",
           "message": "getfield: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "getfield-textual-index",
+          "mode": "RunMatOnly",
+          "description": "getfield with an end or numeric text index is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GetfieldTextualIndexExtension"
+        },
+        {
+          "id": "getfield-object-family",
+          "mode": "RunMatOnly",
+          "description": "getfield access to RunMat object, handle, listener, and exception values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GetfieldObjectFamilyExtension"
+        },
+        {
+          "id": "getfield-indexed-resident-field",
+          "mode": "RunMatOnly",
+          "description": "getfield indexing into a resident field with typed host gather is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GetfieldIndexedResidentFieldExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "value = getfield(S, field, ...) with integer field payload",
+          "inputs": [
+            {
+              "name": "field payload",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "A structure field can contain every integer class; direct access and host indexing preserve exact payload storage, class, shape, and magnitude."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Direct field retrieval clones the stored value without numeric conversion or provider access. Host subarray selection gathers native numeric storage rather than a floating mirror."
+        },
+        {
+          "form": "value = getfield(S, {integer_idx}, field, ..., {integer_idxN})",
+          "inputs": [
+            {
+              "name": "idx",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Each numeric index-cell component accepts exact positive scalar or vector values from every integer class; integral doubles remain accepted by the documented numeric index form."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Indices are decoded exactly to checked one-based host positions. The selected field determines output class; the selector class never does."
         }
       ]
     },

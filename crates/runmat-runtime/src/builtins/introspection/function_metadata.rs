@@ -1,7 +1,7 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, StructValue, Value,
 };
 
 const FUNCTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -41,6 +41,13 @@ pub const FUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &FUNCTIONS_ERRORS,
 };
+
+pub const FUNCTIONS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "functions accepts only function-handle values and returns a metadata struct; integer, numeric, and provider-resident values reject before provider access. Captured values in future workspace metadata are opaque closure state rather than integer signature positions and must remain exact.",
+    };
 
 #[derive(Debug, Clone, Copy)]
 enum FunctionHandleKind {
@@ -103,6 +110,7 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
     category = "introspection",
     summary = "Return deterministic metadata for a function handle.",
     descriptor(self::FUNCTIONS_DESCRIPTOR),
+    integer_audit(self::FUNCTIONS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::function_metadata"
 )]
 pub fn functions_builtin_registered(handle: Value) -> crate::BuiltinResult<Value> {
@@ -112,6 +120,7 @@ pub fn functions_builtin_registered(handle: Value) -> crate::BuiltinResult<Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
         let Value::Struct(info) = value else {
@@ -120,6 +129,51 @@ mod tests {
         info.fields
             .get(name)
             .unwrap_or_else(|| panic!("missing field {name}"))
+    }
+
+    fn unowned_resident_value() -> Value {
+        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        })
+    }
+
+    #[test]
+    fn functions_integer_audit_is_inapplicable() {
+        assert_eq!(
+            FUNCTIONS_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(FUNCTIONS_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
+    fn functions_rejects_integer_and_resident_values_before_provider_access() {
+        let integers = [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ];
+        for value in integers.into_iter().map(Value::Int).chain([
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I64(vec![i64::MAX]), vec![1, 1])
+                    .expect("integer tensor"),
+            ),
+            unowned_resident_value(),
+        ]) {
+            let error = dispatch_functions(value).expect_err("non-handle rejection");
+            assert_eq!(
+                error.identifier(),
+                FUNCTIONS_ERROR_HANDLE_UNSUPPORTED.identifier
+            );
+            assert!(!error.message().to_ascii_lowercase().contains("provider"));
+        }
     }
 
     #[test]

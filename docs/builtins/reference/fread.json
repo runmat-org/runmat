@@ -33,14 +33,14 @@
   },
   "description": "`fread` reads binary data from a file identifier returned by `fopen`. Size, precision, skip, and machine-format arguments follow MATLAB semantics, and file position advances accordingly. Optional second output returns the number of elements successfully read.",
   "behaviors": [
-    "`A = fread(fid)` reads to the end of the file, returning a column vector of doubles.",
+    "`A = fread(fid)` reads `uint8` source values to the end of the file and returns a double column vector, including a `0`-by-`1` column for an empty read.",
     "`A = fread(fid, sizeA)` reads at most `prod(sizeA)` elements, filling the result in column-major order. Use `[m n]` to request a matrix or `[m Inf]` to keep filling columns until EOF.",
     "`A = fread(fid, precision)` controls how many bytes each element consumes and how the result is typed. RunMat supports the common precisions from MATLAB: `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`. When no output class is specified, data is converted to double; `char` (and `*char`) return a MATLAB-style character array.",
     "`A = fread(fid, sizeA, precision, skip, machinefmt)` honours optional byte skipping and machine-format overrides (`'native'`, `'ieee-le'`, `'ieee-be'`). The machine format defaults to the value recorded by `fopen`.",
     "`[A, count] = fread(...)` returns the number of elements successfully read before encountering EOF.",
     "If MATLAB requests more elements than available, `fread` pads matrix outputs with zeros (or `'\\0'` for character data) to satisfy the requested dimensions; the `count` output always reflects the number of real elements read from the file.",
-    "In `runmat` compatibility mode, `A = fread(___, 'like', prototype)` is a RunMat extension that matches the residency and logical or numeric flavour of `prototype`. GPU prototypes trigger an upload after reading so the result remains on the device, while logical prototypes convert the output using the ordinary non-zero rule.",
-    "RunMat executes the builtin entirely on the host CPU. Arguments that reside on a GPU are gathered automatically before any I/O occurs."
+    "In `runmat` compatibility mode, `A = fread(___, 'like', prototype)` is a RunMat extension that matches the residency and logical or numeric flavour of `prototype`. All eight typed integer prototype classes determine exact saturating output storage. GPU prototypes upload through their actual owning provider after pre-read metadata validation, while logical prototypes convert the output using the ordinary non-zero rule. Character precision requires a character prototype, and character prototypes require character precision; invalid pairings reject before file access.",
+    "RunMat executes the builtin entirely on the host CPU. Typed integer file identifiers, sizes, and skips are independent RunMat extensions, as are logical, single, and provider-resident controls; all extension policy is checked before gather or I/O."
   ],
   "examples": [
     {
@@ -91,7 +91,7 @@
     },
     {
       "question": "What does the `'like'` prototype control?",
-      "answer": "The `'like', prototype` pair matches the output residency and high-level type of `prototype`. Pass a GPU tensor to receive a GPU tensor, use a logical array to obtain logical output (non-zero becomes `true`), or use a character prototype together with a character precision to obtain a `CharArray`."
+      "answer": "The `'like', prototype` pair matches the output residency and high-level type of `prototype`. All eight typed integer classes select exact saturating output storage. A GPU tensor returns through its owning provider, a logical prototype applies the non-zero rule, and only a character prototype may accompany character output precision."
     },
     {
       "question": "Which machine formats are supported?",
@@ -144,8 +144,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/filetext/fread.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fread.rs"
   },
-  "gpu_residency": "In `runmat` compatibility mode, the RunMat-only `'like'` form can upload the result to match a GPU prototype:\n```matlab:runnable\nfid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');\n```\n`values` stays on the GPU when an acceleration provider is active. Without a provider the function still returns correct data on the host.",
+  "gpu_residency": "In `runmat` compatibility mode, the RunMat-only `'like'` form can upload the result to match a GPU prototype:\n```matlab:runnable\nfid = fopen('samples.bin', 'w+b');\nfwrite(fid, [2.5 4.5 6.5 8.5], 'double');\nfrewind(fid);\n\nprototype = gpuArray.zeros(4, 1);\n[values, count] = fread(fid, 4, 'double', 'like', prototype);\n% When a GPU provider is active, values stays on the GPU and count == 4.\n\nfclose(fid);\ndelete('samples.bin');\n```\n`values` stays with the prototype's owning provider. A missing or malformed owner contract rejects before reading rather than silently returning host data.",
   "gpu_behavior": [
-    "`fread` is a host-only operation. When the file identifier or optional arguments (size vectors, precision strings, skip counts) live on the GPU, RunMat gathers them to the host first. File handles are managed by the shared registry established by `fopen`, and GPU providers never participate in file I/O. In `runmat` compatibility mode, the RunMat-only `'like'` form uploads the host result when its prototype is a GPU tensor so that the output mirrors the prototype's residency. Providers that fail the upload silently fall back to returning the host tensor."
+    "`fread` is a host-only operation. In `runmat` compatibility mode, independently gated resident controls gather before host I/O, and the separately gated `'like'` form can upload the result to a GPU prototype. File handles remain in the shared host registry."
   ]
 }
