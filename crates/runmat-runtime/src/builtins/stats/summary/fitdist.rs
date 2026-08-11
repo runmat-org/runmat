@@ -293,6 +293,70 @@ pub const FITDIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const FITDIST_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fitdist-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fitdist with typed-integer sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FitdistIntegerDataExtension"),
+};
+const FITDIST_INTEGER_FREQUENCY_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fitdist-integer-frequency",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fitdist with typed-integer Frequency storage is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FitdistIntegerFrequencyExtension"),
+    };
+const FITDIST_RESIDENT_FALLBACK_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fitdist-resident-fallback",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fitdist gathers resident inputs and returns a host distribution object",
+        error_identifier: Some("RunMat:compatibility:FitdistResidentFallbackExtension"),
+    };
+pub const FITDIST_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    FITDIST_INTEGER_DATA_EXTENSION,
+    FITDIST_INTEGER_FREQUENCY_EXTENSION,
+    FITDIST_RESIDENT_FALLBACK_EXTENSION,
+];
+const FITDIST_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a documents double sample data. RunMat mode admits all eight integer classes only when every observation is exactly representable at the binary64 fitting boundary.",
+    }];
+const FITDIST_INTEGER_FREQUENCY_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Frequency",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a requires nonnegative integer-valued single or double counts. RunMat mode additionally admits exact typed-integer count storage.",
+    }];
+pub const FITDIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pd = fitdist(integer_x, distname, ...)",
+        inputs: &FITDIST_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer observations are gated before provider access, gathered exactly when resident, and converted once to binary64; the returned host probability-distribution object has floating parameters.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pd = fitdist(x, distname, Frequency=integer_counts)",
+        inputs: &FITDIST_INTEGER_FREQUENCY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Typed counts are independently gated before provider access and must remain nonnegative, finite, integral, shape-matched, and exactly representable as binary64 weights.",
+    },
+];
+
 pub const PDF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PDF_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -449,6 +513,8 @@ fn internal_for(builtin: &'static str, message: impl Into<String>) -> RuntimeErr
     keywords = "fitdist,probability distribution,normal,exponential,lognormal,gamma,weibull,poisson,statistics",
     type_resolver(fitdist_type),
     descriptor(crate::builtins::stats::summary::fitdist::FITDIST_DESCRIPTOR),
+    extensions(crate::builtins::stats::summary::fitdist::FITDIST_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::summary::fitdist::FITDIST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::fitdist"
 )]
 pub(crate) async fn fitdist_builtin(
@@ -456,8 +522,10 @@ pub(crate) async fn fitdist_builtin(
     distname: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    ensure_fitdist_integer_extensions(&data, &rest)?;
+    ensure_fitdist_resident_fallback_extension(&data, &rest)?;
     let kind = parse_distribution_name(&distname)?;
-    let sample_tensor = value_to_tensor(FITDIST_NAME, data).await?;
+    let sample_tensor = fitdist_value_to_tensor(data, "x").await?;
     let sample = parse_sample(sample_tensor, parse_fit_options(rest).await?)?;
     let fit = fit_distribution(kind, &sample)?;
     Ok(Value::Object(distribution_object(&fit)?))
@@ -966,7 +1034,7 @@ async fn parse_fit_options(rest: Vec<Value>) -> BuiltinResult<FitOptions> {
             .to_ascii_lowercase();
         match name.as_str() {
             "frequency" | "freq" => {
-                let tensor = value_to_tensor(FITDIST_NAME, pair[1].clone()).await?;
+                let tensor = fitdist_value_to_tensor(pair[1].clone(), "Frequency").await?;
                 options.frequency = Some(tensor::tensor_into_values_f64(tensor));
             }
             "censoring" | "censor" => {
@@ -983,6 +1051,69 @@ async fn parse_fit_options(rest: Vec<Value>) -> BuiltinResult<FitOptions> {
         }
     }
     Ok(options)
+}
+
+fn ensure_fitdist_integer_extensions(data: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if is_typed_integer_value(data) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FITDIST_INTEGER_DATA_EXTENSION,
+            FITDIST_NAME,
+        )?;
+    }
+    for pair in rest.chunks_exact(2) {
+        if keyword_of(&pair[0]).is_some_and(|name| {
+            name.eq_ignore_ascii_case("frequency") || name.eq_ignore_ascii_case("freq")
+        }) && is_typed_integer_value(&pair[1])
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FITDIST_INTEGER_FREQUENCY_EXTENSION,
+                FITDIST_NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_fitdist_resident_fallback_extension(data: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if matches!(data, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FITDIST_RESIDENT_FALLBACK_EXTENSION,
+            FITDIST_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+async fn fitdist_value_to_tensor(value: Value, role: &str) -> BuiltinResult<Tensor> {
+    let gathered = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| invalid(format!("fitdist: {err}")))?;
+    let tensor = tensor::value_into_tensor_for(FITDIST_NAME, gathered)
+        .map_err(|_| invalid("fitdist: expected numeric input"))?;
+    ensure_exact_fitdist_integer_boundary(&tensor, role)?;
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid(format!("fitdist: {err}")))
+}
+
+fn ensure_exact_fitdist_integer_boundary(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    for integer in tensor
+        .integer_storage()
+        .expect("integer storage checked above")
+        .exact_values()
+    {
+        if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+            return Err(invalid(format!(
+                "fitdist: integer {role} values must be exactly representable as double"
+            )));
+        }
+    }
+    Ok(())
 }
 
 async fn value_to_tensor(name: &'static str, value: Value) -> BuiltinResult<Tensor> {
@@ -1059,14 +1190,14 @@ fn parse_sample(tensor: Tensor, options: FitOptions) -> BuiltinResult<WeightedSa
     let mut total_weight = 0.0;
     let sample_values = tensor::tensor_values_f64(&tensor);
     for (value, weight) in sample_values.into_iter().zip(frequency) {
-        if weight.is_nan() || weight < 0.0 {
+        if weight.is_nan() || weight < 0.0 || weight.fract() != 0.0 {
             return Err(invalid(
-                "fitdist: Frequency values must be nonnegative finite numbers",
+                "fitdist: Frequency values must be nonnegative finite integer counts",
             ));
         }
         if !weight.is_finite() {
             return Err(invalid(
-                "fitdist: Frequency values must be nonnegative finite numbers",
+                "fitdist: Frequency values must be nonnegative finite integer counts",
             ));
         }
         if value.is_nan() || weight == 0.0 {
@@ -1836,6 +1967,19 @@ mod tests {
         ]
     }
 
+    fn all_fitdist_integer_storages() -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(vec![1, 2, 3]),
+            IntegerStorage::I16(vec![1, 2, 3]),
+            IntegerStorage::I32(vec![1, 2, 3]),
+            IntegerStorage::I64(vec![1, 2, 3]),
+            IntegerStorage::U8(vec![1, 2, 3]),
+            IntegerStorage::U16(vec![1, 2, 3]),
+            IntegerStorage::U32(vec![1, 2, 3]),
+            IntegerStorage::U64(vec![1, 2, 3]),
+        ]
+    }
+
     #[test]
     fn fitdist_broadcast_indexing_appends_trailing_singletons() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1892,6 +2036,7 @@ mod tests {
 
     #[test]
     fn fitdist_accepts_typed_integer_sample_and_eval_points() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let pd = block_on(fitdist_builtin(
             int_vec_tensor(IntegerStorage::I16(vec![1, 2, 3]), 3),
             Value::String("Normal".into()),
@@ -1921,6 +2066,158 @@ mod tests {
     }
 
     #[test]
+    fn fitdist_integer_data_and_frequency_are_separate_gated_extensions() {
+        for storage in all_fitdist_integer_storages() {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            block_on(fitdist_builtin(
+                mirrorless_int_tensor(storage.clone(), vec![3, 1]),
+                Value::String("Normal".into()),
+                Vec::new(),
+            ))
+            .expect("integer observations");
+            block_on(fitdist_builtin(
+                vec_tensor(&[1.0, 2.0, 3.0]),
+                Value::String("Normal".into()),
+                vec![
+                    Value::from("Frequency"),
+                    mirrorless_int_tensor(storage, vec![3, 1]),
+                ],
+            ))
+            .expect("integer Frequency");
+        }
+
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let data_error = block_on(fitdist_builtin(
+            mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
+            Value::String("Normal".into()),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            data_error.identifier(),
+            Some("RunMat:compatibility:FitdistIntegerDataExtension")
+        );
+        let frequency_error = block_on(fitdist_builtin(
+            vec_tensor(&[1.0, 2.0, 3.0]),
+            Value::String("Normal".into()),
+            vec![
+                Value::from("Frequency"),
+                mirrorless_int_tensor(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            frequency_error.identifier(),
+            Some("RunMat:compatibility:FitdistIntegerFrequencyExtension")
+        );
+    }
+
+    #[test]
+    fn fitdist_rejects_inexact_integer_boundaries_and_fractional_frequency() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let exact_wide = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 54]), vec![1, 1])
+            .expect("exact wide integer");
+        ensure_exact_fitdist_integer_boundary(&exact_wide, "test")
+            .expect("wide powers of two remain exactly representable");
+        let wide = block_on(fitdist_builtin(
+            mirrorless_int_tensor(
+                IntegerStorage::U64(vec![1, 2, (1_u64 << 53) + 1]),
+                vec![3, 1],
+            ),
+            Value::String("Normal".into()),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert!(wide.message().contains("exactly representable as double"));
+
+        for invalid in [1.5, f64::NAN, f64::INFINITY, -1.0] {
+            let error = block_on(fitdist_builtin(
+                vec_tensor(&[1.0, 2.0]),
+                Value::String("Normal".into()),
+                vec![Value::from("Frequency"), vec_tensor(&[0.0, invalid])],
+            ))
+            .unwrap_err();
+            assert!(error.message().contains("integer counts"));
+        }
+    }
+
+    #[test]
+    fn fitdist_strict_mode_gates_resident_fallback_before_gather() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1])
+                .expect("integer observations");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+            let floating = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("observations");
+            let floating_handle =
+                gpu_helpers::upload_tensor(provider, &floating).expect("floating upload");
+            let resident_error = block_on(fitdist_builtin(
+                Value::GpuTensor(floating_handle.clone()),
+                Value::String("Normal".into()),
+                Vec::new(),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                resident_error.identifier(),
+                Some("RunMat:compatibility:FitdistResidentFallbackExtension")
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&floating_handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            let resident_option_error = block_on(fitdist_builtin(
+                vec_tensor(&[1.0, 2.0, 3.0]),
+                Value::String("Normal".into()),
+                vec![
+                    Value::from("Frequency"),
+                    Value::GpuTensor(floating_handle.clone()),
+                ],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                resident_option_error.identifier(),
+                Some("RunMat:compatibility:FitdistResidentFallbackExtension")
+            );
+
+            let error = block_on(fitdist_builtin(
+                Value::GpuTensor(handle.clone()),
+                Value::String("Normal".into()),
+                Vec::new(),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:FitdistIntegerDataExtension")
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+
+            let frequency = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1])
+                .expect("integer Frequency");
+            let frequency_handle =
+                gpu_helpers::upload_tensor(provider, &frequency).expect("integer upload");
+            let error = block_on(fitdist_builtin(
+                vec_tensor(&[1.0, 2.0, 3.0]),
+                Value::String("Normal".into()),
+                vec![
+                    Value::from("Frequency"),
+                    Value::GpuTensor(frequency_handle.clone()),
+                ],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:FitdistIntegerFrequencyExtension")
+            );
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&frequency_handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+            );
+        });
+    }
+
+    #[test]
     fn fitdist_random_shape_parser_ignores_all_typed_mirrors() {
         let storages = [
             IntegerStorage::I8(vec![2, 3]),
@@ -1947,6 +2244,7 @@ mod tests {
 
     #[test]
     fn fitdist_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let pd = block_on(fitdist_builtin(
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
             Value::String("Exponential".into()),
@@ -1973,6 +2271,7 @@ mod tests {
 
     #[test]
     fn fitdist_sample_length_uses_typed_integer_storage_not_mirror() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let pd = block_on(fitdist_builtin(
             mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]),
             Value::String("Normal".into()),

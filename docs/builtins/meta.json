@@ -54636,6 +54636,109 @@
           "when": "RunMat cannot construct the ClassificationLinear result.",
           "message": "fitclinear: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fitclinear-integer-predictors",
+          "mode": "RunMatOnly",
+          "description": "fitclinear with typed-integer predictors is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitclinearIntegerPredictorExtension"
+        },
+        {
+          "id": "fitclinear-integer-numeric-arguments",
+          "mode": "RunMatOnly",
+          "description": "fitclinear with typed-integer weights or numeric controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitclinearIntegerNumericArgumentExtension"
+        },
+        {
+          "id": "fitclinear-resident-input",
+          "mode": "RunMatOnly",
+          "description": "fitclinear host fitting from provider-resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitclinearResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Mdl = fitclinear(integer_X, Y, ___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer predictors must be exactly representable in binary64 before host fitting; values that would round are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Matrix and table predictor roles share the same exact conversion boundary."
+        },
+        {
+          "form": "Mdl = fitclinear(X, integer_Y, ClassNames=integer_names)",
+          "inputs": [
+            {
+              "name": "Y or ClassNames",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Grouping labels retain their exact integer class and identity through model storage and prediction, including above flintmax."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Class grouping never passes through floating point."
+        },
+        {
+          "form": "Mdl = fitclinear(X, Y, Weights=integer_W, numericOption=integer_value)",
+          "inputs": [
+            {
+              "name": "Weights or numeric option",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer statistical inputs are independently gated and must cross the binary64 boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer weights and numeric controls are RunMat-only extensions and reject rather than round."
+        }
       ]
     },
     {
@@ -54776,6 +54879,109 @@
           "when": "RunMat cannot construct the ClassificationTree result.",
           "message": "fitctree: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fitctree-integer-predictors",
+          "mode": "RunMatOnly",
+          "description": "fitctree with typed-integer predictors is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitctreeIntegerPredictorExtension"
+        },
+        {
+          "id": "fitctree-integer-numeric-arguments",
+          "mode": "RunMatOnly",
+          "description": "fitctree with typed-integer weights or numeric controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitctreeIntegerNumericArgumentExtension"
+        },
+        {
+          "id": "fitctree-resident-input",
+          "mode": "RunMatOnly",
+          "description": "fitctree host fitting from provider-resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitctreeResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Mdl = fitctree(integer_X, Y, ___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer predictors must be exactly representable in binary64 before host fitting; values that would round are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Matrix and table predictor roles share the same exact conversion boundary."
+        },
+        {
+          "form": "Mdl = fitctree(X, integer_Y, ClassNames=integer_names)",
+          "inputs": [
+            {
+              "name": "Y or ClassNames",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Grouping labels retain their exact integer class and identity through model storage and prediction, including above flintmax."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Class grouping never passes through floating point."
+        },
+        {
+          "form": "Mdl = fitctree(X, Y, Weights=integer_W, numericOption=integer_value)",
+          "inputs": [
+            {
+              "name": "Weights or numeric option",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer statistical inputs are independently gated and must cross the binary64 boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer weights and numeric controls are RunMat-only extensions and reject rather than round."
+        }
       ]
     },
     {
@@ -54865,6 +55071,82 @@
           "identifier": "RunMat:fitdist:Internal",
           "when": "RunMat cannot construct distribution outputs.",
           "message": "fitdist: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fitdist-integer-data",
+          "mode": "RunMatOnly",
+          "description": "fitdist with typed-integer sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitdistIntegerDataExtension"
+        },
+        {
+          "id": "fitdist-integer-frequency",
+          "mode": "RunMatOnly",
+          "description": "fitdist with typed-integer Frequency storage is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitdistIntegerFrequencyExtension"
+        },
+        {
+          "id": "fitdist-resident-fallback",
+          "mode": "RunMatOnly",
+          "description": "fitdist gathers resident inputs and returns a host distribution object",
+          "error_identifier": "RunMat:compatibility:FitdistResidentFallbackExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "pd = fitdist(integer_x, distname, ...)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents double sample data. RunMat mode admits all eight integer classes only when every observation is exactly representable at the binary64 fitting boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer observations are gated before provider access, gathered exactly when resident, and converted once to binary64; the returned host probability-distribution object has floating parameters."
+        },
+        {
+          "form": "pd = fitdist(x, distname, Frequency=integer_counts)",
+          "inputs": [
+            {
+              "name": "Frequency",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a requires nonnegative integer-valued single or double counts. RunMat mode additionally admits exact typed-integer count storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Typed counts are independently gated before provider access and must remain nonnegative, finite, integral, shape-matched, and exactly representable as binary64 weights."
         }
       ]
     },
@@ -55004,6 +55286,181 @@
           "identifier": "RunMat:fitlm:Internal",
           "when": "RunMat cannot construct a LinearModel result.",
           "message": "fitlm: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fitlm-integer-predictor-data",
+          "mode": "RunMatOnly",
+          "description": "fitlm with typed-integer predictor data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitlmIntegerPredictorExtension"
+        },
+        {
+          "id": "fitlm-integer-response-data",
+          "mode": "RunMatOnly",
+          "description": "fitlm with typed-integer response data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitlmIntegerResponseExtension"
+        },
+        {
+          "id": "fitlm-integer-weights",
+          "mode": "RunMatOnly",
+          "description": "fitlm with typed-integer observation weights is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitlmIntegerWeightsExtension"
+        },
+        {
+          "id": "fitlm-integer-selectors",
+          "mode": "RunMatOnly",
+          "description": "fitlm with typed-integer Exclude or selector controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitlmIntegerSelectorExtension"
+        },
+        {
+          "id": "fitlm-integer-controls",
+          "mode": "RunMatOnly",
+          "description": "fitlm with a typed-integer Intercept control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FitlmIntegerControlExtension"
+        },
+        {
+          "id": "fitlm-resident-fallback",
+          "mode": "RunMatOnly",
+          "description": "fitlm gathers resident inputs and returns a host linear-model object",
+          "error_identifier": "RunMat:compatibility:FitlmResidentFallbackExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "mdl = fitlm(integer_X,y,...) or fitlm(table_with_integer_predictors,...)",
+          "inputs": [
+            {
+              "name": "X or active table predictors",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single or double predictors. RunMat mode admits all eight integer classes at an exact binary64 fitting boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Predictors are gated before provider access; admitted resident data gathers exactly and the returned model is currently host-resident with binary64 properties."
+        },
+        {
+          "form": "mdl = fitlm(X,integer_y,...) or fitlm(table_with_integer_response,...)",
+          "inputs": [
+            {
+              "name": "y or active table response",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single or double matrix responses and numeric/logical table responses, but not typed integers. RunMat mode requires exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Responses are independently gated and checked before binary64 least-squares computation."
+        },
+        {
+          "form": "mdl = fitlm(...,Weights=integer_weights)",
+          "inputs": [
+            {
+              "name": "Weights",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "R2026a documents single or double weights. RunMat mode admits typed integers only at an exact binary64 weighting boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer weights remain authoritative through admission and must be nonnegative, finite, shape-matched, and exactly representable as double."
+        },
+        {
+          "form": "mdl = fitlm(...,Exclude=integer_indices,...) ",
+          "inputs": [
+            {
+              "name": "Exclude and numeric selectors",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer structural selectors are parsed exactly as one-based indices or logical-style masks after independent extension admission."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "One-based integer selectors are decoded from exact storage without a floating mirror."
+        },
+        {
+          "form": "mdl = fitlm(...,Intercept=integer_scalar)",
+          "inputs": [
+            {
+              "name": "Intercept",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "A typed-integer Intercept scalar is a RunMat-only exact zero/nonzero control and does not cross through binary64."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Zero disables and every nonzero exact integer enables the intercept."
         }
       ]
     },
@@ -55833,6 +56290,174 @@
           "when": "Bounds/callback/input scalar semantics are invalid.",
           "message": "fminbnd: invalid input"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fminbnd-nonfloating-bounds",
+          "mode": "RunMatOnly",
+          "description": "fminbnd with typed-integer or logical bounds is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FminbndNumericInputExtension"
+        },
+        {
+          "id": "fminbnd-nonfloating-objective",
+          "mode": "RunMatOnly",
+          "description": "fminbnd with typed-integer or logical objective values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FminbndCallbackExtension"
+        },
+        {
+          "id": "fminbnd-typed-option-controls",
+          "mode": "RunMatOnly",
+          "description": "fminbnd with typed-integer option controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FminbndOptionExtension"
+        },
+        {
+          "id": "fminbnd-resident-fallback",
+          "mode": "RunMatOnly",
+          "description": "fminbnd with provider-resident numeric input or callback output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FminbndResidentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = fminbnd(fun, integer_x1, integer_x2, options)",
+          "inputs": [
+            {
+              "name": "x1",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer lower bounds are an independently gated RunMat extension and must convert exactly to binary64."
+            },
+            {
+              "name": "x2",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer upper bounds are an independently gated RunMat extension and must convert exactly to binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Documented bounds are double. Strict compatibility rejects typed integers; RunMat mode admits exact binary64 values and returns the ordinary double solver outputs."
+        },
+        {
+          "form": "x = fminbnd(fun_returning_integer, x1, x2, options)",
+          "inputs": [
+            {
+              "name": "fun(x) result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer objective results are gated before resident gather and must convert exactly to binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Strict compatibility rejects typed-integer objective values before provider access; RunMat mode converts exact values to binary64 and returns double x and fval plus function-specific diagnostics."
+        },
+        {
+          "form": "fminbnd(..., options.TolX=integer)",
+          "inputs": [
+            {
+              "name": "TolX",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer TolX is independently gated and must convert exactly to a positive binary64 scalar."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer tolerance controls are RunMat-only and do not change the documented output classes."
+        },
+        {
+          "form": "fminbnd(..., options.MaxIter=integer, options.MaxFunEvals=integer)",
+          "inputs": [
+            {
+              "name": "MaxIter",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer iteration counts are independently gated and decoded exactly through platform bounds."
+            },
+            {
+              "name": "MaxFunEvals",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer evaluation counts are independently gated and decoded exactly through platform bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The documented controls are integer-valued numeric scalars, not documented typed-integer classes. RunMat's typed forms preserve exact counts without a binary64 round trip."
+        }
       ]
     },
     {
@@ -56441,6 +57066,217 @@
           "identifier": "RunMat:fminunc:InvalidInput",
           "when": "Initial guess/callback/iteration semantics are invalid.",
           "message": "fminunc: invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fminunc-nonfloating-initial-point",
+          "mode": "RunMatOnly",
+          "description": "fminunc with a typed-integer or logical initial point is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FminuncNumericInputExtension"
+        },
+        {
+          "id": "fminunc-nonfloating-callback-output",
+          "mode": "RunMatOnly",
+          "description": "fminunc with typed-integer or logical objective or derivative output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FminuncCallbackExtension"
+        },
+        {
+          "id": "fminunc-typed-option-controls",
+          "mode": "RunMatOnly",
+          "description": "fminunc with typed-integer option controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FminuncOptionExtension"
+        },
+        {
+          "id": "fminunc-resident-fallback",
+          "mode": "RunMatOnly",
+          "description": "fminunc with provider-resident numeric input or callback output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FminuncResidentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = fminunc(fun, integer_x0, options)",
+          "inputs": [
+            {
+              "name": "x0",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer initial guesses are independently gated and every element must convert exactly to binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented x0 is double. Strict compatibility rejects typed integers; RunMat mode admits exact binary64 values and returns the ordinary double x, fval, gradient, and Hessian outputs plus diagnostics."
+        },
+        {
+          "form": "fminunc callback returns integer objective or gradient",
+          "inputs": [
+            {
+              "name": "objective result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer objective values are gated before resident gather and must convert exactly to binary64."
+            },
+            {
+              "name": "gradient result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer supplied gradients are gated independently and every element must convert exactly to binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Strict compatibility rejects typed callback outputs before provider access. RunMat mode converts exact values to binary64; solver outputs retain their function-specific double and diagnostic classes."
+        },
+        {
+          "form": "fminunc(..., options.TolX=integer, options.TolFun=integer)",
+          "inputs": [
+            {
+              "name": "TolX",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer TolX is independently gated and must convert exactly to a positive binary64 scalar."
+            },
+            {
+              "name": "TolFun",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer TolFun is independently gated and must convert exactly to a positive binary64 scalar."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer tolerance controls are RunMat-only and do not change output classes."
+        },
+        {
+          "form": "fminunc(..., options.MaxIter=integer, options.MaxFunEvals=integer)",
+          "inputs": [
+            {
+              "name": "MaxIter",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer iteration counts are independently gated and decoded exactly through the solver limit."
+            },
+            {
+              "name": "MaxFunEvals",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer evaluation counts are independently gated and decoded exactly through the solver limit."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The documented controls are integer-valued numeric scalars, not documented typed-integer classes. RunMat's typed forms preserve exact counts without a binary64 round trip."
+        },
+        {
+          "form": "fminunc(..., options.SpecifyObjectiveGradient=integer)",
+          "inputs": [
+            {
+              "name": "SpecifyObjectiveGradient",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer 0 or 1 is a RunMat-only spelling. Documented logical false or true remains accepted in strict compatibility mode."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Only typed-integer 0 or 1 uses this extension. Logical option values are documented and bypass the typed-integer extension gate."
         }
       ]
     },
@@ -58050,7 +58886,7 @@
     },
     {
       "name": "fsolve",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
@@ -58115,6 +58951,398 @@
               "description": "Approximate solution vector/scalar."
             }
           ]
+        },
+        {
+          "label": "[x,fval] = fsolve(fun, x0)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "System residual callback."
+            },
+            {
+              "name": "x0",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial guess scalar/vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate solution."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Function value at x."
+            }
+          ]
+        },
+        {
+          "label": "[x,fval] = fsolve(fun, x0, options)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "System residual callback."
+            },
+            {
+              "name": "x0",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial guess scalar/vector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate solution."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Function value at x."
+            }
+          ]
+        },
+        {
+          "label": "[x,fval,exitflag] = fsolve(fun, x0)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "System residual callback."
+            },
+            {
+              "name": "x0",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial guess scalar/vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate solution."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Function value at x."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Convergence status code."
+            }
+          ]
+        },
+        {
+          "label": "[x,fval,exitflag] = fsolve(fun, x0, options)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "System residual callback."
+            },
+            {
+              "name": "x0",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial guess scalar/vector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate solution."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Function value at x."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Convergence status code."
+            }
+          ]
+        },
+        {
+          "label": "[x,fval,exitflag,output] = fsolve(fun, x0)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "System residual callback."
+            },
+            {
+              "name": "x0",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial guess scalar/vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate solution."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Function value at x."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Convergence status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver diagnostics."
+            }
+          ]
+        },
+        {
+          "label": "[x,fval,exitflag,output] = fsolve(fun, x0, options)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "System residual callback."
+            },
+            {
+              "name": "x0",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial guess scalar/vector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate solution."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Function value at x."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Convergence status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver diagnostics."
+            }
+          ]
+        },
+        {
+          "label": "[x,fval,exitflag,output,jacobian] = fsolve(fun, x0)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "System residual callback."
+            },
+            {
+              "name": "x0",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial guess scalar/vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate solution."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Function value at x."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Convergence status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver diagnostics."
+            },
+            {
+              "name": "jacobian",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Jacobian at x."
+            }
+          ]
+        },
+        {
+          "label": "[x,fval,exitflag,output,jacobian] = fsolve(fun, x0, options)",
+          "inputs": [
+            {
+              "name": "fun",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "System residual callback."
+            },
+            {
+              "name": "x0",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Initial guess scalar/vector."
+            },
+            {
+              "name": "options",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": null,
+              "description": "Options struct from optimset."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "x",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Approximate solution."
+            },
+            {
+              "name": "fval",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Function value at x."
+            },
+            {
+              "name": "exitflag",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Convergence status code."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Solver diagnostics."
+            },
+            {
+              "name": "jacobian",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Jacobian at x."
+            }
+          ]
         }
       ],
       "errors": [
@@ -58129,6 +59357,174 @@
           "identifier": "RunMat:fsolve:InvalidInput",
           "when": "Initial guess/callback/iteration semantics are invalid.",
           "message": "fsolve: invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fsolve-nonfloating-initial-point",
+          "mode": "RunMatOnly",
+          "description": "fsolve with a typed-integer or logical initial point is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsolveNumericInputExtension"
+        },
+        {
+          "id": "fsolve-nonfloating-callback-output",
+          "mode": "RunMatOnly",
+          "description": "fsolve with typed-integer or logical residual output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsolveCallbackExtension"
+        },
+        {
+          "id": "fsolve-typed-option-controls",
+          "mode": "RunMatOnly",
+          "description": "fsolve with typed-integer option controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsolveOptionExtension"
+        },
+        {
+          "id": "fsolve-resident-fallback",
+          "mode": "RunMatOnly",
+          "description": "fsolve with provider-resident numeric input or callback output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsolveResidentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = fsolve(fun, integer_x0, options)",
+          "inputs": [
+            {
+              "name": "x0",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer initial guesses are independently gated and every element must convert exactly to binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented x0 is double. Strict compatibility rejects typed integers; RunMat mode admits exact binary64 values and returns double x, fval, exitflag, diagnostics, and Jacobian outputs."
+        },
+        {
+          "form": "fsolve callback returns an integer residual",
+          "inputs": [
+            {
+              "name": "fun(x) residual",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer residuals are gated before resident gather and every element must convert exactly to binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Strict compatibility rejects typed residuals before provider access. RunMat mode converts exact values to binary64; the one-to-five output contract remains function-specific and double-valued for numeric results."
+        },
+        {
+          "form": "fsolve(..., options.TolX=integer, options.TolFun=integer)",
+          "inputs": [
+            {
+              "name": "TolX",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer TolX is independently gated and must convert exactly to a positive binary64 scalar."
+            },
+            {
+              "name": "TolFun",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer TolFun is independently gated and must convert exactly to a positive binary64 scalar."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer tolerance controls are RunMat-only and do not change output classes."
+        },
+        {
+          "form": "fsolve(..., options.MaxIter=integer, options.MaxFunEvals=integer)",
+          "inputs": [
+            {
+              "name": "MaxIter",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer iteration counts are independently gated and decoded exactly through platform bounds."
+            },
+            {
+              "name": "MaxFunEvals",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer evaluation counts are independently gated and decoded exactly through platform bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The documented controls are integer-valued numeric scalars, not documented typed-integer classes. RunMat's typed forms preserve exact counts without a binary64 round trip."
         }
       ]
     },
@@ -59232,6 +60628,158 @@
           "identifier": "RunMat:fzero:TooManyOutputs",
           "when": "`fzero` is called with more than four requested output arguments.",
           "message": "fzero: too many output arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fzero-nonfloating-initial-point",
+          "mode": "RunMatOnly",
+          "description": "fzero with a typed-integer or logical initial point or interval is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FzeroNumericInputExtension"
+        },
+        {
+          "id": "fzero-nonfloating-callback-output",
+          "mode": "RunMatOnly",
+          "description": "fzero with typed-integer or logical function values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FzeroCallbackExtension"
+        },
+        {
+          "id": "fzero-typed-option-controls",
+          "mode": "RunMatOnly",
+          "description": "fzero with typed-integer option controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FzeroOptionExtension"
+        },
+        {
+          "id": "fzero-resident-fallback",
+          "mode": "RunMatOnly",
+          "description": "fzero with provider-resident numeric input or callback output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FzeroResidentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = fzero(fun, integer_x0_or_interval, options)",
+          "inputs": [
+            {
+              "name": "x0 or [a,b]",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer initial points and intervals are independently gated and every value must convert exactly to binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented x0 supports single or double, not typed-integer classes. Strict compatibility rejects typed integers; RunMat mode admits exact binary64 values and returns double x, fval, and exitflag. A documented single x0 separately yields single numeric outputs."
+        },
+        {
+          "form": "fzero callback returns an integer function value",
+          "inputs": [
+            {
+              "name": "fun(x) result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer function values are gated before resident gather and must convert exactly to binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Strict compatibility rejects typed function values before provider access. RunMat mode converts exact values at the binary64 solver boundary; numeric output precision remains determined by x0."
+        },
+        {
+          "form": "fzero(..., options.TolX=integer)",
+          "inputs": [
+            {
+              "name": "TolX",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer TolX is independently gated and must convert exactly to a positive binary64 scalar."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Typed-integer TolX is RunMat-only. It overrides the precision-specific default without changing output precision."
+        },
+        {
+          "form": "fzero(..., options.MaxIter=integer, options.MaxFunEvals=integer)",
+          "inputs": [
+            {
+              "name": "MaxIter",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer iteration counts are independently gated and decoded exactly through platform bounds."
+            },
+            {
+              "name": "MaxFunEvals",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer evaluation counts are independently gated and decoded exactly through platform bounds."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The documented controls are integer-valued numeric scalars, not documented typed-integer classes. RunMat's typed forms preserve exact counts without a binary64 round trip."
         }
       ]
     },

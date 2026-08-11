@@ -173,6 +173,15 @@ fn fitclinear_surface_executes_from_scripts() {
 }
 
 #[test]
+fn fitting_integer_semantics_execute_from_compiled_source() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(
+        "base = uint64(9007199254740992); labels = base + uint64([1;1;2;2]); X = [0;1;2;3]; linear = fitclinear(X, labels, 'Learner', 'logistic', 'Lambda', 0, 'Solver', 'sgd'); linear_labels = predict(linear, [0;3]); tree = fitctree(X, labels, 'MaxNumSplits', uint8(1), 'MinParentSize', uint16(2)); tree_labels = predict(tree, [0;3]); if ~strcmp(class(linear_labels),'uint64') || linear_labels(1) ~= base+uint64(1) || linear_labels(2) ~= base+uint64(2) || ~strcmp(class(tree_labels),'uint64') || tree_labels(1) ~= base+uint64(1) || tree_labels(2) ~= base+uint64(2); error('compiled classifier integer labels lost identity'); end; pd = fitdist(uint16([1;2;3]), 'Normal', 'Frequency', uint8([1;1;1])); if abs(pd.ParameterValues(1)-2) > 1e-10; error('compiled fitdist integer boundary failed'); end; mdl = fitlm(int16([0;1;2;3]), int32([1;3;5;7]), 'Intercept', uint8(1)); coefficients = mdl.Coefficients.Estimate; if abs(coefficients(1)-1) > 1e-8 || abs(coefficients(2)-2) > 1e-8; error('compiled fitlm integer boundary failed'); end;",
+    )
+    .expect("compiled fitting integer semantics");
+}
+
+#[test]
 fn tsne_surface_executes_from_scripts() {
     let vars = execute_source(
         "rng('default'); X = [0 0; 0.2 0.1; 9.8 9.9; NaN 1]; [Y,loss] = tsne(X, 'Algorithm', 'exact', 'Perplexity', 2, 'NumDimensions', 2, 'Options', struct('MaxIter', 5)); s = size(Y); rows = s(1); cols = s(2);",

@@ -14,7 +14,11 @@
 //! `TolX`, `MaxIter`, `MaxFunEvals`, and `Display`.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     LogicalArray, StructValue, Tensor, Value,
 };
@@ -233,6 +237,133 @@ const FMINBND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescript
 const FMINBND_ERRORS: [BuiltinErrorDescriptor; 2] =
     [FMINBND_ERROR_INVALID_ARGUMENT, FMINBND_ERROR_INVALID_INPUT];
 
+const FMINBND_INTEGER_BOUND_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x1",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer lower bounds are an independently gated RunMat extension and must convert exactly to binary64.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "x2",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer upper bounds are an independently gated RunMat extension and must convert exactly to binary64.",
+    },
+];
+const FMINBND_INTEGER_OBJECTIVE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fun(x) result",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer objective results are gated before resident gather and must convert exactly to binary64.",
+    }];
+const FMINBND_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "TolX",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer TolX is independently gated and must convert exactly to a positive binary64 scalar.",
+    }];
+const FMINBND_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "MaxIter",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer iteration counts are independently gated and decoded exactly through platform bounds.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "MaxFunEvals",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer evaluation counts are independently gated and decoded exactly through platform bounds.",
+    },
+];
+pub const FMINBND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "x = fminbnd(fun, integer_x1, integer_x2, options)",
+        inputs: &FMINBND_INTEGER_BOUND_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Documented bounds are double. Strict compatibility rejects typed integers; RunMat mode admits exact binary64 values and returns the ordinary double solver outputs.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "x = fminbnd(fun_returning_integer, x1, x2, options)",
+        inputs: &FMINBND_INTEGER_OBJECTIVE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Strict compatibility rejects typed-integer objective values before provider access; RunMat mode converts exact values to binary64 and returns double x and fval plus function-specific diagnostics.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fminbnd(..., options.TolX=integer)",
+        inputs: &FMINBND_INTEGER_TOLERANCE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed-integer tolerance controls are RunMat-only and do not change the documented output classes.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "fminbnd(..., options.MaxIter=integer, options.MaxFunEvals=integer)",
+        inputs: &FMINBND_INTEGER_COUNT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented controls are integer-valued numeric scalars, not documented typed-integer classes. RunMat's typed forms preserve exact counts without a binary64 round trip.",
+    },
+];
+
+pub(crate) const FMINBND_INPUT_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fminbnd-nonfloating-bounds",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fminbnd with typed-integer or logical bounds is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FminbndNumericInputExtension"),
+    };
+pub(crate) const FMINBND_CALLBACK_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fminbnd-nonfloating-objective",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fminbnd with typed-integer or logical objective values is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FminbndCallbackExtension"),
+    };
+pub(crate) const FMINBND_OPTION_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fminbnd-typed-option-controls",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fminbnd with typed-integer option controls is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FminbndOptionExtension"),
+    };
+pub(crate) const FMINBND_RESIDENT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fminbnd-resident-fallback",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "fminbnd with provider-resident numeric input or callback output is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FminbndResidentExtension"),
+    };
+pub const FMINBND_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FMINBND_INPUT_NUMERIC_EXTENSION,
+    FMINBND_CALLBACK_NUMERIC_EXTENSION,
+    FMINBND_OPTION_EXTENSION,
+    FMINBND_RESIDENT_EXTENSION,
+];
+
 pub const FMINBND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FMINBND_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -301,6 +432,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(scalar_root_type),
     descriptor(crate::builtins::math::optim::fminbnd::FMINBND_DESCRIPTOR),
+    extensions(crate::builtins::math::optim::fminbnd::FMINBND_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::optim::fminbnd::FMINBND_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::optim::fminbnd"
 )]
 async fn fminbnd_builtin(
@@ -319,9 +452,27 @@ async fn fminbnd_builtin(
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
     let options = FminbndOptions::from_struct(options_struct.as_ref())
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
+    let x1 = crate::builtins::math::optim::common::prepare_floating_value(
+        NAME,
+        x1,
+        &FMINBND_INPUT_NUMERIC_EXTENSION,
+        &FMINBND_RESIDENT_EXTENSION,
+        "lower bound",
+    )
+    .await
+    .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
     let x1 = scalar_bound("lower bound", x1)
         .await
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
+    let x2 = crate::builtins::math::optim::common::prepare_floating_value(
+        NAME,
+        x2,
+        &FMINBND_INPUT_NUMERIC_EXTENSION,
+        &FMINBND_RESIDENT_EXTENSION,
+        "upper bound",
+    )
+    .await
+    .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
     let x2 = scalar_bound("upper bound", x2)
         .await
         .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
@@ -377,6 +528,12 @@ struct FminbndOptions {
 
 impl FminbndOptions {
     fn from_struct(options: Option<&StructValue>) -> BuiltinResult<Self> {
+        crate::builtins::math::optim::common::ensure_option_extensions(
+            NAME,
+            options,
+            &FMINBND_OPTION_EXTENSION,
+            &FMINBND_RESIDENT_EXTENSION,
+        )?;
         let display = match options {
             Some(opts) => match lookup(opts, "Display") {
                 Some(value) => DisplayMode::parse(&option_string("Display", value)?)?,
@@ -445,23 +602,27 @@ fn option_string(field: &str, value: &Value) -> BuiltinResult<String> {
 fn option_f64(field: &str, value: &Value) -> BuiltinResult<f64> {
     let parsed = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
-        Value::Bool(b) => {
-            if *b {
-                1.0
-            } else {
-                0.0
-            }
+        Value::Int(i) if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(i) => {
+            i.to_f64()
+        }
+        Value::Int(_) => {
+            return Err(fminbnd_error_with_detail(
+                &FMINBND_ERROR_INVALID_ARGUMENT,
+                format!("option {field} must be exactly representable as double"),
+            ))
         }
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            tensor::tensor_value_f64(tensor, 0)
-        }
-        Value::LogicalArray(LogicalArray { data, .. }) if data.len() == 1 => {
-            if data[0] != 0 {
-                1.0
-            } else {
-                0.0
+            if tensor.integer_storage().is_some_and(|storage| {
+                storage.exact_values().iter().any(|value| {
+                    !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value)
+                })
+            }) {
+                return Err(fminbnd_error_with_detail(
+                    &FMINBND_ERROR_INVALID_ARGUMENT,
+                    format!("option {field} must be exactly representable as double"),
+                ));
             }
+            tensor::tensor_value_f64(tensor, 0)
         }
         other => {
             return Err(fminbnd_error_with_detail(
@@ -979,7 +1140,29 @@ mod tests {
     }
 
     #[test]
+    fn logical_numeric_options_are_not_accepted_as_floating_controls() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (field, value) in [
+            ("TolX", Value::Bool(true)),
+            (
+                "MaxIter",
+                Value::LogicalArray(LogicalArray {
+                    data: vec![1],
+                    shape: vec![1, 1],
+                }),
+            ),
+        ] {
+            let mut options = StructValue::new();
+            options.insert(field, value);
+            let error = FminbndOptions::from_struct(Some(&options))
+                .expect_err("logical numeric option must reject");
+            assert_eq!(error.identifier(), Some("RunMat:fminbnd:InvalidArgument"));
+        }
+    }
+
+    #[test]
     fn bounds_and_options_read_typed_integer_tensor_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let lower =
             Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("lower bound");
         let upper =
@@ -1004,6 +1187,7 @@ mod tests {
 
     #[test]
     fn options_reject_nonpositive_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let max_iter =
             Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
         let mut opts = StructValue::new();

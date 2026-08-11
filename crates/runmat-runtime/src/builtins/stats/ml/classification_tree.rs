@@ -3,10 +3,14 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor,
-    Type, Value,
+    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, ResolveContext, StringArray,
+    StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -22,6 +26,39 @@ const FITCTREE_NAME: &str = "fitctree";
 const PREDICT_NAME: &str = "predict";
 const EPS: f64 = 1.0e-12;
 const MAX_TREE_DEPTH: usize = 4096;
+
+const INTEGER_PREDICTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fitctree-integer-predictors",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fitctree with typed-integer predictors is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FitctreeIntegerPredictorExtension"),
+};
+const INTEGER_NUMERIC_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fitctree-integer-numeric-arguments",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fitctree with typed-integer weights or numeric controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FitctreeIntegerNumericArgumentExtension"),
+};
+const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fitctree-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fitctree host fitting from provider-resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FitctreeResidentInputExtension"),
+};
+pub const FITCTREE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_PREDICTOR_EXTENSION,
+    INTEGER_NUMERIC_ARGUMENT_EXTENSION,
+    RESIDENT_INPUT_EXTENSION,
+];
+
+const INTEGER_PREDICTOR_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Integer predictors must be exactly representable in binary64 before host fitting; values that would round are rejected." }];
+const INTEGER_LABEL_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "Y or ClassNames", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Grouping labels retain their exact integer class and identity through model storage and prediction, including above flintmax." }];
+const INTEGER_NUMERIC_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "Weights or numeric option", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Typed-integer statistical inputs are independently gated and must cross the binary64 boundary exactly." }];
+pub const FITCTREE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor { form: "Mdl = fitctree(integer_X, Y, ___)", inputs: &INTEGER_PREDICTOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Matrix and table predictor roles share the same exact conversion boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "Mdl = fitctree(X, integer_Y, ClassNames=integer_names)", inputs: &INTEGER_LABEL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Class grouping never passes through floating point." },
+    BuiltinIntegerCapabilityDescriptor { form: "Mdl = fitctree(X, Y, Weights=integer_W, numericOption=integer_value)", inputs: &INTEGER_NUMERIC_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer weights and numeric controls are RunMat-only extensions and reject rather than round." },
+];
 
 const OUTPUT_TREE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Mdl",
@@ -186,6 +223,7 @@ enum SplitCriterion {
 #[derive(Clone, Debug, PartialEq)]
 enum ClassLabel {
     Numeric(f64),
+    Integer(IntValue),
     Text(String),
     Logical(bool),
 }
@@ -193,8 +231,21 @@ enum ClassLabel {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LabelKind {
     Numeric,
+    Integer(IntegerClass),
     Text,
     Logical,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IntegerClass {
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
 }
 
 #[derive(Clone, Debug)]
@@ -247,9 +298,14 @@ struct SplitCandidate {
     keywords = "fitctree,classification tree,decision tree,machine learning,statistics",
     type_resolver(fitctree_type),
     descriptor(crate::builtins::stats::ml::classification_tree::FITCTREE_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::classification_tree::FITCTREE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::stats::ml::classification_tree::FITCTREE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::stats::ml::classification_tree"
 )]
 async fn fitctree_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_fitctree_extensions(&first, &rest)?;
     let first = gather(first)
         .await
         .map_err(|err| fitctree_invalid(err.message))?;
@@ -259,6 +315,114 @@ async fn fitctree_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
     let spec = build_fit_spec(first, rest)?;
     let fit = fit_tree(&spec)?;
     model_object(spec, fit).map(Value::Object)
+}
+
+fn enable_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(extension, FITCTREE_NAME)
+}
+
+fn typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn ensure_fitctree_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if crate::dispatcher::value_contains_gpu(first)
+        || rest.iter().any(crate::dispatcher::value_contains_gpu)
+    {
+        enable_extension(&RESIDENT_INPUT_EXTENSION)?;
+    }
+    let option_start = if is_table_value(first) {
+        ensure_table_integer_extensions(first, rest)?
+    } else {
+        if typed_integer_value(first) {
+            enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
+        }
+        1
+    };
+    for pair in rest[option_start.min(rest.len())..].chunks_exact(2) {
+        let Some(name) = scalar_text(&pair[0]) else {
+            continue;
+        };
+        if typed_integer_value(&pair[1]) && !name.eq_ignore_ascii_case("ClassNames") {
+            enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<usize> {
+    let Value::Object(object) = first else {
+        return Ok(0);
+    };
+    let names = table_variable_names_from_object(object)
+        .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
+    let variables =
+        table_variables(object).map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
+    let mut response = names.last().cloned().unwrap_or_default();
+    let mut predictors: Option<Vec<String>> = None;
+    let mut external_y = false;
+    let mut option_start = 0;
+    if let Some(arg) = rest.first().filter(|arg| !is_name_value_option(arg)) {
+        option_start = 1;
+        if let Some(text) = scalar_text(arg) {
+            if let Some((lhs, rhs)) = text.split_once('~') {
+                response = lhs.trim().to_string();
+                predictors = Some(
+                    rhs.split('+')
+                        .map(str::trim)
+                        .filter(|term| !term.is_empty() && *term != "1")
+                        .map(str::to_string)
+                        .collect(),
+                );
+            } else {
+                response = text;
+            }
+        } else {
+            external_y = true;
+        }
+    }
+    let mut weight_variable = None;
+    for pair in rest[option_start..].chunks_exact(2) {
+        let Some(name) = scalar_text(&pair[0]) else {
+            continue;
+        };
+        match name.to_ascii_lowercase().as_str() {
+            "responsename" if !external_y => {
+                if let Some(value) = scalar_text(&pair[1]) {
+                    response = value;
+                }
+            }
+            "predictornames" => predictors = text_list(&pair[1], "PredictorNames").ok(),
+            "weights" => weight_variable = scalar_text(&pair[1]),
+            _ => {}
+        }
+    }
+    let predictors = predictors.unwrap_or_else(|| {
+        names
+            .iter()
+            .filter(|name| {
+                (external_y || **name != response)
+                    && weight_variable.as_deref() != Some(name.as_str())
+            })
+            .cloned()
+            .collect()
+    });
+    if predictors
+        .iter()
+        .any(|name| variables.fields.get(name).is_some_and(typed_integer_value))
+    {
+        enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
+    }
+    if weight_variable
+        .as_ref()
+        .is_some_and(|name| variables.fields.get(name).is_some_and(typed_integer_value))
+    {
+        enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
+    }
+    Ok(option_start)
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
@@ -300,6 +464,7 @@ fn build_matrix_fit_spec(
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITCTREE_NAME, x_value)
         .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
+    ensure_integer_tensor_exact(&x, "predictors")?;
     if x.shape.len() > 2 {
         return Err(fitctree_invalid("fitctree: X must be a 2-D numeric matrix"));
     }
@@ -431,6 +596,7 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
                 "fitctree: predictor variable '{name}' must be numeric"
             ))
         })?;
+        ensure_integer_tensor_exact(&tensor, name)?;
         columns.push(vector_values(&tensor, name)?);
     }
     let x = columns_to_tensor(columns)?;
@@ -502,7 +668,7 @@ fn finalize_fit_spec(
                 fitctree_invalid("fitctree: response contains a class outside ClassNames")
             })?;
         let mut row_values = Vec::with_capacity(x.cols);
-        let mut complete = true;
+        let mut has_observed_predictor = false;
         for col in 0..x.cols {
             let value = x_value(&x, row, col);
             if value.is_infinite() {
@@ -510,13 +676,12 @@ fn finalize_fit_spec(
                     "fitctree: predictor values must not contain Inf",
                 ));
             }
-            if value.is_nan() {
-                complete = false;
-                break;
+            if !value.is_nan() {
+                has_observed_predictor = true;
             }
             row_values.push(value);
         }
-        if complete {
+        if has_observed_predictor {
             clean_rows.push(row_values);
             clean_classes.push(class_index);
             clean_weights.push(weight);
@@ -524,7 +689,7 @@ fn finalize_fit_spec(
     }
     if clean_classes.is_empty() {
         return Err(fitctree_invalid(
-            "fitctree: at least one complete weighted observation is required",
+            "fitctree: at least one weighted observation with an observed predictor is required",
         ));
     }
     let mut observed_classes = vec![false; class_names.len()];
@@ -780,14 +945,13 @@ fn build_node(
 fn best_split(
     spec: &FitSpec,
     rows: &[usize],
-    parent_counts: &[f64],
+    _parent_counts: &[f64],
 ) -> BuiltinResult<Option<SplitCandidate>> {
-    let parent_weight = parent_counts.iter().sum::<f64>();
-    let parent_impurity = impurity(parent_counts, spec.options.split_criterion);
     let mut best = None;
     for col in 0..spec.x.cols {
         let mut entries = rows
             .iter()
+            .filter(|row| !x_value(&spec.x, **row, col).is_nan())
             .map(|row| {
                 (
                     x_value(&spec.x, *row, col),
@@ -801,8 +965,13 @@ fn best_split(
         if entries.len() < 2 {
             continue;
         }
-        let mut left_counts = vec![0.0; parent_counts.len()];
-        let mut right_counts = parent_counts.to_vec();
+        let mut right_counts = vec![0.0; spec.class_names.len()];
+        for (_, class_idx, weight, _) in &entries {
+            right_counts[*class_idx] += *weight;
+        }
+        let parent_weight = right_counts.iter().sum::<f64>();
+        let parent_impurity = impurity(&right_counts, spec.options.split_criterion);
+        let mut left_counts = vec![0.0; right_counts.len()];
         let mut left_weight = 0.0;
         let mut right_weight = parent_weight;
         let mut left_len = 0usize;
@@ -963,6 +1132,7 @@ fn model_object(spec: FitSpec, fit: TreeFit) -> BuiltinResult<ObjectInstance> {
         Value::String(
             match spec.class_kind {
                 LabelKind::Numeric => "numeric",
+                LabelKind::Integer(class) => integer_class_name(class),
                 LabelKind::Text => "text",
                 LabelKind::Logical => "logical",
             }
@@ -1113,6 +1283,7 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
                     tensor::value_into_tensor_for(PREDICT_NAME, raw.clone()).map_err(|_| {
                         predict_invalid(format!("predict: predictor '{name}' must be numeric"))
                     })?;
+                ensure_integer_tensor_exact_predict(&tensor, name)?;
                 columns.push(vector_values_predict(&tensor, name)?);
             }
             return columns_to_tensor_predict(columns);
@@ -1120,6 +1291,7 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
     }
     let tensor = tensor::value_into_tensor_for(PREDICT_NAME, value)
         .map_err(|err| predict_invalid(format!("predict: {err}")))?;
+    ensure_integer_tensor_exact_predict(&tensor, "predictors")?;
     if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
         return Err(predict_invalid(format!(
             "predict: X must have {} predictor columns",
@@ -1135,6 +1307,20 @@ fn label_vector(value: Value, name: &str) -> BuiltinResult<LabelVector> {
 
 fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
+                return Err(predict_invalid(format!("predict: {name} must be a vector")));
+            }
+            let storage = tensor.integer_storage().expect("checked above");
+            Ok(LabelVector {
+                labels: storage
+                    .exact_values()
+                    .into_iter()
+                    .map(ClassLabel::Integer)
+                    .collect(),
+                kind: LabelKind::Integer(integer_class(storage)),
+            })
+        }
         Value::Tensor(tensor) => Ok(LabelVector {
             labels: vector_values_predict(&tensor, name)?
                 .into_iter()
@@ -1147,8 +1333,8 @@ fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
             kind: LabelKind::Numeric,
         }),
         Value::Int(value) => Ok(LabelVector {
-            labels: vec![ClassLabel::Numeric(value.to_f64())],
-            kind: LabelKind::Numeric,
+            kind: LabelKind::Integer(integer_class_for_value(&value)),
+            labels: vec![ClassLabel::Integer(value)],
         }),
         Value::String(text) => Ok(LabelVector {
             labels: vec![ClassLabel::Text(text)],
@@ -1239,6 +1425,10 @@ fn unique_labels(labels: &[ClassLabel], kind: LabelKind) -> Vec<ClassLabel> {
             }
             _ => Ordering::Equal,
         }),
+        LabelKind::Integer(_) => out.sort_by(|left, right| match (left, right) {
+            (ClassLabel::Integer(a), ClassLabel::Integer(b)) => integer_cmp(a, b),
+            _ => Ordering::Equal,
+        }),
         LabelKind::Text => out.sort_by(|left, right| match (left, right) {
             (ClassLabel::Text(a), ClassLabel::Text(b)) => a.cmp(b),
             _ => Ordering::Equal,
@@ -1254,6 +1444,7 @@ fn unique_labels(labels: &[ClassLabel], kind: LabelKind) -> Vec<ClassLabel> {
 fn label_kind(label: &ClassLabel) -> LabelKind {
     match label {
         ClassLabel::Numeric(_) => LabelKind::Numeric,
+        ClassLabel::Integer(value) => LabelKind::Integer(integer_class_for_value(value)),
         ClassLabel::Text(_) => LabelKind::Text,
         ClassLabel::Logical(_) => LabelKind::Logical,
     }
@@ -1262,6 +1453,7 @@ fn label_kind(label: &ClassLabel) -> LabelKind {
 fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
     match (left, right) {
         (ClassLabel::Numeric(a), ClassLabel::Numeric(b)) => (a == b) || (a.is_nan() && b.is_nan()),
+        (ClassLabel::Integer(a), ClassLabel::Integer(b)) => a == b,
         (ClassLabel::Text(a), ClassLabel::Text(b)) => a == b,
         (ClassLabel::Logical(a), ClassLabel::Logical(b)) => a == b,
         _ => false,
@@ -1270,6 +1462,134 @@ fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
 
 fn is_missing_label(label: &ClassLabel) -> bool {
     matches!(label, ClassLabel::Numeric(value) if value.is_nan())
+}
+
+fn integer_class(storage: &IntegerStorage) -> IntegerClass {
+    match storage {
+        IntegerStorage::I8(_) => IntegerClass::I8,
+        IntegerStorage::I16(_) => IntegerClass::I16,
+        IntegerStorage::I32(_) => IntegerClass::I32,
+        IntegerStorage::I64(_) => IntegerClass::I64,
+        IntegerStorage::U8(_) => IntegerClass::U8,
+        IntegerStorage::U16(_) => IntegerClass::U16,
+        IntegerStorage::U32(_) => IntegerClass::U32,
+        IntegerStorage::U64(_) => IntegerClass::U64,
+    }
+}
+
+fn integer_class_for_value(value: &IntValue) -> IntegerClass {
+    match value {
+        IntValue::I8(_) => IntegerClass::I8,
+        IntValue::I16(_) => IntegerClass::I16,
+        IntValue::I32(_) => IntegerClass::I32,
+        IntValue::I64(_) => IntegerClass::I64,
+        IntValue::U8(_) => IntegerClass::U8,
+        IntValue::U16(_) => IntegerClass::U16,
+        IntValue::U32(_) => IntegerClass::U32,
+        IntValue::U64(_) => IntegerClass::U64,
+    }
+}
+
+fn integer_class_name(class: IntegerClass) -> &'static str {
+    match class {
+        IntegerClass::I8 => "int8",
+        IntegerClass::I16 => "int16",
+        IntegerClass::I32 => "int32",
+        IntegerClass::I64 => "int64",
+        IntegerClass::U8 => "uint8",
+        IntegerClass::U16 => "uint16",
+        IntegerClass::U32 => "uint32",
+        IntegerClass::U64 => "uint64",
+    }
+}
+
+fn integer_class_from_name(name: &str) -> Option<IntegerClass> {
+    match name {
+        "int8" => Some(IntegerClass::I8),
+        "int16" => Some(IntegerClass::I16),
+        "int32" => Some(IntegerClass::I32),
+        "int64" => Some(IntegerClass::I64),
+        "uint8" => Some(IntegerClass::U8),
+        "uint16" => Some(IntegerClass::U16),
+        "uint32" => Some(IntegerClass::U32),
+        "uint64" => Some(IntegerClass::U64),
+        _ => None,
+    }
+}
+
+fn integer_cmp(left: &IntValue, right: &IntValue) -> Ordering {
+    match (left, right) {
+        (IntValue::I8(a), IntValue::I8(b)) => a.cmp(b),
+        (IntValue::I16(a), IntValue::I16(b)) => a.cmp(b),
+        (IntValue::I32(a), IntValue::I32(b)) => a.cmp(b),
+        (IntValue::I64(a), IntValue::I64(b)) => a.cmp(b),
+        (IntValue::U8(a), IntValue::U8(b)) => a.cmp(b),
+        (IntValue::U16(a), IntValue::U16(b)) => a.cmp(b),
+        (IntValue::U32(a), IntValue::U32(b)) => a.cmp(b),
+        (IntValue::U64(a), IntValue::U64(b)) => a.cmp(b),
+        _ => Ordering::Equal,
+    }
+}
+
+fn integer_storage(class: IntegerClass, values: Vec<IntValue>) -> Result<IntegerStorage, String> {
+    match class {
+        IntegerClass::I8 => collect_integer_values(values, "int8", |v| match v {
+            IntValue::I8(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::I8),
+        IntegerClass::I16 => collect_integer_values(values, "int16", |v| match v {
+            IntValue::I16(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::I16),
+        IntegerClass::I32 => collect_integer_values(values, "int32", |v| match v {
+            IntValue::I32(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::I32),
+        IntegerClass::I64 => collect_integer_values(values, "int64", |v| match v {
+            IntValue::I64(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::I64),
+        IntegerClass::U8 => collect_integer_values(values, "uint8", |v| match v {
+            IntValue::U8(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::U8),
+        IntegerClass::U16 => collect_integer_values(values, "uint16", |v| match v {
+            IntValue::U16(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::U16),
+        IntegerClass::U32 => collect_integer_values(values, "uint32", |v| match v {
+            IntValue::U32(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::U32),
+        IntegerClass::U64 => collect_integer_values(values, "uint64", |v| match v {
+            IntValue::U64(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::U64),
+    }
+}
+
+fn collect_integer_values<T>(
+    values: Vec<IntValue>,
+    expected: &str,
+    convert: impl Fn(IntValue) -> Option<T>,
+) -> Result<Vec<T>, String> {
+    values
+        .into_iter()
+        .map(|value| {
+            let actual = value.class_name();
+            convert(value).ok_or_else(|| {
+                format!("integer label invariant expected {expected}, found {actual}")
+            })
+        })
+        .collect()
 }
 
 fn labels_value(labels: &[ClassLabel], kind: LabelKind) -> BuiltinResult<Value> {
@@ -1293,6 +1613,27 @@ fn predicted_labels_value(
             Ok(Value::Tensor(
                 Tensor::new(data, vec![indices.len(), 1])
                     .map_err(|err| predict_internal(format!("predict: {err}")))?,
+            ))
+        }
+        LabelKind::Integer(class) => {
+            let values = indices
+                .iter()
+                .map(|idx| match labels.get(*idx) {
+                    Some(ClassLabel::Integer(value)) => Ok(value.clone()),
+                    Some(_) => Err(predict_internal(
+                        "predict: integer class metadata does not match stored labels",
+                    )),
+                    None => Err(predict_internal(
+                        "predict: predicted class index is out of range",
+                    )),
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            Ok(Value::Tensor(
+                Tensor::new_integer(
+                    integer_storage(class, values).map_err(predict_internal)?,
+                    vec![indices.len(), 1],
+                )
+                .map_err(|err| predict_internal(format!("predict: {err}")))?,
             ))
         }
         LabelKind::Text => {
@@ -1329,6 +1670,9 @@ fn predicted_labels_value(
 fn class_kind_property(object: &ObjectInstance) -> BuiltinResult<LabelKind> {
     match object.properties.get("__RunMatTreeClassKind") {
         Some(Value::String(text)) if text == "numeric" => Ok(LabelKind::Numeric),
+        Some(Value::String(text)) if integer_class_from_name(text).is_some() => Ok(
+            LabelKind::Integer(integer_class_from_name(text).expect("checked above")),
+        ),
         Some(Value::String(text)) if text == "text" => Ok(LabelKind::Text),
         Some(Value::String(text)) if text == "logical" => Ok(LabelKind::Logical),
         _ => Err(predict_invalid(
@@ -1378,8 +1722,14 @@ fn char_rows(array: &CharArray) -> Vec<String> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
-        Value::Int(value) => Ok(vec![value.to_f64()]),
-        Value::Tensor(tensor) => vector_values(tensor, name),
+        Value::Int(value) => {
+            ensure_int_exact_f64(value, name)?;
+            Ok(vec![value.to_f64()])
+        }
+        Value::Tensor(tensor) => {
+            ensure_integer_tensor_exact(tensor, name)?;
+            vector_values(tensor, name)
+        }
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -1426,14 +1776,50 @@ fn positive_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Int(value) => Ok(value.to_f64()),
+        Value::Int(value) => {
+            ensure_int_exact_f64(value, name)?;
+            Ok(value.to_f64())
+        }
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            ensure_integer_tensor_exact(tensor, name)?;
             Ok(tensor::tensor_values_f64(tensor)[0])
         }
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         _ => Err(fitctree_invalid(format!(
             "fitctree: {name} must be a numeric scalar"
         ))),
+    }
+}
+
+fn ensure_integer_tensor_exact(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+    if let Some(storage) = tensor.integer_storage() {
+        for value in storage.exact_values() {
+            ensure_int_exact_f64(&value, name)?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_integer_tensor_exact_predict(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+    if let Some(storage) = tensor.integer_storage() {
+        for value in storage.exact_values() {
+            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+                return Err(predict_invalid(format!(
+                    "predict: integer {name} must be exactly representable as double"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_int_exact_f64(value: &IntValue, name: &str) -> BuiltinResult<()> {
+    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+        Ok(())
+    } else {
+        Err(fitctree_invalid(format!(
+            "fitctree: integer {name} must be exactly representable as double"
+        )))
     }
 }
 
@@ -1669,6 +2055,7 @@ mod tests {
 
     #[test]
     fn fitctree_and_predict_read_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let model = block_on(fitctree_builtin(
             poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
             vec![
@@ -1693,6 +2080,168 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(tensor(&predicted).materialize_f64(), vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn integer_grouping_labels_round_trip_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-1, 1]),
+            IntegerStorage::I16(vec![-1, 1]),
+            IntegerStorage::I32(vec![-1, 1]),
+            IntegerStorage::I64(vec![-1, 1]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 1]),
+            IntegerStorage::U32(vec![0, 1]),
+            IntegerStorage::U64(vec![0, 1]),
+        ];
+        for storage in storages {
+            let expected = storage.clone();
+            let labels = labels_from_value(
+                Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap()),
+                "Y",
+            )
+            .unwrap();
+            let Value::Tensor(round_trip) = labels_value(&labels.labels, labels.kind).unwrap()
+            else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(round_trip.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn fitctree_preserves_adjacent_wide_uint64_classes() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let base = 9_007_199_254_740_992_u64;
+        let model = block_on(fitctree_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
+            vec![
+                poisoned_int_tensor(
+                    IntegerStorage::U64(vec![base, base, base + 1, base + 1]),
+                    4,
+                    1,
+                ),
+                Value::from("MaxNumSplits"),
+                Value::Num(1.0),
+                Value::from("MinParentSize"),
+                Value::Num(2.0),
+            ],
+        ))
+        .unwrap();
+        let Value::Object(model_object) = &model else {
+            panic!("expected model");
+        };
+        assert_eq!(
+            model_object
+                .properties
+                .get("ClassNames")
+                .and_then(|value| match value {
+                    Value::Tensor(tensor) => tensor.integer_storage(),
+                    _ => None,
+                }),
+            Some(&IntegerStorage::U64(vec![base, base + 1]))
+        );
+        let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+            model,
+            tensor_value(vec![0.0, 3.0], 2, 1),
+            Vec::new(),
+        ))
+        .unwrap();
+        assert_eq!(
+            match &predicted {
+                Value::Tensor(tensor) => tensor.integer_storage(),
+                _ => None,
+            },
+            Some(&IntegerStorage::U64(vec![base, base + 1]))
+        );
+    }
+
+    #[test]
+    fn fitctree_strict_mode_rejects_integer_numeric_extensions() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(fitctree_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
+            vec![tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1)],
+        ))
+        .expect_err("integer predictor extension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FitctreeIntegerPredictorExtension")
+        );
+
+        let error = block_on(fitctree_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
+            vec![
+                tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1),
+                Value::from("MaxNumSplits"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+            ],
+        ))
+        .expect_err("integer control extension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FitctreeIntegerNumericArgumentExtension")
+        );
+
+        let poison = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![4, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = block_on(fitctree_builtin(
+            poison,
+            vec![tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1)],
+        ))
+        .expect_err("resident gate before gather");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FitctreeResidentInputExtension")
+        );
+    }
+
+    #[test]
+    fn fitctree_rejects_inexact_integer_predictors_and_weights() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let inexact = 9_007_199_254_740_993_u64;
+        let error = block_on(fitctree_builtin(
+            poisoned_int_tensor(IntegerStorage::U64(vec![0, 1, 2, inexact]), 4, 1),
+            vec![tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1)],
+        ))
+        .expect_err("inexact predictor");
+        assert!(error.message.contains("exactly representable"));
+
+        let error = block_on(fitctree_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
+            vec![
+                tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1),
+                Value::from("Weights"),
+                poisoned_int_tensor(IntegerStorage::U64(vec![1, 1, 1, inexact]), 4, 1),
+            ],
+        ))
+        .expect_err("inexact weights");
+        assert!(error.message.contains("exactly representable"));
+    }
+
+    #[test]
+    fn fitctree_retains_rows_with_partially_missing_predictors() {
+        let model = block_on(fitctree_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0, 3.0, f64::NAN, 10.0, 11.0, 12.0], 4, 2),
+            vec![
+                tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1),
+                Value::from("MaxNumSplits"),
+                Value::Num(1.0),
+                Value::from("MinParentSize"),
+                Value::Num(2.0),
+            ],
+        ))
+        .unwrap();
+        let Value::Object(object) = model else {
+            panic!("expected model");
+        };
+        assert_eq!(
+            object.properties.get("NumObservations"),
+            Some(&Value::Num(4.0))
+        );
     }
 
     #[test]

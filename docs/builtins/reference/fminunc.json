@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The BFGS optimization loop runs on the host. Objective callbacks may still call GPU-aware builtins, but objective values and gradients are gathered for the iterative solve."
+    "notes": "The BFGS optimization loop runs on the host and does not provide native gpuArray or tall-array execution. In RunMat extension mode, resident numeric operands, objective values, and gradients use a separately gated gather fallback. Strict compatibility mode rejects that extension before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,9 +28,11 @@
     "unit": "builtins::math::optim::fminunc::tests",
     "options": "builtins::math::optim::optimoptions::tests::optimoptions_fminunc_defaults_match_solver"
   },
-  "description": "`x = fminunc(fun, x0)` minimizes a finite real scalar objective starting from `x0`. Scalar guesses return scalars, and vector or array guesses return solutions with the same shape as `x0`.",
+  "description": "`x = fminunc(fun, x0)` minimizes a finite real scalar objective starting from binary64 `x0`. Scalar guesses return scalars, and vector or array guesses return solutions with the same shape as `x0`.",
   "behaviors": [
     "Uses a host-side BFGS quasi-Newton method with a strong-Wolfe line search.",
+    "Strict compatibility mode rejects typed-integer or logical initial guesses, objective values, and supplied gradients. RunMat extension mode accepts those values when every integer converts exactly to binary64.",
+    "Typed-integer option controls are a separately gated RunMat extension. Structural counts such as `MaxIter` and `MaxFunEvals` are validated as exact nonnegative integers rather than rounded through floating point.",
     "When `SpecifyObjectiveGradient` is false or omitted, gradients are estimated with forward finite differences.",
     "When `SpecifyObjectiveGradient` is true, the objective callback is called as `[f, g] = fun(x)` and `g` must contain one gradient entry per element of `x`.",
     "Options are supplied as a struct, usually from `optimoptions` or `optimset`. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, `Algorithm`, and `SpecifyObjectiveGradient` are accepted.",

@@ -25,6 +25,15 @@ fn fminunc_solves_quadratic_from_source() {
 }
 
 #[test]
+fn optimization_integer_boundaries_execute_from_compiled_source() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(
+        "b = fminbnd(@(x) (x-2).^2, int16(0), uint16(5), struct('MaxIter',uint8(100))); if abs(b-2) > 1e-4; error('compiled fminbnd integer boundary failed'); end; u = fminunc(@(x) (x-3).^2, int8(0), struct('MaxIter',uint16(100))); if abs(u-3) > 1e-4; error('compiled fminunc integer boundary failed'); end; [s,residual,flag,output,jacobian] = fsolve(@(x) x-4, uint8(0), struct('MaxIter',uint16(100))); if abs(s-4) > 1e-5 || abs(residual) > 1e-5 || flag <= 0 || output.iterations < 0 || abs(jacobian-1) > 1e-4; error('compiled fsolve integer boundary failed'); end; [z,zval,zflag] = fzero(@(x) x-5, single([0])); if ~strcmp(class(z),'single'); error('compiled fzero root class failed'); end; if ~strcmp(class(zval),'single'); error('compiled fzero value class failed'); end; if ~strcmp(class(zflag),'single'); error('compiled fzero flag class failed'); end; if abs(double(z)-5) > 1e-4; error('compiled fzero value failed'); end;",
+    )
+    .expect("compiled optimization integer semantics");
+}
+
+#[test]
 fn linprog_solves_bounded_program_from_source() {
     let vars = execute_source(
         "f = [-1; -2]; A = [1 1]; b = 4; [x, fval, exitflag] = linprog(f, A, b, [], [], [0; 0], []); y = x(2);",
