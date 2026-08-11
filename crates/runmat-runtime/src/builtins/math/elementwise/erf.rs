@@ -6,9 +6,12 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, NumericScalar, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, NumericDType, NumericScalar, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -88,6 +91,27 @@ const ERF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const ERF_ERRORS: [BuiltinErrorDescriptor; 2] = [ERF_ERROR_INVALID_INPUT, ERF_ERROR_INTERNAL];
 
+const ERF_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes:
+        "Integer and logical inputs are rejected before real floating host or provider dispatch.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = erf(X)",
+        inputs: &ERF_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "erf has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
+    }];
+
 pub const ERF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ERF_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -121,6 +145,7 @@ fn erf_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::erf::ERF_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::erf::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::erf"
 )]
 async fn erf_builtin(value: Value) -> BuiltinResult<Value> {
@@ -176,22 +201,46 @@ async fn erf_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         ));
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match provider.unary_erf(&handle).await {
-            Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
-            Err(err) if is_unsupported_provider_hook(&err) => {}
-            Err(err) => {
-                return Err(erf_error_with_detail(
-                    &ERF_ERROR_INTERNAL,
-                    format!("provider unary_erf failed: {err}"),
-                ))
-            }
+    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+        erf_error_with_detail(&ERF_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
+    match provider.unary_erf(&handle).await {
+        Ok(out) if valid_real_gpu_output(&out, &handle, provider) => {
+            return Ok(gpu_helpers::resident_gpu_value(out));
+        }
+        Ok(out) => {
+            free_rejected_gpu_output(&out, &handle);
+            return Err(erf_error_with_detail(
+                &ERF_ERROR_INTERNAL,
+                "provider unary_erf returned malformed output",
+            ));
+        }
+        Err(err) if is_unsupported_provider_hook(&err) => {}
+        Err(err) => {
+            return Err(erf_error_with_detail(
+                &ERF_ERROR_INTERNAL,
+                format!("provider unary_erf failed: {err}"),
+            ))
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    Ok(erf_tensor_into_value(erf_tensor(tensor)?))
+    let result = erf_tensor(tensor)?;
+    let out = gpu_helpers::upload_tensor(provider, &result).map_err(|err| {
+        erf_error_with_detail(
+            &ERF_ERROR_INTERNAL,
+            format!("failed to restore fallback result to input provider: {err}"),
+        )
+    })?;
+    if !valid_real_gpu_output(&out, &handle, provider) {
+        free_rejected_gpu_output(&out, &handle);
+        return Err(erf_error_with_detail(
+            &ERF_ERROR_INTERNAL,
+            "provider upload returned malformed fallback output",
+        ));
+    }
+    Ok(gpu_helpers::resident_gpu_value(out))
 }
 
 fn erf_real(value: Value) -> BuiltinResult<Value> {
@@ -240,6 +289,40 @@ fn erf_real_scalar(value: f64) -> f64 {
 
 fn is_unsupported_provider_hook(err: &anyhow::Error) -> bool {
     err.to_string().contains("unary_erf not supported")
+}
+
+fn valid_real_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gpu_handles_alias(output, input)
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .filter(|owner| owner.device_id() == output.device_id)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn free_rejected_gpu_output(output: &GpuTensorHandle, input: &GpuTensorHandle) {
+    if gpu_handles_alias(output, input) {
+        return;
+    }
+    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output)
+        .filter(|owner| owner.device_id() == output.device_id)
+    {
+        let _ = owner.free(output);
+    }
 }
 
 #[cfg(test)]

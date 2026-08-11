@@ -6284,14 +6284,7 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().copied().map(erf_scalar_host).collect();
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_erfcinv<'a>(
@@ -6934,20 +6927,36 @@ impl AccelProvider for InProcessProvider {
 
     fn unary_exp<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
+                "unary_exp does not support complex-interleaved buffers"
+            );
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.exp()).collect();
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
+        })
+    }
+
+    fn unary_expm1<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
+                "unary_expm1 does not support complex-interleaved buffers"
+            );
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = abuf.iter().map(|&x| x.exp_m1()).collect();
+            drop(guard);
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -11556,5 +11565,23 @@ mod tests {
             &values.map(|(re, im)| tan_complex_host(re, im)),
             &[1, 2],
         );
+    }
+
+    #[test]
+    fn expm1_is_precise_for_tiny_real_values_and_real_exp_hooks_reject_complex() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_450, Ordering::Relaxed);
+        let real = real_handle(&provider, &[1.0e-16, -1.0e-16], &[1, 2]);
+        let output = block_on(provider.unary_expm1(&real)).expect("expm1");
+        assert_real_close(
+            &provider,
+            &output,
+            &[1.0e-16_f64.exp_m1(), (-1.0e-16_f64).exp_m1()],
+            &[1, 2],
+        );
+
+        let complex = complex_handle(&provider, &[(1.0, 2.0)], &[1, 1]);
+        assert!(block_on(provider.unary_exp(&complex)).is_err());
+        assert!(block_on(provider.unary_expm1(&complex)).is_err());
     }
 }

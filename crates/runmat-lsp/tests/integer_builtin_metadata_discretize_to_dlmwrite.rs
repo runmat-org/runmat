@@ -3,7 +3,7 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, hover_at, signature_help_at, CompatMode,
 };
 
-const SLICE399_BUILTINS: [&str; 10] = [
+const DISCRETIZE_TO_DLMWRITE_BUILTINS: [&str; 10] = [
     "discretize",
     "dividerand",
     "dlmread",
@@ -17,7 +17,7 @@ const SLICE399_BUILTINS: [&str; 10] = [
 ];
 
 #[test]
-fn slice399_descriptors_are_visible_to_signature_help_and_hover() {
+fn discretize_to_dlmwrite_descriptors_are_visible_to_signature_help_and_hover() {
     for (name, source, expected_signature) in [
         (
             "discretize",
@@ -100,12 +100,12 @@ fn slice399_descriptors_are_visible_to_signature_help_and_hover() {
 }
 
 #[test]
-fn slice399_builtins_are_public_completions_with_integer_metadata() {
+fn discretize_to_dlmwrite_builtins_are_public_completions_with_integer_metadata() {
     let source = "x = 1;";
     let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
-    for name in SLICE399_BUILTINS {
+    for name in DISCRETIZE_TO_DLMWRITE_BUILTINS {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         let descriptor = builtin
             .descriptor
@@ -138,7 +138,7 @@ fn slice399_builtins_are_public_completions_with_integer_metadata() {
 }
 
 #[test]
-fn matlab_mode_keeps_slice399_extension_metadata_visible() {
+fn matlab_mode_keeps_discretize_to_dlmwrite_extension_metadata_visible() {
     for (name, extension_id) in [
         ("dividerand", "dividerand-resident-argument"),
         ("dlmread", "dlmread-colon-spreadsheet-range"),

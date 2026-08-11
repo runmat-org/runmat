@@ -77,6 +77,77 @@ where
     panic!("test provider registered");
 }
 
+/// In-process owner that declares F32 as its physical storage precision while retaining exact
+/// native-integer transfer support for precision-boundary regression tests.
+pub struct F32TestProvider {
+    inner: runmat_accelerate::simple_provider::InProcessProvider,
+}
+
+impl F32TestProvider {
+    fn new() -> Self {
+        Self {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        }
+    }
+}
+
+impl runmat_accelerate_api::AccelProvider for F32TestProvider {
+    fn upload(
+        &self,
+        host: &runmat_accelerate_api::HostTensorView,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        self.inner.upload(host)
+    }
+
+    fn download<'a>(
+        &'a self,
+        handle: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        self.inner.download(handle)
+    }
+
+    fn upload_integer(
+        &self,
+        host: &runmat_accelerate_api::HostIntegerTensorView,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        self.inner.upload_integer(host)
+    }
+
+    fn download_integer<'a>(
+        &'a self,
+        handle: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelIntegerDownloadFuture<'a> {
+        self.inner.download_integer(handle)
+    }
+
+    fn free(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
+        self.inner.free(handle)
+    }
+
+    fn device_info(&self) -> String {
+        self.inner.device_info()
+    }
+
+    fn device_id(&self) -> u32 {
+        self.inner.device_id()
+    }
+
+    fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+        runmat_accelerate_api::ProviderPrecision::F32
+    }
+}
+
+pub fn with_f32_test_provider<F, R>(f: F) -> R
+where
+    F: FnOnce(&'static dyn runmat_accelerate_api::AccelProvider) -> R,
+{
+    let _guard = accel_test_lock();
+    let provider: &'static dyn runmat_accelerate_api::AccelProvider =
+        Box::leak(Box::new(F32TestProvider::new()));
+    let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    f(provider)
+}
+
 /// Test provider whose native signal hooks deliberately return a handle with
 /// incompatible storage. This exercises rejection cleanup before host fallback.
 pub struct RejectingNativeResultProvider {

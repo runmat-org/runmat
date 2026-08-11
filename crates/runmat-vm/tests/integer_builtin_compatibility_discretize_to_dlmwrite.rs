@@ -124,7 +124,7 @@ fn compiled_double_and_dummyvar_cover_every_integer_class() {
 }
 
 #[test]
-fn compiled_slice399_extensions_reject_in_strict_mode() {
+fn compiled_discretize_to_dlmwrite_extensions_reject_in_strict_mode() {
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     for (source, identifier) in [
         (
@@ -160,19 +160,19 @@ fn compiled_slice399_extensions_reject_in_strict_mode() {
             "RunMat:compatibility:DownsampleNdInputExtension",
         ),
         (
-            "value = dlmread('__runmat_slice399_missing__.csv', uint8(44));",
+            "value = dlmread('__runmat_integer_missing__.csv', uint8(44));",
             "RunMat:compatibility:DlmreadNumericDelimiterExtension",
         ),
         (
-            "value = dlmread('__runmat_slice399_missing__.csv', ',', 'A1:B2');",
+            "value = dlmread('__runmat_integer_missing__.csv', ',', 'A1:B2');",
             "RunMat:compatibility:DlmreadColonSpreadsheetRangeExtension",
         ),
         (
-            "value = dlmread('__runmat_slice399_missing__.csv', uint8(1), uint8(1));",
+            "value = dlmread('__runmat_integer_missing__.csv', uint8(1), uint8(1));",
             "RunMat:compatibility:DlmreadComposedRangeExtension",
         ),
         (
-            "bytes = dlmwrite('/private/tmp/runmat-slice399-strict-output.csv', 1);",
+            "bytes = dlmwrite('/private/tmp/runmat-integer-strict-output.csv', 1);",
             "RunMat:compatibility:DlmwriteByteCountOutputExtension",
         ),
     ] {
@@ -188,7 +188,7 @@ impl TempFile {
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         Self(std::env::temp_dir().join(format!(
-            "runmat-integer-slice399-{}-{id}.{extension}",
+            "runmat-integer-io-{}-{id}.{extension}",
             std::process::id()
         )))
     }

@@ -299,6 +299,26 @@ pub(crate) fn generate_exponential(mu: f64, len: usize, label: &str) -> BuiltinR
     Ok(out)
 }
 
+/// Generate one exponential variate per output element, expanding a scalar mean
+/// or pairing an array of means elementwise with the shared host stream.
+pub(crate) fn generate_exponential_array(
+    mu: &[f64],
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    debug_assert!(mu.len() == 1 || mu.len() == len);
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for index in 0..len {
+        let u = next_uniform_state(&mut guard.state).max(MIN_UNIFORM);
+        let mean = if mu.len() == 1 { mu[0] } else { mu[index] };
+        out.push(-mean * u.ln());
+    }
+    Ok(out)
+}
+
 pub(crate) fn generate_normal_scaled(
     mu: f64,
     sigma: f64,

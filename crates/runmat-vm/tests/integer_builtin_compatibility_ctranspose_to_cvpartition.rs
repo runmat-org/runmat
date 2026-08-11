@@ -67,7 +67,7 @@ fn compiled_graphics_metadata_integer_forms_execute() {
 fn compiled_csv_extension_gates_precede_file_access() {
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     let read_error =
-        execute_source("x = csvread('__runmat_slice396_missing__.csv', 0, 0, uint8([0 0]));")
+        execute_source("x = csvread('__runmat_integer_missing__.csv', 0, 0, uint8([0 0]));")
             .expect_err("two-vector range gate");
     assert_eq!(
         read_error.identifier(),
@@ -75,7 +75,7 @@ fn compiled_csv_extension_gates_precede_file_access() {
     );
 
     let write_error =
-        execute_source("bytes = csvwrite('__runmat_slice396_never_written__.csv', uint8([1 2]));")
+        execute_source("bytes = csvwrite('__runmat_integer_never_written__.csv', uint8([1 2]));")
             .expect_err("bytes-written gate");
     assert_eq!(
         write_error.identifier(),

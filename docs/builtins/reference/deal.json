@@ -25,7 +25,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::common::deal::tests",
-    "integration": "crates/runmat-vm/tests/integer_slice397_semantics.rs"
+    "integration": "crates/runmat-vm/tests/integer_builtin_compatibility_datetime_to_dcgain.rs"
   },
   "description": "`[B1,...,Bn] = deal(A1,...,An)` copies matching inputs positionally. `[B1,...,Bn] = deal(A)` copies one input to every requested output.",
   "behaviors": [

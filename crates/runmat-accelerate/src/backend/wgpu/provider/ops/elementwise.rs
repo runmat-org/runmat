@@ -1034,6 +1034,11 @@ impl WgpuProvider {
             return Err(anyhow!("unary ops disabled via RUNMAT_DISABLE_UNARY"));
         }
         let entry_a = self.get_entry(a)?;
+        ensure!(
+            self.effective_storage_for_entry(a, &entry_a)
+                != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            "real unary operation does not support complex-interleaved buffers"
+        );
         let len = entry_a.len;
         let shader = real_unary_shader(op, self.precision);
         self.fused_elementwise_with_telemetry_exec(
@@ -3732,5 +3737,31 @@ mod tests {
         let host = provider.download(&tiled).await.expect("download tiled");
         assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
         assert_interleaved_close(&host.data, &[(2.0, -3.0), (2.0, -3.0), (2.0, -3.0)]);
+    }
+
+    #[tokio::test]
+    async fn wgpu_precise_expm1_and_exp_hooks_reject_complex_interleaved_storage() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return;
+        };
+        let shape = [1, 1];
+        let real = provider
+            .upload(&HostTensorView {
+                data: &[1.0e-7],
+                shape: &shape,
+            })
+            .expect("upload real");
+        let output = provider.unary_expm1(&real).await.expect("expm1");
+        let host = provider.download(&output).await.expect("download expm1");
+        let expected = 1.0e-7_f64.exp_m1();
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-14,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-7,
+        };
+        assert!((host.data[0] - expected).abs() <= tolerance);
+
+        let complex = complex_pair(provider, &[1.0], &[2.0], &shape).await;
+        assert!(provider.unary_exp(&complex).await.is_err());
+        assert!(provider.unary_expm1(&complex).await.is_err());
     }
 }

@@ -2129,13 +2129,124 @@ pub(in crate::builtins::strings) fn erase_punctuation_tokenized_document(
         ));
     }
     let selected_types = parse_erase_punctuation_args(args)?;
-    transform_tokenized_document(&object, "erasePunctuation", |token, token_type| {
-        if !selected_types.contains(token_type.as_str()) {
+    transform_tokenized_document_by_type_name(&object, "erasePunctuation", |token, token_type| {
+        if !selected_types.contains(token_type) {
             return Ok(Some(token.to_string()));
         }
         let cleaned = remove_punctuation_and_symbols(token);
         Ok((!cleaned.is_empty()).then_some(cleaned))
     })
+}
+
+pub(in crate::builtins::strings) fn erase_urls_tokenized_document(
+    object: ObjectInstance,
+) -> BuiltinResult<Value> {
+    if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
+        return Err(text_analytics_error(
+            "eraseURLs",
+            format!(
+                "eraseURLs: expected tokenizedDocument object, got {}",
+                object.class_name
+            ),
+        ));
+    }
+    transform_tokenized_document_by_type_name(&object, "eraseURLs", |token, token_type| {
+        Ok((token_type != "web-address").then(|| token.to_string()))
+    })
+}
+
+fn transform_tokenized_document_by_type_name(
+    object: &ObjectInstance,
+    fn_name: &str,
+    mut transform: impl FnMut(&str, &str) -> BuiltinResult<Option<String>>,
+) -> BuiltinResult<Value> {
+    let options = options_from_document_object(object);
+    let source_documents = documents_from_object(object, fn_name)?;
+    let explicit_types = explicit_type_details(object, &source_documents, fn_name)?;
+    let mut output_documents = Vec::with_capacity(source_documents.len());
+    let mut output_types = explicit_types
+        .as_ref()
+        .map(|_| Vec::with_capacity(source_documents.len()));
+
+    for (document_index, document) in source_documents.into_iter().enumerate() {
+        let mut transformed_document = Vec::with_capacity(document.len());
+        let mut transformed_types = output_types
+            .as_ref()
+            .map(|_| Vec::with_capacity(document.len()));
+        for (token_index, token) in document.into_iter().enumerate() {
+            let explicit_type = explicit_types
+                .as_ref()
+                .and_then(|documents| documents.get(document_index))
+                .and_then(|types| types.get(token_index));
+            let derived_type;
+            let token_type = if let Some(explicit_type) = explicit_type {
+                explicit_type.as_str()
+            } else {
+                derived_type = document_token_type_with_options(&token, &options);
+                derived_type.as_str()
+            };
+            if let Some(transformed) = transform(&token, token_type)? {
+                transformed_document.push(transformed);
+                if let Some(types) = &mut transformed_types {
+                    types.push(token_type.to_string());
+                }
+            }
+        }
+        output_documents.push(transformed_document);
+        if let (Some(all_types), Some(types)) = (&mut output_types, transformed_types) {
+            all_types.push(types);
+        }
+    }
+
+    tokenized_document_value(
+        output_documents,
+        shape_from_object(object, fn_name)?,
+        options,
+        output_types,
+    )
+}
+
+fn explicit_type_details(
+    object: &ObjectInstance,
+    documents: &[Vec<String>],
+    fn_name: &str,
+) -> BuiltinResult<Option<Vec<Vec<String>>>> {
+    let Some(value) = object.properties.get("TypeDetails") else {
+        return Ok(None);
+    };
+    let Value::Cell(cell) = value else {
+        return Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: invalid token type details"),
+        ));
+    };
+    if cell.data.len() != documents.len() {
+        return Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: token type details do not match document shape"),
+        ));
+    }
+    let mut all_types = Vec::with_capacity(documents.len());
+    for (value, document) in cell.data.iter().zip(documents) {
+        let types = match value {
+            Value::StringArray(array) => array.data.clone(),
+            Value::String(text) if document.len() == 1 => vec![text.clone()],
+            _ => {
+                return Err(text_analytics_error(
+                    fn_name,
+                    format!("{fn_name}: invalid token type details"),
+                ))
+            }
+        };
+        if types.len() != document.len() {
+            return Err(text_analytics_error(
+                fn_name,
+                format!("{fn_name}: token type details do not match document tokens"),
+            ));
+        }
+        all_types.push(types);
+    }
+    Ok(Some(all_types))
 }
 
 fn parse_erase_punctuation_args(args: Vec<Value>) -> BuiltinResult<HashSet<String>> {
@@ -3796,6 +3907,62 @@ mod tests {
                 "help@example.com",
                 "https://example.com"
             ]]
+        );
+    }
+
+    #[test]
+    fn erase_punctuation_honors_and_preserves_custom_type_details() {
+        let words =
+            StringArray::new(vec!["C++".to_string(), "plain".to_string()], vec![1, 2]).unwrap();
+        let mut docs = object(
+            run_tokenized(vec![
+                Value::StringArray(words),
+                Value::String("TokenizeMethod".to_string()),
+                Value::String("none".to_string()),
+            ])
+            .expect("tokenized"),
+        );
+        docs.properties.insert(
+            "TypeDetails".to_string(),
+            type_details_cell(&[vec!["language".to_string(), "letters".to_string()]])
+                .expect("type details"),
+        );
+        let filtered = object(
+            erase_punctuation_tokenized_document(
+                docs,
+                vec![
+                    Value::String("TokenTypes".to_string()),
+                    Value::String("language".to_string()),
+                ],
+            )
+            .expect("erase custom type"),
+        );
+        assert_eq!(documents_property(&filtered), vec![vec!["C", "plain"]]);
+        assert_eq!(
+            type_details_property(&filtered),
+            vec![vec!["language", "letters"]]
+        );
+    }
+
+    #[test]
+    fn erase_urls_supports_r2026a_tokenized_documents_and_preserves_shape() {
+        let input = StringArray::new(
+            vec![
+                "visit https://example.com now".to_string(),
+                "plain words".to_string(),
+            ],
+            vec![2, 1],
+        )
+        .unwrap();
+        let docs = object(run_tokenized(vec![Value::StringArray(input)]).expect("tokenized"));
+        let filtered = object(erase_urls_tokenized_document(docs).expect("erase URLs"));
+        assert_eq!(
+            documents_property(&filtered),
+            vec![vec!["visit", "now"], vec!["plain", "words"]]
+        );
+        assert_eq!(
+            tensor_property(&filtered, "Shape").materialize_f64(),
+            vec![2.0, 1.0]
         );
     }
 

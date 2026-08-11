@@ -4,7 +4,7 @@ use runmat_lsp::core::analysis::{
 };
 
 #[test]
-fn slice397_descriptors_are_visible_to_lsp() {
+fn datetime_to_dcgain_descriptors_are_visible_to_lsp() {
     for (source, expected) in [
         (
             "t = datetime(uint16([2024 7 31]));",
@@ -39,7 +39,7 @@ fn slice397_descriptors_are_visible_to_lsp() {
 }
 
 #[test]
-fn matlab_mode_keeps_slice397_capabilities_and_extensions_visible() {
+fn matlab_mode_keeps_datetime_to_dcgain_capabilities_and_extensions_visible() {
     for name in [
         "datetime",
         "dateshift",

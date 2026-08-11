@@ -4,12 +4,15 @@
 //! The implementation uses a monotonic bisection over `erfc` to keep tails stable
 //! without depending on a platform-specific inverse special function.
 
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     shape_rules::element_count_if_known, BuiltinCompletionPolicy, BuiltinDescriptor,
-    BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, NumericScalar, NumericStorage,
-    ResolveContext, Tensor, Type, Value,
+    BuiltinErrorDescriptor, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, NumericScalar, NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -61,6 +64,27 @@ const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 };
 
 const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_INTERNAL];
+
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes:
+        "Integer and logical inputs are rejected before real floating host or provider dispatch.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = erfcinv(X)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "erfcinv has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
+    }];
 
 pub const ERFCINV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
@@ -139,6 +163,7 @@ fn erfcinv_type(args: &[Type], _context: &ResolveContext) -> Type {
     accel = "unary",
     type_resolver(erfcinv_type),
     descriptor(crate::builtins::math::elementwise::erfcinv::ERFCINV_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::erfcinv::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::erfcinv"
 )]
 async fn erfcinv_builtin(value: Value) -> BuiltinResult<Value> {
@@ -192,16 +217,23 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         ));
     }
 
-    let provider = runmat_accelerate_api::provider_for_handle(&handle);
-    if let Some(provider) = provider.as_ref() {
-        match provider.unary_erfcinv(&handle).await {
-            Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
-            Err(err) if is_unsupported_provider_hook(&err) => {}
-            Err(err) => {
-                return Err(internal_error(format!(
-                    "provider unary_erfcinv failed: {err}"
-                )))
-            }
+    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+        .ok_or_else(|| internal_error("GPU provider unavailable for input"))?;
+    match provider.unary_erfcinv(&handle).await {
+        Ok(out) if valid_real_gpu_output(&out, &handle, provider) => {
+            return Ok(gpu_helpers::resident_gpu_value(out));
+        }
+        Ok(out) => {
+            free_rejected_gpu_output(&out, &handle);
+            return Err(internal_error(
+                "provider unary_erfcinv returned malformed output",
+            ));
+        }
+        Err(err) if is_unsupported_provider_hook(&err) => {}
+        Err(err) => {
+            return Err(internal_error(format!(
+                "provider unary_erfcinv failed: {err}"
+            )))
         }
     }
 
@@ -210,31 +242,18 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let result = erfcinv_tensor(tensor)?;
 
-    if let Some(provider) = provider {
-        let upload_data = result.materialize_f64();
-        let view = HostTensorView {
-            data: &upload_data,
-            shape: &result.shape,
-        };
-        match provider.upload(&view) {
-            Ok(handle) => {
-                runmat_accelerate_api::mark_residency(&handle);
-                return Ok(Value::GpuTensor(handle));
-            }
-            Err(err) if err.to_string() == "interaction pending..." => {
-                return Err(build_runtime_error("interaction pending...")
-                    .with_builtin(BUILTIN_NAME)
-                    .build())
-            }
-            Err(err) => {
-                return Err(internal_error(format!(
-                    "failed to upload erfcinv result to GPU provider: {err}"
-                )))
-            }
-        }
+    let out = gpu_helpers::upload_tensor(provider, &result).map_err(|err| {
+        internal_error(format!(
+            "failed to restore fallback result to input provider: {err}"
+        ))
+    })?;
+    if !valid_real_gpu_output(&out, &handle, provider) {
+        free_rejected_gpu_output(&out, &handle);
+        return Err(internal_error(
+            "provider upload returned malformed fallback output",
+        ));
     }
-
-    Ok(erfcinv_tensor_into_value(result))
+    Ok(gpu_helpers::resident_gpu_value(out))
 }
 
 fn erfcinv_real(value: Value) -> BuiltinResult<Value> {
@@ -309,6 +328,39 @@ fn is_unsupported_provider_hook(err: &anyhow::Error) -> bool {
     err.to_string().contains("unary_erfcinv not supported")
 }
 
+fn valid_real_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gpu_handles_alias(output, input)
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .filter(|owner| owner.device_id() == output.device_id)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn free_rejected_gpu_output(output: &GpuTensorHandle, input: &GpuTensorHandle) {
+    if gpu_handles_alias(output, input) {
+        return;
+    }
+    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output)
+        .filter(|owner| owner.device_id() == output.device_id)
+    {
+        let _ = owner.free(output);
+    }
+}
+
 fn erfcinv_positive_tail(target: f64) -> f64 {
     debug_assert!(target > 0.0 && target < 1.0);
     let mut lo = 0.0;
@@ -337,6 +389,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, SparseTensor, Type};
 
     fn erfcinv_builtin(value: Value) -> BuiltinResult<Value> {
@@ -565,10 +618,9 @@ mod tests {
             runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,
         };
         for (actual, expected) in gathered
-            .as_f64_slice()
-            .expect("double gathered result")
+            .materialize_f64()
             .iter()
-            .zip(cpu.as_f64_slice().expect("double cpu result"))
+            .zip(cpu.materialize_f64().iter())
         {
             assert_close(*actual, *expected, tol);
         }

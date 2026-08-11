@@ -3,7 +3,7 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, hover_at, signature_help_at, CompatMode,
 };
 
-const SLICE400_BUILTINS: [&str; 10] = [
+const ECDF_TO_ERASEBETWEEN_BUILTINS: [&str; 10] = [
     "ecdf",
     "eig",
     "eigs",
@@ -28,7 +28,7 @@ const INTEGER_EMPTY_BUILTINS: [&str; 8] = [
 ];
 
 #[test]
-fn slice400_descriptors_are_visible_to_signature_help_and_hover() {
+fn ecdf_to_erasebetween_descriptors_are_visible_to_signature_help_and_hover() {
     for (name, source, expected_signature) in [
         ("ecdf", "[f, x] = ecdf(uint8([1 2]));", "[f, x] = ecdf(y)"),
         ("eig", "d = eig(uint8(1));", "d = eig(A)"),
@@ -101,12 +101,12 @@ fn slice400_descriptors_are_visible_to_signature_help_and_hover() {
 }
 
 #[test]
-fn slice400_builtins_are_public_completions_with_integer_metadata() {
+fn ecdf_to_erasebetween_builtins_are_public_completions_with_integer_metadata() {
     let source = "x = 1;";
     let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
-    for name in SLICE400_BUILTINS {
+    for name in ECDF_TO_ERASEBETWEEN_BUILTINS {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         let descriptor = builtin
             .descriptor
@@ -179,7 +179,7 @@ fn integer_empty_static_registrations_follow_the_public_completion_policy() {
 }
 
 #[test]
-fn matlab_mode_keeps_slice400_extension_metadata_visible() {
+fn matlab_mode_keeps_ecdf_to_erasebetween_extension_metadata_visible() {
     for (name, extension_id) in [
         ("ecdf", "ecdf-integer-y"),
         ("eig", "eig-nonfloating-coefficient"),

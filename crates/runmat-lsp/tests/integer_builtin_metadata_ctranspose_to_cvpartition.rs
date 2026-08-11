@@ -2,7 +2,7 @@ use lsp_types::Position;
 use runmat_lsp::core::analysis::{analyze_document_with_compat, signature_help_at, CompatMode};
 
 #[test]
-fn slice396_descriptors_are_visible_to_lsp() {
+fn ctranspose_to_cvpartition_descriptors_are_visible_to_lsp() {
     for (source, expected) in [
         ("m = csvread('x.csv');", "M = csvread(filename)"),
         ("csvwrite('x.csv', uint8(1));", "csvwrite(filename, M)"),

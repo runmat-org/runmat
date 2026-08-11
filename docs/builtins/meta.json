@@ -42345,567 +42345,1040 @@
       ]
     },
     {
+      "completion_policy": "Public",
+      "errors": [
+        {
+          "code": "RM.ERASE_PUNCTUATION.INVALID_INPUT",
+          "identifier": "RunMat:erasePunctuation:InvalidInput",
+          "message": "erasePunctuation: input must be text or tokenizedDocument",
+          "when": "Input is not documented host text or a tokenizedDocument object."
+        },
+        {
+          "code": "RM.ERASE_PUNCTUATION.INVALID_OPTION",
+          "identifier": "RunMat:erasePunctuation:InvalidOption",
+          "message": "erasePunctuation: invalid TokenTypes option",
+          "when": "TokenTypes is malformed, empty, or used with non-document text."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "erasePunctuation with a multirow character matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ErasePunctuationCharMatrixExtension",
+          "id": "erase-punctuation-char-matrix-input",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "erasePunctuation with nested cells or non-character cell elements is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ErasePunctuationBroadCellExtension",
+          "id": "erase-punctuation-broad-cell-input",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "erasePunctuation accepts host text, tokenizedDocument, and textual TokenTypes values only. All eight integer classes, logical values, and resident numeric handles reject without numeric-to-text conversion or provider access."
+      },
       "name": "erasePunctuation",
       "output_mode": "Fixed",
-      "completion_policy": "Public",
       "signatures": [
         {
-          "label": "out = erasePunctuation(textOrDocuments, Name, Value, ...)",
           "inputs": [
             {
-              "name": "text",
-              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
+              "description": "Input text.",
+              "name": "text",
+              "ty": "Any"
+            }
+          ],
+          "label": "newStr = erasePunctuation(str)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Text with matching content erased.",
+              "name": "newStr",
+              "ty": "Any"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Input text.",
+              "name": "text",
+              "ty": "Any"
+            }
+          ],
+          "label": "newDocuments = erasePunctuation(documents)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Updated tokenized documents.",
+              "name": "newDocuments",
+              "ty": "Any"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Input text.",
+              "name": "text",
+              "ty": "Any"
             },
             {
-              "name": "arg",
-              "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Additional arguments.",
+              "name": "arg",
+              "ty": "Any"
             }
           ],
+          "label": "newDocuments = erasePunctuation(documents, 'TokenTypes', types)",
           "outputs": [
             {
-              "name": "out",
-              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Output value."
+              "description": "Updated tokenized documents.",
+              "name": "newDocuments",
+              "ty": "Any"
             }
           ]
         }
-      ],
-      "errors": []
+      ]
     },
     {
+      "completion_policy": "Public",
+      "errors": [
+        {
+          "code": "RM.ERASE_URLS.INVALID_INPUT",
+          "identifier": "RunMat:eraseURLs:InvalidInput",
+          "message": "eraseURLs: input must be text or tokenizedDocument",
+          "when": "Input is not documented host text or a tokenizedDocument object."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "eraseURLs with a multirow character matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EraseURLsCharMatrixExtension",
+          "id": "erase-urls-char-matrix-input",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "eraseURLs with nested cells or non-character cell elements is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EraseURLsBroadCellExtension",
+          "id": "erase-urls-broad-cell-input",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "eraseURLs accepts host text or tokenizedDocument input only. All eight integer classes, logical values, and resident numeric handles reject without numeric-to-text conversion or provider access."
+      },
       "name": "eraseURLs",
       "output_mode": "Fixed",
-      "completion_policy": "Public",
       "signatures": [
         {
-          "label": "s = eraseURLs(text)",
           "inputs": [
             {
-              "name": "text",
-              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
+              "description": "Input text.",
+              "name": "text",
+              "ty": "Any"
             }
           ],
+          "label": "newStr = eraseURLs(str)",
           "outputs": [
             {
-              "name": "out",
-              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Output value."
+              "description": "Text with matching content erased.",
+              "name": "newStr",
+              "ty": "Any"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Input text.",
+              "name": "text",
+              "ty": "Any"
+            }
+          ],
+          "label": "newDocuments = eraseURLs(documents)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Updated tokenized documents.",
+              "name": "newDocuments",
+              "ty": "Any"
             }
           ]
         }
-      ],
-      "errors": []
+      ]
     },
     {
-      "name": "erf",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = erf(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Real numeric input."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Elementwise error-function result."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.ERF.INVALID_INPUT",
           "identifier": "RunMat:erf:InvalidInput",
-          "when": "Input cannot be interpreted as a real, nonsparse numeric array.",
-          "message": "erf: invalid input"
+          "message": "erf: invalid input",
+          "when": "Input cannot be interpreted as a real, nonsparse numeric array."
         },
         {
           "code": "RM.ERF.INTERNAL",
           "identifier": "RunMat:erf:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
-          "message": "erf: internal error"
+          "message": "erf: internal error",
+          "when": "Internal tensor construction or provider interaction failed."
+        }
+      ],
+      "extensions": [],
+      "integer_capabilities": [
+        {
+          "backend": "HostAndGpu",
+          "computation_domain": "FloatingPoint",
+          "form": "Y = erf(X)",
+          "inputs": [
+            {
+              "availability": "Rejected",
+              "classes": [],
+              "name": "X",
+              "notes": "Integer and logical inputs are rejected before real floating host or provider dispatch.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "erf has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "overload": "ElementwiseShapePreserving"
+        }
+      ],
+      "name": "erf",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Real numeric input.",
+              "name": "X",
+              "ty": "Any"
+            }
+          ],
+          "label": "Y = erf(X)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise error-function result.",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "erfcinv",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = erfcinv(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Real single or double input in the interval [0, 2]."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Elementwise inverse complementary error-function result."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.ERFCINV.INVALID_INPUT",
           "identifier": "RunMat:erfcinv:InvalidInput",
-          "when": "Input cannot be interpreted as a real, nonsparse numeric array.",
-          "message": "erfcinv: invalid input"
+          "message": "erfcinv: invalid input",
+          "when": "Input cannot be interpreted as a real, nonsparse numeric array."
         },
         {
           "code": "RM.ERFCINV.INTERNAL",
           "identifier": "RunMat:erfcinv:Internal",
-          "when": "Internal tensor construction, gathering, or upload failed.",
-          "message": "erfcinv: internal error"
+          "message": "erfcinv: internal error",
+          "when": "Internal tensor construction, gathering, or upload failed."
+        }
+      ],
+      "extensions": [],
+      "integer_capabilities": [
+        {
+          "backend": "HostAndGpu",
+          "computation_domain": "FloatingPoint",
+          "form": "Y = erfcinv(X)",
+          "inputs": [
+            {
+              "availability": "Rejected",
+              "classes": [],
+              "name": "X",
+              "notes": "Integer and logical inputs are rejected before real floating host or provider dispatch.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "erfcinv has no integer overload; the empty accepted-class mask is intentional and prevents generic numeric coercion from admitting integers.",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "overload": "ElementwiseShapePreserving"
+        }
+      ],
+      "name": "erfcinv",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Real single or double input in the interval [0, 2].",
+              "name": "X",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "Y = erfcinv(X)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise inverse complementary error-function result.",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "error",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "out = error(message)",
-          "inputs": [
-            {
-              "name": "message",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Error message text."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Never returned because error always throws."
-            }
-          ]
-        },
-        {
-          "label": "out = error(message, A...)",
-          "inputs": [
-            {
-              "name": "message",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Error message template text."
-            },
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Formatting values for the message template."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Never returned because error always throws."
-            }
-          ]
-        },
-        {
-          "label": "out = error(message_id, message)",
-          "inputs": [
-            {
-              "name": "message_id",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"RunMat:error\"",
-              "description": "Message identifier."
-            },
-            {
-              "name": "message",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Error message text."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Never returned because error always throws."
-            }
-          ]
-        },
-        {
-          "label": "out = error(message_id, message, A...)",
-          "inputs": [
-            {
-              "name": "message_id",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"RunMat:error\"",
-              "description": "Message identifier."
-            },
-            {
-              "name": "message",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Error message template text."
-            },
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Formatting values for the message template."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Never returned because error always throws."
-            }
-          ]
-        },
-        {
-          "label": "out = error(mex)",
-          "inputs": [
-            {
-              "name": "mex",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "MException value to rethrow."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Never returned because error always throws."
-            }
-          ]
-        },
-        {
-          "label": "out = error(msg_struct)",
-          "inputs": [
-            {
-              "name": "msg_struct",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Struct containing identifier/message fields."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "out",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Never returned because error always throws."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.ERROR.MISSING_MESSAGE",
           "identifier": "RunMat:error",
-          "when": "No arguments are supplied.",
-          "message": "error: missing message argument"
+          "message": "error: missing message argument",
+          "when": "No arguments are supplied."
         },
         {
           "code": "RM.ERROR.MEXCEPTION_EXTRA_ARGS",
           "identifier": "RunMat:error",
-          "when": "Additional arguments are supplied after an MException input.",
-          "message": "error: additional arguments are not allowed when passing an MException"
+          "message": "error: additional arguments are not allowed when passing an MException",
+          "when": "Additional arguments are supplied after an MException input."
         },
         {
           "code": "RM.ERROR.STRUCT_EXTRA_ARGS",
           "identifier": "RunMat:error",
-          "when": "Additional arguments are supplied after a message-struct input.",
-          "message": "error: additional arguments are not allowed when passing a message struct"
+          "message": "error: additional arguments are not allowed when passing a message struct",
+          "when": "Additional arguments are supplied after a message-struct input."
         },
         {
-          "code": "RM.ERROR.STRUCT_MISSING_IDENTIFIER",
+          "code": "RM.ERROR.STRUCT_NO_FIELDS",
           "identifier": "RunMat:error",
-          "when": "Message struct does not contain an identifier field.",
-          "message": "error: message struct must contain an 'identifier' field"
+          "message": "error: message struct must contain 'message', 'identifier', or 'stack'",
+          "when": "Message struct contains none of message, identifier, or stack."
         },
         {
-          "code": "RM.ERROR.STRUCT_MISSING_MESSAGE",
+          "code": "RM.ERROR.STRUCT_STACK_UNSUPPORTED",
           "identifier": "RunMat:error",
-          "when": "Message struct does not contain a message field.",
-          "message": "error: message struct must contain a 'message' field"
+          "message": "error: explicit errorStruct stack is not supported yet",
+          "when": "Message struct requests an explicit MATLAB stack that cannot be represented yet."
         },
         {
           "code": "RM.ERROR.INVALID_INPUT",
           "identifier": "RunMat:error",
-          "when": "Identifier/message inputs or format arguments are not string-compatible.",
-          "message": "error: invalid input argument"
+          "message": "error: invalid input argument",
+          "when": "Identifier/message inputs or format arguments are not string-compatible."
+        },
+        {
+          "code": "RM.ERROR.INVALID_IDENTIFIER",
+          "identifier": "RunMat:error",
+          "message": "error: invalid error identifier",
+          "when": "Identifier fields do not follow documented colon-separated identifier grammar."
+        },
+        {
+          "code": "RM.ERROR.CORRECTION_UNSUPPORTED",
+          "identifier": "RunMat:error",
+          "message": "error: matlab.lang.correction objects are not supported yet",
+          "when": "A documented matlab.lang.correction object is supplied before correction objects are representable."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "error(MException) is a RunMat extension; MATLAB uses throw or rethrow",
+          "error_identifier": "RunMat:compatibility:ErrorMExceptionExtension",
+          "id": "error-mexception-input",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "Treating an unqualified leading token as an error identifier is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ErrorUnqualifiedIdentifierExtension",
+          "id": "error-unqualified-identifier",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "messageid and msg error-structure aliases are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ErrorStructAliasExtension",
+          "id": "error-struct-field-aliases",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FunctionSpecific",
+          "form": "error(msg, integer_A) or error(errID, msg, integer_A)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "A",
+              "notes": "All eight typed-integer classes are documented numeric formatting values and remain exact through integer conversion specifiers.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Host formatting is exact for integer conversions; documented GPU-array arguments gather only after host message and identifier validation.",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "HostOnly",
+          "computation_domain": "FunctionSpecific",
+          "form": "error(integer_msg, ...) or error(integer_errID, ...)",
+          "inputs": [
+            {
+              "availability": "Rejected",
+              "classes": [],
+              "name": "msg",
+              "notes": "The message role is a text scalar and never converts integer data to text implicitly.",
+              "scalar_double": "NotApplicable"
+            },
+            {
+              "availability": "Rejected",
+              "classes": [],
+              "name": "errID",
+              "notes": "The identifier role is a text scalar and rejects integer values before provider access.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Integer values are valid only in formatting-value roles, never as message or identifier text.",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "overload": "FunctionSpecific"
+        }
+      ],
+      "name": "error",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Error message text.",
+              "name": "message",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "error(msg)",
+          "outputs": []
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Error message template text.",
+              "name": "message",
+              "ty": "StringScalar"
+            },
+            {
+              "arity": "Variadic",
+              "default": null,
+              "description": "Formatting values for the message template.",
+              "name": "A",
+              "ty": "Any"
+            }
+          ],
+          "label": "error(msg, A)",
+          "outputs": []
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Message identifier.",
+              "name": "message_id",
+              "ty": "StringScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Error message text.",
+              "name": "message",
+              "ty": "StringScalar"
+            },
+            {
+              "arity": "Variadic",
+              "default": null,
+              "description": "Formatting values for the message template.",
+              "name": "A",
+              "ty": "Any"
+            }
+          ],
+          "label": "error(errID, ___)",
+          "outputs": []
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Struct containing identifier/message fields.",
+              "name": "msg_struct",
+              "ty": "Any"
+            }
+          ],
+          "label": "error(errorStruct)",
+          "outputs": []
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "MATLAB correction object.",
+              "name": "correction",
+              "ty": "Any"
+            },
+            {
+              "arity": "Variadic",
+              "default": null,
+              "description": "Identifier, message, and optional formatting values.",
+              "name": "messageArguments",
+              "ty": "Any"
+            }
+          ],
+          "label": "error(correction, ___)",
+          "outputs": []
         }
       ]
     },
     {
-      "name": "errorbar",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "h = errorbar(Y, E)",
-          "inputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Data values."
-            },
-            {
-              "name": "E",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Symmetric Y error magnitudes."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "h",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Handle to the created error bar series."
-            }
-          ]
-        },
-        {
-          "label": "h = errorbar(X, Y, E)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "X coordinates."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Y coordinates."
-            },
-            {
-              "name": "E",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Symmetric Y error magnitudes."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "h",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Handle to the created error bar series."
-            }
-          ]
-        },
-        {
-          "label": "h = errorbar(X, Y, YNeg, YPos)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "X coordinates."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Y coordinates."
-            },
-            {
-              "name": "YNeg",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Negative Y error magnitudes."
-            },
-            {
-              "name": "YPos",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Positive Y error magnitudes."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "h",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Handle to the created error bar series."
-            }
-          ]
-        },
-        {
-          "label": "h = errorbar(X, Y, XNeg, XPos, YNeg, YPos)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "X coordinates."
-            },
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Y coordinates."
-            },
-            {
-              "name": "XNeg",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Negative X error magnitudes."
-            },
-            {
-              "name": "XPos",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Positive X error magnitudes."
-            },
-            {
-              "name": "YNeg",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Negative Y error magnitudes."
-            },
-            {
-              "name": "YPos",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Positive Y error magnitudes."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "h",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Handle to the created error bar series."
-            }
-          ]
-        },
-        {
-          "label": "h = errorbar(ax, ...)",
-          "inputs": [
-            {
-              "name": "ax",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Target axes handle."
-            },
-            {
-              "name": "data",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Errorbar positional data arguments."
-            },
-            {
-              "name": "props",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Style and name/value properties."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "h",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Handle to the created error bar series."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.ERRORBAR.INVALID_ARGUMENT",
           "identifier": "RunMat:errorbar:InvalidArgument",
-          "when": "Input vectors, error vectors, style arguments, or axes-target forms are malformed.",
-          "message": "errorbar: invalid argument"
+          "message": "errorbar: invalid argument",
+          "when": "Input vectors, error vectors, style arguments, or axes-target forms are malformed."
         },
         {
           "code": "RM.ERRORBAR.INTERNAL",
           "identifier": "RunMat:errorbar:Internal",
-          "when": "Internal render preparation or GPU vertex generation fails.",
-          "message": "errorbar: internal operation failed"
+          "message": "errorbar: internal operation failed",
+          "when": "Internal render preparation or GPU vertex generation fails."
+        }
+      ],
+      "extensions": [],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "h = errorbar(integer_Y, integer_E)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Y",
+              "notes": "Y accepts every built-in integer class as coordinate data.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "E",
+              "notes": "E accepts every built-in integer class as symmetric error lengths.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Authoritative integer storage crosses one explicit client graphics conversion boundary and returns opaque graphics handles.",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "h = errorbar(integer_X, integer_Y, integer_E)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "X",
+              "notes": "X accepts every built-in integer class as coordinate data.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Y",
+              "notes": "Y accepts every built-in integer class as coordinate data.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "E",
+              "notes": "E accepts every built-in integer class as symmetric error lengths.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Coordinate and error inputs remain exact until the client graphics conversion boundary.",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "h = errorbar(integer_X, integer_Y, integer_YNeg, integer_YPos)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "X",
+              "notes": "X accepts every built-in integer class as coordinate data.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Y",
+              "notes": "Y accepts every built-in integer class as coordinate data.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "YNeg",
+              "notes": "Negative error lengths accept every built-in integer class.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "YPos",
+              "notes": "Positive error lengths accept every built-in integer class.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Asymmetric lengths remain exact until the client graphics conversion boundary.",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "overload": "Multiple"
+        },
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "h = errorbar(integer_X, integer_Y, integer_YNeg, integer_YPos, integer_XNeg, integer_XPos)",
+          "inputs": [
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "X",
+              "notes": "X accepts every built-in integer class as coordinate data.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "Y",
+              "notes": "Y accepts every built-in integer class as coordinate data.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "YNeg",
+              "notes": "Negative vertical lengths accept every built-in integer class.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "YPos",
+              "notes": "Positive vertical lengths accept every built-in integer class.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "XNeg",
+              "notes": "Negative horizontal lengths accept every built-in integer class.",
+              "scalar_double": "Allowed"
+            },
+            {
+              "availability": "Documented",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "XPos",
+              "notes": "Positive horizontal lengths accept every built-in integer class.",
+              "scalar_double": "Allowed"
+            }
+          ],
+          "notes": "Both-direction integer lengths gather authoritatively before client graphics conversion.",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "overload": "Multiple"
+        }
+      ],
+      "name": "errorbar",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Data values.",
+              "name": "Y",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Symmetric Y error magnitudes.",
+              "name": "E",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "h = errorbar(Y, E)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created error bar series.",
+              "name": "h",
+              "ty": "NumericScalar"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates.",
+              "name": "Y",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Symmetric Y error magnitudes.",
+              "name": "E",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "h = errorbar(X, Y, E)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created error bar series.",
+              "name": "h",
+              "ty": "NumericScalar"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates.",
+              "name": "Y",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Negative Y error magnitudes.",
+              "name": "YNeg",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Positive Y error magnitudes.",
+              "name": "YPos",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "h = errorbar(X, Y, YNeg, YPos)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created error bar series.",
+              "name": "h",
+              "ty": "NumericScalar"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "X coordinates.",
+              "name": "X",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Y coordinates.",
+              "name": "Y",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Negative Y error magnitudes.",
+              "name": "YNeg",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Positive Y error magnitudes.",
+              "name": "YPos",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Negative X error magnitudes.",
+              "name": "XNeg",
+              "ty": "NumericArray"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Positive X error magnitudes.",
+              "name": "XPos",
+              "ty": "NumericArray"
+            }
+          ],
+          "label": "h = errorbar(X, Y, YNeg, YPos, XNeg, XPos)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created error bar series.",
+              "name": "h",
+              "ty": "NumericScalar"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Target axes handle.",
+              "name": "ax",
+              "ty": "NumericScalar"
+            },
+            {
+              "arity": "Variadic",
+              "default": null,
+              "description": "Errorbar positional data arguments.",
+              "name": "data",
+              "ty": "Any"
+            },
+            {
+              "arity": "Variadic",
+              "default": null,
+              "description": "Style and name/value properties.",
+              "name": "props",
+              "ty": "Any"
+            }
+          ],
+          "label": "h = errorbar(ax, ...)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the created error bar series.",
+              "name": "h",
+              "ty": "NumericScalar"
+            }
+          ]
         }
       ]
     },
@@ -43053,272 +43526,480 @@
       ]
     },
     {
-      "name": "exist",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "code = exist(name)",
-          "inputs": [
-            {
-              "name": "name",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Variable/function/file/class name to query."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "code",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Existence code (0,1,2,3,4,5,6,7,8) following MATLAB semantics."
-            }
-          ]
-        },
-        {
-          "label": "code = exist(name, type)",
-          "inputs": [
-            {
-              "name": "name",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Variable/function/file/class name to query."
-            },
-            {
-              "name": "type",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Query kind: var|file|dir|builtin|class|handle|method|mex|pcode|simulink|thunk|lib|java."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "code",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Existence code (0,1,2,3,4,5,6,7,8) following MATLAB semantics."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.EXIST.TOO_MANY_INPUTS",
-          "identifier": null,
-          "when": "More than two total input arguments are provided.",
-          "message": "exist: too many input arguments"
+          "identifier": "RunMat:exist:TooManyInputs",
+          "message": "exist: too many input arguments",
+          "when": "More than two total input arguments are provided."
         },
         {
           "code": "RM.EXIST.NAME_ARG",
-          "identifier": null,
-          "when": "Name input is not a character vector or string scalar/array scalar.",
-          "message": "exist: name must be a character vector or string scalar"
+          "identifier": "RunMat:exist:InvalidName",
+          "message": "exist: name must be a character vector or string scalar",
+          "when": "Name input is not a character vector or string scalar/array scalar."
         },
         {
           "code": "RM.EXIST.TYPE_ARG",
-          "identifier": null,
-          "when": "Type input is not a character vector or string scalar/array scalar.",
-          "message": "exist: type must be a character vector or string scalar"
+          "identifier": "RunMat:exist:InvalidTypeArgument",
+          "message": "exist: type must be a character vector or string scalar",
+          "when": "Type input is not a character vector or string scalar/array scalar."
         },
         {
           "code": "RM.EXIST.INVALID_TYPE",
-          "identifier": null,
-          "when": "Type input is not one of the supported exist query types.",
-          "message": "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'"
+          "identifier": "RunMat:exist:InvalidType",
+          "message": "exist: invalid type. Type must be one of 'builtin', 'class', 'dir', 'file', or 'var'",
+          "when": "Type input is not one of the supported exist query types."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "exist selectors and aliases beyond builtin, class, dir, file, and var are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:ExistSearchTypeExtension",
+          "id": "exist-search-type-extension",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "exist(handleObject, 'handle') with a nontext first argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExistNontextHandleExtension",
+          "id": "exist-nontext-handle-query",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "exist accepts textual name and searchType inputs only; all eight integer classes, logical values, and resident numeric handles reject before lookup or provider access. Its integer-valued typeID output remains a documented host double scalar, not typed-integer storage."
+      },
+      "name": "exist",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Variable/function/file/class name to query.",
+              "name": "name",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "exist name",
+          "outputs": []
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Variable/function/file/class name to query.",
+              "name": "name",
+              "ty": "StringScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Documented query kind: builtin|class|dir|file|var.",
+              "name": "type",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "exist name searchType",
+          "outputs": []
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Variable/function/file/class name to query.",
+              "name": "name",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "typeID = exist(name)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Existence code (0,1,2,3,4,5,6,7,8) following MATLAB semantics.",
+              "name": "typeID",
+              "ty": "NumericScalar"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Variable/function/file/class name to query.",
+              "name": "name",
+              "ty": "StringScalar"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Documented query kind: builtin|class|dir|file|var.",
+              "name": "type",
+              "ty": "StringScalar"
+            }
+          ],
+          "label": "typeID = exist(name, searchType)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Existence code (0,1,2,3,4,5,6,7,8) following MATLAB semantics.",
+              "name": "typeID",
+              "ty": "NumericScalar"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "exp",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = exp(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric, logical, char, or complex input."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Elementwise exponential result."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.EXP.INVALID_INPUT",
           "identifier": "RunMat:exp:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
-          "message": "exp: invalid input"
+          "message": "exp: invalid input",
+          "when": "Input cannot be interpreted as numeric, logical, char, or complex data."
         },
         {
           "code": "RM.EXP.INTERNAL",
           "identifier": "RunMat:exp:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
-          "message": "exp: internal error"
+          "message": "exp: internal error",
+          "when": "Internal tensor construction or provider interaction failed."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "exp with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExpIntegerInputExtension",
+          "id": "exp-integer-input",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "exp with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExpLogicalInputExtension",
+          "id": "exp-logical-input",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "exp with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExpCharacterInputExtension",
+          "id": "exp-character-input",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "Y = exp(integer_X)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "X",
+              "notes": "All eight integer classes are accepted only in RunMat extension mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53].",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "The RunMat-only overload validates exact binary64 conversion before exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double.",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "overload": "ElementwiseShapePreserving"
+        }
+      ],
+      "name": "exp",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
+              "name": "X",
+              "ty": "Any"
+            }
+          ],
+          "label": "Y = exp(X)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise exponential result.",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "expm1",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "Y = expm1(X)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric, logical, char, or complex input."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Elementwise exp(x)-1 result."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.EXPM1.INVALID_INPUT",
           "identifier": "RunMat:expm1:InvalidInput",
-          "when": "Input cannot be interpreted as numeric, logical, char, or complex data.",
-          "message": "expm1: invalid input"
+          "message": "expm1: invalid input",
+          "when": "Input cannot be interpreted as numeric, logical, char, or complex data."
         },
         {
           "code": "RM.EXPM1.INTERNAL",
           "identifier": "RunMat:expm1:Internal",
-          "when": "Internal tensor construction or provider interaction failed.",
-          "message": "expm1: internal error"
+          "message": "expm1: internal error",
+          "when": "Internal tensor construction or provider interaction failed."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "expm1 with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Expm1IntegerInputExtension",
+          "id": "expm1-integer-input",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "expm1 with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Expm1LogicalInputExtension",
+          "id": "expm1-logical-input",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "expm1 with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Expm1CharacterInputExtension",
+          "id": "expm1-character-input",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "Y = expm1(integer_X)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "X",
+              "notes": "All eight integer classes are accepted only in RunMat extension mode and only when every value lies in the inclusive exact binary64 interval [-2^53, 2^53].",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "The RunMat-only overload validates exact binary64 conversion before accurate exponentiation. Resident integer input gathers exactly through its owning provider; the double result is restored only when that provider physically supports binary64, otherwise it remains a host double.",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "overload": "ElementwiseShapePreserving"
+        }
+      ],
+      "name": "expm1",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
+              "name": "X",
+              "ty": "Any"
+            }
+          ],
+          "label": "Y = expm1(X)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Elementwise exp(x)-1 result.",
+              "name": "Y",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "exprnd",
-      "output_mode": "Fixed",
       "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "r = exprnd(mu)",
-          "inputs": [
-            {
-              "name": "mu",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Exponential mean parameter (must be > 0)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "r",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Random sample array from exponential distribution."
-            }
-          ]
-        },
-        {
-          "label": "r = exprnd(mu, sz)",
-          "inputs": [
-            {
-              "name": "mu",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Exponential mean parameter (must be > 0)."
-            },
-            {
-              "name": "sz",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Size scalar or size vector argument."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "r",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Random sample array from exponential distribution."
-            }
-          ]
-        },
-        {
-          "label": "r = exprnd(mu, sz1, sz2, ...)",
-          "inputs": [
-            {
-              "name": "mu",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Exponential mean parameter (must be > 0)."
-            },
-            {
-              "name": "sz",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Dimension extents for output shape."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "r",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Random sample array from exponential distribution."
-            }
-          ]
-        }
-      ],
       "errors": [
         {
           "code": "RM.EXPRND.MU_MUST_BE_POSITIVE",
           "identifier": "RunMat:exprnd:MuMustBePositive",
-          "when": "mu is zero or negative.",
-          "message": "exprnd: mu must be greater than zero"
+          "message": "exprnd: mu must be greater than zero",
+          "when": "mu is zero or negative."
         },
         {
           "code": "RM.EXPRND.INVALID_ARGUMENT",
           "identifier": "RunMat:exprnd:InvalidArgument",
-          "when": "Input parameters or size arguments are missing or malformed.",
-          "message": "exprnd: invalid argument"
+          "message": "exprnd: invalid argument",
+          "when": "Input parameters or size arguments are missing or malformed."
         },
         {
           "code": "RM.EXPRND.INTERNAL",
           "identifier": "RunMat:exprnd:Internal",
-          "when": "Internal conversion/allocation/provider decode fails.",
-          "message": "exprnd: internal operation failed"
+          "message": "exprnd: internal operation failed",
+          "when": "Internal conversion/allocation/provider decode fails."
+        }
+      ],
+      "extensions": [
+        {
+          "description": "exprnd with a typed-integer mean is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExprndIntegerMeanExtension",
+          "id": "exprnd-integer-mean",
+          "mode": "RunMatOnly"
+        },
+        {
+          "description": "exprnd with typed-integer size arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExprndIntegerSizeExtension",
+          "id": "exprnd-integer-size",
+          "mode": "RunMatOnly"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "backend": "GatherFallback",
+          "computation_domain": "FloatingPoint",
+          "form": "r = exprnd(mu, sz1, sz2, ...)",
+          "inputs": [
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "mu",
+              "notes": "Typed-integer means are gated and enter the floating exponential computation domain only after positivity validation.",
+              "scalar_double": "NotApplicable"
+            },
+            {
+              "availability": "RunMatOnly",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "name": "sz",
+              "notes": "Typed-integer size controls are gated and parsed exactly before allocation.",
+              "scalar_double": "NotApplicable"
+            }
+          ],
+          "notes": "Typed-integer mean and size arguments are separate RunMat-only extensions; resident mean fallback restores output only to the exact source owner and only when that owner physically supports the required output precision.",
+          "output_class": "Double",
+          "overflow": "Error",
+          "overload": "Multiple"
+        }
+      ],
+      "name": "exprnd",
+      "output_mode": "Fixed",
+      "signatures": [
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Exponential mean parameter (must be > 0).",
+              "name": "mu",
+              "ty": "Any"
+            }
+          ],
+          "label": "r = exprnd(mu)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array from exponential distribution.",
+              "name": "r",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Exponential mean parameter (must be > 0).",
+              "name": "mu",
+              "ty": "Any"
+            },
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Size scalar or size vector argument.",
+              "name": "sz",
+              "ty": "Any"
+            }
+          ],
+          "label": "r = exprnd(mu, sz)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array from exponential distribution.",
+              "name": "r",
+              "ty": "NumericArray"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Exponential mean parameter (must be > 0).",
+              "name": "mu",
+              "ty": "Any"
+            },
+            {
+              "arity": "Variadic",
+              "default": null,
+              "description": "Dimension extents for output shape.",
+              "name": "sz",
+              "ty": "Any"
+            }
+          ],
+          "label": "r = exprnd(mu, sz1, sz2, ...)",
+          "outputs": [
+            {
+              "arity": "Required",
+              "default": null,
+              "description": "Random sample array from exponential distribution.",
+              "name": "r",
+              "ty": "NumericArray"
+            }
+          ]
         }
       ]
     },

@@ -2,10 +2,10 @@
 
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CharArray, IntValue,
-    ResolveContext, StringArray, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, IntValue, ResolveContext, StringArray, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -15,7 +15,9 @@ use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_stri
 use crate::builtins::strings::core::compat::{
     broadcast_flat_index, broadcast_shape, logical_value, pattern_regex, scalar_text, text_items,
 };
-use crate::builtins::strings::text_analytics::documents::erase_punctuation_tokenized_document;
+use crate::builtins::strings::text_analytics::documents::{
+    erase_punctuation_tokenized_document, erase_urls_tokenized_document,
+};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -24,6 +26,22 @@ const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Output value.",
+}];
+
+const OUT_NEW_STR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "newStr",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Text with matching content erased.",
+}];
+
+const OUT_NEW_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "newDocuments",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Updated tokenized documents.",
 }];
 
 const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -140,18 +158,116 @@ descriptor!(
     &IN_TEXT_REST,
     &OUT_ANY
 );
-descriptor!(
-    ERASE_URLS_DESCRIPTOR,
-    "s = eraseURLs(text)",
-    &IN_TEXT,
-    &OUT_ANY
-);
-descriptor!(
-    ERASE_PUNCTUATION_DESCRIPTOR,
-    "out = erasePunctuation(textOrDocuments, Name, Value, ...)",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
+const ERASE_URLS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "newStr = eraseURLs(str)",
+        inputs: &IN_TEXT,
+        outputs: &OUT_NEW_STR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "newDocuments = eraseURLs(documents)",
+        inputs: &IN_TEXT,
+        outputs: &OUT_NEW_DOCUMENTS,
+    },
+];
+const ERASE_PUNCTUATION_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "newStr = erasePunctuation(str)",
+        inputs: &IN_TEXT,
+        outputs: &OUT_NEW_STR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "newDocuments = erasePunctuation(documents)",
+        inputs: &IN_TEXT,
+        outputs: &OUT_NEW_DOCUMENTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "newDocuments = erasePunctuation(documents, 'TokenTypes', types)",
+        inputs: &IN_TEXT_REST,
+        outputs: &OUT_NEW_DOCUMENTS,
+    },
+];
+const ERASE_URLS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERASE_URLS.INVALID_INPUT",
+    identifier: Some("RunMat:eraseURLs:InvalidInput"),
+    when: "Input is not documented host text or a tokenizedDocument object.",
+    message: "eraseURLs: input must be text or tokenizedDocument",
+};
+const ERASE_PUNCTUATION_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERASE_PUNCTUATION.INVALID_INPUT",
+    identifier: Some("RunMat:erasePunctuation:InvalidInput"),
+    when: "Input is not documented host text or a tokenizedDocument object.",
+    message: "erasePunctuation: input must be text or tokenizedDocument",
+};
+const ERASE_PUNCTUATION_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERASE_PUNCTUATION.INVALID_OPTION",
+    identifier: Some("RunMat:erasePunctuation:InvalidOption"),
+    when: "TokenTypes is malformed, empty, or used with non-document text.",
+    message: "erasePunctuation: invalid TokenTypes option",
+};
+const ERASE_URLS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERASE_URLS_ERROR_INVALID_INPUT];
+const ERASE_PUNCTUATION_ERRORS: [BuiltinErrorDescriptor; 2] = [
+    ERASE_PUNCTUATION_ERROR_INVALID_INPUT,
+    ERASE_PUNCTUATION_ERROR_INVALID_OPTION,
+];
+pub const ERASE_URLS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ERASE_URLS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERASE_URLS_ERRORS,
+};
+pub const ERASE_PUNCTUATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ERASE_PUNCTUATION_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERASE_PUNCTUATION_ERRORS,
+};
+pub const ERASE_URLS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "eraseURLs accepts host text or tokenizedDocument input only. All eight integer classes, logical values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
+    };
+pub const ERASE_PUNCTUATION_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "erasePunctuation accepts host text, tokenizedDocument, and textual TokenTypes values only. All eight integer classes, logical values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
+    };
+const ERASE_URLS_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "erase-urls-char-matrix-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eraseURLs with a multirow character matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EraseURLsCharMatrixExtension"),
+};
+const ERASE_URLS_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "erase-urls-broad-cell-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eraseURLs with nested cells or non-character cell elements is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EraseURLsBroadCellExtension"),
+};
+const ERASE_URLS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    ERASE_URLS_CHAR_MATRIX_EXTENSION,
+    ERASE_URLS_BROAD_CELL_EXTENSION,
+];
+const ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "erase-punctuation-char-matrix-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "erasePunctuation with a multirow character matrix is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ErasePunctuationCharMatrixExtension"),
+    };
+const ERASE_PUNCTUATION_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "erase-punctuation-broad-cell-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "erasePunctuation with nested cells or non-character cell elements is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ErasePunctuationBroadCellExtension"),
+    };
+const ERASE_PUNCTUATION_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION,
+    ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
+];
 descriptor!(
     MATCHES_DESCRIPTOR,
     "tf = matches(text, pattern)",
@@ -531,13 +647,28 @@ async fn replace_between_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::ERASE_URLS_DESCRIPTOR),
+    extensions(ERASE_URLS_EXTENSIONS),
+    integer_audit(crate::builtins::strings::transform::compat::ERASE_URLS_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
-    let text = gather_if_needed_async(&text)
-        .await
-        .map_err(map_flow("eraseURLs"))?;
-    let regex = Regex::new(r"https?://[^\s]+|www\.[^\s]+")
+    reject_resident_text_input(&text, "eraseURLs", &ERASE_URLS_ERROR_INVALID_INPUT)?;
+    ensure_erase_text_extensions(
+        &text,
+        "eraseURLs",
+        &ERASE_URLS_CHAR_MATRIX_EXTENSION,
+        &ERASE_URLS_BROAD_CELL_EXTENSION,
+    )?;
+    if let Value::Object(object) = text {
+        return erase_urls_tokenized_document(object);
+    }
+    if !is_host_text_tree(&text) {
+        return Err(descriptor_transform_error(
+            "eraseURLs",
+            &ERASE_URLS_ERROR_INVALID_INPUT,
+        ));
+    }
+    let regex = Regex::new(r"(?i)https?://[^\s]+")
         .map_err(|e| transform_error("eraseURLs", e.to_string()))?;
     map_text_preserve(text, "eraseURLs", |s| regex.replace_all(s, "").to_string())
 }
@@ -550,22 +681,37 @@ async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::ERASE_PUNCTUATION_DESCRIPTOR),
+    extensions(ERASE_PUNCTUATION_EXTENSIONS),
+    integer_audit(crate::builtins::strings::transform::compat::ERASE_PUNCTUATION_INTEGER_AUDIT),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn erase_punctuation_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let text = gather_if_needed_async(&text)
-        .await
-        .map_err(map_flow("erasePunctuation"))?;
+    reject_resident_text_input(
+        &text,
+        "erasePunctuation",
+        &ERASE_PUNCTUATION_ERROR_INVALID_INPUT,
+    )?;
+    for value in &rest {
+        reject_resident_text_input(
+            value,
+            "erasePunctuation",
+            &ERASE_PUNCTUATION_ERROR_INVALID_OPTION,
+        )?;
+    }
+    ensure_erase_text_extensions(
+        &text,
+        "erasePunctuation",
+        &ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION,
+        &ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
+    )?;
     if let Value::Object(object) = text {
-        let mut gathered = Vec::with_capacity(rest.len());
-        for value in rest {
-            gathered.push(
-                gather_if_needed_async(&value)
-                    .await
-                    .map_err(map_flow("erasePunctuation"))?,
-            );
-        }
-        return erase_punctuation_tokenized_document(object, gathered);
+        return erase_punctuation_tokenized_document(object, rest);
+    }
+    if !is_host_text_tree(&text) {
+        return Err(descriptor_transform_error(
+            "erasePunctuation",
+            &ERASE_PUNCTUATION_ERROR_INVALID_INPUT,
+        ));
     }
     if !rest.is_empty() {
         return Err(transform_error(
@@ -578,6 +724,61 @@ async fn erase_punctuation_builtin(text: Value, rest: Vec<Value>) -> BuiltinResu
     map_text_preserve(text, "erasePunctuation", |s| {
         regex.replace_all(s, "").to_string()
     })
+}
+
+fn reject_resident_text_input(
+    value: &Value,
+    name: &str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    if crate::dispatcher::value_contains_gpu(value) {
+        let mut builder = build_runtime_error(error.message).with_builtin(name);
+        if let Some(identifier) = error.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        return Err(builder.build());
+    }
+    Ok(())
+}
+
+fn descriptor_transform_error(
+    name: &str,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(name);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn is_host_text_tree(value: &Value) -> bool {
+    match value {
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
+        Value::Cell(cell) => cell.data.iter().all(is_host_text_tree),
+        _ => false,
+    }
+}
+
+fn ensure_erase_text_extensions(
+    value: &Value,
+    builtin: &str,
+    char_matrix: &'static BuiltinExtensionDescriptor,
+    broad_cell: &'static BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    match value {
+        Value::CharArray(array) if array.rows > 1 && array.cols > 1 => {
+            crate::compatibility::ensure_builtin_extension_enabled(char_matrix, builtin)
+        }
+        Value::Cell(cell) if !cell.data.iter().all(is_cellstr_element) => {
+            crate::compatibility::ensure_builtin_extension_enabled(broad_cell, builtin)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn is_cellstr_element(value: &Value) -> bool {
+    matches!(value, Value::CharArray(array) if array.rows <= 1 || array.cols <= 1)
 }
 
 #[runtime_builtin(
@@ -1281,6 +1482,7 @@ mod tests {
             .unwrap(),
             Value::CharArray(CharArray::new_row("cost 500"))
         );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("alpha,beta!")),
@@ -1308,6 +1510,112 @@ mod tests {
             ))
             .unwrap(),
             Value::CharArray(CharArray::new_row("x  "))
+        );
+    }
+
+    #[test]
+    fn erase_descriptors_and_integer_audits_are_settled() {
+        assert_eq!(ERASE_URLS_DESCRIPTOR.signatures.len(), 2);
+        assert_eq!(ERASE_PUNCTUATION_DESCRIPTOR.signatures.len(), 3);
+        for name in ["eraseURLs", "erasePunctuation"] {
+            let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered");
+            assert_eq!(
+                builtin.integer_audit.expect("integer audit").kind,
+                BuiltinIntegerAuditKind::NotApplicable
+            );
+        }
+    }
+
+    #[test]
+    fn erase_text_builtins_reject_all_integer_classes_and_logical_values() {
+        for value in [
+            IntValue::I8(-1),
+            IntValue::I16(-1),
+            IntValue::I32(-1),
+            IntValue::I64(-1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ] {
+            assert!(block(erase_urls_builtin(Value::Int(value.clone()))).is_err());
+            assert!(block(erase_punctuation_builtin(Value::Int(value), vec![])).is_err());
+        }
+        assert!(block(erase_urls_builtin(Value::Bool(true))).is_err());
+        assert!(block(erase_punctuation_builtin(Value::Bool(true), vec![])).is_err());
+    }
+
+    #[test]
+    fn erase_text_broad_container_extensions_are_independently_gated() {
+        let matrix = Value::CharArray(
+            CharArray::new(vec!['a', '!', 'b', '?'], 2, 2).expect("character matrix"),
+        );
+        let broad_cell = Value::Cell(
+            CellArray::new(vec![Value::String("https://example.com!".into())], 1, 1)
+                .expect("broad text cell"),
+        );
+        let nested_cell = Value::Cell(
+            CellArray::new(
+                vec![Value::Cell(
+                    CellArray::new(vec![Value::CharArray(CharArray::new_row("nested!"))], 1, 1)
+                        .expect("inner cell"),
+                )],
+                1,
+                1,
+            )
+            .expect("outer cell"),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (value, identifier) in [
+            (
+                matrix.clone(),
+                "RunMat:compatibility:EraseURLsCharMatrixExtension",
+            ),
+            (
+                broad_cell.clone(),
+                "RunMat:compatibility:EraseURLsBroadCellExtension",
+            ),
+        ] {
+            let error = block(erase_urls_builtin(value)).expect_err("strict eraseURLs gate");
+            assert_eq!(error.identifier(), Some(identifier));
+        }
+        for (value, identifier) in [
+            (
+                matrix,
+                "RunMat:compatibility:ErasePunctuationCharMatrixExtension",
+            ),
+            (
+                broad_cell,
+                "RunMat:compatibility:ErasePunctuationBroadCellExtension",
+            ),
+            (
+                nested_cell,
+                "RunMat:compatibility:ErasePunctuationBroadCellExtension",
+            ),
+        ] {
+            let error = block(erase_punctuation_builtin(value, vec![]))
+                .expect_err("strict erasePunctuation gate");
+            assert_eq!(error.identifier(), Some(identifier));
+        }
+    }
+
+    #[test]
+    fn erase_text_builtins_reject_resident_numeric_without_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let url_error = block(erase_urls_builtin(resident.clone())).unwrap_err();
+        assert_eq!(
+            url_error.identifier(),
+            ERASE_URLS_ERROR_INVALID_INPUT.identifier
+        );
+        let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
+        let punctuation_error = block(erase_punctuation_builtin(nested, vec![])).unwrap_err();
+        assert_eq!(
+            punctuation_error.identifier(),
+            ERASE_PUNCTUATION_ERROR_INVALID_INPUT.identifier
         );
     }
 

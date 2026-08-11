@@ -166,7 +166,7 @@ fn compiled_erase_rejects_numeric_roles_and_erasebetween_accepts_typed_positions
 }
 
 #[test]
-fn compiled_slice400_extensions_have_stable_strict_mode_identifiers() {
+fn compiled_ecdf_to_erasebetween_extensions_have_stable_strict_mode_identifiers() {
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     for (source, identifier) in [
         (
