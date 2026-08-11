@@ -1,13 +1,18 @@
 //! MATLAB-compatible `fclose` builtin for RunMat.
 //!
-//! Mirrors MATLAB semantics for closing individual files, vectors of file
-//! identifiers, or all open files. The implementation integrates with the
-//! shared file registry managed by `fopen` and always executes on the host.
+//! MATLAB-compatible mode closes one scalar double file identifier or all open
+//! files through the character-vector `all` form. Broader RunMat forms are
+//! extension-gated. The implementation integrates with the shared file registry
+//! managed by `fopen` and always executes on the host.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, Value,
+    IntValue, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -23,6 +28,113 @@ use crate::builtins::io::filetext::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "fclose";
+
+macro_rules! fclose_extension {
+    ($name:ident, $id:literal, $description:literal, $error:literal) => {
+        const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: $description,
+            error_identifier: Some($error),
+        };
+    };
+}
+fclose_extension!(
+    FCLOSE_NO_INPUT_EXTENSION,
+    "fclose-no-input-close-all",
+    "fclose() close-all syntax is a RunMat extension",
+    "RunMat:compatibility:FcloseNoInputExtension"
+);
+fclose_extension!(
+    FCLOSE_INTEGER_ID_EXTENSION,
+    "fclose-integer-fileid",
+    "integer-class fclose file identifiers are a RunMat extension",
+    "RunMat:compatibility:FcloseIntegerIdExtension"
+);
+fclose_extension!(
+    FCLOSE_VECTOR_ID_EXTENSION,
+    "fclose-fileid-vector",
+    "fclose file-identifier arrays are a RunMat extension",
+    "RunMat:compatibility:FcloseVectorIdExtension"
+);
+fclose_extension!(
+    FCLOSE_LOGICAL_ID_EXTENSION,
+    "fclose-logical-fileid",
+    "logical fclose file identifiers are a RunMat extension",
+    "RunMat:compatibility:FcloseLogicalIdExtension"
+);
+fclose_extension!(
+    FCLOSE_CELL_ID_EXTENSION,
+    "fclose-cell-fileids",
+    "cell fclose file-identifier collections are a RunMat extension",
+    "RunMat:compatibility:FcloseCellIdExtension"
+);
+fclose_extension!(
+    FCLOSE_STRING_ALL_EXTENSION,
+    "fclose-string-all",
+    "string-scalar fclose all syntax is a RunMat extension",
+    "RunMat:compatibility:FcloseStringAllExtension"
+);
+fclose_extension!(
+    FCLOSE_MESSAGE_OUTPUT_EXTENSION,
+    "fclose-message-output",
+    "a second fclose diagnostic output is a RunMat extension",
+    "RunMat:compatibility:FcloseMessageOutputExtension"
+);
+fclose_extension!(
+    FCLOSE_RESIDENT_ID_EXTENSION,
+    "fclose-resident-fileid",
+    "resident fclose file identifiers are a RunMat extension",
+    "RunMat:compatibility:FcloseResidentIdExtension"
+);
+fclose_extension!(
+    FCLOSE_SINGLE_ID_EXTENSION,
+    "fclose-single-fileid",
+    "single-precision fclose file identifiers are a RunMat extension",
+    "RunMat:compatibility:FcloseSingleIdExtension"
+);
+pub const FCLOSE_EXTENSIONS: [BuiltinExtensionDescriptor; 9] = [
+    FCLOSE_NO_INPUT_EXTENSION,
+    FCLOSE_INTEGER_ID_EXTENSION,
+    FCLOSE_VECTOR_ID_EXTENSION,
+    FCLOSE_LOGICAL_ID_EXTENSION,
+    FCLOSE_CELL_ID_EXTENSION,
+    FCLOSE_STRING_ALL_EXTENSION,
+    FCLOSE_MESSAGE_OUTPUT_EXTENSION,
+    FCLOSE_RESIDENT_ID_EXTENSION,
+    FCLOSE_SINGLE_ID_EXTENSION,
+];
+
+const FCLOSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are parsed exactly and must fit the runtime file-identifier domain before registry access.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "status = fclose(integer_fileID)",
+        inputs: &FCLOSE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "This RunMat-only scalar form returns double status and never converts the identifier through binary64.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "status = fclose(integer_fileIDs)",
+        inputs: &FCLOSE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The collection and resident forms are independently gated RunMat extensions; every identifier validates before any close side effect.",
+    },
+];
 
 const FCLOSE_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "status",
@@ -194,17 +306,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fclose_type),
     descriptor(crate::builtins::io::filetext::fclose::FCLOSE_DESCRIPTOR),
+    extensions(FCLOSE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::filetext::fclose::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::filetext::fclose"
 )]
 async fn fclose_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    preflight_fclose_outputs()?;
     let eval = evaluate(&args).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
         }
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            eval.outputs(),
+        return Ok(Value::OutputList(
+            eval.outputs().into_iter().take(out_count).collect(),
         ));
     }
     Ok(eval.first_output())
@@ -251,6 +365,7 @@ impl FcloseEval {
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
+    preflight_fclose_inputs(args)?;
     let gathered = gather_args(args).await?;
     match gathered.len() {
         0 => Ok(close_all().await),
@@ -259,6 +374,134 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
             &FCLOSE_ERROR_INVALID_INPUT,
             "too many input arguments",
         )),
+    }
+}
+
+fn preflight_fclose_outputs() -> BuiltinResult<()> {
+    let Some(count) = crate::output_count::current_output_count() else {
+        return Ok(());
+    };
+    if count > 2 {
+        return Err(fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "too many output arguments",
+        ));
+    }
+    if count == 2 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FCLOSE_MESSAGE_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn preflight_fclose_inputs(args: &[Value]) -> BuiltinResult<()> {
+    match args {
+        [] => crate::compatibility::ensure_builtin_extension_enabled(
+            &FCLOSE_NO_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        [value] => preflight_fclose_value(value),
+        _ => Err(fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "too many input arguments",
+        )),
+    }
+}
+
+fn preflight_fclose_value(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Num(_) | Value::CharArray(_) => Ok(()),
+        Value::Int(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FCLOSE_INTEGER_ID_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::Bool(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FCLOSE_LOGICAL_ID_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::Tensor(tensor) => {
+            if tensor.len() != 1 {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FCLOSE_VECTOR_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            if tensor.integer_storage().is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FCLOSE_INTEGER_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if tensor.numeric_dtype() == NumericDType::F32 {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FCLOSE_SINGLE_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        Value::LogicalArray(array) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FCLOSE_LOGICAL_ID_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if array.len() != 1 {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FCLOSE_VECTOR_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        Value::Cell(cell) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FCLOSE_CELL_ID_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            for nested in &cell.data {
+                preflight_fclose_value(nested)?;
+            }
+            Ok(())
+        }
+        Value::String(_) | Value::StringArray(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FCLOSE_STRING_ALL_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FCLOSE_RESIDENT_ID_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if tensor::element_count(&handle.shape) != 1 {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FCLOSE_VECTOR_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FCLOSE_INTEGER_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_is_logical(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FCLOSE_LOGICAL_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FCLOSE_SINGLE_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 
@@ -703,6 +946,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_all_closes_everything() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let (fid, path) = open_temp_file("fclose_all");
@@ -717,6 +961,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_no_args_closes_all() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let (fid, path) = open_temp_file("fclose_no_args");
@@ -729,6 +974,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_vector_of_fids_closes_each() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path1 = unique_path("fclose_vec1");
@@ -828,6 +1074,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_standard_stream_bool_argument() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let eval = run_evaluate(&[Value::Bool(true)]).expect("fclose stdout");
@@ -841,6 +1088,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_logical_array_converts_to_numeric_ids() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let logical = LogicalArray::new(vec![1u8, 0u8, 1u8], vec![3]).expect("logical array");
@@ -852,6 +1100,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_cell_array_closes_each_entry() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let (fid1, path1) = open_temp_file("fclose_cell1");
@@ -868,6 +1117,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_tensor_with_non_integer_entries_errors() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let tensor = Tensor::new(vec![1.5], vec![1, 1]).expect("tensor");
@@ -884,6 +1134,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_string_array_all_equivalent() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let strings = StringArray::new(vec!["all".to_string()], vec![1]).expect("string array");
@@ -895,6 +1146,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_accepts_empty_tensor() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).expect("tensor");
@@ -906,6 +1158,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fclose_errors_on_non_numeric_input() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let err = unwrap_error_message(run_evaluate(&[Value::from("not-a-fid")]).unwrap_err());
@@ -916,5 +1169,51 @@ pub(crate) mod tests {
                 FCLOSE_ERROR_INVALID_INPUT.message
             )
         );
+    }
+
+    #[test]
+    fn fclose_strict_extension_rejection_precedes_close_side_effects() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let (fid, path) = open_temp_file("fclose_preflight");
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let integer = run_evaluate(&[Value::Int(IntValue::I64(fid as i64))]).unwrap_err();
+        assert_eq!(
+            integer.identifier(),
+            Some("RunMat:compatibility:FcloseIntegerIdExtension")
+        );
+        assert!(registry::info_for(fid as i32).is_some());
+
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let message =
+            futures::executor::block_on(fclose_builtin(vec![Value::Num(fid)])).unwrap_err();
+        assert_eq!(
+            message.identifier(),
+            Some("RunMat:compatibility:FcloseMessageOutputExtension")
+        );
+        assert!(registry::info_for(fid as i32).is_some());
+
+        drop(_outputs);
+        run_evaluate(&[Value::Num(fid)]).expect("close after rejected forms");
+        test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn fclose_integer_extension_accepts_exact_scalar_and_documented_char_all() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let (fid, path) = open_temp_file("fclose_integer_extension");
+        {
+            let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result =
+                run_evaluate(&[Value::Int(IntValue::U64(fid as u64))]).expect("integer file id");
+            assert_eq!(result.status(), 0.0);
+        }
+        test_support::fs::remove_file(path).unwrap();
+
+        let all = run_evaluate(&[Value::CharArray(runmat_builtins::CharArray::new_row("all"))])
+            .expect("documented char all");
+        assert_eq!(all.status(), 0.0);
     }
 }

@@ -680,6 +680,7 @@ pub struct FunctionContourHandleState {
     pub x_range: (f64, f64),
     pub y_range: (f64, f64),
     pub function: FunctionSurfaceFunctionRef,
+    pub fill: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1040,6 +1041,7 @@ impl PlotChildHandleState {
                 x_range: state.x_range,
                 y_range: state.y_range,
                 function: state.function.clone(),
+                fill: state.fill,
             }),
             Self::Area(_) => Self::Area(AreaHandleState {
                 figure,
@@ -3941,6 +3943,7 @@ pub fn register_function_contour_handle(
     x_range: (f64, f64),
     y_range: (f64, f64),
     function: FunctionSurfaceFunctionRef,
+    fill: bool,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3955,6 +3958,7 @@ pub fn register_function_contour_handle(
             x_range,
             y_range,
             function,
+            fill,
         }),
     );
     id as f64

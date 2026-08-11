@@ -3504,6 +3504,7 @@ fn get_function_contour_property(
                 "YRange",
                 tensor_from_vec(vec![function_contour.y_range.0, function_contour.y_range.1]),
             );
+            st.insert("Fill", Value::Bool(function_contour.fill));
             st.insert("LineWidth", Value::Num(contour.line_width as f64));
             st.insert(
                 "DisplayName",
@@ -3527,6 +3528,7 @@ fn get_function_contour_property(
             function_contour.y_range.0,
             function_contour.y_range.1,
         ])),
+        Some("fill") => Ok(Value::Bool(function_contour.fill)),
         Some("linewidth") => Ok(Value::Num(contour.line_width as f64)),
         Some("displayname") => Ok(Value::String(contour.label.unwrap_or_default())),
         Some("zdata") => Ok(Value::Num(contour.base_z as f64)),
@@ -5794,7 +5796,7 @@ fn apply_function_contour_property(
             };
             apply_contour_property(&contour_handle, key, value, builtin)
         }
-        "meshdensity" | "xrange" | "yrange" | "function" => Err(plotting_error(
+        "meshdensity" | "xrange" | "yrange" | "function" | "fill" => Err(plotting_error(
             builtin,
             format!("{builtin}: changing {key} after fcontour sampling is not supported yet"),
         )),

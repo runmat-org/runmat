@@ -10,7 +10,11 @@ use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, IntValue, NumericScalar, StringArray, Value,
 };
@@ -53,6 +57,82 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "extractBetween";
+
+const FULL_BROADCAST_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extractbetween-full-broadcast",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "extractBetween with non-scalar boundary expansion is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractBetweenFullBroadcastExtension"),
+};
+const RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extractbetween-resident-position",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "extractBetween with resident numeric positions is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractBetweenResidentPositionExtension"),
+};
+const CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extractbetween-char-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "extractBetween row-wise character-matrix input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractBetweenCharMatrixExtension"),
+};
+const STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extractbetween-string-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "extractBetween cells containing string scalars are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractBetweenStringCellExtension"),
+};
+const EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FULL_BROADCAST_EXTENSION,
+    RESIDENT_POSITION_EXTENSION,
+    CHAR_MATRIX_EXTENSION,
+    STRING_CELL_EXTENSION,
+];
+const INTEGER_POSITION_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "startPos",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public numeric position accepts every built-in integer class and is read exactly with one-based indexing.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "endPos",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public numeric position accepts every built-in integer class and is read exactly with one-based indexing.",
+    },
+];
+const INTEGER_TEXT_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "str",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The first argument is text; integer data rejects before provider access.",
+}];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "newStr = extractBetween(str, integer_startPos, integer_endPos)",
+        inputs: &INTEGER_POSITION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Strict compatibility accepts scalar positions or arrays exactly the same size as str; string input returns string and other documented text input returns cellstr.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "newStr = extractBetween(integer_str, start, end)",
+        inputs: &INTEGER_TEXT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer text input is outside the public domain and rejects without numeric-to-text conversion.",
+    },
+];
 
 const EXTRACT_BETWEEN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "newText",
@@ -252,6 +332,8 @@ enum BoundariesMode {
     summary = "Extract substrings between boundary markers.",
     keywords = "extractBetween,substring,boundaries,strings",
     accel = "sink",
+    extensions(EXTENSIONS),
+    integer_capabilities(INTEGER_CAPABILITIES),
     type_resolver(text_preserve_type),
     descriptor(crate::builtins::strings::transform::extractbetween::EXTRACT_BETWEEN_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::extractbetween"
@@ -262,6 +344,41 @@ async fn extract_between_builtin(
     stop: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if is_numeric_or_resident(&text) || contains_nested_numeric_or_resident(&text) {
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_INVALID_INPUT));
+    }
+    if is_resident_or_contains_resident(&start) || is_resident_or_contains_resident(&stop) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESIDENT_POSITION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if is_char_matrix(&text) || is_char_matrix(&start) || is_char_matrix(&stop) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CHAR_MATRIX_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if cell_contains_string(&text) || cell_contains_string(&start) || cell_contains_string(&stop) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRING_CELL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if raw_boundary_uses_full_broadcast(&text, &start)
+        || raw_boundary_uses_full_broadcast(&text, &stop)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FULL_BROADCAST_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if rest
+        .iter()
+        .any(|value| is_numeric_or_resident(value) || contains_nested_numeric_or_resident(value))
+    {
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_VALUE));
+    }
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let start = gather_if_needed_async(&start).await.map_err(map_flow)?;
     let stop = gather_if_needed_async(&stop).await.map_err(map_flow)?;
@@ -284,6 +401,15 @@ async fn extract_between_builtin(
     let start_shape = start_boundary.shape();
     let stop_shape = stop_boundary.shape();
     let text_shape = normalized_text.shape();
+
+    if !shape_is_scalar_or_same(start_shape, text_shape)
+        || !shape_is_scalar_or_same(stop_shape, text_shape)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FULL_BROADCAST_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
 
     let shape_ts = broadcast_shapes(BUILTIN_NAME, text_shape, start_shape).map_err(|err| {
         extract_between_error_with_message(
@@ -335,6 +461,91 @@ async fn extract_between_builtin(
     }
 
     normalized_text.into_value(results, output_shape)
+}
+
+fn is_numeric_or_resident(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn contains_nested_numeric_or_resident(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|value| {
+            is_numeric_or_resident(value) || contains_nested_numeric_or_resident(value)
+        }),
+        _ => false,
+    }
+}
+
+fn is_resident_or_contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(cell) => cell.data.iter().any(is_resident_or_contains_resident),
+        _ => false,
+    }
+}
+
+fn is_char_matrix(value: &Value) -> bool {
+    matches!(value, Value::CharArray(array) if array.rows > 1)
+}
+
+fn cell_contains_string(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|value| {
+            matches!(value, Value::String(_) | Value::StringArray(_)) || cell_contains_string(value)
+        }),
+        _ => false,
+    }
+}
+
+fn raw_text_shape(value: &Value) -> Option<Vec<usize>> {
+    match value {
+        Value::String(_) => Some(vec![1, 1]),
+        Value::StringArray(array) => Some(array.shape.clone()),
+        Value::CharArray(array) if array.rows <= 1 => Some(vec![1, 1]),
+        Value::CharArray(array) => Some(vec![array.rows, 1]),
+        Value::Cell(cell) => Some(cell.shape.clone()),
+        _ => None,
+    }
+}
+
+fn raw_boundary_shape(value: &Value) -> Option<Vec<usize>> {
+    match value {
+        Value::String(_) | Value::Num(_) | Value::Int(_) | Value::Object(_) => Some(vec![1, 1]),
+        Value::StringArray(array) => Some(array.shape.clone()),
+        Value::CharArray(array) if array.rows <= 1 => Some(vec![1, 1]),
+        Value::CharArray(array) => Some(vec![array.rows, 1]),
+        Value::Cell(cell) => Some(cell.shape.clone()),
+        Value::Tensor(tensor) => Some(tensor.shape.clone()),
+        Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        _ => None,
+    }
+}
+
+fn raw_boundary_uses_full_broadcast(text: &Value, boundary: &Value) -> bool {
+    let (Some(text_shape), Some(boundary_shape)) =
+        (raw_text_shape(text), raw_boundary_shape(boundary))
+    else {
+        return false;
+    };
+    !shape_is_scalar_or_same(&boundary_shape, &text_shape)
+}
+
+fn shape_is_scalar_or_same(shape: &[usize], text_shape: &[usize]) -> bool {
+    shape
+        .iter()
+        .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+        == Some(1)
+        || shape == text_shape
 }
 
 async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMode>> {
@@ -552,14 +763,22 @@ impl NormalizedText {
                 kind: TextKind::StringArray,
             }),
             Value::CharArray(ca) => {
-                let rows = ca.rows;
+                let rows = ca.rows.max(1);
                 let mut data = Vec::with_capacity(rows);
-                for row in 0..rows {
-                    data.push(char_row_to_string_slice(&ca.data, ca.cols, row));
+                if ca.rows == 0 {
+                    data.push(String::new());
+                } else {
+                    for row in 0..ca.rows {
+                        data.push(char_row_to_string_slice(&ca.data, ca.cols, row));
+                    }
                 }
                 Ok(Self {
                     data,
-                    shape: vec![rows, 1],
+                    shape: if ca.rows <= 1 {
+                        vec![1, 1]
+                    } else {
+                        vec![rows, 1]
+                    },
                     kind: TextKind::CharArray { rows },
                 })
             }
@@ -658,18 +877,25 @@ impl NormalizedText {
                 Ok(Value::StringArray(array))
             }
             TextKind::CharArray { rows } => {
-                if rows == 0 {
-                    return CharArray::new(Vec::new(), 0, 0)
-                        .map(Value::CharArray)
-                        .map_err(|e| {
-                            extract_between_error_with_message(
-                                format!("{BUILTIN_NAME}: {e}"),
-                                &EXTRACT_BETWEEN_ERROR_INTERNAL,
-                            )
-                        });
-                }
                 if results.len() != rows {
                     return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH));
+                }
+                if rows == 1 {
+                    let text = results
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| ExtractResult::text(String::new()))
+                        .text;
+                    return make_cell_with_shape(
+                        vec![Value::CharArray(CharArray::new_row(&text))],
+                        vec![1, 1],
+                    )
+                    .map_err(|e| {
+                        extract_between_error_with_message(
+                            format!("{BUILTIN_NAME}: {e}"),
+                            &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                        )
+                    });
                 }
                 let mut max_width = 0usize;
                 let mut row_strings = Vec::with_capacity(rows);
@@ -929,12 +1155,21 @@ pub(crate) mod tests {
 
     #[test]
     fn extractBetween_position_vectors_read_typed_integer_storage_exactly() {
-        let positions =
-            Tensor::new_integer(IntegerStorage::U16(vec![2, 4]), vec![1, 2]).expect("positions");
-
-        let parsed = BoundaryPositions::from_value(Value::Tensor(positions)).unwrap();
-        assert_eq!(parsed.data, vec![2, 4]);
-        assert_eq!(parsed.shape, vec![1, 2]);
+        for storage in [
+            IntegerStorage::I8(vec![2, 4]),
+            IntegerStorage::I16(vec![2, 4]),
+            IntegerStorage::I32(vec![2, 4]),
+            IntegerStorage::I64(vec![2, 4]),
+            IntegerStorage::U8(vec![2, 4]),
+            IntegerStorage::U16(vec![2, 4]),
+            IntegerStorage::U32(vec![2, 4]),
+            IntegerStorage::U64(vec![2, 4]),
+        ] {
+            let positions = Tensor::new_integer(storage, vec![1, 2]).expect("positions");
+            let parsed = BoundaryPositions::from_value(Value::Tensor(positions)).unwrap();
+            assert_eq!(parsed.data, vec![2, 4]);
+            assert_eq!(parsed.shape, vec![1, 2]);
+        }
     }
 
     #[test]
@@ -1069,7 +1304,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn extractBetween_char_array_rows() {
+    fn extractBetween_character_vector_returns_scalar_cellstr() {
         let chars = CharArray::new(
             "GPUAccelerateVM".chars().collect(),
             1,
@@ -1084,18 +1319,62 @@ pub(crate) mod tests {
         )
         .expect("extractBetween");
         match result {
-            Value::CharArray(out) => {
-                assert_eq!(out.rows, 1);
-                let text: String = out.data.iter().collect();
+            Value::Cell(out) => {
+                assert_eq!(out.shape, vec![1, 1]);
+                let Value::CharArray(chars) = &out.data[0] else {
+                    panic!("expected character vector element")
+                };
+                let text: String = chars.data.iter().collect();
                 assert_eq!(text.trim_end(), "Accelerate");
             }
-            other => panic!("expected char array, got {other:?}"),
+            other => panic!("expected scalar cellstr, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn extractBetween_integer_capabilities_and_strict_shape_are_declared() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(INTEGER_POSITION_INPUTS[0].classes.len(), 8);
+        let text = Value::StringArray(
+            StringArray::new(vec!["abcd".into(), "wxyz".into()], vec![2, 1]).unwrap(),
+        );
+        let start = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![1, 2]).unwrap(),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = extract_between_builtin(text, start, Value::Num(3.0), Vec::new())
+            .expect_err("non-same-size expansion must be gated");
+        assert_eq!(
+            error.identifier(),
+            FULL_BROADCAST_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn extractBetween_strict_mode_gates_resident_positions_before_gather() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = extract_between_builtin(
+            Value::String("abcd".into()),
+            resident,
+            Value::Num(3.0),
+            Vec::new(),
+        )
+        .expect_err("resident position gate");
+        assert_eq!(
+            error.identifier(),
+            RESIDENT_POSITION_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_cell_array_preserves_types() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("A[B]C")),
@@ -1272,7 +1551,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extractBetween_cell_boundary_arguments() {
-        let text = CellArray::new(vec![Value::String("A<GPU>".into())], 1, 1).unwrap();
+        let text =
+            CellArray::new(vec![Value::CharArray(CharArray::new_row("A<GPU>"))], 1, 1).unwrap();
         let start = CellArray::new(vec![Value::CharArray(CharArray::new_row("<"))], 1, 1).unwrap();
         let stop = CellArray::new(vec![Value::CharArray(CharArray::new_row(">"))], 1, 1).unwrap();
         let result = extract_between_builtin(
@@ -1285,7 +1565,7 @@ pub(crate) mod tests {
         match result {
             Value::Cell(out) => {
                 let value = out.get(0, 0).unwrap();
-                assert_eq!(value, Value::String("GPU".into()));
+                assert_eq!(value, Value::CharArray(CharArray::new_row("GPU")));
             }
             other => panic!("expected cell array, got {other:?}"),
         }

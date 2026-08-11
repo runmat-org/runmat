@@ -7,9 +7,13 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, NumericScalar, ObjectInstance, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ClassDef, IntValue, MethodDef, NumericScalar, ObjectInstance,
+    Tensor, Value,
 };
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
@@ -180,6 +184,42 @@ const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     inputs: &IN_VARIADIC_ARGS,
     outputs: &OUT_ANY,
 }];
+const BOUNDARY_CONDITION_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Boundary-condition id.",
+    },
+    BuiltinParamDescriptor {
+        name: "region",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target region id.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Boundary-condition kind.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Numeric fields required by the selected kind.",
+    },
+];
+const BOUNDARY_CONDITION_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "bc = fea.boundaryCondition(id, region, kind, Name, Value, ...)",
+        inputs: &BOUNDARY_CONDITION_INPUTS,
+        outputs: &OUT_ANY,
+    }];
 const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "results = fea.results(runOrRunId, Name, Value, ...)",
     inputs: &IN_VARIADIC_ARGS,
@@ -287,6 +327,89 @@ pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+pub const FEA_BOUNDARY_CONDITION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &BOUNDARY_CONDITION_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+const fn boundary_integer_input(name: &'static str) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion.",
+    }
+}
+
+const BOUNDARY_ROTATION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    boundary_integer_input("rx"),
+    boundary_integer_input("ry"),
+    boundary_integer_input("rz"),
+];
+const BOUNDARY_IMPEDANCE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [boundary_integer_input("specificImpedancePaSPerM")];
+const BOUNDARY_TEMPERATURE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [boundary_integer_input("temperatureK")];
+const BOUNDARY_HEAT_FLUX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [boundary_integer_input("heatFluxWPerM2")];
+const BOUNDARY_CONVECTION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    boundary_integer_input("ambientTemperatureK"),
+    boundary_integer_input("coefficientWPerM2K"),
+];
+const BOUNDARY_INLET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [boundary_integer_input("velocityMPerS")];
+const BOUNDARY_OUTLET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [boundary_integer_input("pressurePa")];
+
+const fn boundary_integer_capability(
+    form: &'static str,
+    inputs: &'static [BuiltinIntegerInputCapability],
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round.",
+    }
+}
+
+pub const FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 7] = [
+    boundary_integer_capability(
+        "prescribedRotation integer fields",
+        &BOUNDARY_ROTATION_INTEGER_INPUTS,
+    ),
+    boundary_integer_capability(
+        "acousticImpedance integer field",
+        &BOUNDARY_IMPEDANCE_INTEGER_INPUTS,
+    ),
+    boundary_integer_capability(
+        "thermalPrescribedTemperature integer field",
+        &BOUNDARY_TEMPERATURE_INTEGER_INPUTS,
+    ),
+    boundary_integer_capability(
+        "thermalHeatFlux integer field",
+        &BOUNDARY_HEAT_FLUX_INTEGER_INPUTS,
+    ),
+    boundary_integer_capability(
+        "thermalConvection integer fields",
+        &BOUNDARY_CONVECTION_INTEGER_INPUTS,
+    ),
+    boundary_integer_capability(
+        "cfdInletVelocity integer field",
+        &BOUNDARY_INLET_INTEGER_INPUTS,
+    ),
+    boundary_integer_capability(
+        "cfdOutletPressure integer field",
+        &BOUNDARY_OUTLET_INTEGER_INPUTS,
+    ),
+];
 pub const FEA_RESULTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &RESULTS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -399,7 +522,8 @@ pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<
     category = "fea",
     summary = "Create a typed FEA boundary condition.",
     keywords = "fea,boundary,condition,region,prescribed,rotation",
-    descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
+    descriptor(crate::builtins::fea::FEA_BOUNDARY_CONDITION_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_boundary_condition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1179,54 +1303,146 @@ fn create_boundary_condition_object_from_args(args: Vec<Value>) -> BuiltinResult
     let bc_id = scalar_string(&args[0], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
     let region_id = scalar_string(&args[1], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
     let kind_text = scalar_string(&args[2], BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
-    let mut fields = json_fields_from_name_values(BOUNDARY_CONDITION_NAME, &args[3..])?;
+    let mut fields = boundary_fields_from_name_values(&args[3..])?;
     let kind = match normalize_token(&kind_text).as_str() {
         "prescribedrotation" => BoundaryConditionKind::PrescribedRotation {
-            rx: remove_required_f64(&mut fields, BOUNDARY_CONDITION_NAME, "rx")?,
-            ry: remove_required_f64(&mut fields, BOUNDARY_CONDITION_NAME, "ry")?,
-            rz: remove_required_f64(&mut fields, BOUNDARY_CONDITION_NAME, "rz")?,
+            rx: remove_required_boundary_f64(&mut fields, "rx")?,
+            ry: remove_required_boundary_f64(&mut fields, "ry")?,
+            rz: remove_required_boundary_f64(&mut fields, "rz")?,
         },
         "acousticimpedance" => BoundaryConditionKind::AcousticImpedance {
-            specific_impedance_pa_s_per_m: remove_required_f64(
+            specific_impedance_pa_s_per_m: remove_required_boundary_f64(
                 &mut fields,
-                BOUNDARY_CONDITION_NAME,
                 "specific_impedance_pa_s_per_m",
             )?,
         },
         "thermalprescribedtemperature" => BoundaryConditionKind::ThermalPrescribedTemperature {
-            temperature_k: remove_required_f64(
-                &mut fields,
-                BOUNDARY_CONDITION_NAME,
-                "temperature_k",
-            )?,
+            temperature_k: remove_required_boundary_f64(&mut fields, "temperature_k")?,
         },
         "thermalheatflux" => BoundaryConditionKind::ThermalHeatFlux {
-            heat_flux_w_per_m2: remove_required_f64(
-                &mut fields,
-                BOUNDARY_CONDITION_NAME,
-                "heat_flux_w_per_m2",
-            )?,
+            heat_flux_w_per_m2: remove_required_boundary_f64(&mut fields, "heat_flux_w_per_m2")?,
         },
         "thermalconvection" => BoundaryConditionKind::ThermalConvection {
-            ambient_temperature_k: remove_required_f64(
+            ambient_temperature_k: remove_required_boundary_f64(
                 &mut fields,
-                BOUNDARY_CONDITION_NAME,
                 "ambient_temperature_k",
             )?,
-            coefficient_w_per_m2k: remove_required_f64(
+            coefficient_w_per_m2k: remove_required_boundary_f64(
                 &mut fields,
-                BOUNDARY_CONDITION_NAME,
                 "coefficient_w_per_m2k",
             )?,
         },
-        _ => parse_scalar_enum::<BoundaryConditionKind>(&kind_text, "BoundaryConditionKind")?,
+        "cfdinletvelocity" => BoundaryConditionKind::CfdInletVelocity {
+            velocity_m_per_s: remove_required_boundary_f64(&mut fields, "velocity_m_per_s")?,
+        },
+        "cfdoutletpressure" => BoundaryConditionKind::CfdOutletPressure {
+            pressure_pa: remove_required_boundary_f64(&mut fields, "pressure_pa")?,
+        },
+        _ => parse_scalar_enum_for_builtin::<BoundaryConditionKind>(
+            BOUNDARY_CONDITION_NAME,
+            &kind_text,
+            "BoundaryConditionKind",
+        )?,
     };
-    reject_unknown_fields(BOUNDARY_CONDITION_NAME, fields)?;
+    reject_unknown_boundary_fields(fields)?;
     boundary_condition_to_object(BoundaryCondition {
         bc_id,
         region_id,
         kind,
     })
+}
+
+fn boundary_fields_from_name_values<'a>(
+    args: &'a [Value],
+) -> BuiltinResult<HashMap<String, &'a Value>> {
+    let mut fields = HashMap::new();
+    for pair in expect_name_value_tail(BOUNDARY_CONDITION_NAME, args)? {
+        let raw = scalar_string(pair.name, BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
+        fields.insert(canonical_field_name(&raw), pair.value);
+    }
+    Ok(fields)
+}
+
+fn remove_required_boundary_f64(
+    fields: &mut HashMap<String, &Value>,
+    key: &str,
+) -> BuiltinResult<f64> {
+    let Some(value) = fields.remove(key) else {
+        return Err(builtin_error(
+            BOUNDARY_CONDITION_NAME,
+            &ERROR_INPUT,
+            format!("missing required option `{key}`"),
+        ));
+    };
+    boundary_numeric_scalar_f64(value, key)
+}
+
+fn boundary_numeric_scalar_f64(value: &Value, key: &str) -> BuiltinResult<f64> {
+    let converted = match value {
+        Value::Num(value) => *value,
+        Value::Int(value) => boundary_integer_to_f64(value),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            boundary_numeric_storage_scalar_to_f64(
+                tensor
+                    .numeric_value_at(0)
+                    .expect("validated scalar tensor storage"),
+            )
+        }
+        _ => {
+            return Err(builtin_error(
+                BOUNDARY_CONDITION_NAME,
+                &ERROR_INPUT,
+                format!("numeric option `{key}` must be a real numeric scalar"),
+            ))
+        }
+    };
+    if !converted.is_finite() {
+        return Err(builtin_error(
+            BOUNDARY_CONDITION_NAME,
+            &ERROR_INPUT,
+            format!("numeric option `{key}` must be finite"),
+        ));
+    }
+    Ok(converted)
+}
+
+fn boundary_integer_to_f64(value: &IntValue) -> f64 {
+    match value {
+        IntValue::I8(value) => f64::from(*value),
+        IntValue::I16(value) => f64::from(*value),
+        IntValue::I32(value) => f64::from(*value),
+        IntValue::I64(value) => *value as f64,
+        IntValue::U8(value) => f64::from(*value),
+        IntValue::U16(value) => f64::from(*value),
+        IntValue::U32(value) => f64::from(*value),
+        IntValue::U64(value) => *value as f64,
+    }
+}
+
+fn boundary_numeric_storage_scalar_to_f64(value: NumericScalar) -> f64 {
+    match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        NumericScalar::I8(value) => f64::from(value),
+        NumericScalar::I16(value) => f64::from(value),
+        NumericScalar::I32(value) => f64::from(value),
+        NumericScalar::I64(value) => value as f64,
+        NumericScalar::U8(value) => f64::from(value),
+        NumericScalar::U16(value) => f64::from(value),
+        NumericScalar::U32(value) => f64::from(value),
+        NumericScalar::U64(value) => value as f64,
+    }
+}
+
+fn reject_unknown_boundary_fields(fields: HashMap<String, &Value>) -> BuiltinResult<()> {
+    if let Some(key) = fields.keys().next() {
+        return Err(builtin_error(
+            BOUNDARY_CONDITION_NAME,
+            &ERROR_INPUT,
+            format!("unsupported fea.boundaryCondition option `{key}`"),
+        ));
+    }
+    Ok(())
 }
 
 fn create_load_case_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -2827,6 +3043,13 @@ fn canonical_field_name(text: &str) -> String {
         "magnitude" | "magnitudepa" => "magnitude_pa".to_string(),
         "current" | "currenta" => "current_a".to_string(),
         "phase" | "phaserad" => "phase_rad".to_string(),
+        "specificimpedancepasperm" => "specific_impedance_pa_s_per_m".to_string(),
+        "temperaturek" => "temperature_k".to_string(),
+        "heatfluxwperm2" => "heat_flux_w_per_m2".to_string(),
+        "ambienttemperaturek" => "ambient_temperature_k".to_string(),
+        "coefficientwperm2k" => "coefficient_w_per_m2k".to_string(),
+        "velocitympers" => "velocity_m_per_s".to_string(),
+        "pressurepa" => "pressure_pa".to_string(),
         "amplitudescale" => "amplitude_scale".to_string(),
         "deterministicmode" => "deterministic_mode".to_string(),
         "precisionmode" => "precision_mode".to_string(),
@@ -3341,9 +3564,17 @@ fn scalar_string(
 }
 
 fn parse_scalar_enum<T: DeserializeOwned>(text: &str, label: &str) -> BuiltinResult<T> {
+    parse_scalar_enum_for_builtin(STUDY_NAME, text, label)
+}
+
+fn parse_scalar_enum_for_builtin<T: DeserializeOwned>(
+    builtin: &'static str,
+    text: &str,
+    label: &str,
+) -> BuiltinResult<T> {
     serde_yaml::from_str::<T>(&text.to_ascii_lowercase()).map_err(|err| {
         builtin_error(
-            STUDY_NAME,
+            builtin,
             &ERROR_INPUT,
             format!("invalid {label} value `{text}`: {err}"),
         )
@@ -3628,6 +3859,29 @@ mod tests {
         Value::Tensor(Tensor::new_2d(vec![10.0, 20.0, 30.0], 1, 3).expect("tensor should build"))
     }
 
+    fn boundary_payload(value: Value) -> BoundaryCondition {
+        let Value::Object(object) = value else {
+            panic!("expected boundary condition object");
+        };
+        let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) else {
+            panic!("expected boundary condition JSON payload");
+        };
+        serde_json::from_str(payload).expect("boundary condition payload should decode")
+    }
+
+    fn boundary_args(kind: &str, fields: Vec<(&str, Value)>) -> Vec<Value> {
+        let mut args = vec![
+            Value::String("bc".into()),
+            Value::String("region".into()),
+            Value::String(kind.into()),
+        ];
+        for (name, value) in fields {
+            args.push(Value::String(name.into()));
+            args.push(value);
+        }
+        args
+    }
+
     #[test]
     fn fea_usize_parsers_preserve_typed_bounds_and_reject_invalid_values() {
         use runmat_builtins::{IntValue, IntegerStorage};
@@ -3842,6 +4096,126 @@ run:
                 rz: 0.3
             }
         ));
+    }
+
+    #[test]
+    fn fea_boundary_condition_accepts_integer_fields_for_all_numeric_kinds() {
+        let rotation = boundary_payload(
+            block_on(fea_boundary_condition_builtin(boundary_args(
+                "prescribedRotation",
+                vec![
+                    ("rx", Value::Int(IntValue::I8(1))),
+                    ("ry", Value::Int(IntValue::U16(2))),
+                    ("rz", Value::Int(IntValue::I32(3))),
+                ],
+            )))
+            .unwrap(),
+        );
+        assert!(matches!(
+            rotation.kind,
+            BoundaryConditionKind::PrescribedRotation {
+                rx: 1.0,
+                ry: 2.0,
+                rz: 3.0
+            }
+        ));
+
+        let cases = [
+            (
+                "acousticImpedance",
+                "specificImpedancePaSPerM",
+                IntValue::U32(4),
+            ),
+            (
+                "thermalPrescribedTemperature",
+                "temperatureK",
+                IntValue::I64(5),
+            ),
+            ("thermalHeatFlux", "heatFluxWPerM2", IntValue::U64(6)),
+            ("cfdInletVelocity", "velocityMPerS", IntValue::I16(7)),
+            ("cfdOutletPressure", "pressurePa", IntValue::U8(8)),
+        ];
+        for (kind, field, value) in cases {
+            boundary_payload(
+                block_on(fea_boundary_condition_builtin(boundary_args(
+                    kind,
+                    vec![(field, Value::Int(value))],
+                )))
+                .unwrap(),
+            );
+        }
+
+        let convection = boundary_payload(
+            block_on(fea_boundary_condition_builtin(boundary_args(
+                "thermalConvection",
+                vec![
+                    ("ambientTemperatureK", Value::Int(IntValue::U8(9))),
+                    ("coefficientWPerM2K", Value::Int(IntValue::I16(10))),
+                ],
+            )))
+            .unwrap(),
+        );
+        assert!(matches!(
+            convection.kind,
+            BoundaryConditionKind::ThermalConvection {
+                ambient_temperature_k: 9.0,
+                coefficient_w_per_m2k: 10.0
+            }
+        ));
+    }
+
+    #[test]
+    fn fea_boundary_condition_converts_every_integer_class_at_binary64_boundary() {
+        for value in [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ] {
+            let expected = boundary_integer_to_f64(&value);
+            let boundary = boundary_payload(
+                block_on(fea_boundary_condition_builtin(boundary_args(
+                    "thermalHeatFlux",
+                    vec![("heatFluxWPerM2", Value::Int(value))],
+                )))
+                .unwrap(),
+            );
+            let BoundaryConditionKind::ThermalHeatFlux { heat_flux_w_per_m2 } = boundary.kind
+            else {
+                panic!("expected thermal heat-flux boundary");
+            };
+            assert_eq!(heat_flux_w_per_m2, expected);
+        }
+    }
+
+    #[test]
+    fn fea_boundary_condition_rejects_nonscalar_numeric_fields() {
+        let values =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1, 2]), vec![1, 2])
+                .unwrap();
+        let err = block_on(fea_boundary_condition_builtin(boundary_args(
+            "thermalHeatFlux",
+            vec![("heatFluxWPerM2", Value::Tensor(values))],
+        )))
+        .expect_err("nonscalar field must fail");
+        assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
+        assert_eq!(
+            err.context.builtin.as_deref(),
+            Some(BOUNDARY_CONDITION_NAME)
+        );
+    }
+
+    #[test]
+    fn fea_boundary_condition_declares_seven_integer_forms() {
+        assert_eq!(FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES.len(), 7);
+        assert!(FEA_BOUNDARY_CONDITION_INTEGER_CAPABILITIES
+            .iter()
+            .flat_map(|capability| capability.inputs)
+            .all(|input| input.classes.len() == 8));
     }
 
     #[test]

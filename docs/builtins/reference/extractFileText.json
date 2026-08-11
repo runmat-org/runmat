@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "`extractFileText` performs host file IO and text parsing; it does not use provider kernels."
+    "notes": "`extractFileText` performs host file IO and text parsing. It has no provider kernel; resident Pages controls are available only through an explicit RunMat extension."
   },
   "fusion": {
     "elementwise": false,
@@ -30,12 +30,14 @@
   },
   "description": "`extractFileText(filename)` reads text from a host file and returns a string scalar. This slice supports plain text files with encodings, HTML files through RunMat's `extractHTMLText` parser, and DOCX files by extracting `word/document.xml` text.",
   "behaviors": [
-    "`filename` may be a string scalar, character vector, scalar string array, or 1-by-1 cell containing a text filename.",
+    "Documented `filename`/URL input is a string scalar, character vector, or 1-by-1 cell containing a character vector. A string-valued or nested filename cell is a RunMat extension.",
     "Plain text files are decoded as UTF-8 by default. The `Encoding` name-value option accepts labels supported by `encoding_rs`, such as `UTF-8`, `windows-1252`, and `ISO-8859-1`.",
     "HTML files with extensions `.html`, `.htm`, and `.xhtml` are decoded as text and passed to `extractHTMLText`.",
     "For HTML files, `ExtractionMethod` accepts `\"tree\"`, `\"article\"`, or `\"all-text\"` and follows the existing `extractHTMLText` compatibility behavior.",
     "DOCX files are read as zip archives and text is extracted from `word/document.xml`, preserving paragraph breaks and basic tabs/line breaks.",
-    "PDF extraction, website/URL fetching, password-protected documents, PDF page selection, legacy binary DOC, and full Microsoft Word layout fidelity remain tracked by the broader Text Analytics compatibility issue.",
+    "The documented `Pages` option is a nonempty vector of positive values in single, double, or any of the eight integer classes. RunMat parses these controls exactly from native storage, but PDF extraction itself remains unsupported.",
+    "PDF extraction, website/URL fetching, password-protected documents, legacy binary DOC, and full Microsoft Word layout fidelity remain tracked by the broader Text Analytics compatibility issue.",
+    "Integer, logical, complex, and resident numeric filename values reject before file IO or provider access. Resident Pages controls require RunMat extension mode.",
     "Unknown file extensions are treated as plain text files."
   ],
   "examples": [
@@ -90,9 +92,9 @@
       "output": "`str` is a string scalar."
     },
     "points": [
-      "`Encoding` applies to plain text and HTML decoding in RunMat.",
+      "MATLAB documents `Encoding` for plain text. RunMat currently also applies it while decoding HTML input.",
       "`ExtractionMethod` is supported for HTML files only.",
-      "`Password` and `Pages` are recognized as PDF-only options but remain unsupported until PDF extraction is implemented."
+      "`Password` and `Pages` are recognized as PDF-only options. Pages values are validated exactly, but extraction remains unsupported until PDF support is implemented."
     ]
   },
   "source": {

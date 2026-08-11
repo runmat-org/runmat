@@ -3,9 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, ResolveContext, StringArray, StructValue, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, ObjectInstance, ResolveContext, StringArray,
+    StructValue, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -14,6 +16,30 @@ use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, B
 
 const HTML_TREE_CLASS: &str = "htmlTree";
 const MISSING: &str = "<missing>";
+
+const EXTRACT_HTML_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extracthtmltext-char-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "extractHTMLText row-wise character-matrix input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractHTMLTextCharMatrixExtension"),
+};
+const EXTRACT_HTML_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extracthtmltext-broad-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "extractHTMLText with string-valued or mixed htmlTree/text cells is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractHTMLTextBroadCellExtension"),
+};
+const EXTRACT_HTML_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    EXTRACT_HTML_CHAR_MATRIX_EXTENSION,
+    EXTRACT_HTML_BROAD_CELL_EXTENSION,
+];
+pub const EXTRACT_HTML_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "extractHTMLText accepts host text or htmlTree input and textual ExtractionMethod values only. All eight integer classes, logical and complex values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
+    };
 
 const OUT_TREE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tree",
@@ -212,13 +238,86 @@ async fn html_tree_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Extract visible text from HTML code or htmlTree objects.",
     keywords = "extractHTMLText,HTML,text analytics,parse",
     accel = "sink",
+    extensions(EXTRACT_HTML_EXTENSIONS),
+    integer_audit(crate::builtins::strings::text_analytics::html::EXTRACT_HTML_INTEGER_AUDIT),
     type_resolver(string_type),
     descriptor(crate::builtins::strings::text_analytics::html::EXTRACT_HTML_TEXT_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::html"
 )]
 async fn extract_html_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    preflight_extract_html_args(&args)?;
     let (source, method) = parse_extract_args(args).await?;
     extract_html_text_value(source, method)
+}
+
+fn preflight_extract_html_args(args: &[Value]) -> BuiltinResult<()> {
+    if let Some(source) = args.first() {
+        if numeric_or_resident(source) || contains_numeric_or_resident(source) {
+            return Err(html_error(
+                "extractHTMLText",
+                "extractHTMLText: expected HTML text or htmlTree input",
+            ));
+        }
+        if matches!(source, Value::CharArray(array) if array.rows > 1) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &EXTRACT_HTML_CHAR_MATRIX_EXTENSION,
+                "extractHTMLText",
+            )?;
+        }
+        if html_cell_is_broad(source) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &EXTRACT_HTML_BROAD_CELL_EXTENSION,
+                "extractHTMLText",
+            )?;
+        }
+    }
+    for value in args.iter().skip(1) {
+        if numeric_or_resident(value) || contains_numeric_or_resident(value) {
+            return Err(html_error(
+                "extractHTMLText",
+                "extractHTMLText: option names and values must be text scalars",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn numeric_or_resident(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn contains_numeric_or_resident(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        _ => false,
+    }
+}
+
+fn html_cell_is_broad(value: &Value) -> bool {
+    let Value::Cell(cell) = value else {
+        return false;
+    };
+    let contains_tree = cell.data.iter().any(is_html_tree_value);
+    if contains_tree {
+        cell.data.iter().any(|value| !is_html_tree_value(value))
+    } else {
+        cell.data
+            .iter()
+            .any(|value| !matches!(value, Value::CharArray(array) if array.rows <= 1))
+    }
 }
 
 #[runtime_builtin(
@@ -2011,6 +2110,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extraction_accepts_cell_array_of_text() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::String("<p>first</p>".to_string()),
@@ -2351,5 +2451,64 @@ mod tests {
         ]))
         .expect_err("invalid method");
         assert!(err.to_string().contains("ExtractionMethod"));
+    }
+
+    #[test]
+    fn extract_html_text_integer_audit_is_not_applicable() {
+        assert_eq!(
+            EXTRACT_HTML_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(EXTRACT_HTML_INTEGER_AUDIT
+            .notes
+            .contains("All eight integer"));
+    }
+
+    #[test]
+    fn extract_html_text_rejects_integer_and_resident_numeric_input_before_gather() {
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(1)),
+            Value::Int(runmat_builtins::IntValue::I16(1)),
+            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_builtins::IntValue::I64(1)),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_builtins::IntValue::U16(1)),
+            Value::Int(runmat_builtins::IntValue::U32(1)),
+            Value::Int(runmat_builtins::IntValue::U64(1)),
+        ] {
+            let error = futures::executor::block_on(extract_html_text_builtin(vec![value]))
+                .expect_err("integer HTML input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = futures::executor::block_on(extract_html_text_builtin(vec![resident]))
+            .expect_err("resident HTML input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn extract_html_text_strict_mode_gates_broad_text_containers() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let matrix = Value::CharArray(
+            runmat_builtins::CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap(),
+        );
+        let error = futures::executor::block_on(extract_html_text_builtin(vec![matrix]))
+            .expect_err("strict char matrix gate");
+        assert_eq!(
+            error.identifier(),
+            EXTRACT_HTML_CHAR_MATRIX_EXTENSION.error_identifier
+        );
+        let broad_cell =
+            Value::Cell(CellArray::new(vec![Value::String("<p>x</p>".into())], 1, 1).unwrap());
+        let error = futures::executor::block_on(extract_html_text_builtin(vec![broad_cell]))
+            .expect_err("strict broad cell gate");
+        assert_eq!(
+            error.identifier(),
+            EXTRACT_HTML_BROAD_CELL_EXTENSION.error_identifier
+        );
     }
 }

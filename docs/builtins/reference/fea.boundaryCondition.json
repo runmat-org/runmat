@@ -1,0 +1,61 @@
+{
+  "title": "fea.boundaryCondition",
+  "category": "fea",
+  "keywords": [
+    "fea",
+    "boundary condition",
+    "thermal",
+    "acoustic",
+    "cfd"
+  ],
+  "summary": "Create a typed RunMat FEA boundary condition.",
+  "requires_feature": "fea",
+  "tested": {
+    "unit": "builtins::fea::tests::fea_boundary_condition"
+  },
+  "description": "`fea.boundaryCondition(id, region, kind, Name, Value, ...)` creates a typed boundary-condition object for a RunMat FEA model. This API is native to RunMat rather than a MATLAB compatibility builtin.",
+  "behaviors": [
+    "The first three inputs select the boundary-condition id, target region id, and boundary kind.",
+    "Numeric fields must be finite real numeric scalars. Logical values, arrays with more than one element, and unknown fields are rejected with `RunMat:fea:InvalidInput`.",
+    "All eight built-in integer classes are accepted for every numeric field listed below. Each exact integer is converted once to the model's binary64 field using IEEE-754 integer-to-f64 conversion, so sufficiently wide integers can round."
+  ],
+  "integer_forms": [
+    "`prescribedRotation`: `rx`, `ry`, and `rz`.",
+    "`acousticImpedance`: `specificImpedancePaSPerM`.",
+    "`thermalPrescribedTemperature`: `temperatureK`.",
+    "`thermalHeatFlux`: `heatFluxWPerM2`.",
+    "`thermalConvection`: `ambientTemperatureK` and `coefficientWPerM2K`.",
+    "`cfdInletVelocity`: `velocityMPerS`.",
+    "`cfdOutletPressure`: `pressurePa`."
+  ],
+  "examples": [
+    {
+      "description": "Prescribe integer-valued rotations",
+      "input": "bc = fea.boundaryCondition('rotation', 'tip', 'prescribedRotation', 'rx', int16(0), 'ry', int16(1), 'rz', int16(0));"
+    },
+    {
+      "description": "Create a CFD inlet boundary",
+      "input": "bc = fea.boundaryCondition('inlet', 'inlet_face', 'cfdInletVelocity', 'velocityMPerS', uint8(12));"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are integer fields stored as integers?",
+      "answer": "No. Boundary-condition model fields are binary64 values. RunMat preserves the integer until the explicit constructor boundary and then performs one documented IEEE-754 conversion."
+    }
+  ],
+  "links": [
+    {
+      "label": "Using FEA",
+      "url": "../../fea/using-fea"
+    },
+    {
+      "label": "FEA operation reference",
+      "url": "../../fea/operation-reference"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs"
+  }
+}

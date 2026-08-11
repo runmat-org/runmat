@@ -198,6 +198,8 @@ fea.plot(result, "von_mises");
 print("bracket_von_mises.png", "-dpng");
 ```
 
+`fea.boundaryCondition` accepts finite real numeric scalars for the fields of `prescribedRotation`, `acousticImpedance`, `thermalPrescribedTemperature`, `thermalHeatFlux`, `thermalConvection`, `cfdInletVelocity`, and `cfdOutletPressure`. All eight built-in integer classes are accepted for those fields; the constructor preserves the exact scalar until one explicit IEEE-754 binary64 model-storage conversion, so sufficiently wide integers can round. The `fea.boundaryCondition` builtin reference lists the required field names for each kind.
+
 Use `.fea` when the study definition should be checked in as a portable declarative artifact:
 
 ```matlab

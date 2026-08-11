@@ -44016,14 +44016,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
+              "description": "Input string array, character vector, or cell array of character vectors."
             },
             {
-              "name": "arg",
+              "name": "boundary",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Text/pattern boundary or positive numeric position, scalar or the same size as text."
             }
           ],
           "outputs": [
@@ -44037,7 +44037,93 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.EXTRACT_AFTER.INVALID_INPUT",
+          "identifier": "RunMat:extractAfter:InvalidInput",
+          "when": "The call does not contain exactly one documented text input and one boundary.",
+          "message": "extractAfter: invalid input"
+        },
+        {
+          "code": "RM.EXTRACT_AFTER.INVALID_BOUNDARY",
+          "identifier": "RunMat:extractAfter:InvalidBoundary",
+          "when": "A numeric boundary is not a positive integer or a text/pattern boundary is invalid.",
+          "message": "extractAfter: invalid boundary"
+        },
+        {
+          "code": "RM.EXTRACT_AFTER.SIZE_MISMATCH",
+          "identifier": "RunMat:extractAfter:SizeMismatch",
+          "when": "A nonscalar boundary does not have the same shape as the text input.",
+          "message": "extractAfter: boundary size must match text"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "extractafter-resident-position",
+          "mode": "RunMatOnly",
+          "description": "extractAfter with a resident numeric position is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractAfterResidentPositionExtension"
+        },
+        {
+          "id": "extractafter-char-matrix",
+          "mode": "RunMatOnly",
+          "description": "extractAfter row-wise character-matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractAfterCharMatrixExtension"
+        },
+        {
+          "id": "extractafter-string-cell",
+          "mode": "RunMatOnly",
+          "description": "extractAfter cells containing string scalars or nested cells are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractAfterStringCellExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = extractAfter(str, integer_pos)",
+          "inputs": [
+            {
+              "name": "pos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The numeric position is a one-based structural control and accepts scalar or same-size arrays from every built-in integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "Positions are read exactly with one-based indexing; the output preserves the input text container class and shape."
+        },
+        {
+          "form": "newStr = extractAfter(integer_str, boundary)",
+          "inputs": [
+            {
+              "name": "str",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The first argument is text; integer data is rejected before provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer text input is outside the public text domain and rejects without numeric-to-text conversion."
+        }
+      ]
     },
     {
       "name": "extractBefore",
@@ -44052,14 +44138,14 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Input text."
+              "description": "Input string array, character vector, or cell array of character vectors."
             },
             {
-              "name": "arg",
+              "name": "boundary",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "Additional arguments."
+              "description": "Text/pattern boundary or positive numeric position, scalar or the same size as text."
             }
           ],
           "outputs": [
@@ -44073,7 +44159,93 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.EXTRACT_BEFORE.INVALID_INPUT",
+          "identifier": "RunMat:extractBefore:InvalidInput",
+          "when": "The call does not contain exactly one documented text input and one boundary.",
+          "message": "extractBefore: invalid input"
+        },
+        {
+          "code": "RM.EXTRACT_BEFORE.INVALID_BOUNDARY",
+          "identifier": "RunMat:extractBefore:InvalidBoundary",
+          "when": "A numeric boundary is not a positive integer or a text/pattern boundary is invalid.",
+          "message": "extractBefore: invalid boundary"
+        },
+        {
+          "code": "RM.EXTRACT_BEFORE.SIZE_MISMATCH",
+          "identifier": "RunMat:extractBefore:SizeMismatch",
+          "when": "A nonscalar boundary does not have the same shape as the text input.",
+          "message": "extractBefore: boundary size must match text"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "extractbefore-resident-position",
+          "mode": "RunMatOnly",
+          "description": "extractBefore with a resident numeric position is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractBeforeResidentPositionExtension"
+        },
+        {
+          "id": "extractbefore-char-matrix",
+          "mode": "RunMatOnly",
+          "description": "extractBefore row-wise character-matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractBeforeCharMatrixExtension"
+        },
+        {
+          "id": "extractbefore-string-cell",
+          "mode": "RunMatOnly",
+          "description": "extractBefore cells containing string scalars or nested cells are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractBeforeStringCellExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = extractBefore(str, integer_pos)",
+          "inputs": [
+            {
+              "name": "pos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The numeric position is a one-based structural control and accepts scalar or same-size arrays from every built-in integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "Positions are read exactly with one-based indexing; the output preserves the input text container class and shape."
+        },
+        {
+          "form": "newStr = extractBefore(integer_str, boundary)",
+          "inputs": [
+            {
+              "name": "str",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The first argument is text; integer data is rejected before provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer text input is outside the public text domain and rejects without numeric-to-text conversion."
+        }
+      ]
     },
     {
       "name": "extractBetween",
@@ -44220,6 +44392,95 @@
           "when": "Internal output construction failed.",
           "message": "extractBetween: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "extractbetween-full-broadcast",
+          "mode": "RunMatOnly",
+          "description": "extractBetween with non-scalar boundary expansion is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractBetweenFullBroadcastExtension"
+        },
+        {
+          "id": "extractbetween-resident-position",
+          "mode": "RunMatOnly",
+          "description": "extractBetween with resident numeric positions is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractBetweenResidentPositionExtension"
+        },
+        {
+          "id": "extractbetween-char-matrix",
+          "mode": "RunMatOnly",
+          "description": "extractBetween row-wise character-matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractBetweenCharMatrixExtension"
+        },
+        {
+          "id": "extractbetween-string-cell",
+          "mode": "RunMatOnly",
+          "description": "extractBetween cells containing string scalars are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractBetweenStringCellExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = extractBetween(str, integer_startPos, integer_endPos)",
+          "inputs": [
+            {
+              "name": "startPos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric position accepts every built-in integer class and is read exactly with one-based indexing."
+            },
+            {
+              "name": "endPos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public numeric position accepts every built-in integer class and is read exactly with one-based indexing."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "Strict compatibility accepts scalar positions or arrays exactly the same size as str; string input returns string and other documented text input returns cellstr."
+        },
+        {
+          "form": "newStr = extractBetween(integer_str, start, end)",
+          "inputs": [
+            {
+              "name": "str",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The first argument is text; integer data rejects before provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer text input is outside the public domain and rejects without numeric-to-text conversion."
+        }
       ]
     },
     {
@@ -44263,7 +44524,7 @@
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Name-value options: Encoding and ExtractionMethod in this slice."
+              "description": "Name-value options: Encoding, ExtractionMethod, Password, and Pages."
             }
           ],
           "outputs": [
@@ -44295,6 +44556,67 @@
           "identifier": "RunMat:extractFileText:UnsupportedFormat",
           "when": "The requested file type or option requires unsupported extraction infrastructure.",
           "message": "extractFileText: unsupported file type or option"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "extractfiletext-resident-pages",
+          "mode": "RunMatOnly",
+          "description": "extractFileText with a resident Pages control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractFileTextResidentPagesExtension"
+        },
+        {
+          "id": "extractfiletext-broad-file-cell",
+          "mode": "RunMatOnly",
+          "description": "extractFileText with a string-valued or nested filename cell is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractFileTextBroadFileCellExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "str = extractFileText(filename, 'Pages', integer_pages)",
+          "inputs": [
+            {
+              "name": "Pages",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Pages is a nonempty vector of positive page numbers and accepts every built-in integer class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Pages values are parsed exactly without floating materialization. PDF extraction itself remains an explicitly unsupported format in RunMat."
+        },
+        {
+          "form": "str = extractFileText(integer_filename)",
+          "inputs": [
+            {
+              "name": "filename",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The filename or URL is text; integer data rejects before file IO or provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer filenames are outside the public text domain and reject without conversion."
         }
       ]
     },
@@ -44367,7 +44689,25 @@
           "when": "Inputs are not a supported htmlTree or extractHTMLText form.",
           "message": "HTML Text Analytics helper received invalid input"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "extracthtmltext-char-matrix",
+          "mode": "RunMatOnly",
+          "description": "extractHTMLText row-wise character-matrix input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractHTMLTextCharMatrixExtension"
+        },
+        {
+          "id": "extracthtmltext-broad-cell",
+          "mode": "RunMatOnly",
+          "description": "extractHTMLText with string-valued or mixed htmlTree/text cells is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ExtractHTMLTextBroadCellExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "extractHTMLText accepts host text or htmlTree input and textual ExtractionMethod values only. All eight integer classes, logical and complex values, and resident numeric handles reject without numeric-to-text conversion or provider access."
+      }
     },
     {
       "name": "eye",
@@ -44486,7 +44826,7 @@
               "ty": "StringScalar",
               "arity": "Optional",
               "default": "\"double\"",
-              "description": "Class name override (double|logical)."
+              "description": "Class name override (double|single|logical|int8|int16|int32|int64|uint8|uint16|uint32|uint64)."
             }
           ],
           "outputs": [
@@ -44549,12 +44889,6 @@
           "message": "eye: cannot combine 'like' with other class specifiers"
         },
         {
-          "code": "RM.EYE.UNSUPPORTED_SINGLE",
-          "identifier": null,
-          "when": "The 'single' class option is requested.",
-          "message": "eye: single precision output is not implemented yet"
-        },
-        {
           "code": "RM.EYE.UNRECOGNIZED_OPTION",
           "identifier": null,
           "when": "A trailing option string is not a supported class keyword.",
@@ -44565,6 +44899,119 @@
           "identifier": null,
           "when": "Dimension arguments fail numeric/shape parsing.",
           "message": "eye: dimension arguments must be numeric and nonnegative"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "eye-implicit-prototype",
+          "mode": "RunMatOnly",
+          "description": "eye(A) implicit size-and-class prototype syntax is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EyeImplicitPrototypeExtension"
+        },
+        {
+          "id": "eye-nd-dimensions",
+          "mode": "RunMatOnly",
+          "description": "eye with more than two dimensions is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EyeNdDimensionsExtension"
+        },
+        {
+          "id": "eye-column-size-vector",
+          "mode": "RunMatOnly",
+          "description": "eye with a column size vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:EyeColumnSizeVectorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "I = eye(integer_n[, integer_m])",
+          "inputs": [
+            {
+              "name": "n/m/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls. Negative signed values clamp to zero; values outside the platform allocation domain reject before allocation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default output is double; typename or like can select logical, single, or an exact integer class. MATLAB-compatible mode admits at most two dimensions."
+        },
+        {
+          "form": "I = eye(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/m/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls. Negative signed values clamp to zero; values outside the platform allocation domain reject before allocation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The documented size vector is a row vector containing no more than two exact integer values."
+        },
+        {
+          "form": "I = eye(..., integer_typename)",
+          "inputs": [],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "Multiple",
+          "notes": "Every integer typename creates exact native zero and one storage in the selected class."
+        },
+        {
+          "form": "I = eye(..., like=integer_p)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer prototype selects its exact class and applicable residency; it never supplies output shape."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Dense integer prototypes preserve exact class. Resident prototypes use their owning provider; unsupported native construction falls back through exact typed upload."
         }
       ]
     },
@@ -44948,6 +45395,115 @@
           "when": "Dimension arguments fail numeric/shape parsing.",
           "message": "false: dimension arguments must be numeric and nonnegative"
         }
+      ],
+      "extensions": [
+        {
+          "id": "false-implicit-prototype",
+          "mode": "RunMatOnly",
+          "description": "false(A) implicit size-prototype syntax is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FalseImplicitPrototypeExtension"
+        },
+        {
+          "id": "false-logical-class-option",
+          "mode": "RunMatOnly",
+          "description": "false(...,'logical') is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FalseLogicalOptionExtension"
+        },
+        {
+          "id": "false-single-size-input",
+          "mode": "RunMatOnly",
+          "description": "single-precision false size controls are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FalseSingleSizeExtension"
+        },
+        {
+          "id": "false-resident-size-input",
+          "mode": "RunMatOnly",
+          "description": "resident false size controls are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FalseResidentSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "F = false(integer_n or integer_sz1,...,integer_szN)",
+          "inputs": [
+            {
+              "name": "n/sz/szN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls. Negative signed values clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Exact integer dimensions determine shape only; output is always logical."
+        },
+        {
+          "form": "F = false(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz/szN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls. Negative signed values clamp to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The documented row size vector is read from authoritative integer storage without a floating mirror."
+        },
+        {
+          "form": "F = false(..., like=integer_p)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer prototype selects applicable sparsity and residency; false output remains logical and the prototype never supplies shape."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "The logical output preserves applicable sparse or owning-provider residency but not the integer prototype class."
+        }
       ]
     },
     {
@@ -45092,6 +45648,118 @@
           "when": "Internal runtime control-flow or conversion failed.",
           "message": "fclose: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fclose-no-input-close-all",
+          "mode": "RunMatOnly",
+          "description": "fclose() close-all syntax is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseNoInputExtension"
+        },
+        {
+          "id": "fclose-integer-fileid",
+          "mode": "RunMatOnly",
+          "description": "integer-class fclose file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseIntegerIdExtension"
+        },
+        {
+          "id": "fclose-fileid-vector",
+          "mode": "RunMatOnly",
+          "description": "fclose file-identifier arrays are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseVectorIdExtension"
+        },
+        {
+          "id": "fclose-logical-fileid",
+          "mode": "RunMatOnly",
+          "description": "logical fclose file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseLogicalIdExtension"
+        },
+        {
+          "id": "fclose-cell-fileids",
+          "mode": "RunMatOnly",
+          "description": "cell fclose file-identifier collections are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseCellIdExtension"
+        },
+        {
+          "id": "fclose-string-all",
+          "mode": "RunMatOnly",
+          "description": "string-scalar fclose all syntax is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseStringAllExtension"
+        },
+        {
+          "id": "fclose-message-output",
+          "mode": "RunMatOnly",
+          "description": "a second fclose diagnostic output is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseMessageOutputExtension"
+        },
+        {
+          "id": "fclose-resident-fileid",
+          "mode": "RunMatOnly",
+          "description": "resident fclose file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseResidentIdExtension"
+        },
+        {
+          "id": "fclose-single-fileid",
+          "mode": "RunMatOnly",
+          "description": "single-precision fclose file identifiers are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcloseSingleIdExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "status = fclose(integer_fileID)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are parsed exactly and must fit the runtime file-identifier domain before registry access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "This RunMat-only scalar form returns double status and never converts the identifier through binary64."
+        },
+        {
+          "form": "status = fclose(integer_fileIDs)",
+          "inputs": [
+            {
+              "name": "fileID",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are parsed exactly and must fit the runtime file-identifier domain before registry access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The collection and resident forms are independently gated RunMat extensions; every identifier validates before any close side effect."
+        }
       ]
     },
     {
@@ -45231,6 +45899,244 @@
           "when": "Contour construction or rendering fails unexpectedly.",
           "message": "fcontour: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fcontour-integer-line-color",
+          "mode": "RunMatOnly",
+          "description": "fcontour with a typed-integer RGB LineColor is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcontourIntegerLineColorExtension"
+        },
+        {
+          "id": "fcontour-positional-level-spec",
+          "mode": "RunMatOnly",
+          "description": "fcontour with a positional level count or value vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcontourPositionalLevelSpecExtension"
+        },
+        {
+          "id": "fcontour-resident-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "fcontour with resident numeric arguments is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FcontourResidentNumericInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = fcontour(f, integer_xyinterval)",
+          "inputs": [
+            {
+              "name": "xyinterval",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented two- or four-element plotting interval accepts real numeric vectors; authoritative integer bounds are validated before the host graphics conversion boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Exact bounds cross one deliberate binary64 graphics-domain boundary; the result is an opaque graphics handle."
+        },
+        {
+          "form": "h = fcontour(..., 'MeshDensity', integer_density)",
+          "inputs": [
+            {
+              "name": "MeshDensity",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "MeshDensity is an exact scalar count with a documented effective minimum of three and a RunMat resource ceiling of 400."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The exact count controls bounded host callback sampling and does not become integer output."
+        },
+        {
+          "form": "h = fcontour(..., 'LevelList', integer_levels)",
+          "inputs": [
+            {
+              "name": "LevelList",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "LevelList explicitly documents every built-in integer class; a scalar is one level and vector order is not constrained."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Authoritative level values cross one deliberate contour-geometry conversion boundary."
+        },
+        {
+          "form": "h = fcontour(..., 'LevelStep', integer_step)",
+          "inputs": [
+            {
+              "name": "LevelStep",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "LevelStep explicitly documents every built-in integer class; zero selects automatic levels and positive values select spacing."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The exact scalar step crosses one checked f32 contour-geometry boundary."
+        },
+        {
+          "form": "h = fcontour(..., 'LineWidth', integer_width)",
+          "inputs": [
+            {
+              "name": "LineWidth",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A positive integer line width crosses one checked f32 graphics-property boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "The exact positive scalar crosses one checked f32 renderer-property boundary."
+        },
+        {
+          "form": "h = fcontour(..., 'Fill', integer_on_off)",
+          "inputs": [
+            {
+              "name": "Fill",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented numeric on/off form accepts only the exact scalar values zero and one."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Zero disables and one enables filled contour bands; the result remains graphics state."
+        },
+        {
+          "form": "h = fcontour(..., 'LineColor', integer_rgb)",
+          "inputs": [
+            {
+              "name": "LineColor",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode accepts a three-element typed-integer RGB vector containing only zero or one."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "This independently gated RunMat extension validates exact RGB components before graphics conversion."
+        },
+        {
+          "form": "h = fcontour(f, integer_level_count_or_values)",
+          "inputs": [
+            {
+              "name": "levels",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat mode accepts the contour-style positional level count or value-vector shorthand after the function handle."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "This independently gated RunMat shorthand reuses contour positional-level semantics."
+        }
       ]
     },
     {
@@ -45239,14 +46145,35 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "component = fea.component(args, ...)",
+          "label": "bc = fea.boundaryCondition(id, region, kind, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Boundary-condition id."
+            },
+            {
+              "name": "region",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Target region id."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Boundary-condition kind."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Numeric fields required by the selected kind."
             }
           ],
           "outputs": [
@@ -45284,6 +46211,245 @@
           "identifier": "RunMat:fea:Internal",
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "prescribedRotation integer fields",
+          "inputs": [
+            {
+              "name": "rx",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            },
+            {
+              "name": "ry",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            },
+            {
+              "name": "rz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round."
+        },
+        {
+          "form": "acousticImpedance integer field",
+          "inputs": [
+            {
+              "name": "specificImpedancePaSPerM",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round."
+        },
+        {
+          "form": "thermalPrescribedTemperature integer field",
+          "inputs": [
+            {
+              "name": "temperatureK",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round."
+        },
+        {
+          "form": "thermalHeatFlux integer field",
+          "inputs": [
+            {
+              "name": "heatFluxWPerM2",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round."
+        },
+        {
+          "form": "thermalConvection integer fields",
+          "inputs": [
+            {
+              "name": "ambientTemperatureK",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            },
+            {
+              "name": "coefficientWPerM2K",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round."
+        },
+        {
+          "form": "cfdInletVelocity integer field",
+          "inputs": [
+            {
+              "name": "velocityMPerS",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round."
+        },
+        {
+          "form": "cfdOutletPressure integer field",
+          "inputs": [
+            {
+              "name": "pressurePa",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "An exact scalar is converted once to the model's binary64 storage field using Rust's IEEE-754 integer-to-f64 conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The constructor validates scalar shape and finiteness, then performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can therefore round."
         }
       ]
     },

@@ -105,6 +105,8 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.compare(baselineRunId, candidateRunId, Name, Value, ...)` | Compare two persisted runs. |
 | `fea.trends(Name, Value, ...)` | Summarize recent persisted runs. |
 
+`fea.boundaryCondition` is a RunMat-native constructor. Its seven numeric boundary forms accept finite real numeric scalars from all eight built-in integer classes and convert them once to the model's binary64 storage fields; scalar shape, finiteness, required fields, and unknown fields are validated before object construction, and invalid input is attributed to `fea.boundaryCondition` with `RunMat:fea:InvalidInput`.
+
 `fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. `fea.RunResult` exposes `results`, `field`, and `plot`; `fea.Results` exposes `field` and `plot`; `fea.Field` exposes `plot`.
 
 ## `.fea` Document Fields

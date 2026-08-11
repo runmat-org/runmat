@@ -527,7 +527,6 @@ impl ContourLevelSpec {
                         format!("{name}: level vector must contain at least one value"),
                     ));
                 }
-                let mut last = None;
                 for &value in values {
                     if !value.is_finite() {
                         return Err(plotting_error(
@@ -535,15 +534,6 @@ impl ContourLevelSpec {
                             format!("{name}: level values must be finite"),
                         ));
                     }
-                    if let Some(prev) = last {
-                        if value < prev {
-                            return Err(plotting_error(
-                                name,
-                                format!("{name}: level values must be strictly increasing"),
-                            ));
-                        }
-                    }
-                    last = Some(value);
                 }
                 let mut levels = Vec::with_capacity(values.len());
                 for &value in values {
@@ -554,10 +544,10 @@ impl ContourLevelSpec {
                             format!("{name}: level value is too large for contour geometry"),
                         ));
                     }
-                    if levels.last().copied() != Some(converted) {
-                        levels.push(converted);
-                    }
+                    levels.push(converted);
                 }
+                levels.sort_by(f32::total_cmp);
+                levels.dedup();
                 Ok(levels)
             }
             ContourLevelSpec::Step(step) => {
@@ -1387,6 +1377,18 @@ pub(crate) fn apply_contour_options(
     args: &mut ContourArgs,
     options: &[Value],
 ) -> BuiltinResult<()> {
+    apply_contour_options_with_integer_line_color_extension(
+        args,
+        options,
+        &CONTOUR_INTEGER_LINE_COLOR_EXTENSION,
+    )
+}
+
+pub(crate) fn apply_contour_options_with_integer_line_color_extension(
+    args: &mut ContourArgs,
+    options: &[Value],
+    integer_line_color_extension: &'static BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
     if options.is_empty() {
         return Ok(());
     }
@@ -1443,10 +1445,12 @@ pub(crate) fn apply_contour_options(
                 level_override_seen = true;
             }
             "linecolor" => {
-                args.line_color = parse_line_color_option(&opts, &pair[1])?;
+                args.line_color =
+                    parse_line_color_option(&opts, &pair[1], integer_line_color_extension)?;
             }
             "color" => {
-                args.line_color = parse_line_color_option(&opts, &pair[1])?;
+                args.line_color =
+                    parse_line_color_option(&opts, &pair[1], integer_line_color_extension)?;
             }
             "linewidth" => {
                 let width = contour_property_scalar(&pair[1], args.name, "LineWidth")?;
@@ -1557,6 +1561,7 @@ fn apply_contour_linespec(args: &mut ContourArgs, token: &str) -> BuiltinResult<
 fn parse_line_color_option(
     opts: &LineStyleParseOptions,
     value: &Value,
+    integer_line_color_extension: &'static BuiltinExtensionDescriptor,
 ) -> BuiltinResult<ContourLineColor> {
     if let Some(text) = value_as_string(value) {
         let lower = text.trim().to_ascii_lowercase();
@@ -1571,15 +1576,15 @@ fn parse_line_color_option(
     }
     if is_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &CONTOUR_INTEGER_LINE_COLOR_EXTENSION,
-            BUILTIN_NAME,
+            integer_line_color_extension,
+            opts.builtin_name,
         )?;
     }
     let gathered;
     let value = if let Value::GpuTensor(handle) = value {
         gathered = Value::Tensor(super::common::gather_tensor_from_gpu(
             handle.clone(),
-            BUILTIN_NAME,
+            opts.builtin_name,
         )?);
         &gathered
     } else {

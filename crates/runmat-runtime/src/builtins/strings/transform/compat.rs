@@ -4,8 +4,12 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, IntValue, ResolveContext, StringArray, Type, Value,
+    BuiltinSignatureDescriptor, CharArray, IntValue, NumericScalar, ResolveContext, StringArray,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -77,6 +81,24 @@ const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+const IN_TEXT_BOUNDARY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "text",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input string array, character vector, or cell array of character vectors.",
+    },
+    BuiltinParamDescriptor {
+        name: "boundary",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description:
+            "Text/pattern boundary or positive numeric position, scalar or the same size as text.",
+    },
+];
+
 const REST: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "arg",
     ty: BuiltinParamType::Any,
@@ -128,18 +150,177 @@ descriptor!(
     &IN_TEXT,
     &OUT_ANY
 );
-descriptor!(
-    EXTRACT_BEFORE_DESCRIPTOR,
-    "s = extractBefore(text, boundary)",
-    &IN_TEXT_REST,
-    &OUT_ANY
+const EXTRACT_BEFORE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    BuiltinErrorDescriptor {
+        code: "RM.EXTRACT_BEFORE.INVALID_INPUT",
+        identifier: Some("RunMat:extractBefore:InvalidInput"),
+        when: "The call does not contain exactly one documented text input and one boundary.",
+        message: "extractBefore: invalid input",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EXTRACT_BEFORE.INVALID_BOUNDARY",
+        identifier: Some("RunMat:extractBefore:InvalidBoundary"),
+        when: "A numeric boundary is not a positive integer or a text/pattern boundary is invalid.",
+        message: "extractBefore: invalid boundary",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EXTRACT_BEFORE.SIZE_MISMATCH",
+        identifier: Some("RunMat:extractBefore:SizeMismatch"),
+        when: "A nonscalar boundary does not have the same shape as the text input.",
+        message: "extractBefore: boundary size must match text",
+    },
+];
+pub const EXTRACT_BEFORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "s = extractBefore(text, boundary)",
+        inputs: &IN_TEXT_BOUNDARY,
+        outputs: &OUT_ANY,
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EXTRACT_BEFORE_ERRORS,
+};
+const EXTRACT_AFTER_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    BuiltinErrorDescriptor {
+        code: "RM.EXTRACT_AFTER.INVALID_INPUT",
+        identifier: Some("RunMat:extractAfter:InvalidInput"),
+        when: "The call does not contain exactly one documented text input and one boundary.",
+        message: "extractAfter: invalid input",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EXTRACT_AFTER.INVALID_BOUNDARY",
+        identifier: Some("RunMat:extractAfter:InvalidBoundary"),
+        when: "A numeric boundary is not a positive integer or a text/pattern boundary is invalid.",
+        message: "extractAfter: invalid boundary",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EXTRACT_AFTER.SIZE_MISMATCH",
+        identifier: Some("RunMat:extractAfter:SizeMismatch"),
+        when: "A nonscalar boundary does not have the same shape as the text input.",
+        message: "extractAfter: boundary size must match text",
+    },
+];
+pub const EXTRACT_AFTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "s = extractAfter(text, boundary)",
+        inputs: &IN_TEXT_BOUNDARY,
+        outputs: &OUT_ANY,
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EXTRACT_AFTER_ERRORS,
+};
+
+const EXTRACT_BOUNDARY_POSITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "pos",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The numeric position is a one-based structural control and accepts scalar or same-size arrays from every built-in integer class.",
+    }];
+const EXTRACT_BOUNDARY_TEXT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "str",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The first argument is text; integer data is rejected before provider access.",
+    }];
+pub const EXTRACT_BEFORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    extract_boundary_position_capability("newStr = extractBefore(str, integer_pos)"),
+    extract_boundary_text_capability("newStr = extractBefore(integer_str, boundary)"),
+];
+pub const EXTRACT_AFTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    extract_boundary_position_capability("newStr = extractAfter(str, integer_pos)"),
+    extract_boundary_text_capability("newStr = extractAfter(integer_str, boundary)"),
+];
+
+const fn extract_boundary_position_capability(
+    form: &'static str,
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs: &EXTRACT_BOUNDARY_POSITION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Positions are read exactly with one-based indexing; the output preserves the input text container class and shape.",
+    }
+}
+
+const fn extract_boundary_text_capability(
+    form: &'static str,
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs: &EXTRACT_BOUNDARY_TEXT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer text input is outside the public text domain and rejects without numeric-to-text conversion.",
+    }
+}
+
+const EXTRACT_BEFORE_RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor =
+    extract_boundary_extension(
+        "extractbefore-resident-position",
+        "extractBefore with a resident numeric position is a RunMat extension",
+        "RunMat:compatibility:ExtractBeforeResidentPositionExtension",
+    );
+const EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = extract_boundary_extension(
+    "extractbefore-char-matrix",
+    "extractBefore row-wise character-matrix input is a RunMat extension",
+    "RunMat:compatibility:ExtractBeforeCharMatrixExtension",
 );
-descriptor!(
-    EXTRACT_AFTER_DESCRIPTOR,
-    "s = extractAfter(text, boundary)",
-    &IN_TEXT_REST,
-    &OUT_ANY
+const EXTRACT_BEFORE_STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = extract_boundary_extension(
+    "extractbefore-string-cell",
+    "extractBefore cells containing string scalars or nested cells are a RunMat extension",
+    "RunMat:compatibility:ExtractBeforeStringCellExtension",
 );
+const EXTRACT_BEFORE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    EXTRACT_BEFORE_RESIDENT_POSITION_EXTENSION,
+    EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION,
+    EXTRACT_BEFORE_STRING_CELL_EXTENSION,
+];
+const EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor =
+    extract_boundary_extension(
+        "extractafter-resident-position",
+        "extractAfter with a resident numeric position is a RunMat extension",
+        "RunMat:compatibility:ExtractAfterResidentPositionExtension",
+    );
+const EXTRACT_AFTER_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = extract_boundary_extension(
+    "extractafter-char-matrix",
+    "extractAfter row-wise character-matrix input is a RunMat extension",
+    "RunMat:compatibility:ExtractAfterCharMatrixExtension",
+);
+const EXTRACT_AFTER_STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = extract_boundary_extension(
+    "extractafter-string-cell",
+    "extractAfter cells containing string scalars or nested cells are a RunMat extension",
+    "RunMat:compatibility:ExtractAfterStringCellExtension",
+);
+const EXTRACT_AFTER_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION,
+    EXTRACT_AFTER_CHAR_MATRIX_EXTENSION,
+    EXTRACT_AFTER_STRING_CELL_EXTENSION,
+];
+
+const fn extract_boundary_extension(
+    id: &'static str,
+    description: &'static str,
+    error_identifier: &'static str,
+) -> BuiltinExtensionDescriptor {
+    BuiltinExtensionDescriptor {
+        id,
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description,
+        error_identifier: Some(error_identifier),
+    }
+}
 descriptor!(
     INSERT_BEFORE_DESCRIPTOR,
     "s = insertBefore(text, boundary, newText)",
@@ -285,6 +466,34 @@ fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
 
 fn transform_error(name: &str, message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
+}
+
+#[derive(Clone, Copy)]
+enum ExtractErrorKind {
+    InvalidInput,
+    InvalidBoundary,
+    SizeMismatch,
+}
+
+fn extract_error(
+    name: &str,
+    kind: ExtractErrorKind,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let descriptor = match (name, kind) {
+        ("extractBefore", ExtractErrorKind::InvalidInput) => &EXTRACT_BEFORE_ERRORS[0],
+        ("extractBefore", ExtractErrorKind::InvalidBoundary) => &EXTRACT_BEFORE_ERRORS[1],
+        ("extractBefore", ExtractErrorKind::SizeMismatch) => &EXTRACT_BEFORE_ERRORS[2],
+        ("extractAfter", ExtractErrorKind::InvalidInput) => &EXTRACT_AFTER_ERRORS[0],
+        ("extractAfter", ExtractErrorKind::InvalidBoundary) => &EXTRACT_AFTER_ERRORS[1],
+        ("extractAfter", ExtractErrorKind::SizeMismatch) => &EXTRACT_AFTER_ERRORS[2],
+        _ => return transform_error(name, message),
+    };
+    let mut builder = build_runtime_error(message).with_builtin(name);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::RuntimeError {
@@ -538,15 +747,25 @@ async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
     summary = "Extract text before a position or boundary.",
     keywords = "extractBefore,string,text,boundary",
     accel = "sink",
+    extensions(EXTRACT_BEFORE_EXTENSIONS),
+    integer_capabilities(EXTRACT_BEFORE_INTEGER_CAPABILITIES),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::EXTRACT_BEFORE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn extract_before_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    boundary_transform(text, rest, "extractBefore", |s, boundary| {
-        let (start, _) = locate_boundary(s, boundary)?;
-        Ok(s[..start].to_string())
-    })
+    boundary_transform(
+        text,
+        rest,
+        "extractBefore",
+        &EXTRACT_BEFORE_RESIDENT_POSITION_EXTENSION,
+        &EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION,
+        &EXTRACT_BEFORE_STRING_CELL_EXTENSION,
+        |s, boundary| {
+            let (start, _) = locate_boundary(s, boundary)?;
+            Ok(s[..start].to_string())
+        },
+    )
     .await
 }
 
@@ -556,15 +775,25 @@ async fn extract_before_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<
     summary = "Extract text after a position or boundary.",
     keywords = "extractAfter,string,text,boundary",
     accel = "sink",
+    extensions(EXTRACT_AFTER_EXTENSIONS),
+    integer_capabilities(EXTRACT_AFTER_INTEGER_CAPABILITIES),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::EXTRACT_AFTER_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn extract_after_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    boundary_transform(text, rest, "extractAfter", |s, boundary| {
-        let (_, end) = locate_boundary(s, boundary)?;
-        Ok(s[end..].to_string())
-    })
+    boundary_transform(
+        text,
+        rest,
+        "extractAfter",
+        &EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION,
+        &EXTRACT_AFTER_CHAR_MATRIX_EXTENSION,
+        &EXTRACT_AFTER_STRING_CELL_EXTENSION,
+        |s, boundary| {
+            let (_, end) = locate_boundary(s, boundary)?;
+            Ok(s[end..].to_string())
+        },
+    )
     .await
 }
 
@@ -814,22 +1043,75 @@ async fn boundary_transform(
     text: Value,
     rest: Vec<Value>,
     fn_name: &'static str,
+    resident_extension: &'static BuiltinExtensionDescriptor,
+    char_matrix_extension: &'static BuiltinExtensionDescriptor,
+    string_cell_extension: &'static BuiltinExtensionDescriptor,
     op: impl Fn(&str, &Boundary) -> BuiltinResult<String> + Copy,
 ) -> BuiltinResult<Value> {
-    if rest.is_empty() {
-        return Err(transform_error(
+    if rest.len() != 1 {
+        return Err(extract_error(
             fn_name,
-            format!("{fn_name}: expected a boundary argument"),
+            ExtractErrorKind::InvalidInput,
+            format!("{fn_name}: expected exactly text and one boundary argument"),
         ));
+    }
+    if numeric_or_resident_value(&text) || contains_numeric_or_resident(&text) {
+        return Err(extract_error(
+            fn_name,
+            ExtractErrorKind::InvalidInput,
+            format!("{fn_name}: expected text input"),
+        ));
+    }
+    if contains_resident_value(&rest[0]) {
+        crate::compatibility::ensure_builtin_extension_enabled(resident_extension, fn_name)?;
+    }
+    if is_multirow_char(&text) || is_multirow_char(&rest[0]) {
+        crate::compatibility::ensure_builtin_extension_enabled(char_matrix_extension, fn_name)?;
+    }
+    if contains_string_or_nested_cell(&text) || contains_string_or_nested_cell(&rest[0]) {
+        crate::compatibility::ensure_builtin_extension_enabled(string_cell_extension, fn_name)?;
     }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow(fn_name))?;
+    if !valid_extract_text_input(&text, false) {
+        return Err(extract_error(
+            fn_name,
+            ExtractErrorKind::InvalidInput,
+            format!("{fn_name}: expected a supported text container"),
+        ));
+    }
     let boundary = gather_if_needed_async(&rest[0])
         .await
         .map_err(map_flow(fn_name))?;
-    let boundary = Boundary::from_value(&boundary, fn_name)?;
-    map_text_try_preserve(text, fn_name, |s| op(s, &boundary))
+    let boundaries = BoundaryList::from_value(&boundary, fn_name).map_err(|error| {
+        extract_error(
+            fn_name,
+            ExtractErrorKind::InvalidBoundary,
+            error.to_string(),
+        )
+    })?;
+    let text_shape = boundary_text_shape(&text).ok_or_else(|| {
+        extract_error(
+            fn_name,
+            ExtractErrorKind::InvalidInput,
+            format!("{fn_name}: expected text input"),
+        )
+    })?;
+    if !shape_is_scalar_or_same(&boundaries.shape, &text_shape) {
+        return Err(extract_error(
+            fn_name,
+            ExtractErrorKind::SizeMismatch,
+            format!("{fn_name}: boundary size must be scalar or match the text input"),
+        ));
+    }
+    map_text_with_boundaries(text, &boundaries, fn_name, op).map_err(|error| {
+        extract_error(
+            fn_name,
+            ExtractErrorKind::InvalidBoundary,
+            error.to_string(),
+        )
+    })
 }
 
 async fn insert_transform(
@@ -867,6 +1149,111 @@ enum Boundary {
     Position(usize),
     Text(String),
     Pattern(String),
+}
+
+#[derive(Clone)]
+struct BoundaryList {
+    data: Vec<Boundary>,
+    shape: Vec<usize>,
+}
+
+impl BoundaryList {
+    fn from_value(value: &Value, fn_name: &str) -> BuiltinResult<Self> {
+        match value {
+            Value::Num(value) => Ok(Self {
+                data: vec![Boundary::Position(parse_boundary_float(*value, fn_name)?)],
+                shape: vec![1, 1],
+            }),
+            Value::Int(value) => Ok(Self {
+                data: vec![Boundary::Position(parse_boundary_integer(
+                    value.clone(),
+                    fn_name,
+                )?)],
+                shape: vec![1, 1],
+            }),
+            Value::Tensor(tensor) => {
+                let mut data = Vec::with_capacity(tensor.len());
+                for idx in 0..tensor.len() {
+                    let value = tensor.numeric_value_at(idx).ok_or_else(|| {
+                        transform_error(
+                            fn_name,
+                            format!("{fn_name}: numeric boundaries must be positive integers"),
+                        )
+                    })?;
+                    let position = match value {
+                        NumericScalar::F64(value) => parse_boundary_float(value, fn_name)?,
+                        NumericScalar::F32(value) => {
+                            parse_boundary_float(f64::from(value), fn_name)?
+                        }
+                        integer => parse_boundary_integer(
+                            integer
+                                .into_int_value()
+                                .expect("non-floating numeric scalar is integer"),
+                            fn_name,
+                        )?,
+                    };
+                    data.push(Boundary::Position(position));
+                }
+                Ok(Self {
+                    data,
+                    shape: tensor.shape.clone(),
+                })
+            }
+            Value::String(text) => Ok(Self {
+                data: vec![Boundary::Text(text.clone())],
+                shape: vec![1, 1],
+            }),
+            Value::StringArray(array) => Ok(Self {
+                data: array.data.iter().cloned().map(Boundary::Text).collect(),
+                shape: array.shape.clone(),
+            }),
+            Value::CharArray(array) => {
+                let data = if array.rows == 0 {
+                    vec![Boundary::Text(String::new())]
+                } else {
+                    (0..array.rows)
+                        .map(|row| {
+                            Boundary::Text(char_row_to_string_slice(&array.data, array.cols, row))
+                        })
+                        .collect()
+                };
+                Ok(Self {
+                    data,
+                    shape: if array.rows <= 1 {
+                        vec![1, 1]
+                    } else {
+                        vec![array.rows, 1]
+                    },
+                })
+            }
+            Value::Cell(cell) => {
+                let mut data = Vec::with_capacity(cell.data.len());
+                for value in &cell.data {
+                    data.push(Boundary::Text(scalar_text(value, fn_name)?));
+                }
+                Ok(Self {
+                    data,
+                    shape: cell.shape.clone(),
+                })
+            }
+            Value::Object(_) => Ok(Self {
+                data: vec![Boundary::Pattern(pattern_regex(value, fn_name)?)],
+                shape: vec![1, 1],
+            }),
+            other => Err(transform_error(
+                fn_name,
+                format!("{fn_name}: expected a text, pattern, or numeric boundary, got {other:?}"),
+            )),
+        }
+    }
+
+    fn at(&self, idx: usize) -> &Boundary {
+        if self.data.len() == 1 {
+            &self.data[0]
+        } else {
+            &self.data[idx]
+        }
+    }
 }
 
 impl Boundary {
@@ -908,7 +1295,7 @@ fn parse_boundary_float(value: f64, fn_name: &str) -> BuiltinResult<usize> {
         ));
     }
     let parsed = value as usize;
-    if parsed as f64 != value || parsed == usize::MAX {
+    if parsed == 0 || parsed as f64 != value || parsed == usize::MAX {
         return Err(transform_error(
             fn_name,
             format!("{fn_name}: numeric boundaries must be positive integer scalars"),
@@ -944,6 +1331,178 @@ fn locate_boundary(text: &str, boundary: &Boundary) -> BuiltinResult<(usize, usi
             .find(text)
             .map(|m| (m.start(), m.end()))
             .ok_or_else(|| transform_error("text boundary", "boundary not found")),
+    }
+}
+
+fn numeric_or_resident_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn contains_numeric_or_resident(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .any(|value| numeric_or_resident_value(value) || contains_numeric_or_resident(value)),
+        _ => false,
+    }
+}
+
+fn contains_resident_value(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(cell) => cell.data.iter().any(contains_resident_value),
+        _ => false,
+    }
+}
+
+fn is_multirow_char(value: &Value) -> bool {
+    matches!(value, Value::CharArray(array) if array.rows > 1)
+}
+
+fn contains_string_or_nested_cell(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|value| {
+            matches!(
+                value,
+                Value::String(_) | Value::StringArray(_) | Value::Cell(_)
+            ) || contains_string_or_nested_cell(value)
+        }),
+        _ => false,
+    }
+}
+
+fn valid_extract_text_input(value: &Value, nested: bool) -> bool {
+    match value {
+        Value::String(_) => true,
+        Value::StringArray(array) => !nested || array.data.len() == 1,
+        Value::CharArray(array) => !nested || array.rows <= 1,
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .all(|value| valid_extract_text_input(value, true)),
+        _ => false,
+    }
+}
+
+fn boundary_text_shape(value: &Value) -> Option<Vec<usize>> {
+    match value {
+        Value::String(_) => Some(vec![1, 1]),
+        Value::StringArray(array) => Some(array.shape.clone()),
+        Value::CharArray(array) if array.rows <= 1 => Some(vec![1, 1]),
+        Value::CharArray(array) => Some(vec![array.rows, 1]),
+        Value::Cell(cell) => Some(cell.shape.clone()),
+        _ => None,
+    }
+}
+
+fn shape_is_scalar_or_same(shape: &[usize], text_shape: &[usize]) -> bool {
+    shape
+        .iter()
+        .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+        == Some(1)
+        || shape == text_shape
+}
+
+fn map_text_with_boundaries(
+    value: Value,
+    boundaries: &BoundaryList,
+    fn_name: &str,
+    map: impl Fn(&str, &Boundary) -> BuiltinResult<String> + Copy,
+) -> BuiltinResult<Value> {
+    match value {
+        Value::String(text) => {
+            if is_missing_string(&text) {
+                Ok(Value::String(text))
+            } else {
+                Ok(Value::String(map(&text, boundaries.at(0))?))
+            }
+        }
+        Value::StringArray(array) => StringArray::new(
+            array
+                .data
+                .into_iter()
+                .enumerate()
+                .map(|(idx, text)| {
+                    if is_missing_string(&text) {
+                        Ok(text)
+                    } else {
+                        map(&text, boundaries.at(idx))
+                    }
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
+            array.shape,
+        )
+        .map(Value::StringArray)
+        .map_err(|e| transform_error(fn_name, e)),
+        Value::CharArray(array) => {
+            let rows = (0..array.rows)
+                .map(|row| {
+                    map(
+                        &char_row_to_string_slice(&array.data, array.cols, row),
+                        boundaries.at(row),
+                    )
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            char_rows(rows, fn_name)
+        }
+        Value::Cell(cell) => {
+            let values = cell
+                .data
+                .into_iter()
+                .enumerate()
+                .map(|(idx, value)| map_text_cell_element(value, boundaries.at(idx), fn_name, map))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            make_cell_with_shape(values, cell.shape).map_err(|e| transform_error(fn_name, e))
+        }
+        other => Err(transform_error(
+            fn_name,
+            format!("{fn_name}: expected text input, got {other:?}"),
+        )),
+    }
+}
+
+fn map_text_cell_element(
+    value: Value,
+    boundary: &Boundary,
+    fn_name: &str,
+    map: impl Fn(&str, &Boundary) -> BuiltinResult<String> + Copy,
+) -> BuiltinResult<Value> {
+    match value {
+        Value::String(text) => map(&text, boundary).map(Value::String),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            map(&array.data[0], boundary).map(Value::String)
+        }
+        Value::CharArray(array) if array.rows <= 1 => {
+            let text = if array.rows == 0 {
+                String::new()
+            } else {
+                char_row_to_string_slice(&array.data, array.cols, 0)
+            };
+            map(&text, boundary).map(|text| Value::CharArray(CharArray::new_row(&text)))
+        }
+        Value::Cell(cell) => {
+            let values = cell
+                .data
+                .into_iter()
+                .map(|value| map_text_cell_element(value, boundary, fn_name, map))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            make_cell_with_shape(values, cell.shape).map_err(|e| transform_error(fn_name, e))
+        }
+        other => Err(transform_error(
+            fn_name,
+            format!("{fn_name}: expected character vectors in cell input, got {other:?}"),
+        )),
     }
 }
 
@@ -1163,7 +1722,9 @@ fn justify(text: &str, side: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{BuiltinIntegerAuditKind, CellArray, IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::{
+        BuiltinIntegerAuditKind, CellArray, IntValue, IntegerStorage, StructValue, Tensor,
+    };
 
     fn block(
         value: impl std::future::Future<Output = BuiltinResult<Value>>,
@@ -1617,6 +2178,203 @@ mod tests {
             punctuation_error.identifier(),
             ERASE_PUNCTUATION_ERROR_INVALID_INPUT.identifier
         );
+    }
+
+    #[test]
+    fn extract_before_and_after_accept_every_integer_scalar_class_exactly() {
+        assert_eq!(EXTRACT_BEFORE_DESCRIPTOR.errors.len(), 3);
+        assert_eq!(EXTRACT_AFTER_DESCRIPTOR.errors.len(), 3);
+        for position in [
+            IntValue::I8(2),
+            IntValue::I16(2),
+            IntValue::I32(2),
+            IntValue::I64(2),
+            IntValue::U8(2),
+            IntValue::U16(2),
+            IntValue::U32(2),
+            IntValue::U64(2),
+        ] {
+            assert_eq!(
+                block(extract_before_builtin(
+                    Value::String("abcdef".into()),
+                    vec![Value::Int(position.clone())],
+                ))
+                .expect("extractBefore"),
+                Value::String("a".into())
+            );
+            assert_eq!(
+                block(extract_after_builtin(
+                    Value::String("abcdef".into()),
+                    vec![Value::Int(position)],
+                ))
+                .expect("extractAfter"),
+                Value::String("cdef".into())
+            );
+        }
+    }
+
+    #[test]
+    fn extract_before_and_after_apply_same_size_native_integer_positions() {
+        let text = Value::StringArray(
+            StringArray::new(vec!["abcd".into(), "wxyz".into()], vec![2, 1]).unwrap(),
+        );
+        for storage in [
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ] {
+            let positions = Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap());
+            assert_eq!(
+                block(extract_before_builtin(
+                    text.clone(),
+                    vec![positions.clone()]
+                ))
+                .unwrap(),
+                Value::StringArray(
+                    StringArray::new(vec!["a".into(), "wx".into()], vec![2, 1]).unwrap()
+                )
+            );
+            assert_eq!(
+                block(extract_after_builtin(text.clone(), vec![positions])).unwrap(),
+                Value::StringArray(
+                    StringArray::new(vec!["cd".into(), "z".into()], vec![2, 1]).unwrap()
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn extract_before_and_after_enforce_strict_extensions_before_gather() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let matrix = Value::CharArray(
+            CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"),
+        );
+        let before = block(extract_before_builtin(
+            matrix,
+            vec![Value::Int(IntValue::U8(1))],
+        ))
+        .expect_err("strict char matrix gate");
+        assert_eq!(
+            before.identifier(),
+            EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION.error_identifier
+        );
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let after = block(extract_after_builtin(
+            Value::String("abc".into()),
+            vec![resident],
+        ))
+        .expect_err("strict resident gate");
+        assert_eq!(
+            after.identifier(),
+            EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION.error_identifier
+        );
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn extract_boundary_preserves_wide_u64_position_without_f64_conversion() {
+        let position = (1_u64 << 53) + 1;
+        let boundaries =
+            BoundaryList::from_value(&Value::Int(IntValue::U64(position)), "extractBefore")
+                .unwrap();
+        assert!(matches!(
+            boundaries.data.as_slice(),
+            [Boundary::Position(value)] if *value == position as usize
+        ));
+    }
+
+    #[test]
+    fn extract_before_and_after_reject_extra_arguments() {
+        assert!(block(extract_before_builtin(
+            Value::String("abc".into()),
+            vec![Value::Num(2.0), Value::Num(3.0)],
+        ))
+        .is_err());
+        assert!(block(extract_after_builtin(
+            Value::String("abc".into()),
+            vec![Value::Num(2.0), Value::Num(3.0)],
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn extract_before_and_after_reject_zero_floating_positions() {
+        for position in [
+            Value::Num(0.0),
+            Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+            Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
+        ] {
+            let before = block(extract_before_builtin(
+                Value::String("abc".into()),
+                vec![position.clone()],
+            ))
+            .expect_err("zero extractBefore position must reject");
+            assert_eq!(
+                before.identifier(),
+                Some("RunMat:extractBefore:InvalidBoundary")
+            );
+            let after = block(extract_after_builtin(
+                Value::String("abc".into()),
+                vec![position],
+            ))
+            .expect_err("zero extractAfter position must reject");
+            assert_eq!(
+                after.identifier(),
+                Some("RunMat:extractAfter:InvalidBoundary")
+            );
+        }
+    }
+
+    #[test]
+    fn extract_before_and_after_accept_empty_character_boundary_without_panicking() {
+        let boundary = Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap());
+        assert_eq!(
+            block(extract_before_builtin(
+                Value::String("abc".into()),
+                vec![boundary.clone()],
+            ))
+            .expect("empty character boundary"),
+            Value::String(String::new())
+        );
+        assert_eq!(
+            block(extract_after_builtin(
+                Value::String("abc".into()),
+                vec![boundary],
+            ))
+            .expect("empty character boundary"),
+            Value::String("abc".into())
+        );
+    }
+
+    #[test]
+    fn extract_before_and_after_classify_unsupported_text_cell_elements_as_invalid_input() {
+        let text = Value::Cell(
+            CellArray::new(vec![Value::Struct(StructValue::new())], 1, 1).expect("text cell"),
+        );
+        let before = block(extract_before_builtin(
+            text.clone(),
+            vec![Value::Int(IntValue::U8(1))],
+        ))
+        .expect_err("unsupported extractBefore text cell");
+        assert_eq!(
+            before.identifier(),
+            Some("RunMat:extractBefore:InvalidInput")
+        );
+        let after = block(extract_after_builtin(
+            text,
+            vec![Value::Int(IntValue::U8(1))],
+        ))
+        .expect_err("unsupported extractAfter text cell");
+        assert_eq!(after.identifier(), Some("RunMat:extractAfter:InvalidInput"));
     }
 
     #[test]
