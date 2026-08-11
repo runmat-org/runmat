@@ -1,0 +1,61 @@
+{
+  "title": "fftn",
+  "category": "math/fft",
+  "keywords": ["fftn", "n-dimensional fft", "fourier transform", "gpu"],
+  "summary": "Compute an N-dimensional discrete Fourier transform.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": ["f32", "f64"],
+    "broadcasting": "matlab",
+    "notes": "Runs provider-backed fft_dim passes when available; host fallback restores the result to the provider that owns the input."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::fft::fftn::tests",
+    "integration": "builtins::math::fft::fftn::tests::fftn_matches_sequential_fft_on_3d"
+  },
+  "description": "`fftn(X)` transforms every dimension of `X`. `fftn(X,SIZE)` pads or truncates each transformed dimension according to a positive integer size vector whose length is at least `ndims(X)`.",
+  "behaviors": [
+    "Integer inputs through 32 bits and logical inputs are documented and produce double output; single input produces single output.",
+    "`SIZE` must be a row or column vector of positive integers with at least one entry per input dimension.",
+    "RunMat extension mode can admit exact int64 and uint64 structural controls and positive SIZE vectors shorter than `ndims(X)` through independent gates.",
+    "gpuArray results remain resident when a provider hook succeeds or when RunMat completes a supported fallback on the host."
+  ],
+  "examples": [
+    {
+      "description": "Transforming every dimension of a volume",
+      "input": "X = rand(4, 5, 6);\nY = fftn(X)"
+    },
+    {
+      "description": "Padding an N-dimensional transform",
+      "input": "X = rand(4, 5, 6);\nY = fftn(X, [8 8 8])"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What shape does `fftn(X,SIZE)` return?",
+      "answer": "Its transformed dimensions have the lengths listed in `SIZE`; the compatibility form requires `length(SIZE) >= ndims(X)`."
+    },
+    {
+      "question": "What precision is used for integer input?",
+      "answer": "Documented integer classes enter the double-precision FFT domain and return double output."
+    }
+  ],
+  "links": [
+    {"label": "fft", "url": "./fft"},
+    {"label": "fft2", "url": "./fft2"},
+    {"label": "ifftn", "url": "./ifftn"},
+    {"label": "fftshift", "url": "./fftshift"}
+  ],
+  "source": {
+    "label": "Open a ticket",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  }
+}

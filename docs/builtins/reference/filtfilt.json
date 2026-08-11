@@ -34,9 +34,9 @@
   "description": "`filtfilt(b, a, x)` filters a vector forward and backward to remove phase delay. Coefficients follow the same digital-filter convention as `filter`: `b` is the numerator, `a` is the denominator, and `a(1)` is normalized internally.",
   "behaviors": [
     "The v1 implementation supports vector signals and preserves row or column orientation.",
-    "RunMat uses odd reflection at both signal edges with `3 * (max(numel(a), numel(b)) - 1)` samples, matching the common MATLAB-compatible zero-phase filtering path.",
+    "The three-argument path uses constant steady-state initialization and linear endpoint continuation with `3 * (max(numel(a), numel(b)) - 1)` transient samples, matching the R2026a defaults for the implemented coefficient-vector/vector-signal form.",
     "Input length must be greater than the reflection length unless the filter has zero state.",
-    "Real gpuArray inputs use provider-backed filter passes when available; complex inputs fall back to the host reference path."
+    "Real floating gpuArray inputs use provider-backed filter passes when available; complex inputs fall back to the host reference path. Typed-integer and logical inputs are independently gated RunMat-only extensions. Calls containing a single input retain single output; integer/logical-only calls produce double output."
   ],
   "examples": [
     {

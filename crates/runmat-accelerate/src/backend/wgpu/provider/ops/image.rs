@@ -23,6 +23,16 @@ impl WgpuProvider {
         kernel: &GpuTensorHandle,
         options: &ImfilterOptions,
     ) -> Result<GpuTensorHandle> {
+        ensure!(
+            runmat_accelerate_api::handle_integer_type(image).is_none()
+                && runmat_accelerate_api::handle_integer_type(kernel).is_none(),
+            "imfilter: integer buffers must be converted before floating provider dispatch"
+        );
+        ensure!(
+            !runmat_accelerate_api::handle_is_logical(image)
+                && !runmat_accelerate_api::handle_is_logical(kernel),
+            "imfilter: logical buffers must be converted before floating provider dispatch"
+        );
         if std::env::var("RUNMAT_WGPU_DISABLE_IMFILTER")
             .ok()
             .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {

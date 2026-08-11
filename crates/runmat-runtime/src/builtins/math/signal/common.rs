@@ -248,6 +248,32 @@ pub(crate) fn complex_vector_to_value(
     }
 }
 
+pub(crate) fn complex_vector_to_value_with_dtype(
+    data: Vec<Complex<f64>>,
+    shape: Vec<usize>,
+    force_complex: bool,
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
+    if dtype != NumericDType::F32 {
+        return complex_vector_to_value(data, shape, force_complex);
+    }
+    let has_imag = force_complex || data.iter().any(|z| z.im.abs() > EPS);
+    if has_imag {
+        let tensor = ComplexTensor::from_f32(
+            data.into_iter()
+                .map(|z| (z.re as f32, z.im as f32))
+                .collect(),
+            shape,
+        )
+        .map_err(|e| signal_error("signal", None, format!("signal: {e}")))?;
+        Ok(Value::ComplexTensor(tensor))
+    } else {
+        let tensor = Tensor::from_f32(data.into_iter().map(|z| z.re as f32).collect(), shape)
+            .map_err(|e| signal_error("signal", None, format!("signal: {e}")))?;
+        Ok(tensor::tensor_into_value(tensor))
+    }
+}
+
 pub(crate) fn real_vector_to_row_value(data: Vec<f64>) -> BuiltinResult<Value> {
     let len = data.len();
     let tensor = Tensor::new(data, vec![1, len])

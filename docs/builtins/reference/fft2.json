@@ -34,10 +34,10 @@
   "behaviors": [
     "`fft2(X)` transforms along the first and second dimensions that have size greater than one.",
     "`fft2(X, M, N)` zero-pads or truncates `X` to `M` rows and `N` columns before evaluating the 2-D transform.",
-    "`fft2(X, SIZE)` accepts a two-element vector (or scalar) specifying the transform lengths.",
+    "RunMat extension: `fft2(X, SIZE)` accepts a two-element vector (or scalar) specifying the transform lengths when RunMat extensions are enabled.",
     "Real inputs produce complex outputs; complex inputs are transformed element-wise with no additional conversion.",
     "Higher-dimensional inputs are transformed slice-by-slice across trailing dimensions, matching MATLAB behaviour.",
-    "Empty dimensions yield empty outputs; zero padding with `0` produces a zero-sized complex tensor.",
+    "MATLAB-compatible `M` and `N` controls are positive integer scalars. Empty and zero transform sizes are separately gated RunMat extensions.",
     "GPU arrays execute on-device when the provider advertises the `fft_dim` hook; otherwise RunMat gathers the data and performs the transform on the host using `rustfft`."
   ],
   "examples": [
@@ -51,8 +51,8 @@
       "input": "patch = [1 0 1; 0 1 0; 1 0 1];\nF = fft2(patch, 8, 8)"
     },
     {
-      "description": "Specifying transform lengths with a size vector",
-      "input": "X = rand(4, 6);\nF = fft2(X, [8 4]);   % pad rows to 8 and truncate columns to 4"
+      "description": "RunMat extension: specifying transform lengths with a size vector",
+      "input": "X = rand(4, 6);\nF = fft2(X, [8 4]);   % requires RunMat extension mode"
     },
     {
       "description": "Using `fft2` on `gpuArray` data",
@@ -74,11 +74,11 @@
     },
     {
       "question": "How do zero-length transform sizes behave?",
-      "answer": "Passing `0` for either `M` or `N` produces a complex tensor with zero elements along that dimension."
+      "answer": "MATLAB-compatible mode requires positive `M` and `N`. RunMat extension mode can use `0` to produce a zero-sized complex tensor."
     },
     {
       "question": "Can I use a single scalar for the size argument?",
-      "answer": "Yes. `fft2(X, K)` is shorthand for `fft2(X, [K K])`, padding or truncating both dimensions to `K`."
+      "answer": "In RunMat extension mode, `fft2(X, K)` is shorthand for `fft2(X, [K K])`. The documented compatibility forms are `fft2(X)` and `fft2(X,M,N)`."
     },
     {
       "question": "What happens when `X` has more than two dimensions?",
@@ -90,7 +90,7 @@
     },
     {
       "question": "Will `fft2` run on the GPU automatically?",
-      "answer": "Yes if the active provider implements `fft_dim`. Otherwise RunMat gathers to the host and performs the transform with `rustfft`."
+      "answer": "Yes if the input's owning provider implements `fft_dim` for its storage class. Otherwise RunMat gathers to the host, performs the transform with `rustfft`, and restores the result to that provider."
     },
     {
       "question": "Does `fft2` normalise the output?",
@@ -98,7 +98,7 @@
     },
     {
       "question": "Can I mix `[]` with explicit sizes (e.g., `fft2(X, [], 128)`)?",
-      "answer": "Yes. Passing `[]` leaves that dimension unchanged while applying the specified size to the other dimension."
+      "answer": "This is a RunMat extension. MATLAB-compatible mode requires positive scalar `M` and `N` values."
     }
   ],
   "links": [

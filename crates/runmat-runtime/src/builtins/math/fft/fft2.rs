@@ -1,9 +1,10 @@
 //! MATLAB-compatible `fft2` builtin with GPU-aware semantics for RunMat.
 
 use super::common::{
-    download_provider_complex_tensor, gather_gpu_complex_tensor, parse_2d_lengths_from_data,
-    parse_2d_lengths_from_tensor, parse_length, transform_axes_complex_tensor,
-    value_to_complex_tensor, TransformDirection,
+    download_provider_complex_tensor, ensure_wide_integer_data_exact, gather_gpu_complex_tensor,
+    is_wide_integer_value, parse_2d_lengths_from_data, parse_2d_lengths_from_tensor, parse_length,
+    restore_complex_gpu_result, transform_axes_complex_tensor, value_to_complex_tensor,
+    TransformDirection,
 };
 use super::fft::fft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -16,7 +17,11 @@ use crate::builtins::math::fft::type_resolvers::fft2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, Value,
 };
@@ -52,6 +57,89 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fft2";
 
+const FFT2_WIDE_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fft2-wide-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fft2 with host int64 or uint64 data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Fft2WideIntegerDataExtension"),
+};
+const FFT2_WIDE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fft2-wide-integer-controls",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fft2 with int64 or uint64 transform-size controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Fft2WideIntegerControlExtension"),
+};
+const FFT2_SIZE_FORM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fft2-size-form",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fft2(X, SIZE) scalar/vector shorthand is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Fft2SizeFormExtension"),
+};
+const FFT2_EMPTY_ZERO_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fft2-empty-zero-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fft2 empty or zero transform sizes are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Fft2EmptyZeroSizeExtension"),
+};
+pub const FFT2_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FFT2_WIDE_DATA_EXTENSION,
+    FFT2_WIDE_CONTROL_EXTENSION,
+    FFT2_SIZE_FORM_EXTENSION,
+    FFT2_EMPTY_ZERO_SIZE_EXTENSION,
+];
+
+const FFT2_DOCUMENTED_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented integer arrays enter the double two-dimensional FFT domain.",
+    }];
+const FFT2_DOCUMENTED_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "M and N",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "M and N are exact positive scalar structural controls; logical scalars are also documented.",
+    }];
+const FFT2_WIDE_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &[
+        runmat_builtins::BuiltinIntegerClass::Int64,
+        runmat_builtins::BuiltinIntegerClass::Uint64,
+    ],
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Host wide data has its own gate and must cross the double boundary exactly.",
+}];
+const FFT2_WIDE_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "M, N, or SIZE",
+    classes: &[
+        runmat_builtins::BuiltinIntegerClass::Int64,
+        runmat_builtins::BuiltinIntegerClass::Uint64,
+    ],
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+    notes: "Wide structural controls have their own gate and are parsed exactly from authoritative storage.",
+}];
+const FFT2_SIZE_EXTENSION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "SIZE",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "The scalar or two-element SIZE shorthand is independently mode-gated and parsed from authoritative storage.",
+    }];
+pub const FFT2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    BuiltinIntegerCapabilityDescriptor { form: "Y = fft2(integer_X)", inputs: &FFT2_DOCUMENTED_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Documented integer data produces double output; GPU fallback restores residency to the owning provider." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = fft2(X, integer_M, integer_N)", inputs: &FFT2_DOCUMENTED_CONTROL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Documented positive controls are parsed exactly before allocation or provider execution." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = fft2(int64_or_uint64_X, ...)", inputs: &FFT2_WIDE_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only wide host data may not silently round; resident wide data is rejected without an exact provider transform." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = fft2(X, int64_or_uint64_M_or_N_or_SIZE)", inputs: &FFT2_WIDE_CONTROL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only wide controls are independently gated and decoded exactly before execution." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = fft2(X, integer_SIZE)", inputs: &FFT2_SIZE_EXTENSION_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only scalar/two-vector shorthand; empty and zero sizes have a further independent extension gate." },
+];
+
 const FFT2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
@@ -80,8 +168,8 @@ const FFT2_INPUTS_SIZE: [BuiltinParamDescriptor; 2] = [
         name: "SIZE",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Scalar N or two-element [M N] size vector.",
+        default: None,
+        description: "RunMat-only scalar N or two-element [M N] size shorthand.",
     },
 ];
 
@@ -97,15 +185,15 @@ const FFT2_INPUTS_M_N: [BuiltinParamDescriptor; 3] = [
         name: "M",
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Output row count for transform.",
+        default: None,
+        description: "Positive output row count for transform.",
     },
     BuiltinParamDescriptor {
         name: "N",
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Output column count for transform.",
+        default: None,
+        description: "Positive output column count for transform.",
     },
 ];
 
@@ -220,11 +308,43 @@ fn fft2_error_with_message(
     keywords = "fft2,2d fft,two-dimensional fourier transform,gpu",
     type_resolver(fft2_type),
     descriptor(crate::builtins::math::fft::fft2::FFT2_DESCRIPTOR),
+    extensions(crate::builtins::math::fft::fft2::FFT2_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::fft::fft2::FFT2_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::fft::fft2"
 )]
 async fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "fft2")?;
+    if is_wide_integer_value(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FFT2_WIDE_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+        ensure_wide_integer_data_exact(&value, BUILTIN_NAME)?;
+    }
+    if rest.iter().any(is_wide_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FFT2_WIDE_CONTROL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if rest.len() == 1 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FFT2_SIZE_FORM_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let lengths = parse_fft2_arguments(&rest)?;
+    if !rest.is_empty()
+        && (lengths.0.is_none()
+            || lengths.1.is_none()
+            || lengths.0 == Some(0)
+            || lengths.1 == Some(0))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FFT2_EMPTY_ZERO_SIZE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     match value {
         Value::GpuTensor(handle) => fft2_gpu(handle, lengths).await,
         other => fft2_host(other, lengths),
@@ -247,11 +367,11 @@ async fn fft2_gpu(
         return fft2_gpu_fallback(handle, lengths).await;
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(first) = provider.fft_dim(&handle, lengths.0, 0).await {
             match provider.fft_dim(&first, lengths.1, 1).await {
                 Ok(second) => {
-                    if first.buffer_id != second.buffer_id {
+                    if first.buffer_id != handle.buffer_id && first.buffer_id != second.buffer_id {
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }
@@ -259,7 +379,7 @@ async fn fft2_gpu(
                 }
                 Err(_) => {
                     let partial =
-                        download_provider_complex_tensor(provider, &first, BUILTIN_NAME, true)
+                        download_provider_complex_tensor(provider, &first, BUILTIN_NAME, false)
                             .await
                             .map_err(|source| {
                                 fft2_error_with_source(
@@ -267,9 +387,13 @@ async fn fft2_gpu(
                                     "provider download failed",
                                     source,
                                 )
-                            })?;
-                    let completed = fft_complex_tensor(partial, lengths.1, Some(2))?;
-                    return Ok(complex_tensor_into_value(completed));
+                            });
+                    if first.buffer_id != handle.buffer_id {
+                        provider.free(&first).ok();
+                        runmat_accelerate_api::clear_residency(&first);
+                    }
+                    let completed = fft_complex_tensor(partial?, lengths.1, Some(2))?;
+                    return restore_complex_gpu_result(&handle, &completed, BUILTIN_NAME);
                 }
             }
         }
@@ -288,7 +412,7 @@ async fn fft2_gpu_fallback(
             fft2_error_with_source(&FFT2_ERROR_INVALID_INPUT, "gpu gather failed", source)
         })?;
     let transformed = fft2_complex_tensor(complex, lengths)?;
-    Ok(complex_tensor_into_value(transformed))
+    restore_complex_gpu_result(&handle, &transformed, BUILTIN_NAME)
 }
 
 fn fft2_complex_tensor(
@@ -355,25 +479,15 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
                     )
                 })
         }
-        Value::Num(_) | Value::Int(_) => {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let len = parse_length(value, BUILTIN_NAME).map_err(|source| {
                 fft2_error_with_source(&FFT2_ERROR_INVALID_LENGTH, "length parse failed", source)
             })?;
             Ok((len, len))
         }
-        Value::Complex(re, im) => {
-            if im.abs() > f64::EPSILON {
-                return Err(fft2_error(&FFT2_ERROR_INVALID_LENGTH));
-            }
-            let scalar = Value::Num(*re);
-            let len = parse_length(&scalar, BUILTIN_NAME).map_err(|source| {
-                fft2_error_with_source(&FFT2_ERROR_INVALID_LENGTH, "length parse failed", source)
-            })?;
-            Ok((len, len))
-        }
+        Value::Complex(_, _) => Err(fft2_error(&FFT2_ERROR_INVALID_LENGTH)),
         Value::ComplexTensor(_) => Err(fft2_error(&FFT2_ERROR_INVALID_SIZE_VECTOR)),
         Value::GpuTensor(_) => Err(fft2_error(&FFT2_ERROR_INVALID_SIZE_VECTOR)),
-        Value::Bool(_) => Err(fft2_error(&FFT2_ERROR_INVALID_LENGTH)),
         Value::String(_)
         | Value::StringArray(_)
         | Value::CharArray(_)
@@ -492,6 +606,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft2_accepts_scalar_length() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((0..9).map(|v| v as f64).collect(), vec![3, 3]).unwrap();
         let result = fft2_builtin(
             Value::Tensor(tensor.clone()),
@@ -510,6 +625,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft2_accepts_size_vector() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
         let size = Tensor::new(vec![4.0, 2.0], vec![1, 2]).unwrap();
         let result =
@@ -522,6 +638,7 @@ pub(crate) mod tests {
 
     #[test]
     fn fft2_size_vector_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
         let size = Tensor::new_integer(IntegerStorage::U16(vec![4, 2]), vec![1, 2]).unwrap();
 
@@ -536,6 +653,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft2_accepts_empty_length_vector() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
         let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
         let result =
@@ -549,6 +667,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft2_zero_length_returns_empty() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let result = fft2_builtin(
             Value::Tensor(tensor),
@@ -574,7 +693,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu = fft2_builtin(Value::GpuTensor(handle), Vec::new()).expect("fft2 gpu");
+            let gpu = fft2_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft2 gpu");
             let cpu = fft2_builtin(Value::Tensor(tensor), Vec::new()).expect("fft2 cpu");
             let g = value_to_host_complex(gpu);
             let c = value_to_host_complex(cpu);
@@ -583,12 +702,19 @@ pub(crate) mod tests {
             for (lhs, rhs) in g.materialize_f64().iter().zip(c.materialize_f64().iter()) {
                 assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
             }
+            let original = test_support::gather(Value::GpuTensor(handle))
+                .expect("caller-owned FFT input remains valid");
+            assert_eq!(
+                original.materialize_f64(),
+                (0..8).map(|v| v as f64).collect::<Vec<_>>()
+            );
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft2_rejects_size_vector_with_more_than_two_entries() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let size = Tensor::new(vec![4.0, 2.0, 1.0], vec![1, 3]).unwrap();
         let err = error_message(
@@ -600,16 +726,18 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn fft2_rejects_boolean_length_argument() {
+    fn fft2_accepts_logical_scalar_size_extension() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = fft2_builtin(Value::Tensor(tensor), vec![Value::Bool(true)]).unwrap_err();
-        assert_eq!(error_identifier(&err), FFT2_ERROR_INVALID_LENGTH.identifier);
-        assert!(error_message(err).contains(FFT2_ERROR_INVALID_LENGTH.message));
+        let result = fft2_builtin(Value::Tensor(tensor), vec![Value::Bool(true)])
+            .expect("logical scalar SIZE extension");
+        assert!(matches!(result, Value::Complex(_, _)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft2_accepts_mixed_empty_and_length_arguments() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
         let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
         let result = fft2_builtin(
@@ -621,6 +749,37 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => assert_eq!(out.shape, vec![2, 4]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn fft2_integer_contract_separates_documented_controls_from_extensions() {
+        let builtin = builtin_function_by_name("fft2").expect("fft2 registration");
+        assert_eq!(builtin.integer_capabilities.len(), 5);
+        assert_eq!(builtin.extensions.len(), 4);
+
+        let logical = fft2_builtin(
+            Value::Int(runmat_builtins::IntValue::U8(3)),
+            vec![Value::Bool(true), Value::Bool(true)],
+        )
+        .expect("logical M and N are documented");
+        assert!(matches!(logical, Value::Complex(_, _)));
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let size_form = fft2_builtin(
+            Value::Num(1.0),
+            vec![Value::Int(runmat_builtins::IntValue::U16(2))],
+        )
+        .expect_err("single SIZE form must gate");
+        assert_eq!(
+            size_form.identifier(),
+            Some("RunMat:compatibility:Fft2SizeFormExtension")
+        );
+        let zero = fft2_builtin(Value::Num(1.0), vec![Value::Num(0.0), Value::Num(2.0)])
+            .expect_err("zero M must gate");
+        assert_eq!(
+            zero.identifier(),
+            Some("RunMat:compatibility:Fft2EmptyZeroSizeExtension")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

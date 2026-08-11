@@ -49468,6 +49468,128 @@
           "when": "FFT execution or tensor shaping fails.",
           "message": "fft: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fft-wide-integer-data",
+          "mode": "RunMatOnly",
+          "description": "fft with host int64 or uint64 data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FftWideIntegerDataExtension"
+        },
+        {
+          "id": "fft-wide-integer-controls",
+          "mode": "RunMatOnly",
+          "description": "fft with int64 or uint64 N or DIM controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FftWideIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = fft(integer_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer data enters the floating FFT domain and produces double output."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer input is converted once at the documented double FFT boundary; provider fallback restores a resident result to the input owner."
+        },
+        {
+          "form": "Y = fft(X, integer_N, integer_DIM)",
+          "inputs": [
+            {
+              "name": "N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "N is parsed exactly as a nonnegative structural length; logical scalar controls are also documented."
+            },
+            {
+              "name": "DIM",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "DIM is parsed exactly as a positive one-based dimension; logical scalar controls are also documented."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Documented controls are exact and do not pass through the tensor f64 compatibility mirror."
+        },
+        {
+          "form": "Y = fft(int64_or_uint64_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Host wide integers are independently gated and must be exactly representable as double before FFT evaluation; resident wide integers are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "RunMat-only wide data cannot silently round at the double boundary."
+        },
+        {
+          "form": "Y = fft(X, int64_or_uint64_N_or_DIM)",
+          "inputs": [
+            {
+              "name": "N or DIM",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "Wide structural controls are decoded from authoritative integer storage and independently gated."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only wide controls are independently gated and parsed exactly."
+        }
       ]
     },
     {
@@ -49510,8 +49632,8 @@
               "name": "SIZE",
               "ty": "NumericArray",
               "arity": "Optional",
-              "default": "[]",
-              "description": "Scalar N or two-element [M N] size vector."
+              "default": null,
+              "description": "RunMat-only scalar N or two-element [M N] size shorthand."
             }
           ],
           "outputs": [
@@ -49538,15 +49660,15 @@
               "name": "M",
               "ty": "NumericScalar",
               "arity": "Optional",
-              "default": "[]",
-              "description": "Output row count for transform."
+              "default": null,
+              "description": "Positive output row count for transform."
             },
             {
               "name": "N",
               "ty": "NumericScalar",
               "arity": "Optional",
-              "default": "[]",
-              "description": "Output column count for transform."
+              "default": null,
+              "description": "Positive output column count for transform."
             }
           ],
           "outputs": [
@@ -49591,6 +49713,153 @@
           "when": "FFT2 execution or tensor shaping fails.",
           "message": "fft2: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fft2-wide-integer-data",
+          "mode": "RunMatOnly",
+          "description": "fft2 with host int64 or uint64 data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fft2WideIntegerDataExtension"
+        },
+        {
+          "id": "fft2-wide-integer-controls",
+          "mode": "RunMatOnly",
+          "description": "fft2 with int64 or uint64 transform-size controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fft2WideIntegerControlExtension"
+        },
+        {
+          "id": "fft2-size-form",
+          "mode": "RunMatOnly",
+          "description": "fft2(X, SIZE) scalar/vector shorthand is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fft2SizeFormExtension"
+        },
+        {
+          "id": "fft2-empty-zero-size",
+          "mode": "RunMatOnly",
+          "description": "fft2 empty or zero transform sizes are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fft2EmptyZeroSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = fft2(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer arrays enter the double two-dimensional FFT domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented integer data produces double output; GPU fallback restores residency to the owning provider."
+        },
+        {
+          "form": "Y = fft2(X, integer_M, integer_N)",
+          "inputs": [
+            {
+              "name": "M and N",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "M and N are exact positive scalar structural controls; logical scalars are also documented."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Documented positive controls are parsed exactly before allocation or provider execution."
+        },
+        {
+          "form": "Y = fft2(int64_or_uint64_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Host wide data has its own gate and must cross the double boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "RunMat-only wide host data may not silently round; resident wide data is rejected without an exact provider transform."
+        },
+        {
+          "form": "Y = fft2(X, int64_or_uint64_M_or_N_or_SIZE)",
+          "inputs": [
+            {
+              "name": "M, N, or SIZE",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "Wide structural controls have their own gate and are parsed exactly from authoritative storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only wide controls are independently gated and decoded exactly before execution."
+        },
+        {
+          "form": "Y = fft2(X, integer_SIZE)",
+          "inputs": [
+            {
+              "name": "SIZE",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "The scalar or two-element SIZE shorthand is independently mode-gated and parsed from authoritative storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only scalar/two-vector shorthand; empty and zero sizes have a further independent extension gate."
+        }
       ]
     },
     {
@@ -49633,8 +49902,8 @@
               "name": "SIZE",
               "ty": "NumericArray",
               "arity": "Optional",
-              "default": "[]",
-              "description": "Transform sizes per dimension."
+              "default": null,
+              "description": "Positive transform-size vector with length at least ndims(X)."
             }
           ],
           "outputs": [
@@ -49672,6 +49941,120 @@
           "identifier": "RunMat:fftn:Internal",
           "when": "FFTN execution or tensor shaping fails.",
           "message": "fftn: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fftn-wide-integer-data",
+          "mode": "RunMatOnly",
+          "description": "fftn with host int64 or uint64 data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FftnWideIntegerDataExtension"
+        },
+        {
+          "id": "fftn-wide-integer-controls",
+          "mode": "RunMatOnly",
+          "description": "fftn with int64 or uint64 SIZE controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FftnWideIntegerControlExtension"
+        },
+        {
+          "id": "fftn-short-size-vector",
+          "mode": "RunMatOnly",
+          "description": "fftn SIZE vectors shorter than ndims(X) are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FftnShortSizeExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = fftn(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer arrays enter the double N-dimensional FFT domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented integer data produces double output and resident fallback returns to the owning provider."
+        },
+        {
+          "form": "Y = fftn(X, integer_SIZE)",
+          "inputs": [
+            {
+              "name": "SIZE",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "SIZE is a positive integer vector with length at least ndims(X); logical vectors are also documented."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "SIZE is decoded exactly and validated for vector shape, positivity, and minimum length before execution."
+        },
+        {
+          "form": "Y = fftn(int64_or_uint64_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Host wide data has its own gate and must be exactly representable as double."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "RunMat-only wide host data may not silently round; resident wide data is rejected without an exact provider transform."
+        },
+        {
+          "form": "Y = fftn(X, int64_or_uint64_SIZE)",
+          "inputs": [
+            {
+              "name": "SIZE",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "Wide SIZE controls have their own gate and are decoded exactly from authoritative storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only wide SIZE controls are independently gated; short positive vectors have a separate extension gate."
         }
       ]
     },
@@ -49715,8 +50098,8 @@
               "name": "DIM",
               "ty": "Any",
               "arity": "Optional",
-              "default": "[]",
-              "description": "Dimension selector (scalar, numeric vector, or logical mask vector)."
+              "default": null,
+              "description": "Positive scalar dimension; vectors and logical masks are RunMat extensions."
             }
           ],
           "outputs": [
@@ -49760,6 +50143,97 @@
           "identifier": "RunMat:fftshift:Internal",
           "when": "Shifting, tensor reconstruction, or GPU transfer operations fail.",
           "message": "fftshift: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fftshift-multi-dimension-selector",
+          "mode": "RunMatOnly",
+          "description": "fftshift numeric dimension vectors and logical masks are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FftshiftMultiDimensionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = fftshift(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All integer classes are reordered exactly with class, shape, and complexity preserved."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Real and typed-complex integer storage is reordered without an f64 compatibility mirror; resident fallback re-uploads to the owning provider."
+        },
+        {
+          "form": "Y = fftshift(X, integer_DIM)",
+          "inputs": [
+            {
+              "name": "DIM",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented DIM form is one positive scalar parsed from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "All eight documented integer scalar classes select one dimension exactly."
+        },
+        {
+          "form": "Y = fftshift(X, integer_DIMS)",
+          "inputs": [
+            {
+              "name": "DIMS",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "RunMat-only numeric vectors are decoded exactly; logical mask vectors share the same independent extension gate."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only multi-axis vector/mask selection is independently gated from documented scalar DIM semantics."
         }
       ]
     },
@@ -51609,6 +52083,110 @@
           "when": "Internal tensor/state/index processing fails.",
           "message": "filter: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[y, zf] = filter(integer_b, integer_a, integer_x, integer_zi, dim)",
+          "inputs": [
+            {
+              "name": "b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight real integer classes are documented for numerator coefficients and enter the floating filtering domain."
+            },
+            {
+              "name": "a",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight real integer classes are documented for denominator coefficients and enter the floating filtering domain."
+            },
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer signals are documented and produce double output."
+            },
+            {
+              "name": "zi",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Integer initial conditions are documented and produce floating final conditions."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative integer storage is read before conversion to the documented floating filtering domain; resident integer inputs gather rather than entering floating provider kernels."
+        },
+        {
+          "form": "[y, zf] = filter(b, a, x, zi, integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The filtering dimension is an exact positive integer scalar."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Typed integer dimensions are parsed exactly before host indexing or provider dispatch."
+        }
       ]
     },
     {
@@ -51699,6 +52277,83 @@
           "when": "Internal filtering operation fails.",
           "message": "filter2: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "filter2-convolution-mode",
+          "mode": "RunMatOnly",
+          "description": "filter2 'conv' and 'corr' mode flags are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:Filter2ModeExtension"
+        },
+        {
+          "id": "filter2-nd-input",
+          "mode": "RunMatOnly",
+          "description": "filter2 inputs with more than two dimensions are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Filter2NdExtension"
+        },
+        {
+          "id": "filter2-variadic-options",
+          "mode": "RunMatOnly",
+          "description": "filter2 with more than one trailing option is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Filter2VariadicOptionsExtension"
+        },
+        {
+          "id": "filter2-integer-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "filter2 with integer gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Filter2IntegerGpuExtension"
+        },
+        {
+          "id": "filter2-logical-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "filter2 with logical gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Filter2LogicalGpuExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = filter2(integer_H, integer_X, shape)",
+          "inputs": [
+            {
+              "name": "H",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for the coefficient matrix."
+            },
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are documented for the input matrix."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Host integer matrices enter the documented double computation domain; MATLAB GPU inputs are restricted to single and double."
+        }
       ]
     },
     {
@@ -51766,6 +52421,81 @@
           "identifier": "RunMat:filtfilt:Internal",
           "when": "Internal state solving, filtering, or tensor construction fails.",
           "message": "filtfilt: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "filtfilt-integer-input",
+          "mode": "RunMatOnly",
+          "description": "filtfilt with typed-integer coefficients or signal data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FiltfiltIntegerInputExtension"
+        },
+        {
+          "id": "filtfilt-logical-input",
+          "mode": "RunMatOnly",
+          "description": "filtfilt with logical coefficients or signal data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FiltfiltLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "y = filtfilt(integer_b, integer_a, integer_x)",
+          "inputs": [
+            {
+              "name": "b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB documents single and double coefficients; RunMat mode additionally accepts real integer coefficients."
+            },
+            {
+              "name": "a",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB documents single and double coefficients; RunMat mode additionally accepts real integer coefficients."
+            },
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB documents single and double signals; RunMat mode additionally accepts real integer vectors."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer inputs are independently mode-gated before gathering or provider access and produce double output."
         }
       ]
     },
@@ -52403,6 +53133,145 @@
           "identifier": "RunMat:fir1:Internal",
           "when": "Coefficient materialization fails internally.",
           "message": "fir1: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fir1-integer-order",
+          "mode": "RunMatOnly",
+          "description": "fir1 with a typed-integer filter order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1IntegerOrderExtension"
+        },
+        {
+          "id": "fir1-logical-order",
+          "mode": "RunMatOnly",
+          "description": "fir1 with a logical filter order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1LogicalOrderExtension"
+        },
+        {
+          "id": "fir1-single-order",
+          "mode": "RunMatOnly",
+          "description": "fir1 with a single-precision filter order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1SingleOrderExtension"
+        },
+        {
+          "id": "fir1-integer-cutoff",
+          "mode": "RunMatOnly",
+          "description": "fir1 with typed-integer cutoff frequencies is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1IntegerCutoffExtension"
+        },
+        {
+          "id": "fir1-logical-cutoff",
+          "mode": "RunMatOnly",
+          "description": "fir1 with logical cutoff frequencies is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1LogicalCutoffExtension"
+        },
+        {
+          "id": "fir1-single-cutoff",
+          "mode": "RunMatOnly",
+          "description": "fir1 with single-precision cutoff frequencies is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1SingleCutoffExtension"
+        },
+        {
+          "id": "fir1-integer-window",
+          "mode": "RunMatOnly",
+          "description": "fir1 with a typed-integer window is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1IntegerWindowExtension"
+        },
+        {
+          "id": "fir1-logical-window",
+          "mode": "RunMatOnly",
+          "description": "fir1 with a logical window is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1LogicalWindowExtension"
+        },
+        {
+          "id": "fir1-single-window",
+          "mode": "RunMatOnly",
+          "description": "fir1 with a single-precision window is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fir1SingleWindowExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "b = fir1(integer_n,Wn,...)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented order class is double; RunMat mode parses every typed-integer scalar exactly as a structural filter order."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "The order is decoded without an f64 mirror; resident order input gathers through its owner after compatibility admission, and coefficient output remains a host double row vector."
+        },
+        {
+          "form": "b = fir1(n,integer_Wn,...)",
+          "inputs": [
+            {
+              "name": "Wn",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed cutoff storage is admitted only in RunMat mode and must be exactly representable at the binary64 FIR-design boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer cutoff values cross one checked binary64 boundary before normalized-frequency validation."
+        },
+        {
+          "form": "b = fir1(n,Wn,integer_window,...)",
+          "inputs": [
+            {
+              "name": "window",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed window values remain authoritative through admission and must be exactly representable before binary64 window multiplication."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Integer window values cross one checked binary64 boundary before coefficient multiplication."
         }
       ]
     },
@@ -55808,8 +56677,8 @@
         {
           "code": "RM.FREQZ.INVALID_N",
           "identifier": "RunMat:freqz:InvalidN",
-          "when": "The response length is not a positive integer scalar.",
-          "message": "freqz: n must be a positive integer"
+          "when": "The response length is not an integer scalar greater than or equal to two.",
+          "message": "freqz: n must be an integer greater than or equal to 2"
         },
         {
           "code": "RM.FREQZ.INVALID_FS",
@@ -55822,6 +56691,161 @@
           "identifier": "RunMat:freqz:Internal",
           "when": "Response tensor construction fails internally.",
           "message": "freqz: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "freqz-integer-coefficients",
+          "mode": "RunMatOnly",
+          "description": "freqz with typed-integer transfer-function coefficients is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreqzIntegerCoefficientExtension"
+        },
+        {
+          "id": "freqz-logical-coefficients",
+          "mode": "RunMatOnly",
+          "description": "freqz with logical transfer-function coefficients is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreqzLogicalCoefficientExtension"
+        },
+        {
+          "id": "freqz-integer-point-count",
+          "mode": "RunMatOnly",
+          "description": "freqz with a typed-integer point count is a provisional RunMat extension because the public core documentation does not publish its accepted classes",
+          "error_identifier": "RunMat:compatibility:FreqzIntegerPointCountExtension"
+        },
+        {
+          "id": "freqz-logical-point-count",
+          "mode": "RunMatOnly",
+          "description": "freqz with a logical point count is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreqzLogicalPointCountExtension"
+        },
+        {
+          "id": "freqz-single-point-count",
+          "mode": "RunMatOnly",
+          "description": "freqz with a single-precision point count is a provisional RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreqzSinglePointCountExtension"
+        },
+        {
+          "id": "freqz-integer-sample-rate",
+          "mode": "RunMatOnly",
+          "description": "freqz with a typed-integer sample rate is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreqzIntegerSampleRateExtension"
+        },
+        {
+          "id": "freqz-logical-sample-rate",
+          "mode": "RunMatOnly",
+          "description": "freqz with a logical sample rate is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreqzLogicalSampleRateExtension"
+        },
+        {
+          "id": "freqz-single-sample-rate",
+          "mode": "RunMatOnly",
+          "description": "freqz with a single-precision sample rate is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreqzSingleSampleRateExtension"
+        },
+        {
+          "id": "freqz-resident-input",
+          "mode": "RunMatOnly",
+          "description": "freqz with an interactive resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FreqzResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[h,w] = freqz(integer_b,integer_a,...)",
+          "inputs": [
+            {
+              "name": "b",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer numerator coefficients must be exactly representable at the binary64 response boundary."
+            },
+            {
+              "name": "a",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer denominator coefficients must be exactly representable at the binary64 response boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative integer coefficients cross one checked binary64 boundary; integer-only responses are complex double and frequencies are double."
+        },
+        {
+          "form": "[h,w] = freqz(b,a,integer_n,...)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Core freqz documents a positive integer scalar but publishes no datatype list; RunMat provisionally gates typed n and parses it exactly."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Point count is decoded exactly, must be at least two, and selects response shape without an f64 mirror."
+        },
+        {
+          "form": "[h,f] = freqz(b,a,n,integer_fs)",
+          "inputs": [
+            {
+              "name": "fs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "The documented sample-rate class is double; admitted typed values require exact binary64 representation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Sample rate crosses one checked binary64 boundary; response precision follows documented coefficient precision and f remains host double."
         }
       ]
     },

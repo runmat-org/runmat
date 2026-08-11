@@ -3,7 +3,8 @@
 //! `fftshift` recenters zero-frequency components for outputs produced by FFTs.
 
 use super::common::{
-    apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims, ShiftKind,
+    apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims,
+    gather_gpu_complex_tensor, restore_complex_gpu_result, ShiftKind,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -12,9 +13,13 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::type_resolvers::fftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value,
 };
@@ -49,6 +54,43 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fftshift";
 
+const FFTSHIFT_MULTI_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fftshift-multi-dimension-selector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fftshift numeric dimension vectors and logical masks are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FftshiftMultiDimensionExtension"),
+};
+pub const FFTSHIFT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FFTSHIFT_MULTI_DIM_EXTENSION];
+
+const FFTSHIFT_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "All integer classes are reordered exactly with class, shape, and complexity preserved.",
+}];
+const FFTSHIFT_DIM_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "DIM",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes:
+        "The documented DIM form is one positive scalar parsed from authoritative integer storage.",
+}];
+const FFTSHIFT_MULTI_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "DIMS",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "RunMat-only numeric vectors are decoded exactly; logical mask vectors share the same independent extension gate.",
+    }];
+pub const FFTSHIFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(integer_X)", inputs: &FFTSHIFT_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Real and typed-complex integer storage is reordered without an f64 compatibility mirror; resident fallback re-uploads to the owning provider." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(X, integer_DIM)", inputs: &FFTSHIFT_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All eight documented integer scalar classes select one dimension exactly." },
+    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(X, integer_DIMS)", inputs: &FFTSHIFT_MULTI_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only multi-axis vector/mask selection is independently gated from documented scalar DIM semantics." },
+];
+
 const FFTSHIFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::Any,
@@ -77,8 +119,8 @@ const FFTSHIFT_INPUTS_DIMS: [BuiltinParamDescriptor; 2] = [
         name: "DIM",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Dimension selector (scalar, numeric vector, or logical mask vector).",
+        default: None,
+        description: "Positive scalar dimension; vectors and logical masks are RunMat extensions.",
     },
 ];
 
@@ -199,6 +241,8 @@ fn compute_fftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinRe
     accel = "custom",
     type_resolver(fftshift_type),
     descriptor(crate::builtins::math::fft::fftshift::FFTSHIFT_DESCRIPTOR),
+    extensions(crate::builtins::math::fft::fftshift::FFTSHIFT_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::fft::fftshift::FFTSHIFT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::fft::fftshift"
 )]
 async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -206,6 +250,12 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         return Err(fftshift_error(&FFTSHIFT_ERROR_ARG_COUNT));
     }
     let dims_arg = rest.first();
+    if dims_arg.is_some_and(fftshift_uses_multi_dimension_extension) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FFTSHIFT_MULTI_DIM_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
 
     match value {
         Value::Tensor(tensor) => {
@@ -268,6 +318,14 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::OutputList(_) => Err(fftshift_error(&FFTSHIFT_ERROR_UNSUPPORTED_INPUT)),
+    }
+}
+
+fn fftshift_uses_multi_dimension_extension(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor.len() != 1,
+        Value::LogicalArray(array) => array.data.len() != 1,
+        _ => false,
     }
 }
 
@@ -363,26 +421,13 @@ async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<
         return Ok(Value::GpuTensor(handle));
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let mut working = handle.clone();
-        if plan.ext_shape != working.shape {
-            match provider.reshape(&working, &plan.ext_shape) {
-                Ok(reshaped) => working = reshaped,
-                Err(_) => return fftshift_gpu_fallback(handle, dims).await,
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        // Provider reshape may mutate a handle's registry entry in place. Only use
+        // the native path when no synthetic trailing dimensions are required.
+        if plan.ext_shape == handle.shape {
+            if let Ok(out) = provider.circshift(&handle, &plan.provider) {
+                return Ok(gpu_helpers::resident_gpu_value(out));
             }
-        }
-        if let Ok(mut out) = provider.circshift(&working, &plan.provider) {
-            if plan.ext_shape != handle.shape {
-                match provider.reshape(&out, &handle.shape) {
-                    Ok(restored) => out = restored,
-                    Err(_) => {
-                        let mut coerced = out.clone();
-                        coerced.shape = handle.shape.clone();
-                        out = coerced;
-                    }
-                }
-            }
-            return Ok(Value::GpuTensor(out));
         }
     }
 
@@ -390,15 +435,31 @@ async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<
 }
 
 async fn fftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
+        let host = gather_gpu_complex_tensor(&handle, BUILTIN_NAME)
+            .await
+            .map_err(|source| {
+                fftshift_error_with_source(&FFTSHIFT_ERROR_INTERNAL, "gpu gather failed", source)
+            })?;
+        let shifted = fftshift_complex_tensor(host, dims)?;
+        return restore_complex_gpu_result(&handle, &shifted, BUILTIN_NAME);
+    }
+    let was_logical = runmat_accelerate_api::handle_is_logical(&handle);
     let host_tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|source| {
             fftshift_error_with_source(&FFTSHIFT_ERROR_INTERNAL, "gpu gather failed", source)
         })?;
     let shifted = fftshift_tensor(host_tensor, dims)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         return gpu_helpers::upload_tensor(provider, &shifted)
-            .map(Value::GpuTensor)
+            .map(|output| {
+                if was_logical {
+                    gpu_helpers::logical_gpu_value(output)
+                } else {
+                    gpu_helpers::resident_gpu_value(output)
+                }
+            })
             .map_err(|source| {
                 fftshift_error_with_detail(
                     &FFTSHIFT_ERROR_INTERNAL,
@@ -505,6 +566,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fftshift_matrix_columns_only_via_vector_dims() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let dims = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
         let result =
@@ -518,9 +580,38 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn fftshift_integer_contract_separates_scalar_dim_from_multi_axis_extension() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("fftshift registration");
+        assert_eq!(builtin.integer_capabilities.len(), 3);
+        assert_eq!(builtin.extensions.len(), 1);
+
+        let scalar_logical = fftshift_builtin(
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            vec![Value::Bool(true)],
+        )
+        .expect("documented logical scalar DIM");
+        assert!(matches!(
+            scalar_logical,
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX))
+        ));
+
+        let dims =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1, 2]), vec![1, 2])
+                .unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = fftshift_builtin(Value::Num(1.0), vec![Value::Tensor(dims)])
+            .expect_err("multi-axis selector must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FftshiftMultiDimensionExtension")
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fftshift_matrix_rows_only_logical_mask() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let mask = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
         let result = fftshift_builtin(Value::Tensor(tensor), vec![Value::LogicalArray(mask)])
@@ -551,6 +642,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fftshift_with_empty_dimension_vector_noop() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let dims = Tensor::new(Vec::new(), vec![0, 1]).unwrap();
         let original = tensor.clone();
@@ -724,6 +816,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fftshift_rejects_non_vector_dimension_tensor() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
         let dims = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = fftshift_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).unwrap_err();

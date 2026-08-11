@@ -1,8 +1,10 @@
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned, IntegerElementType,
+};
 use runmat_builtins::{
     ComplexStorage, ComplexTensor, IntValue, NumericDType, NumericStorage, Tensor, Value,
 };
@@ -79,38 +81,25 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
             }
             parse_length_scalar(tensor::tensor_value_f64(t, 0), builtin).map(Some)
         }
-        Value::ComplexTensor(t) => {
-            if t.materialize_f64().len() != 1 {
-                return Err(builtin_error(
-                    builtin,
-                    format!("{builtin}: length must be a scalar"),
-                ));
-            }
-            let (re, im) = t.materialize_f64()[0];
-            if im.abs() > f64::EPSILON {
-                return Err(builtin_error(
-                    builtin,
-                    format!("{builtin}: length must be real-valued"),
-                ));
-            }
-            parse_length_scalar(re, builtin).map(Some)
-        }
+        Value::ComplexTensor(_) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be real numeric or logical"),
+        )),
         Value::Num(n) => parse_length_scalar(*n, builtin).map(Some),
         Value::Int(i) => i.try_to_usize().map(Some).ok_or_else(|| {
             builtin_error(builtin, format!("{builtin}: length must be non-negative"))
         }),
-        Value::Complex(re, im) => {
-            if im.abs() > f64::EPSILON {
-                return Err(builtin_error(
-                    builtin,
-                    format!("{builtin}: length must be real-valued"),
-                ));
-            }
-            parse_length_scalar(*re, builtin).map(Some)
-        }
-        Value::Bool(_) | Value::LogicalArray(_) => Err(builtin_error(
+        Value::Complex(_, _) => Err(builtin_error(
             builtin,
-            format!("{builtin}: length must be numeric"),
+            format!("{builtin}: length must be real numeric or logical"),
+        )),
+        Value::Bool(value) => Ok(Some(usize::from(*value))),
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            Ok(Some(usize::from(array.data[0] != 0)))
+        }
+        Value::LogicalArray(_) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be a scalar"),
         )),
         Value::String(_)
         | Value::StringArray(_)
@@ -161,7 +150,101 @@ fn parse_length_scalar(value: f64, builtin: &str) -> BuiltinResult<usize> {
             format!("{builtin}: length must be an integer"),
         ));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(builtin_error(
+            builtin,
+            format!("{builtin}: length exceeds the maximum supported size"),
+        ));
+    }
     Ok(rounded as usize)
+}
+
+/// Whether a value carries an `int64` or `uint64` class. FFT computation
+/// builtins document integer data only through 32 bits, so callers use this
+/// before any provider dispatch or floating-point materialization.
+pub fn is_wide_integer_value(value: &Value) -> bool {
+    match value {
+        Value::Int(IntValue::I64(_) | IntValue::U64(_)) => true,
+        Value::Tensor(tensor) => matches!(
+            tensor.integer_storage(),
+            Some(runmat_builtins::IntegerStorage::I64(_) | runmat_builtins::IntegerStorage::U64(_))
+        ),
+        Value::GpuTensor(handle) => matches!(
+            runmat_accelerate_api::handle_integer_type(handle),
+            Some(IntegerElementType::I64 | IntegerElementType::U64)
+        ),
+        _ => false,
+    }
+}
+
+/// Require wide integer data to cross the FFT floating boundary exactly.
+/// Compatibility-mode admission is handled independently by each builtin's
+/// extension gate.
+pub fn ensure_wide_integer_data_exact(value: &Value, builtin: &str) -> BuiltinResult<()> {
+    let check = |integer: &IntValue| {
+        let magnitude = match integer {
+            IntValue::I8(value) => u64::from(value.unsigned_abs()),
+            IntValue::I16(value) => u64::from(value.unsigned_abs()),
+            IntValue::I32(value) => u64::from(value.unsigned_abs()),
+            IntValue::I64(value) => value.unsigned_abs(),
+            IntValue::U8(value) => u64::from(*value),
+            IntValue::U16(value) => u64::from(*value),
+            IntValue::U32(value) => u64::from(*value),
+            IntValue::U64(value) => *value,
+        };
+        let significant_bits = u64::BITS - magnitude.leading_zeros();
+        if magnitude == 0
+            || significant_bits <= f64::MANTISSA_DIGITS
+            || magnitude.trailing_zeros() >= significant_bits - f64::MANTISSA_DIGITS
+        {
+            Ok(())
+        } else {
+            Err(builtin_error(
+                builtin,
+                format!("{builtin}: int64 and uint64 data must be exactly representable as double"),
+            ))
+        }
+    };
+    match value {
+        Value::Int(integer) => check(integer),
+        Value::Tensor(tensor) if is_wide_integer_value(value) => {
+            let storage = tensor
+                .integer_storage()
+                .expect("wide integer tensor has authoritative storage");
+            for index in 0..storage.len() {
+                check(&storage.value_at(index).expect("integer storage length"))?;
+            }
+            Ok(())
+        }
+        Value::GpuTensor(_) if is_wide_integer_value(value) => Err(builtin_error(
+            builtin,
+            format!(
+                "{builtin}: resident int64 and uint64 FFT data are not supported without an exact provider transform"
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Upload a host FFT result back to the provider that owns `source`.
+pub fn restore_complex_gpu_result(
+    source: &GpuTensorHandle,
+    tensor: &ComplexTensor,
+    builtin: &str,
+) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(source).ok_or_else(|| {
+        builtin_error(
+            builtin,
+            format!("{builtin}: no acceleration provider owns the input handle"),
+        )
+    })?;
+    let output = gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|source| {
+        builtin_error(
+            builtin,
+            format!("{builtin}: failed to restore GPU result: {source}"),
+        )
+    })?;
+    Ok(gpu_helpers::complex_gpu_value(output))
 }
 
 /// Convert any numeric value into a `ComplexTensor`.
@@ -303,8 +386,8 @@ pub async fn download_provider_complex_tensor(
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
     if free_after_download {
         provider.free(handle).ok();
+        runmat_accelerate_api::clear_residency(handle);
     }
-    runmat_accelerate_api::clear_residency(handle);
     host_to_complex_tensor(host, builtin)
 }
 
@@ -976,6 +1059,21 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
             }
             Ok(dims)
         }
+        Value::Bool(true) => Ok(vec![1]),
+        Value::Bool(false) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: dimension indices must be >= 1"),
+        )),
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            if array.data[0] != 0 {
+                Ok(vec![1])
+            } else {
+                Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimension indices must be >= 1"),
+                ))
+            }
+        }
         Value::LogicalArray(array) => {
             if !is_vector_shape(&array.shape) && !array.data.is_empty() {
                 return Err(builtin_error(
@@ -999,7 +1097,6 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
         | Value::StringArray(_)
         | Value::CharArray(_)
         | Value::SparseTensor(_)
-        | Value::Bool(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::Symbolic(_)

@@ -591,6 +591,18 @@ impl WgpuProvider {
         let entry_b = self.get_entry(b)?;
         let entry_a = self.get_entry(a)?;
         let entry_x = self.get_entry(x)?;
+        ensure!(
+            runmat_accelerate_api::handle_integer_type(b).is_none()
+                && runmat_accelerate_api::handle_integer_type(a).is_none()
+                && runmat_accelerate_api::handle_integer_type(x).is_none(),
+            "iir_filter: integer buffers must be converted before floating provider dispatch"
+        );
+        ensure!(
+            !runmat_accelerate_api::handle_is_logical(b)
+                && !runmat_accelerate_api::handle_is_logical(a)
+                && !runmat_accelerate_api::handle_is_logical(x),
+            "iir_filter: logical buffers must be converted before floating provider dispatch"
+        );
         let effective_storage = |handle: &GpuTensorHandle, entry_storage: GpuTensorStorage| match (
             runmat_accelerate_api::handle_storage(handle),
             entry_storage,
@@ -732,6 +744,11 @@ impl WgpuProvider {
 
         if let Some(ref zi_handle) = zi {
             let zi_entry = self.get_entry(zi_handle)?;
+            ensure!(
+                runmat_accelerate_api::handle_integer_type(zi_handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(zi_handle),
+                "iir_filter: nonfloating initial conditions must be converted before provider dispatch"
+            );
             ensure!(
                 zi_entry.precision == self.precision,
                 "iir_filter: initial conditions use incompatible precision"
