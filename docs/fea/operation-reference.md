@@ -102,10 +102,16 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.results(runOrId, Name, Value, ...)` | Load result data from a run result object or persisted run id. |
 | `fea.field(resultsOrRun, fieldId)` | Extract one field from a result query. |
 | `fea.plot(runOrResultsOrField, fieldId)` | Create a RunMat figure for a result field using the study geometry context. |
-| `fea.compare(baselineRunId, candidateRunId, Name, Value, ...)` | Compare two persisted runs. |
+| `fea.compare(baselineRunId, candidateRunId)` | Compare two persisted runs; no Name, Value options are accepted. |
 | `fea.trends(Name, Value, ...)` | Summarize recent persisted runs. |
 
 `fea.boundaryCondition` is a RunMat-native constructor. Its seven numeric boundary forms accept finite real numeric scalars from all eight built-in integer classes and convert them once to the model's binary64 storage fields; scalar shape, finiteness, required fields, and unknown fields are validated before object construction, and invalid input is attributed to `fea.boundaryCondition` with `RunMat:fea:InvalidInput`.
+
+`fea.material`, `fea.loadCase`, `fea.domain`, and `fea.interface` are also RunMat-native host constructors. Their documented finite real physical fields accept all eight built-in integer classes, preserve exact input through kind/field/shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. The nested thermo-field-source revision is a structural nonnegative integer and remains exact.
+
+`fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, `fea.plot`, and `fea.compare` accept structural objects and text rather than integer arrays. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
+
+These constructors, planning operations, field projections, comparisons, and plots do not intrinsically require native OCCT. Existing geometry assets, STL or synthetic geometry, and persisted mesh/result artifacts use their normal paths without OCCT; only document resolution that must import topology-bearing CAD may require an OCCT-enabled geometry backend.
 
 `fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. `fea.RunResult` exposes `results`, `field`, and `plot`; `fea.Results` exposes `field` and `plot`; `fea.Field` exposes `plot`.
 

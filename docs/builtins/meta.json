@@ -46462,11 +46462,18 @@
           "label": "comparison = fea.compare(baselineRunId, candidateRunId)",
           "inputs": [
             {
-              "name": "args",
-              "ty": "Any",
-              "arity": "Variadic",
+              "name": "baselineRunId",
+              "ty": "StringScalar",
+              "arity": "Required",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Baseline persisted run id."
+            },
+            {
+              "name": "candidateRunId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Candidate persisted run id."
             }
           ],
           "outputs": [
@@ -46505,7 +46512,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.domain",
@@ -46513,14 +46524,21 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "component = fea.component(args, ...)",
+          "label": "domain = fea.domain(kind, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Physics-domain kind."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Typed fields for the selected domain kind."
             }
           ],
           "outputs": [
@@ -46558,6 +46576,143 @@
           "identifier": "RunMat:fea:Internal",
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "thermo-mechanical physics fields",
+          "inputs": [
+            {
+              "name": "domain numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "thermo field-source revision",
+          "inputs": [
+            {
+              "name": "field_source.revision",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Rejected",
+              "notes": "The structural revision is decoded exactly as u32 and rejects negative or out-of-range integer values."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The RunMat-native constructor preserves the exact u32 revision in both typed model storage and its public object representation."
+        },
+        {
+          "form": "electro-thermal physics fields",
+          "inputs": [
+            {
+              "name": "domain numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "electromagnetic physics fields",
+          "inputs": [
+            {
+              "name": "domain numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "CFD physics fields",
+          "inputs": [
+            {
+              "name": "domain numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
         }
       ]
     },
@@ -46570,11 +46725,18 @@
           "label": "field = fea.field(resultsOrRun, fieldId)",
           "inputs": [
             {
-              "name": "args",
+              "name": "resultsOrRun",
               "ty": "Any",
-              "arity": "Variadic",
+              "arity": "Required",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "fea.Results, fea.RunResult, or persisted run id."
+            },
+            {
+              "name": "fieldId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Exact field id or unique dotted suffix."
             }
           ],
           "outputs": [
@@ -46613,7 +46775,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.interface",
@@ -46621,14 +46787,35 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "component = fea.component(args, ...)",
+          "label": "interface = fea.interface(id, primaryRegion, secondaryRegion, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Interface id."
+            },
+            {
+              "name": "primaryRegion",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Primary geometry region selector."
+            },
+            {
+              "name": "secondaryRegion",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Secondary geometry region selector."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Interface kind and numeric fields."
             }
           ],
           "outputs": [
@@ -46666,6 +46853,89 @@
           "identifier": "RunMat:fea:Internal",
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "contact interface fields",
+          "inputs": [
+            {
+              "name": "interface numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "fluid-structure interface fields",
+          "inputs": [
+            {
+              "name": "interface numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "conjugate-heat-transfer interface fields",
+          "inputs": [
+            {
+              "name": "interface numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
         }
       ]
     },
@@ -46729,14 +46999,35 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "component = fea.component(args, ...)",
+          "label": "load = fea.loadCase(id, region, kind, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Load-case id."
+            },
+            {
+              "name": "region",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Geometry region selector."
+            },
+            {
+              "name": "kind",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Load kind."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Numeric fields required by the selected load kind."
             }
           ],
           "outputs": [
@@ -46774,6 +47065,213 @@
           "identifier": "RunMat:fea:Internal",
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "force vector",
+          "inputs": [
+            {
+              "name": "three-element vector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "moment or torque vector",
+          "inputs": [
+            {
+              "name": "three-element vector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "pressure magnitude",
+          "inputs": [
+            {
+              "name": "scalar physics fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "body-force vector",
+          "inputs": [
+            {
+              "name": "three-element vector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "current-density fields",
+          "inputs": [
+            {
+              "name": "three-element vector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            },
+            {
+              "name": "phase and amplitude",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "coil-current fields",
+          "inputs": [
+            {
+              "name": "scalar physics fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "volumetric heat source",
+          "inputs": [
+            {
+              "name": "scalar physics fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
         }
       ]
     },
@@ -46786,11 +47284,18 @@
           "label": "material = fea.material(id, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Material id."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Mechanical, thermal, acoustic, electrical, and plastic material fields."
             }
           ],
           "outputs": [
@@ -46828,6 +47333,170 @@
           "identifier": "RunMat:fea:Internal",
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "mechanical material fields",
+          "inputs": [
+            {
+              "name": "mechanical numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "thermal material fields",
+          "inputs": [
+            {
+              "name": "thermal numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "acoustic material fields",
+          "inputs": [
+            {
+              "name": "acoustic numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "electrical material fields",
+          "inputs": [
+            {
+              "name": "electrical numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "electrical frequency-response fields",
+          "inputs": [
+            {
+              "name": "conductivity response numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
+        },
+        {
+          "form": "plastic material fields",
+          "inputs": [
+            {
+              "name": "plastic numeric fields",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
         }
       ]
     },
@@ -46837,14 +47506,28 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "component = fea.component(args, ...)",
+          "label": "assignment = fea.materialAssignment(region, material, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "region",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Geometry region selector."
+            },
+            {
+              "name": "material",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Assigned material id."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Expected-material and confidence options."
             }
           ],
           "outputs": [
@@ -46883,7 +47566,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.model",
@@ -46894,11 +47581,25 @@
           "label": "model = fea.model(id, geometry, Name, Value, ...)",
           "inputs": [
             {
-              "name": "args",
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Model id."
+            },
+            {
+              "name": "geometry",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Existing geometry.Asset object."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Profile, frame, defaults, and typed model-component options."
             }
           ],
           "outputs": [
@@ -46937,7 +47638,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.plan",
@@ -46991,7 +47696,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.plot",
@@ -47002,11 +47711,67 @@
           "label": "figure = fea.plot(runOrResultsOrField, fieldId)",
           "inputs": [
             {
-              "name": "args",
+              "name": "context",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA run, results, field, or study context."
+            },
+            {
+              "name": "fieldId",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional field id."
+            },
+            {
+              "name": "Name, Value",
               "ty": "Any",
               "arity": "Variadic",
               "default": null,
-              "description": "Constructor or query arguments."
+              "description": "Optional Field or FieldId selector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        },
+        {
+          "label": "figure = fea.plot(study, runId, fieldId)",
+          "inputs": [
+            {
+              "name": "study",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA study carrying geometry context."
+            },
+            {
+              "name": "runId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Persisted run id."
+            },
+            {
+              "name": "fieldId",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Optional field id."
+            },
+            {
+              "name": "Name, Value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Optional Field or FieldId selector."
             }
           ],
           "outputs": [
@@ -47045,7 +47810,11 @@
           "when": "An FEA object or operation result cannot be converted to a RunMat value.",
           "message": "fea: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
     },
     {
       "name": "fea.results",

@@ -1,19 +1,21 @@
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisInterface, AnalysisInterfaceKind, AnalysisModel,
     AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition, BoundaryConditionKind,
-    EvidenceConfidence, LoadCase, LoadKind, MaterialAcousticModel, MaterialAssignment,
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
-    MaterialThermalModel, ReferenceFrame,
+    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind,
+    MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
+    MaterialModel, MaterialPlasticModel, MaterialThermalModel, ReferenceFrame,
+    ThermoMechanicalDomain,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ClassDef, IntValue, MethodDef, NumericScalar, ObjectInstance,
-    Tensor, Value,
+    BuiltinSignatureDescriptor, ClassDef, IntValue, IntegerStorage, MethodDef, NumericScalar,
+    ObjectInstance, Tensor, Value,
 };
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
@@ -139,6 +141,230 @@ const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Constructor or query arguments.",
 }];
 
+const MODEL_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Model id.",
+    },
+    BuiltinParamDescriptor {
+        name: "geometry",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Existing geometry.Asset object.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Profile, frame, defaults, and typed model-component options.",
+    },
+];
+const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Material id.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Mechanical, thermal, acoustic, electrical, and plastic material fields.",
+    },
+];
+const MATERIAL_ASSIGNMENT_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "region",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Geometry region selector.",
+    },
+    BuiltinParamDescriptor {
+        name: "material",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned material id.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Expected-material and confidence options.",
+    },
+];
+const LOAD_CASE_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Load-case id.",
+    },
+    BuiltinParamDescriptor {
+        name: "region",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Geometry region selector.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Load kind.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Numeric fields required by the selected load kind.",
+    },
+];
+const DOMAIN_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Physics-domain kind.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Typed fields for the selected domain kind.",
+    },
+];
+const INTERFACE_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Interface id.",
+    },
+    BuiltinParamDescriptor {
+        name: "primaryRegion",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Primary geometry region selector.",
+    },
+    BuiltinParamDescriptor {
+        name: "secondaryRegion",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Secondary geometry region selector.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Interface kind and numeric fields.",
+    },
+];
+const FIELD_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "resultsOrRun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "fea.Results, fea.RunResult, or persisted run id.",
+    },
+    BuiltinParamDescriptor {
+        name: "fieldId",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Exact field id or unique dotted suffix.",
+    },
+];
+const PLOT_CONTEXT_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "context",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "FEA run, results, field, or study context.",
+    },
+    BuiltinParamDescriptor {
+        name: "fieldId",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional field id.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional Field or FieldId selector.",
+    },
+];
+const PLOT_STUDY_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "study",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "FEA study carrying geometry context.",
+    },
+    BuiltinParamDescriptor {
+        name: "runId",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Persisted run id.",
+    },
+    BuiltinParamDescriptor {
+        name: "fieldId",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional field id.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional Field or FieldId selector.",
+    },
+];
+const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "baselineRunId",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Baseline persisted run id.",
+    },
+    BuiltinParamDescriptor {
+        name: "candidateRunId",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Candidate persisted run id.",
+    },
+];
+
 const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "doc = fea.load(path)",
     inputs: &IN_PATH,
@@ -171,12 +397,33 @@ const SWEEP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
 }];
 const MODEL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "model = fea.model(id, geometry, Name, Value, ...)",
-    inputs: &IN_VARIADIC_ARGS,
+    inputs: &MODEL_INPUTS,
     outputs: &OUT_ANY,
 }];
 const MATERIAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "material = fea.material(id, Name, Value, ...)",
-    inputs: &IN_VARIADIC_ARGS,
+    inputs: &MATERIAL_INPUTS,
+    outputs: &OUT_ANY,
+}];
+const MATERIAL_ASSIGNMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "assignment = fea.materialAssignment(region, material, Name, Value, ...)",
+        inputs: &MATERIAL_ASSIGNMENT_INPUTS,
+        outputs: &OUT_ANY,
+    }];
+const LOAD_CASE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "load = fea.loadCase(id, region, kind, Name, Value, ...)",
+    inputs: &LOAD_CASE_INPUTS,
+    outputs: &OUT_ANY,
+}];
+const DOMAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "domain = fea.domain(kind, Name, Value, ...)",
+    inputs: &DOMAIN_INPUTS,
+    outputs: &OUT_ANY,
+}];
+const INTERFACE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "interface = fea.interface(id, primaryRegion, secondaryRegion, Name, Value, ...)",
+    inputs: &INTERFACE_INPUTS,
     outputs: &OUT_ANY,
 }];
 const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -227,17 +474,24 @@ const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDes
 }];
 const FIELD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "field = fea.field(resultsOrRun, fieldId)",
-    inputs: &IN_VARIADIC_ARGS,
+    inputs: &FIELD_INPUTS,
     outputs: &OUT_ANY,
 }];
-const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "figure = fea.plot(runOrResultsOrField, fieldId)",
-    inputs: &IN_VARIADIC_ARGS,
-    outputs: &OUT_ANY,
-}];
+const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "figure = fea.plot(runOrResultsOrField, fieldId)",
+        inputs: &PLOT_CONTEXT_INPUTS,
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "figure = fea.plot(study, runId, fieldId)",
+        inputs: &PLOT_STUDY_INPUTS,
+        outputs: &OUT_ANY,
+    },
+];
 const COMPARE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "comparison = fea.compare(baselineRunId, candidateRunId)",
-    inputs: &IN_VARIADIC_ARGS,
+    inputs: &COMPARE_INPUTS,
     outputs: &OUT_ANY,
 }];
 const TRENDS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -321,11 +575,227 @@ pub const FEA_MATERIAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+pub const FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MATERIAL_ASSIGNMENT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+pub const FEA_LOAD_CASE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LOAD_CASE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+pub const FEA_DOMAIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DOMAIN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+pub const FEA_INTERFACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INTERFACE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
 pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &COMPONENT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
+};
+
+const fn fea_floating_input(
+    name: &'static str,
+    scalar_double: BuiltinIntegerScalarDoubleRule,
+) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double,
+        notes: "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected.",
+    }
+}
+
+const fn fea_floating_capability(
+    form: &'static str,
+    inputs: &'static [BuiltinIntegerInputCapability],
+    overload: BuiltinIntegerOverloadKind,
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload,
+        notes: "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round.",
+    }
+}
+
+const MATERIAL_MECHANICAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [fea_floating_input(
+        "mechanical numeric fields",
+        BuiltinIntegerScalarDoubleRule::Allowed,
+    )];
+const MATERIAL_THERMAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "thermal numeric fields",
+    BuiltinIntegerScalarDoubleRule::Allowed,
+)];
+const MATERIAL_ACOUSTIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "acoustic numeric fields",
+    BuiltinIntegerScalarDoubleRule::Allowed,
+)];
+const MATERIAL_ELECTRICAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [fea_floating_input(
+        "electrical numeric fields",
+        BuiltinIntegerScalarDoubleRule::Allowed,
+    )];
+const MATERIAL_RESPONSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "conductivity response numeric fields",
+    BuiltinIntegerScalarDoubleRule::Allowed,
+)];
+const MATERIAL_PLASTIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "plastic numeric fields",
+    BuiltinIntegerScalarDoubleRule::Allowed,
+)];
+pub const FEA_MATERIAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 6] = [
+    fea_floating_capability(
+        "mechanical material fields",
+        &MATERIAL_MECHANICAL_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::ScalarOnly,
+    ),
+    fea_floating_capability(
+        "thermal material fields",
+        &MATERIAL_THERMAL_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::ScalarOnly,
+    ),
+    fea_floating_capability(
+        "acoustic material fields",
+        &MATERIAL_ACOUSTIC_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::ScalarOnly,
+    ),
+    fea_floating_capability(
+        "electrical material fields",
+        &MATERIAL_ELECTRICAL_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::ScalarOnly,
+    ),
+    fea_floating_capability(
+        "electrical frequency-response fields",
+        &MATERIAL_RESPONSE_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::Multiple,
+    ),
+    fea_floating_capability(
+        "plastic material fields",
+        &MATERIAL_PLASTIC_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::ScalarOnly,
+    ),
+];
+
+const LOAD_VECTOR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "three-element vector",
+    BuiltinIntegerScalarDoubleRule::NotApplicable,
+)];
+const LOAD_SCALAR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "scalar physics fields",
+    BuiltinIntegerScalarDoubleRule::Allowed,
+)];
+const LOAD_CURRENT_DENSITY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    fea_floating_input(
+        "three-element vector",
+        BuiltinIntegerScalarDoubleRule::NotApplicable,
+    ),
+    fea_floating_input(
+        "phase and amplitude",
+        BuiltinIntegerScalarDoubleRule::Allowed,
+    ),
+];
+pub const FEA_LOAD_CASE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 7] = [
+    fea_floating_capability(
+        "force vector",
+        &LOAD_VECTOR_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::FunctionSpecific,
+    ),
+    fea_floating_capability(
+        "moment or torque vector",
+        &LOAD_VECTOR_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::FunctionSpecific,
+    ),
+    fea_floating_capability(
+        "pressure magnitude",
+        &LOAD_SCALAR_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::ScalarOnly,
+    ),
+    fea_floating_capability(
+        "body-force vector",
+        &LOAD_VECTOR_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::FunctionSpecific,
+    ),
+    fea_floating_capability(
+        "current-density fields",
+        &LOAD_CURRENT_DENSITY_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::Multiple,
+    ),
+    fea_floating_capability(
+        "coil-current fields",
+        &LOAD_SCALAR_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::Multiple,
+    ),
+    fea_floating_capability(
+        "volumetric heat source",
+        &LOAD_SCALAR_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::ScalarOnly,
+    ),
+];
+
+const DOMAIN_FLOATING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "domain numeric fields",
+    BuiltinIntegerScalarDoubleRule::Allowed,
+)];
+const DOMAIN_REVISION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "field_source.revision",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
+    notes: "The structural revision is decoded exactly as u32 and rejects negative or out-of-range integer values.",
+}];
+pub const FEA_DOMAIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    fea_floating_capability("thermo-mechanical physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
+    BuiltinIntegerCapabilityDescriptor { form: "thermo field-source revision", inputs: &DOMAIN_REVISION_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The RunMat-native constructor preserves the exact u32 revision in both typed model storage and its public object representation." },
+    fea_floating_capability("electro-thermal physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
+    fea_floating_capability("electromagnetic physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
+    fea_floating_capability("CFD physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
+];
+
+const INTERFACE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
+    "interface numeric fields",
+    BuiltinIntegerScalarDoubleRule::Allowed,
+)];
+pub const FEA_INTERFACE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    fea_floating_capability(
+        "contact interface fields",
+        &INTERFACE_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::Multiple,
+    ),
+    fea_floating_capability(
+        "fluid-structure interface fields",
+        &INTERFACE_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::Multiple,
+    ),
+    fea_floating_capability(
+        "conjugate-heat-transfer interface fields",
+        &INTERFACE_INTEGER_INPUTS,
+        BuiltinIntegerOverloadKind::Multiple,
+    ),
+];
+
+pub const FEA_STRUCTURAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs.",
 };
 pub const FEA_BOUNDARY_CONDITION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &BOUNDARY_CONDITION_SIGNATURES,
@@ -487,6 +957,7 @@ pub async fn fea_sweep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Create a typed FEA model object from geometry and model components.",
     keywords = "fea,model,materials,boundary,loads,domains",
     descriptor(crate::builtins::fea::FEA_MODEL_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -499,6 +970,7 @@ pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Create a typed FEA material object.",
     keywords = "fea,material,mechanical,thermal,electrical,plastic",
     descriptor(crate::builtins::fea::FEA_MATERIAL_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_MATERIAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -510,7 +982,8 @@ pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     category = "fea",
     summary = "Create a typed FEA material assignment.",
     keywords = "fea,material,assignment,region",
-    descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
+    descriptor(crate::builtins::fea::FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -535,7 +1008,8 @@ pub async fn fea_boundary_condition_builtin(args: Vec<Value>) -> BuiltinResult<V
     category = "fea",
     summary = "Create a typed FEA load case.",
     keywords = "fea,load,force,moment,torque,pressure,current",
-    descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
+    descriptor(crate::builtins::fea::FEA_LOAD_CASE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_LOAD_CASE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_load_case_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -559,7 +1033,8 @@ pub async fn fea_step_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     category = "fea",
     summary = "Create a typed FEA physics domain object.",
     keywords = "fea,domain,thermal,electromagnetic,cfd",
-    descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
+    descriptor(crate::builtins::fea::FEA_DOMAIN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_DOMAIN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_domain_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -571,7 +1046,8 @@ pub async fn fea_domain_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     category = "fea",
     summary = "Create a typed FEA interface object.",
     keywords = "fea,interface,contact,region",
-    descriptor(crate::builtins::fea::FEA_COMPONENT_DESCRIPTOR),
+    descriptor(crate::builtins::fea::FEA_INTERFACE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::fea::FEA_INTERFACE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_interface_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -625,6 +1101,7 @@ pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
     summary = "Plan a FEA study or sweep without solving it.",
     keywords = "fea,plan,study,sweep",
     descriptor(crate::builtins::fea::FEA_PLAN_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
@@ -637,13 +1114,20 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
             analysis_plan_study_op(&spec, OperationContext::new(None, None)),
             None,
         ),
-        FeaResolvedDocument::Sweep(spec) => operation_result_to_object(
+        FeaResolvedDocument::Sweep(spec) => operation_result_to_object_preserving_integers(
             PLAN_NAME,
             &ERROR_OPERATION,
             &ERROR_INTERNAL,
             FEA_PLAN_CLASS,
             analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None)),
             None,
+            &[],
+            &[
+                "study_count",
+                "planned_count",
+                "failed_count",
+                "study_index",
+            ],
         ),
     }
 }
@@ -688,6 +1172,7 @@ pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Extract a field from FEA results or a run result.",
     keywords = "fea,field,displacement,von_mises,post",
     descriptor(crate::builtins::fea::FEA_FIELD_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -700,6 +1185,7 @@ pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Create a RunMat figure for an FEA result field on its geometry mesh.",
     keywords = "fea,plot,visualize,mesh,von_mises,stress,field",
     descriptor(crate::builtins::fea::FEA_PLOT_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -712,6 +1198,7 @@ pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Compare two persisted FEA runs by run id.",
     keywords = "fea,compare,run_id,quality",
     descriptor(crate::builtins::fea::FEA_COMPARE_DESCRIPTOR),
+    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_compare_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -821,7 +1308,7 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let study_id = scalar_string(&args[0], STUDY_NAME, &ERROR_INPUT)?;
-    let geometry = geometry_asset_from_value(&args[1])?;
+    let geometry = geometry_asset_from_value(STUDY_NAME, &args[1])?;
     let options = StudyConstructorOptions::parse(&args[2..])?;
     let (profile, run_kind) = resolve_study_profile_and_run_kind(&options)?;
     let model_id = options.model_id.clone().unwrap_or_else(|| {
@@ -1034,7 +1521,7 @@ fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let model_id = scalar_string(&args[0], MODEL_NAME, &ERROR_INPUT)?;
-    let geometry = geometry_asset_from_value(&args[1])?;
+    let geometry = geometry_asset_from_value(MODEL_NAME, &args[1])?;
     let options = parse_model_constructor_options(MODEL_NAME, &args[2..])?;
     let profile = options
         .profile
@@ -1054,12 +1541,14 @@ fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         options.domains,
         options.interfaces,
     )?;
-    serializable_to_object(
+    serializable_to_object_preserving_integers(
         MODEL_NAME,
         &ERROR_INTERNAL,
         FEA_MODEL_CLASS,
         &model,
         Some(FEA_PAYLOAD_JSON_PROPERTY),
+        &[],
+        &["geometry_revision", "revision"],
     )
 }
 
@@ -1127,7 +1616,8 @@ fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     } else {
         let youngs = remove_required_f64(&mut fields, MATERIAL_NAME, "youngs_modulus_pa")?;
         let poisson = remove_required_f64(&mut fields, MATERIAL_NAME, "poisson_ratio")?;
-        let density = remove_optional_f64(&mut fields, "density_kg_per_m3")?.unwrap_or(7850.0);
+        let density =
+            remove_optional_f64(&mut fields, MATERIAL_NAME, "density_kg_per_m3")?.unwrap_or(7850.0);
         MaterialMechanicalModel {
             youngs_modulus_pa: youngs,
             poisson_ratio: poisson,
@@ -1358,7 +1848,14 @@ fn boundary_fields_from_name_values<'a>(
     let mut fields = HashMap::new();
     for pair in expect_name_value_tail(BOUNDARY_CONDITION_NAME, args)? {
         let raw = scalar_string(pair.name, BOUNDARY_CONDITION_NAME, &ERROR_INPUT)?;
-        fields.insert(canonical_field_name(&raw), pair.value);
+        let key = canonical_field_name(&raw);
+        if fields.insert(key.clone(), pair.value).is_some() {
+            return Err(builtin_error(
+                BOUNDARY_CONDITION_NAME,
+                &ERROR_INPUT,
+                format!("duplicate fea.boundaryCondition option `{key}`"),
+            ));
+        }
     }
     Ok(fields)
 }
@@ -1479,15 +1976,22 @@ fn create_load_case_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
                 jx,
                 jy,
                 jz,
-                phase_rad: remove_optional_f64(&mut fields, "phase_rad")?.unwrap_or_default(),
-                amplitude_scale: remove_optional_f64(&mut fields, "amplitude_scale")?
-                    .unwrap_or(1.0),
+                phase_rad: remove_optional_f64(&mut fields, LOAD_CASE_NAME, "phase_rad")?
+                    .unwrap_or_default(),
+                amplitude_scale: remove_optional_f64(
+                    &mut fields,
+                    LOAD_CASE_NAME,
+                    "amplitude_scale",
+                )?
+                .unwrap_or(1.0),
             }
         }
         "coilcurrent" => LoadKind::CoilCurrent {
             current_a: remove_required_f64(&mut fields, LOAD_CASE_NAME, "current_a")?,
-            phase_rad: remove_optional_f64(&mut fields, "phase_rad")?.unwrap_or_default(),
-            amplitude_scale: remove_optional_f64(&mut fields, "amplitude_scale")?.unwrap_or(1.0),
+            phase_rad: remove_optional_f64(&mut fields, LOAD_CASE_NAME, "phase_rad")?
+                .unwrap_or_default(),
+            amplitude_scale: remove_optional_f64(&mut fields, LOAD_CASE_NAME, "amplitude_scale")?
+                .unwrap_or(1.0),
         },
         "heatsource" => LoadKind::HeatSource {
             volumetric_w_per_m3: remove_required_f64(
@@ -1540,64 +2044,80 @@ fn create_domain_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let payload = match kind.as_str() {
         "thermomechanical" => DomainPayload {
             kind: "thermo_mechanical".to_string(),
-            data: json_with_overrides(
+            data: typed_domain_data::<ThermoMechanicalDomain>(
                 DOMAIN_NAME,
-                serde_json::json!({
-                    "enabled": true,
-                    "reference_temperature_k": 293.15,
-                    "applied_temperature_delta_k": 0.0,
-                    "field_artifact_id": null,
-                    "field_source": null,
-                    "region_temperature_deltas": [],
-                    "time_profile": []
-                }),
-                fields,
                 "thermo_mechanical domain",
+                json_with_overrides(
+                    DOMAIN_NAME,
+                    serde_json::json!({
+                        "enabled": true,
+                        "reference_temperature_k": 293.15,
+                        "applied_temperature_delta_k": 0.0,
+                        "field_artifact_id": null,
+                        "field_source": null,
+                        "region_temperature_deltas": [],
+                        "time_profile": []
+                    }),
+                    fields,
+                    "thermo_mechanical domain",
+                )?,
             )?,
         },
         "electrothermal" => DomainPayload {
             kind: "electro_thermal".to_string(),
-            data: json_with_overrides(
+            data: typed_domain_data::<ElectroThermalDomain>(
                 DOMAIN_NAME,
-                serde_json::json!({
-                    "enabled": true,
-                    "reference_temperature_k": 293.15,
-                    "applied_voltage_v": 0.0,
-                    "region_conductivity_scales": [],
-                    "time_profile": []
-                }),
-                fields,
                 "electro_thermal domain",
+                json_with_overrides(
+                    DOMAIN_NAME,
+                    serde_json::json!({
+                        "enabled": true,
+                        "reference_temperature_k": 293.15,
+                        "applied_voltage_v": 0.0,
+                        "region_conductivity_scales": [],
+                        "time_profile": []
+                    }),
+                    fields,
+                    "electro_thermal domain",
+                )?,
             )?,
         },
         "electromagnetic" => DomainPayload {
             kind: "electromagnetic".to_string(),
-            data: json_with_overrides(
+            data: typed_domain_data::<ElectromagneticDomain>(
                 DOMAIN_NAME,
-                serde_json::json!({
-                    "enabled": true,
-                    "reference_frequency_hz": 0.0,
-                    "applied_current_a": 0.0
-                }),
-                fields,
                 "electromagnetic domain",
+                json_with_overrides(
+                    DOMAIN_NAME,
+                    serde_json::json!({
+                        "enabled": true,
+                        "reference_frequency_hz": 0.0,
+                        "applied_current_a": 0.0
+                    }),
+                    fields,
+                    "electromagnetic domain",
+                )?,
             )?,
         },
         "cfd" => DomainPayload {
             kind: "cfd".to_string(),
-            data: json_with_overrides(
+            data: typed_domain_data::<CfdDomain>(
                 DOMAIN_NAME,
-                serde_json::json!({
-                    "enabled": true,
-                    "solve_family": "steady_state",
-                    "reference_density_kg_per_m3": 1.225,
-                    "dynamic_viscosity_pa_s": 1.8e-5,
-                    "inlet_velocity_m_per_s": 0.0,
-                    "turbulence_intensity": 0.0,
-                    "time_profile": []
-                }),
-                fields,
                 "cfd domain",
+                json_with_overrides(
+                    DOMAIN_NAME,
+                    serde_json::json!({
+                        "enabled": true,
+                        "solve_family": "steady_state",
+                        "reference_density_kg_per_m3": 1.225,
+                        "dynamic_viscosity_pa_s": 1.8e-5,
+                        "inlet_velocity_m_per_s": 0.0,
+                        "turbulence_intensity": 0.0,
+                        "time_profile": []
+                    }),
+                    fields,
+                    "cfd domain",
+                )?,
             )?,
         },
         other => {
@@ -1623,15 +2143,32 @@ fn create_interface_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let primary_region_id = scalar_string(&args[1], INTERFACE_NAME, &ERROR_INPUT)?;
     let secondary_region_id = scalar_string(&args[2], INTERFACE_NAME, &ERROR_INPUT)?;
     let mut kind = "contact".to_string();
+    let mut kind_seen = false;
     let mut fields = serde_json::Map::new();
     for pair in expect_name_value_tail(INTERFACE_NAME, &args[3..])? {
         if pair.key == "kind" {
+            if kind_seen {
+                return Err(builtin_error(
+                    INTERFACE_NAME,
+                    &ERROR_INPUT,
+                    "duplicate fea.interface option `kind`",
+                ));
+            }
+            kind_seen = true;
             kind = scalar_string(pair.value, INTERFACE_NAME, &ERROR_INPUT)?;
         } else {
-            fields.insert(
-                canonical_field_name(&scalar_string(pair.name, INTERFACE_NAME, &ERROR_INPUT)?),
-                value_to_json(INTERFACE_NAME, pair.value)?,
-            );
+            let key =
+                canonical_field_name(&scalar_string(pair.name, INTERFACE_NAME, &ERROR_INPUT)?);
+            if fields
+                .insert(key.clone(), value_to_json(INTERFACE_NAME, pair.value)?)
+                .is_some()
+            {
+                return Err(builtin_error(
+                    INTERFACE_NAME,
+                    &ERROR_INPUT,
+                    format!("duplicate fea.interface option `{key}`"),
+                ));
+            }
         }
     }
     let kind = match normalize_token(&kind).as_str() {
@@ -1751,7 +2288,7 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn create_field_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() < 2 {
+    if args.len() != 2 {
         return Err(builtin_error(
             FIELD_NAME,
             &ERROR_INPUT,
@@ -1780,6 +2317,7 @@ fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     #[cfg(feature = "plot-core")]
     {
         let request = plot_request_from_args(&args)?;
+        reject_requested_device_field(&request)?;
         let mut figures = generate_plot_figures(&request.study, &request.run_id)?;
         let figure = select_generated_figure(&mut figures, request.field_id.as_deref())?;
         let handle = import_generated_figure(figure)?;
@@ -1796,8 +2334,34 @@ fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
+#[cfg(feature = "plot-core")]
+fn reject_requested_device_field(request: &FeaPlotRequest) -> BuiltinResult<()> {
+    let Some(field_id) = request.field_id.as_deref() else {
+        return Ok(());
+    };
+    let results = analysis_results_by_run_id_op(
+        &request.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .map(|envelope| envelope.data)
+    .map_err(|err| operation_error(PLOT_NAME, &ERROR_OPERATION, err))?;
+    if find_field(results.fields, field_id)
+        .is_some_and(|field| matches!(field.values, AnalysisFieldValues::DeviceRef(_)))
+    {
+        return Err(builtin_error(
+            PLOT_NAME,
+            &ERROR_INPUT,
+            format!(
+                "FEA field `{field_id}` is device-backed and cannot be plotted without explicit host materialization"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn create_compare_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() < 2 {
+    if args.len() != 2 {
         return Err(builtin_error(
             COMPARE_NAME,
             &ERROR_INPUT,
@@ -1806,7 +2370,7 @@ fn create_compare_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let baseline_run_id = scalar_string(&args[0], COMPARE_NAME, &ERROR_INPUT)?;
     let candidate_run_id = scalar_string(&args[1], COMPARE_NAME, &ERROR_INPUT)?;
-    operation_result_to_object(
+    operation_result_to_object_preserving_integers(
         COMPARE_NAME,
         &ERROR_OPERATION,
         &ERROR_INTERNAL,
@@ -1819,6 +2383,14 @@ fn create_compare_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             OperationContext::new(None, None),
         ),
         Some(FEA_PAYLOAD_JSON_PROPERTY),
+        &[
+            "quality_reason_count_delta",
+            "failed_increment_delta",
+            "max_iteration_delta",
+            "nonlinear_spike_count_delta",
+            "nonlinear_stall_count_delta",
+        ],
+        &[],
     )
 }
 
@@ -1889,7 +2461,8 @@ fn build_model_from_parts(
         model.material_assignments = material_assignments
             .into_iter()
             .map(|mut assignment| {
-                assignment.region_id = resolve_region_selector(&assignment.region_id, geometry)?;
+                assignment.region_id =
+                    resolve_region_selector(builtin, &assignment.region_id, geometry)?;
                 Ok(assignment)
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
@@ -1898,7 +2471,7 @@ fn build_model_from_parts(
         model.boundary_conditions = boundary_conditions
             .into_iter()
             .map(|mut bc| {
-                bc.region_id = resolve_region_selector(&bc.region_id, geometry)?;
+                bc.region_id = resolve_region_selector(builtin, &bc.region_id, geometry)?;
                 Ok(bc)
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
@@ -1907,7 +2480,7 @@ fn build_model_from_parts(
         model.loads = loads
             .into_iter()
             .map(|mut load| {
-                load.region_id = resolve_region_selector(&load.region_id, geometry)?;
+                load.region_id = resolve_region_selector(builtin, &load.region_id, geometry)?;
                 Ok(load)
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
@@ -1918,18 +2491,25 @@ fn build_model_from_parts(
     for domain in domains {
         match domain.kind.as_str() {
             "thermo_mechanical" => {
-                model.thermo_mechanical = Some(json_deserialize(
-                    builtin,
-                    domain.data,
-                    "thermo_mechanical domain",
-                )?);
+                let mut domain: ThermoMechanicalDomain =
+                    json_deserialize(builtin, domain.data, "thermo_mechanical domain")?;
+                for entry in &mut domain.region_temperature_deltas {
+                    entry.region_id = resolve_region_selector(builtin, &entry.region_id, geometry)?;
+                }
+                if let Some(source) = &mut domain.field_source {
+                    for region_id in &mut source.expected_region_ids {
+                        *region_id = resolve_region_selector(builtin, region_id, geometry)?;
+                    }
+                }
+                model.thermo_mechanical = Some(domain);
             }
             "electro_thermal" => {
-                model.electro_thermal = Some(json_deserialize(
-                    builtin,
-                    domain.data,
-                    "electro_thermal domain",
-                )?);
+                let mut domain: ElectroThermalDomain =
+                    json_deserialize(builtin, domain.data, "electro_thermal domain")?;
+                for entry in &mut domain.region_conductivity_scales {
+                    entry.region_id = resolve_region_selector(builtin, &entry.region_id, geometry)?;
+                }
+                model.electro_thermal = Some(domain);
             }
             "electromagnetic" => {
                 model.electromagnetic = Some(json_deserialize(
@@ -1955,9 +2535,9 @@ fn build_model_from_parts(
             .into_iter()
             .map(|mut interface| {
                 interface.primary_region_id =
-                    resolve_region_selector(&interface.primary_region_id, geometry)?;
+                    resolve_region_selector(builtin, &interface.primary_region_id, geometry)?;
                 interface.secondary_region_id =
-                    resolve_region_selector(&interface.secondary_region_id, geometry)?;
+                    resolve_region_selector(builtin, &interface.secondary_region_id, geometry)?;
                 Ok(interface)
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
@@ -1986,12 +2566,16 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
     }
 }
 
-fn resolve_region_selector(selector: &str, geometry: &GeometryAsset) -> BuiltinResult<String> {
+fn resolve_region_selector(
+    builtin: &'static str,
+    selector: &str,
+    geometry: &GeometryAsset,
+) -> BuiltinResult<String> {
     if let Some(id) = selector
         .strip_prefix("id:")
         .or_else(|| selector.strip_prefix("region:"))
     {
-        return require_region_id(id, geometry);
+        return require_region_id(builtin, id, geometry);
     }
     if let Some(tag) = selector.strip_prefix("tag:") {
         return geometry
@@ -2001,7 +2585,7 @@ fn resolve_region_selector(selector: &str, geometry: &GeometryAsset) -> BuiltinR
             .map(|region| region.region_id.clone())
             .ok_or_else(|| {
                 builtin_error(
-                    MODEL_NAME,
+                    builtin,
                     &ERROR_INPUT,
                     format!("region tag `{tag}` was not found in geometry"),
                 )
@@ -2015,16 +2599,20 @@ fn resolve_region_selector(selector: &str, geometry: &GeometryAsset) -> BuiltinR
             .map(|region| region.region_id.clone())
             .ok_or_else(|| {
                 builtin_error(
-                    MODEL_NAME,
+                    builtin,
                     &ERROR_INPUT,
                     format!("region name `{name}` was not found in geometry"),
                 )
             });
     }
-    require_region_id(selector, geometry)
+    require_region_id(builtin, selector, geometry)
 }
 
-fn require_region_id(region_id: &str, geometry: &GeometryAsset) -> BuiltinResult<String> {
+fn require_region_id(
+    builtin: &'static str,
+    region_id: &str,
+    geometry: &GeometryAsset,
+) -> BuiltinResult<String> {
     geometry
         .regions
         .iter()
@@ -2032,7 +2620,7 @@ fn require_region_id(region_id: &str, geometry: &GeometryAsset) -> BuiltinResult
         .map(|region| region.region_id.clone())
         .ok_or_else(|| {
             builtin_error(
-                MODEL_NAME,
+                builtin,
                 &ERROR_INPUT,
                 format!("region id `{region_id}` was not found in geometry"),
             )
@@ -2090,12 +2678,14 @@ fn step_to_object(step: AnalysisStep) -> BuiltinResult<Value> {
 }
 
 fn domain_to_object(domain: DomainPayload) -> BuiltinResult<Value> {
-    serializable_to_object(
+    serializable_to_object_preserving_integers(
         DOMAIN_NAME,
         &ERROR_INTERNAL,
         FEA_DOMAIN_CLASS,
         &domain,
         Some(FEA_PAYLOAD_JSON_PROPERTY),
+        &[],
+        &["revision"],
     )
 }
 
@@ -2665,12 +3255,12 @@ fn field_to_object(
         "component_count".to_string(),
         descriptor
             .component_count
-            .map(|value| Value::Num(value as f64))
+            .map(|value| Value::Int(IntValue::U64(value as u64)))
             .unwrap_or_else(empty_double_value),
     );
     object.properties.insert(
         "element_count".to_string(),
-        Value::Num(descriptor.element_count as f64),
+        Value::Int(IntValue::U64(descriptor.element_count as u64)),
     );
     object.properties.insert(
         "storage".to_string(),
@@ -2678,7 +3268,13 @@ fn field_to_object(
     );
     object.properties.insert(
         "descriptor".to_string(),
-        serializable_to_value(FIELD_NAME, &ERROR_INTERNAL, descriptor)?,
+        serializable_to_value_preserving_integers(
+            FIELD_NAME,
+            &ERROR_INTERNAL,
+            descriptor,
+            &[],
+            &["shape", "element_count", "component_count", "size_bytes"],
+        )?,
     );
     let json = serde_json::to_string(field).map_err(|err| {
         builtin_error_with_source(FIELD_NAME, &ERROR_INTERNAL, err.to_string(), err)
@@ -2700,26 +3296,37 @@ fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
                     format!("fea.field: failed to build values tensor: {err}"),
                 )
             }),
-        AnalysisFieldValues::DeviceRef(device) => {
-            serializable_to_value(FIELD_NAME, &ERROR_INTERNAL, device)
-        }
+        AnalysisFieldValues::DeviceRef(device) => serializable_to_value_preserving_integers(
+            FIELD_NAME,
+            &ERROR_INTERNAL,
+            device,
+            &[],
+            &["element_count"],
+        ),
     }
 }
 
 fn usize_slice_tensor(values: &[usize], rows: usize, cols: usize) -> BuiltinResult<Value> {
-    Tensor::new_2d(
-        values.iter().map(|value| *value as f64).collect(),
-        rows,
-        cols,
-    )
-    .map(Value::Tensor)
-    .map_err(|err| {
-        builtin_error(
-            FIELD_NAME,
-            &ERROR_INTERNAL,
-            format!("fea.field: failed to build metadata tensor: {err}"),
-        )
-    })
+    let values = values
+        .iter()
+        .map(|value| u64::try_from(*value))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| {
+            builtin_error(
+                FIELD_NAME,
+                &ERROR_INTERNAL,
+                "FEA field shape exceeds uint64",
+            )
+        })?;
+    Tensor::new_integer(IntegerStorage::U64(values), vec![rows, cols])
+        .map(Value::Tensor)
+        .map_err(|err| {
+            builtin_error(
+                FIELD_NAME,
+                &ERROR_INTERNAL,
+                format!("fea.field: failed to build metadata tensor: {err}"),
+            )
+        })
 }
 
 fn empty_double_value() -> Value {
@@ -2984,10 +3591,17 @@ fn json_fields_from_name_values(
     let mut fields = serde_json::Map::new();
     for pair in expect_name_value_tail(builtin, args)? {
         let raw = scalar_string(pair.name, builtin, &ERROR_INPUT)?;
-        fields.insert(
-            canonical_field_name(&raw),
-            value_to_json(builtin, pair.value)?,
-        );
+        let key = canonical_field_name(&raw);
+        if fields
+            .insert(key.clone(), value_to_json(builtin, pair.value)?)
+            .is_some()
+        {
+            return Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("duplicate {builtin} option `{key}`"),
+            ));
+        }
     }
     Ok(fields)
 }
@@ -3051,6 +3665,14 @@ fn canonical_field_name(text: &str) -> String {
         "velocitympers" => "velocity_m_per_s".to_string(),
         "pressurepa" => "pressure_pa".to_string(),
         "amplitudescale" => "amplitude_scale".to_string(),
+        "conductivitywpermk" => "conductivity_w_per_mk".to_string(),
+        "specificheatjperkgk" => "specific_heat_j_per_kgk".to_string(),
+        "conductivitysperm" => "conductivity_s_per_m".to_string(),
+        "speedofsoundmpers" => "speed_of_sound_m_per_s".to_string(),
+        "volumetricwperm3" => "volumetric_w_per_m3".to_string(),
+        "inletvelocitympers" => "inlet_velocity_m_per_s".to_string(),
+        "thermalconductancewperm2k" => "thermal_conductance_w_per_m2k".to_string(),
+        "contactresistancem2kperw" => "contact_resistance_m2k_per_w".to_string(),
         "deterministicmode" => "deterministic_mode".to_string(),
         "precisionmode" => "precision_mode".to_string(),
         "preconditionermode" => "preconditioner_mode".to_string(),
@@ -3211,6 +3833,16 @@ fn json_deserialize<T: DeserializeOwned>(
         .map_err(|err| builtin_error(builtin, &ERROR_INPUT, format!("invalid {label}: {err}")))
 }
 
+fn typed_domain_data<T: DeserializeOwned + Serialize>(
+    builtin: &'static str,
+    label: &str,
+    value: serde_json::Value,
+) -> BuiltinResult<serde_json::Value> {
+    let typed: T = json_deserialize(builtin, value, label)?;
+    serde_json::to_value(typed)
+        .map_err(|err| builtin_error_with_source(builtin, &ERROR_INTERNAL, err.to_string(), err))
+}
+
 fn json_to_string(value: serde_json::Value) -> BuiltinResult<String> {
     serde_json::from_value(value).map_err(|err| {
         builtin_error(
@@ -3244,6 +3876,7 @@ fn remove_required_f64(
 
 fn remove_optional_f64(
     fields: &mut serde_json::Map<String, serde_json::Value>,
+    builtin: &'static str,
     key: &str,
 ) -> BuiltinResult<Option<f64>> {
     fields
@@ -3251,7 +3884,7 @@ fn remove_optional_f64(
         .map(|value| {
             serde_json::from_value(value).map_err(|err| {
                 builtin_error(
-                    LOAD_CASE_NAME,
+                    builtin,
                     &ERROR_INPUT,
                     format!("invalid numeric option `{key}`: {err}"),
                 )
@@ -3461,6 +4094,29 @@ fn operation_result_to_object<T: Serialize>(
     )
 }
 
+fn operation_result_to_object_preserving_integers<T: Serialize>(
+    builtin: &'static str,
+    operation_error_descriptor: &'static BuiltinErrorDescriptor,
+    internal_error_descriptor: &'static BuiltinErrorDescriptor,
+    class_name: &'static str,
+    result: Result<OperationEnvelope<T>, OperationErrorEnvelope>,
+    hidden_json_property: Option<&'static str>,
+    signed_fields: &[&str],
+    unsigned_fields: &[&str],
+) -> BuiltinResult<Value> {
+    let envelope =
+        result.map_err(|err| operation_error(builtin, operation_error_descriptor, err))?;
+    serializable_to_object_preserving_integers(
+        builtin,
+        internal_error_descriptor,
+        class_name,
+        &envelope.data,
+        hidden_json_property,
+        signed_fields,
+        unsigned_fields,
+    )
+}
+
 fn serializable_to_object<T: Serialize>(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
@@ -3472,15 +4128,196 @@ fn serializable_to_object<T: Serialize>(
         .map(Value::Object)
 }
 
-fn serializable_to_value<T: Serialize>(
+fn serializable_to_object_preserving_integers<T: Serialize>(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
+    class_name: &'static str,
     value: &T,
+    hidden_json_property: Option<&'static str>,
+    signed_fields: &[&str],
+    unsigned_fields: &[&str],
 ) -> BuiltinResult<Value> {
     let json = serde_json::to_value(value)
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
-    value_from_json(&json)
-        .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))
+    let object =
+        serializable_to_object_value(builtin, error, class_name, value, hidden_json_property)?;
+    let mut wrapped = Value::Object(object);
+    promote_named_integer_fields(
+        builtin,
+        error,
+        &mut wrapped,
+        &json,
+        signed_fields,
+        unsigned_fields,
+    )?;
+    Ok(wrapped)
+}
+
+fn promote_named_integer_fields(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    value: &mut Value,
+    json: &serde_json::Value,
+    signed_fields: &[&str],
+    unsigned_fields: &[&str],
+) -> BuiltinResult<()> {
+    match (value, json) {
+        (Value::Object(object), serde_json::Value::Object(map)) => {
+            for (name, child) in map {
+                let Some(target) = object.properties.get_mut(name) else {
+                    continue;
+                };
+                if signed_fields.contains(&name.as_str()) {
+                    if let Some(exact) = exact_integer_json_value(builtin, error, child, true)? {
+                        *target = exact;
+                    }
+                } else if unsigned_fields.contains(&name.as_str()) {
+                    if let Some(exact) = exact_integer_json_value(builtin, error, child, false)? {
+                        *target = exact;
+                    }
+                } else {
+                    promote_named_integer_fields(
+                        builtin,
+                        error,
+                        target,
+                        child,
+                        signed_fields,
+                        unsigned_fields,
+                    )?;
+                }
+            }
+        }
+        (Value::Struct(value), serde_json::Value::Object(map)) => {
+            for (name, child) in map {
+                let Some(target) = value.fields.get_mut(name) else {
+                    continue;
+                };
+                if signed_fields.contains(&name.as_str()) {
+                    if let Some(exact) = exact_integer_json_value(builtin, error, child, true)? {
+                        *target = exact;
+                    }
+                } else if unsigned_fields.contains(&name.as_str()) {
+                    if let Some(exact) = exact_integer_json_value(builtin, error, child, false)? {
+                        *target = exact;
+                    }
+                } else {
+                    promote_named_integer_fields(
+                        builtin,
+                        error,
+                        target,
+                        child,
+                        signed_fields,
+                        unsigned_fields,
+                    )?;
+                }
+            }
+        }
+        (Value::Cell(cell), serde_json::Value::Array(items)) => {
+            for (target, child) in cell.data.iter_mut().zip(items) {
+                promote_named_integer_fields(
+                    builtin,
+                    error,
+                    target,
+                    child,
+                    signed_fields,
+                    unsigned_fields,
+                )?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn exact_integer_json_value(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    json: &serde_json::Value,
+    signed: bool,
+) -> BuiltinResult<Option<Value>> {
+    match json {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(number) if signed => number
+            .as_i64()
+            .map(|value| Some(Value::Int(IntValue::I64(value))))
+            .ok_or_else(|| {
+                builtin_error(builtin, error, "signed structural integer is out of range")
+            }),
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .map(|value| Some(Value::Int(IntValue::U64(value))))
+            .ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "unsigned structural integer is out of range",
+                )
+            }),
+        serde_json::Value::Array(items) => {
+            if signed {
+                let values = items
+                    .iter()
+                    .map(|item| {
+                        item.as_i64().ok_or_else(|| {
+                            builtin_error(
+                                builtin,
+                                error,
+                                "signed structural integer array is out of range",
+                            )
+                        })
+                    })
+                    .collect::<BuiltinResult<Vec<_>>>()?;
+                Tensor::new_integer(IntegerStorage::I64(values), vec![1, items.len()])
+                    .map(Value::Tensor)
+                    .map(Some)
+                    .map_err(|message| builtin_error(builtin, error, message))
+            } else {
+                let values = items
+                    .iter()
+                    .map(|item| {
+                        item.as_u64().ok_or_else(|| {
+                            builtin_error(
+                                builtin,
+                                error,
+                                "unsigned structural integer array is out of range",
+                            )
+                        })
+                    })
+                    .collect::<BuiltinResult<Vec<_>>>()?;
+                Tensor::new_integer(IntegerStorage::U64(values), vec![1, items.len()])
+                    .map(Value::Tensor)
+                    .map(Some)
+                    .map_err(|message| builtin_error(builtin, error, message))
+            }
+        }
+        _ => Err(builtin_error(
+            builtin,
+            error,
+            "structural integer field has a noninteger representation",
+        )),
+    }
+}
+
+fn serializable_to_value_preserving_integers<T: Serialize>(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    value: &T,
+    signed_fields: &[&str],
+    unsigned_fields: &[&str],
+) -> BuiltinResult<Value> {
+    let json = serde_json::to_value(value)
+        .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
+    let mut converted = value_from_json(&json)
+        .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
+    promote_named_integer_fields(
+        builtin,
+        error,
+        &mut converted,
+        &json,
+        signed_fields,
+        unsigned_fields,
+    )?;
+    Ok(converted)
 }
 
 fn serializable_to_object_value<T: Serialize>(
@@ -3509,30 +4346,25 @@ fn serializable_to_object_value<T: Serialize>(
     Ok(object)
 }
 
-fn geometry_asset_from_value(value: &Value) -> BuiltinResult<GeometryAsset> {
+fn geometry_asset_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<GeometryAsset> {
     let Value::Object(object) = value else {
         return Err(builtin_error(
-            STUDY_NAME,
+            builtin,
             &ERROR_INPUT,
-            format!("fea.study geometry must be {GEOMETRY_ASSET_CLASS}"),
+            format!("{builtin} geometry must be {GEOMETRY_ASSET_CLASS}"),
         ));
     };
     if object.class_name != GEOMETRY_ASSET_CLASS {
         return Err(builtin_error(
-            STUDY_NAME,
+            builtin,
             &ERROR_INPUT,
             format!(
-                "fea.study geometry must be {GEOMETRY_ASSET_CLASS}, got {}",
+                "{builtin} geometry must be {GEOMETRY_ASSET_CLASS}, got {}",
                 object.class_name
             ),
         ));
     }
-    object_json_property(
-        STUDY_NAME,
-        object,
-        GEOMETRY_ASSET_JSON_PROPERTY,
-        &ERROR_INPUT,
-    )
+    object_json_property(builtin, object, GEOMETRY_ASSET_JSON_PROPERTY, &ERROR_INPUT)
 }
 
 fn object_json_property<T: DeserializeOwned>(
@@ -3560,7 +4392,16 @@ fn scalar_string(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
-    String::try_from(value).map_err(|err| builtin_error(builtin, error, err))
+    match value {
+        Value::String(value) => Ok(value.clone()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        _ => Err(builtin_error(
+            builtin,
+            error,
+            format!("{builtin} expected a text scalar"),
+        )),
+    }
 }
 
 fn parse_scalar_enum<T: DeserializeOwned>(text: &str, label: &str) -> BuiltinResult<T> {
@@ -3841,7 +4682,7 @@ fn sanitize_id(id: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, StructValue};
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -3867,6 +4708,16 @@ mod tests {
             panic!("expected boundary condition JSON payload");
         };
         serde_json::from_str(payload).expect("boundary condition payload should decode")
+    }
+
+    fn object_payload<T: DeserializeOwned>(value: &Value) -> T {
+        let Value::Object(object) = value else {
+            panic!("expected FEA object");
+        };
+        let Some(Value::String(payload)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) else {
+            panic!("expected FEA JSON payload");
+        };
+        serde_json::from_str(payload).expect("FEA payload should decode")
     }
 
     fn boundary_args(kind: &str, fields: Vec<(&str, Value)>) -> Vec<Value> {
@@ -3945,6 +4796,307 @@ mod tests {
                 .to_string(),
             "[42,18446744073709551615]"
         );
+    }
+
+    #[test]
+    fn fea_numeric_constructors_cross_all_integer_classes_once_into_binary64() {
+        for integer in [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ] {
+            let expected = boundary_integer_to_f64(&integer);
+            let domain = block_on(fea_domain_builtin(vec![
+                Value::String("electromagnetic".into()),
+                Value::String("AppliedCurrentA".into()),
+                Value::Int(integer.clone()),
+            ]))
+            .expect("domain integer field");
+            let domain: DomainPayload = object_payload(&domain);
+            let domain: runmat_analysis_core::ElectromagneticDomain =
+                json_deserialize(DOMAIN_NAME, domain.data, "electromagnetic domain")
+                    .expect("typed domain storage boundary");
+            assert_eq!(domain.applied_current_a, expected);
+
+            let interface = block_on(fea_interface_builtin(vec![
+                Value::String("contact".into()),
+                Value::String("left".into()),
+                Value::String("right".into()),
+                Value::String("FrictionCoefficient".into()),
+                Value::Int(integer.clone()),
+            ]))
+            .expect("interface integer field");
+            let interface: AnalysisInterface = object_payload(&interface);
+            let AnalysisInterfaceKind::Contact(contact) = interface.kind else {
+                panic!("expected contact interface");
+            };
+            assert_eq!(contact.friction_coefficient, expected);
+
+            let load = block_on(fea_load_case_builtin(vec![
+                Value::String("pressure".into()),
+                Value::String("face".into()),
+                Value::String("pressure".into()),
+                Value::String("MagnitudePa".into()),
+                Value::Int(integer.clone()),
+            ]))
+            .expect("load integer field");
+            let load: LoadCase = object_payload(&load);
+            assert!(
+                matches!(load.kind, LoadKind::Pressure { magnitude_pa } if magnitude_pa == expected)
+            );
+
+            let material = block_on(fea_material_builtin(vec![
+                Value::String("material".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Int(integer),
+                Value::String("PoissonRatio".into()),
+                Value::Int(IntValue::U8(0)),
+            ]))
+            .expect("material integer field");
+            let material: MaterialModel = object_payload(&material);
+            assert_eq!(material.mechanical.youngs_modulus_pa, expected);
+        }
+    }
+
+    #[test]
+    fn fea_domain_revision_and_field_metadata_remain_exact_in_public_objects() {
+        let mut field_source = StructValue::new();
+        field_source.insert("source_id", Value::String("temperature".into()));
+        field_source.insert("revision", Value::Int(IntValue::U32(u32::MAX)));
+        let domain = block_on(fea_domain_builtin(vec![
+            Value::String("thermoMechanical".into()),
+            Value::String("FieldSource".into()),
+            Value::Struct(field_source),
+        ]))
+        .expect("domain source revision");
+        let Value::Object(domain) = domain else {
+            panic!("expected domain object");
+        };
+        let Value::Struct(data) = domain.properties.get("data").expect("domain data") else {
+            panic!("expected domain data struct");
+        };
+        let Value::Struct(source) = data.fields.get("field_source").expect("field source") else {
+            panic!("expected field source struct");
+        };
+        assert_eq!(
+            source.fields.get("revision"),
+            Some(&Value::Int(IntValue::U64(u64::from(u32::MAX))))
+        );
+
+        for revision in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Num(1.0),
+        ] {
+            let mut field_source = StructValue::new();
+            field_source.insert("source_id", Value::String("temperature".into()));
+            field_source.insert("revision", revision);
+            let error = block_on(fea_domain_builtin(vec![
+                Value::String("thermoMechanical".into()),
+                Value::String("FieldSource".into()),
+                Value::Struct(field_source),
+            ]))
+            .expect_err("invalid structural revision must reject");
+            assert_eq!(error.identifier(), Some("RunMat:fea:InvalidInput"));
+            assert_eq!(error.context.builtin.as_deref(), Some(DOMAIN_NAME));
+        }
+
+        let field = AnalysisField {
+            field_id: "stress".into(),
+            shape: vec![u32::MAX as usize, 0],
+            values: AnalysisFieldValues::HostF64(Vec::new()),
+        };
+        let descriptor = AnalysisFieldDescriptor::from_field(&field);
+        let object = field_to_object(&field, &descriptor).expect("field object");
+        let Value::Tensor(shape) = object.properties.get("shape").expect("shape") else {
+            panic!("expected integer shape tensor");
+        };
+        assert_eq!(shape.numeric_dtype(), runmat_builtins::NumericDType::U64);
+        assert_eq!(
+            shape.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::from(u32::MAX), 0]))
+        );
+        assert_eq!(
+            object.properties.get("element_count"),
+            Some(&Value::Int(IntValue::U64(0)))
+        );
+
+        let device_field = AnalysisField {
+            field_id: "device".into(),
+            shape: vec![u32::MAX as usize],
+            values: AnalysisFieldValues::DeviceRef(runmat_analysis_core::DeviceFieldRef {
+                backend: "wgpu".into(),
+                token: "buffer".into(),
+                element_count: u32::MAX as usize,
+            }),
+        };
+        let Value::Struct(device) = field_values_value(&device_field).expect("device metadata")
+        else {
+            panic!("expected device field metadata");
+        };
+        assert_eq!(
+            device.fields.get("element_count"),
+            Some(&Value::Int(IntValue::U64(u64::from(u32::MAX))))
+        );
+    }
+
+    #[test]
+    fn fea_numeric_constructors_reject_resident_fields_without_provider_access() {
+        let resident = || {
+            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX - 1,
+            })
+        };
+        let cases = [
+            block_on(fea_domain_builtin(vec![
+                Value::String("electromagnetic".into()),
+                Value::String("AppliedCurrentA".into()),
+                resident(),
+            ])),
+            block_on(fea_interface_builtin(vec![
+                Value::String("contact".into()),
+                Value::String("left".into()),
+                Value::String("right".into()),
+                Value::String("FrictionCoefficient".into()),
+                resident(),
+            ])),
+            block_on(fea_load_case_builtin(vec![
+                Value::String("pressure".into()),
+                Value::String("face".into()),
+                Value::String("pressure".into()),
+                Value::String("MagnitudePa".into()),
+                resident(),
+            ])),
+            block_on(fea_material_builtin(vec![
+                Value::String("material".into()),
+                Value::String("YoungsModulusPa".into()),
+                resident(),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+            ])),
+        ];
+        for result in cases {
+            let error = result.expect_err("resident FEA constructor field must reject");
+            assert_eq!(error.identifier(), Some("RunMat:fea:InvalidInput"));
+            assert!(error.message().contains("cannot convert value"));
+        }
+    }
+
+    #[test]
+    fn fea_structural_serializer_preserves_plan_counts_and_compare_deltas() {
+        #[derive(Serialize)]
+        struct FailureEntry {
+            study_index: usize,
+        }
+        #[derive(Serialize)]
+        struct StructuralPayload {
+            study_count: usize,
+            failure_entries: Vec<FailureEntry>,
+            quality_reason_count_delta: i64,
+            optional_delta: Option<i64>,
+        }
+        let value = serializable_to_object_preserving_integers(
+            PLAN_NAME,
+            &ERROR_INTERNAL,
+            FEA_PLAN_CLASS,
+            &StructuralPayload {
+                study_count: 3,
+                failure_entries: vec![FailureEntry { study_index: 2 }],
+                quality_reason_count_delta: -4,
+                optional_delta: None,
+            },
+            None,
+            &["quality_reason_count_delta", "optional_delta"],
+            &["study_count", "study_index"],
+        )
+        .expect("structural serializer");
+        let Value::Object(object) = value else {
+            panic!("expected structural object");
+        };
+        assert_eq!(
+            object.properties.get("study_count"),
+            Some(&Value::Int(IntValue::U64(3)))
+        );
+        assert_eq!(
+            object.properties.get("quality_reason_count_delta"),
+            Some(&Value::Int(IntValue::I64(-4)))
+        );
+        assert!(matches!(
+            object.properties.get("optional_delta"),
+            Some(Value::Tensor(tensor)) if tensor.is_empty()
+        ));
+        let Some(Value::Cell(entries)) = object.properties.get("failure_entries") else {
+            panic!("expected failure entry cell");
+        };
+        let Some(Value::Struct(entry)) = entries.data.first() else {
+            panic!("expected failure entry struct");
+        };
+        assert_eq!(
+            entry.fields.get("study_index"),
+            Some(&Value::Int(IntValue::U64(2)))
+        );
+    }
+
+    #[test]
+    fn fea_constructor_aliases_arity_and_error_attribution_are_stable() {
+        for (alias, expected) in [
+            ("ConductivityWPerMk", "conductivity_w_per_mk"),
+            ("SpecificHeatJPerKgK", "specific_heat_j_per_kgk"),
+            ("ConductivitySPerM", "conductivity_s_per_m"),
+            ("SpeedOfSoundMPerS", "speed_of_sound_m_per_s"),
+            ("VolumetricWPerM3", "volumetric_w_per_m3"),
+            ("InletVelocityMPerS", "inlet_velocity_m_per_s"),
+            ("ThermalConductanceWPerM2K", "thermal_conductance_w_per_m2k"),
+            ("ContactResistanceM2KPerW", "contact_resistance_m2k_per_w"),
+        ] {
+            assert_eq!(canonical_field_name(alias), expected, "{alias}");
+        }
+
+        let field_error = create_field_object_from_args(vec![
+            Value::Num(1.0),
+            Value::String("stress".into()),
+            Value::Num(2.0),
+        ])
+        .expect_err("surplus fea.field argument");
+        assert_eq!(field_error.context.builtin.as_deref(), Some(FIELD_NAME));
+
+        let compare_error = create_compare_object_from_args(vec![
+            Value::String("base".into()),
+            Value::String("candidate".into()),
+            Value::Num(2.0),
+        ])
+        .expect_err("surplus fea.compare argument");
+        assert_eq!(compare_error.context.builtin.as_deref(), Some(COMPARE_NAME));
+
+        let model_error = block_on(fea_model_builtin(vec![
+            Value::String("model".into()),
+            Value::Num(1.0),
+        ]))
+        .expect_err("invalid model geometry");
+        assert_eq!(model_error.context.builtin.as_deref(), Some(MODEL_NAME));
+
+        let duplicate_error = block_on(fea_material_builtin(vec![
+            Value::String("material".into()),
+            Value::String("YoungsModulusPa".into()),
+            Value::Num(1.0),
+            Value::String("youngs_modulus_pa".into()),
+            Value::Num(2.0),
+            Value::String("PoissonRatio".into()),
+            Value::Num(0.3),
+        ]))
+        .expect_err("duplicate normalized field");
+        assert_eq!(
+            duplicate_error.context.builtin.as_deref(),
+            Some(MATERIAL_NAME)
+        );
+        assert!(duplicate_error.message().contains("duplicate"));
     }
 
     #[test]
@@ -4228,7 +5380,8 @@ run:
             geometry_path.to_string_lossy().to_string(),
         ))
         .expect("geometry should load");
-        let asset = geometry_asset_from_value(&geometry).expect("geometry payload should decode");
+        let asset = geometry_asset_from_value(MODEL_NAME, &geometry)
+            .expect("geometry payload should decode");
         let region_id = asset
             .regions
             .first()
@@ -4263,7 +5416,7 @@ run:
 
         let load = block_on(fea_load_case_builtin(vec![
             Value::String("tip_force".to_string()),
-            Value::String(region_id),
+            Value::String(region_id.clone()),
             Value::String("force".to_string()),
             Value::String("Vector".to_string()),
             force_vector(),
@@ -4277,6 +5430,23 @@ run:
         ]))
         .expect("analysis step should build");
         assert_object_class(&step, FEA_STEP_CLASS);
+
+        let selector = format!("id:{region_id}");
+        let mut regional_delta = StructValue::new();
+        regional_delta.insert("region_id", Value::String(selector.clone()));
+        regional_delta.insert("temperature_delta_k", Value::Int(IntValue::I8(5)));
+        let mut field_source = StructValue::new();
+        field_source.insert("source_id", Value::String("temperature-map".into()));
+        field_source.insert("revision", Value::Int(IntValue::U32(7)));
+        field_source.insert("expected_region_ids", cell(vec![Value::String(selector)]));
+        let domain = block_on(fea_domain_builtin(vec![
+            Value::String("thermoMechanical".into()),
+            Value::String("RegionTemperatureDeltas".into()),
+            cell(vec![Value::Struct(regional_delta)]),
+            Value::String("FieldSource".into()),
+            Value::Struct(field_source),
+        ]))
+        .expect("thermo-mechanical domain should build");
 
         let model = block_on(fea_model_builtin(vec![
             Value::String("bracket_static_model".to_string()),
@@ -4295,9 +5465,23 @@ run:
             cell(vec![load]),
             Value::String("Steps".to_string()),
             cell(vec![step]),
+            Value::String("Domains".to_string()),
+            cell(vec![domain]),
         ]))
         .expect("model should build");
         assert_object_class(&model, FEA_MODEL_CLASS);
+        let decoded_model: AnalysisModel = object_payload(&model);
+        let thermo = decoded_model
+            .thermo_mechanical
+            .expect("thermo-mechanical domain");
+        assert_eq!(thermo.region_temperature_deltas[0].region_id, region_id);
+        assert_eq!(
+            thermo
+                .field_source
+                .expect("field source")
+                .expected_region_ids,
+            vec![region_id.clone()]
+        );
 
         let run_options = block_on(fea_run_options_builtin(vec![
             Value::String("linear_static".to_string()),

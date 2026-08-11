@@ -1,0 +1,20 @@
+{
+  "title": "fea.plot",
+  "category": "fea",
+  "keywords": ["fea", "plot", "field", "mesh"],
+  "summary": "Create a RunMat figure for a FEA result field.",
+  "requires_feature": "plot-core",
+  "tested": { "unit": "builtins::fea::tests::fea_plot", "integration": null },
+  "description": "`fea.plot` creates a RunMat figure from a contextual run, results object, field object, or explicit study/run pair.",
+  "behaviors": [
+    "Supported forms are `fea.plot(run, fieldId)`, `fea.plot(results, fieldId)`, `fea.plot(field)`, and `fea.plot(study, runId, fieldId)`; `Field` or `FieldId` may select the field where applicable.",
+    "Study geometry context and a persisted run id must be available before figure generation starts.",
+    "The returned figure handle uses RunMat's conventional double scripting representation. Numeric arrays are not accepted as handles, run identifiers, or field identifiers.",
+    "A requested device-backed field is rejected with a targeted error until it is explicitly materialized on the host; the field is never silently omitted or gathered through an unrelated provider.",
+    "Plot generation uses existing study mesh and result artifacts and does not intrinsically require native OCCT or numeric provider dispatch."
+  ],
+  "examples": [{ "description": "Plot a stress field", "input": "figureHandle = fea.plot(result, \"von_mises\");" }],
+  "faqs": [{ "question": "Does plotting re-import CAD?", "answer": "No. It uses geometry context already carried by the study or derived result object." }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

@@ -955,6 +955,10 @@ mod tests {
             "fclose",
             "fcontour",
             "fea.boundaryCondition",
+            "fea.domain",
+            "fea.interface",
+            "fea.loadCase",
+            "fea.material",
         ] {
             let builtin = registered
                 .iter()
@@ -1086,6 +1090,12 @@ mod tests {
                 "eraseURLs",
                 "exist",
                 "extractHTMLText",
+                "fea.compare",
+                "fea.field",
+                "fea.materialAssignment",
+                "fea.model",
+                "fea.plan",
+                "fea.plot",
                 "onCleanup",
             ]
         );

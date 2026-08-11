@@ -1,0 +1,19 @@
+{
+  "title": "fea.plan",
+  "category": "fea",
+  "keywords": ["fea", "plan", "study", "validation"],
+  "summary": "Plan a RunMat FEA study or sweep without solving.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_load_validate_and_plan", "integration": null },
+  "description": "`fea.plan(study)` validates and plans a `.fea` path, `fea.Study`, or `fea.Sweep` without executing the solver.",
+  "behaviors": [
+    "The input is a text path or typed study/sweep object; integer arrays have no input role.",
+    "Planning resolves model data, runs validation, selects the versioned operation sequence, and writes planning evidence before returning.",
+    "Plan counts, indexes, revisions, and other discrete metadata are structural integer outputs and remain exact; estimated physical or timing quantities retain their declared floating representation.",
+    "Planning does not intrinsically require native OCCT when supplied geometry is already loaded or uses a non-OCCT import path. A topology-bearing CAD source may require its configured geometry importer during document resolution."
+  ],
+  "examples": [{ "description": "Plan a study", "input": "plan = fea.plan(study);" }],
+  "faqs": [{ "question": "Does planning run the solver?", "answer": "No. It validates and records the selected operation sequence without solving." }],
+  "links": [{ "label": "FEA solves", "url": "../../fea/solves" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}
