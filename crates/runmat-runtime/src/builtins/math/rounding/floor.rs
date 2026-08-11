@@ -1,10 +1,14 @@
 //! MATLAB-compatible `floor` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, NumericStorage,
+    ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -75,6 +79,24 @@ const FLOOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     inputs: &FLOOR_INPUTS_X,
     outputs: &FLOOR_OUTPUT,
 }];
+const FLOOR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Every real integer class is already integral, so floor preserves its exact class, shape, and values without floating conversion, including inside table and timetable variables.",
+}];
+pub const FLOOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = floor(X) with real integer X, including integer table or timetable variables",
+        inputs: &FLOOR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host integer storage is returned unchanged; resident integer storage is an exact identity operation that retains the original owning-provider handle.",
+    }];
 const FLOOR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FLOOR.INVALID_INPUT",
     identifier: Some("RunMat:floor:InvalidInput"),
@@ -125,6 +147,7 @@ fn builtin_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::rounding::floor::FLOOR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::rounding::floor::FLOOR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::rounding::floor"
 )]
 async fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -137,6 +160,52 @@ async fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => floor_gpu(handle).await,
+        Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {
+            floor_table(object).await
+        }
+        Value::Complex(re, im) => Ok(Value::Complex(
+            apply_floor_scalar(re),
+            apply_floor_scalar(im),
+        )),
+        Value::ComplexTensor(ct) => floor_complex_tensor(ct),
+        Value::CharArray(ca) => floor_char_array(ca),
+        Value::LogicalArray(logical) => {
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INVALID_INPUT, err))?;
+            Ok(tensor::tensor_into_value(floor_tensor(tensor)?))
+        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
+            &FLOOR_ERROR_INVALID_INPUT,
+            "expected numeric or logical input",
+        )),
+        other => floor_numeric(other),
+    }
+}
+
+async fn floor_table(object: ObjectInstance) -> BuiltinResult<Value> {
+    let variables = crate::builtins::table::table_variables(&object)
+        .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INVALID_INPUT, err.message))?;
+    let mut rounded = StructValue::new();
+    for (name, value) in variables.fields {
+        crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+        let value = match value {
+            Value::GpuTensor(handle) => floor_gpu(handle).await?,
+            Value::Object(_) => {
+                return Err(builtin_error_with_detail(
+                    &FLOOR_ERROR_INVALID_INPUT,
+                    format!("table variable {name} does not support floor"),
+                ))
+            }
+            other => floor_host_value(other)?,
+        };
+        rounded.insert(name, value);
+    }
+    crate::builtins::table::table_replace_variables_like(&object, rounded)
+        .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err.message))
+}
+
+fn floor_host_value(value: Value) -> BuiltinResult<Value> {
+    match value {
         Value::Complex(re, im) => Ok(Value::Complex(
             apply_floor_scalar(re),
             apply_floor_scalar(im),
@@ -185,12 +254,28 @@ fn floor_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn floor_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let data: Vec<(f64, f64)> = ct
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| (apply_floor_scalar(re), apply_floor_scalar(im)))
-        .collect();
-    let tensor = ComplexTensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(re, im)| (apply_floor_scalar(re), apply_floor_scalar(im)))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(re, im)| (re.floor(), im.floor()))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(builtin_error_with_detail(
+                &FLOOR_ERROR_INVALID_INPUT,
+                "operations involving complex numbers with integer types are not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
@@ -206,14 +291,61 @@ fn floor_char_array(ca: CharArray) -> BuiltinResult<Value> {
 }
 
 async fn floor_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_floor(&handle).await {
-            return Ok(Value::GpuTensor(out));
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        return Ok(gpu_helpers::resident_gpu_value(handle));
+    }
+    let provider = runmat_accelerate_api::provider_for_handle(&handle);
+    if !runmat_accelerate_api::handle_is_logical(&handle) {
+        if let Some(provider) = provider {
+            if let Ok(out) = provider.unary_floor(&handle).await {
+                if rounding_native_output_matches(&handle, &out, provider) {
+                    return Ok(gpu_helpers::resident_gpu_value(out));
+                }
+                free_rejected_rounding_output(&out, &handle, provider);
+            }
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let floored = floor_tensor(tensor)?;
+    if let Some(provider) = provider {
+        let uploaded = gpu_helpers::upload_tensor(provider, &floored)
+            .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, err))?;
+        return Ok(gpu_helpers::resident_gpu_value(uploaded));
+    }
     Ok(tensor::tensor_into_value(floored))
+}
+
+fn rounding_native_output_matches(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gpu_handles_alias(output, input)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::handle_storage(input)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn free_rejected_rounding_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &dyn AccelProvider,
+) {
+    if !gpu_handles_alias(output, input) {
+        let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(provider);
+        let _ = owner.free(output);
+    }
 }
 
 fn apply_floor_scalar(value: f64) -> f64 {
@@ -231,7 +363,8 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
+        ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext,
+        Tensor, Type, Value,
     };
 
     fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -265,6 +398,22 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert_eq!(labels, vec!["Y = floor(X)"]);
+        assert_eq!(FLOOR_INTEGER_CAPABILITIES.len(), 1);
+        let capability = &FLOOR_INTEGER_CAPABILITIES[0];
+        assert_eq!(capability.inputs[0].classes.len(), 8);
+        assert_eq!(
+            capability.inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            capability.computation_domain,
+            BuiltinIntegerComputationDomain::ExactInteger
+        );
+        assert_eq!(
+            capability.output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+        assert_eq!(capability.backend, BuiltinIntegerBackendRule::HostAndGpu);
     }
 
     #[test]
@@ -332,6 +481,22 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn floor_complex_tensor_preserves_native_single_storage() {
+        let input = ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(vec![(1.7, -2.3), (-0.1, 4.0)]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let Value::ComplexTensor(output) = floor_complex_tensor(input).unwrap() else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(
+            output.into_complex_storage(),
+            ComplexStorage::F32(vec![(1.0, -3.0), (-1.0, 4.0)])
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_char_array_to_tensor() {
@@ -392,6 +557,85 @@ pub(crate) mod tests {
             }
             other => panic!("expected typed integer tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn floor_table_preserves_every_integer_variable_class() {
+        let columns = vec![
+            Tensor::new_integer(IntegerStorage::I8(vec![-3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I16(vec![-3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I32(vec![-3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U8(vec![3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U32(vec![3, 4]), vec![2, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![2, 1]).unwrap(),
+        ];
+        let names = (0..columns.len())
+            .map(|index| format!("V{index}"))
+            .collect::<Vec<_>>();
+        let expected = columns.clone();
+        let input = crate::builtins::table::table_from_columns(
+            names,
+            columns.into_iter().map(Value::Tensor).collect(),
+        )
+        .unwrap();
+        let output = block_on(super::floor_builtin(input, Vec::new())).unwrap();
+        let Value::Object(output) = output else {
+            panic!("expected table output");
+        };
+        let variables = crate::builtins::table::table_variables(&output).unwrap();
+        for (value, expected) in variables.fields.values().zip(expected) {
+            assert_eq!(value, &Value::Tensor(expected));
+        }
+    }
+
+    #[test]
+    fn floor_resident_integer_is_an_exact_identity() {
+        test_support::with_test_provider(|provider| {
+            let input =
+                Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+            let buffer_id = handle.buffer_id;
+            let Value::GpuTensor(output) = block_on(super::floor_gpu(handle)).unwrap() else {
+                panic!("expected resident integer output");
+            };
+            assert_eq!(output.buffer_id, buffer_id);
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(output)).unwrap(),
+                input
+            );
+        });
+    }
+
+    #[test]
+    fn floor_rejects_aliased_or_mistyped_native_outputs_without_freeing_input() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.25], vec![1, 1]).unwrap();
+            let input = gpu_helpers::upload_tensor(provider, &tensor).expect("input upload");
+            assert!(!rounding_native_output_matches(&input, &input, provider));
+            free_rejected_rounding_output(&input, &input, provider);
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(input.clone()))
+                    .expect("input remains live")
+                    .materialize_f64(),
+                vec![1.25]
+            );
+
+            let logical = gpu_helpers::upload_tensor(provider, &tensor).expect("logical upload");
+            runmat_accelerate_api::set_handle_logical(&logical, true);
+            assert!(!rounding_native_output_matches(&input, &logical, provider));
+            free_rejected_rounding_output(&logical, &input, provider);
+
+            let integer = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            runmat_accelerate_api::set_handle_integer_type(
+                &integer,
+                runmat_accelerate_api::IntegerElementType::U8,
+            );
+            assert!(!rounding_native_output_matches(&input, &integer, provider));
+            free_rejected_rounding_output(&integer, &input, provider);
+            let _ = provider.free(&input);
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

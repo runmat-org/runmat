@@ -11,14 +11,37 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexTensor, ResolveContext, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 const LR_DIM: [usize; 1] = [2];
 const BUILTIN_NAME: &str = "fliplr";
+
+const FLIPLR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are reordered through authoritative storage without numeric conversion.",
+    }];
+pub const FLIPLR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = fliplr(integer_A)",
+        inputs: &FLIPLR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Dimension 2 is reversed exactly; GPU fallback restores the result to the owning provider.",
+    }];
 
 fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
@@ -26,20 +49,12 @@ fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
         None => return Type::Unknown,
     };
     match input {
-        Type::Tensor { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Tensor {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-        Type::Logical { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Logical {
-                shape: Some(vec![rows, cols]),
-            }
-        }
+        Type::Tensor { shape: Some(shape) } => Type::Tensor {
+            shape: Some(shape.clone()),
+        },
+        Type::Logical { shape: Some(shape) } => Type::Logical {
+            shape: Some(shape.clone()),
+        },
         Type::Tensor { shape: None } => Type::tensor(),
         Type::Logical { shape: None } => Type::logical(),
         Type::Num | Type::Int | Type::Bool => Type::tensor(),
@@ -167,6 +182,7 @@ fn remap_fliplr_error(err: RuntimeError) -> RuntimeError {
     accel = "custom",
     type_resolver(preserve_matrix_type),
     descriptor(crate::builtins::array::shape::fliplr::FLIPLR_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::fliplr::FLIPLR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::fliplr"
 )]
 async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -268,6 +284,23 @@ pub(crate) mod tests {
             Type::Tensor {
                 shape: Some(vec![Some(2), Some(4)])
             }
+        );
+    }
+
+    #[test]
+    fn fliplr_type_keeps_full_nd_shape_and_integer_contract() {
+        let shape = vec![Some(2), Some(3), Some(4), Some(5)];
+        let out = preserve_matrix_type(
+            &[Type::Tensor {
+                shape: Some(shape.clone()),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Tensor { shape: Some(shape) });
+        assert_eq!(FLIPLR_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(
+            FLIPLR_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
         );
     }
 

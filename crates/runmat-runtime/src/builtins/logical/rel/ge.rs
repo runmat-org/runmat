@@ -2,9 +2,12 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -65,6 +68,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "ge";
+
+const GE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes compare exactly against integer, logical, single, and double operands.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Mixed signed/unsigned and integer/double comparisons do not convert authoritative integer storage to f64.",
+    },
+];
+pub const GE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "tf = ge(integer_A,integer_or_numeric_B)",
+        inputs: &GE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Predicate,
+        output_class: BuiltinIntegerOutputClassRule::Logical,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Compatible implicit expansion is supported; correctness-first GPU fallback restores a logical result to the owning provider.",
+    }];
 
 const GE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -136,33 +167,61 @@ fn ge_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     accel = "elementwise",
     type_resolver(logical_binary_type),
     descriptor(crate::builtins::logical::rel::ge::GE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::logical::rel::ge::GE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::logical::rel::ge"
 )]
 async fn ge_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    let has_resident_input =
+        matches!(&lhs, Value::GpuTensor(_)) || matches!(&rhs, Value::GpuTensor(_));
+    let resident_owner = match (&lhs, &rhs) {
+        (Value::GpuTensor(handle), _) | (_, Value::GpuTensor(handle)) => {
+            runmat_accelerate_api::provider_for_handle(handle)
+        }
+        _ => None,
+    };
+    if has_resident_input && resident_owner.is_none() {
+        return Err(ge_error(&GE_ERROR_INVALID_INPUT));
+    }
     // Prefer device paths when any operand is a GPU tensor
     match (&lhs, &rhs) {
         (Value::GpuTensor(ref a), Value::GpuTensor(ref b)) => {
-            if let Some(result) = try_ge_gpu(a, b).await {
-                return result;
+            if runmat_accelerate_api::handle_integer_type(a).is_none()
+                && runmat_accelerate_api::handle_integer_type(b).is_none()
+            {
+                if let Some(result) = try_ge_gpu(a, b).await {
+                    return result;
+                }
             }
         }
         (Value::GpuTensor(ref a), other) => {
             if let Some(handle) = try_fill_like(a, other) {
-                if let Some(result) = try_ge_gpu(a, &handle).await {
+                let result = try_ge_gpu(a, &handle).await;
+                if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+                    let _ = provider.free(&handle);
+                }
+                if let Some(result) = result {
                     return result;
                 }
             }
         }
         (other, Value::GpuTensor(ref b)) => {
             if let Some(handle) = try_fill_like(b, other) {
-                if let Some(result) = try_ge_gpu(&handle, b).await {
+                let result = try_ge_gpu(&handle, b).await;
+                if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+                    let _ = provider.free(&handle);
+                }
+                if let Some(result) = result {
                     return result;
                 }
             }
         }
         _ => {}
     }
-    ge_host(lhs, rhs).await
+    let result = ge_host(lhs, rhs).await?;
+    if let Some(provider) = resident_owner {
+        return upload_logical_result(provider, result);
+    }
+    Ok(result)
 }
 
 async fn try_ge_gpu(
@@ -173,16 +232,45 @@ async fn try_ge_gpu(
 }
 
 fn try_fill_like(proto: &GpuTensorHandle, other: &Value) -> Option<GpuTensorHandle> {
-    let provider = runmat_accelerate_api::provider()?;
+    if runmat_accelerate_api::handle_integer_type(proto).is_some() {
+        return None;
+    }
+    let provider = runmat_accelerate_api::provider_for_handle(proto)?;
     let scalar = match other {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
+        Value::Int(_) => None,
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) && t.integer_storage().is_none() => {
+            Some(tensor::tensor_value_f64(t, 0))
+        }
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }?;
+    if runmat_accelerate_api::handle_precision(proto)
+        == Some(runmat_accelerate_api::ProviderPrecision::F32)
+        && !scalar.is_nan()
+        && f64::from(scalar as f32) != scalar
+    {
+        return None;
+    }
     provider.fill_like(proto, scalar).ok()
+}
+
+fn upload_logical_result(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    result: Value,
+) -> crate::BuiltinResult<Value> {
+    let tensor = match result {
+        Value::Bool(flag) => Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
+            .map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?,
+        Value::LogicalArray(array) => {
+            tensor::logical_to_tensor(&array).map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?
+        }
+        _ => return Err(ge_error(&GE_ERROR_INVALID_INPUT)),
+    };
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?;
+    Ok(gpu_helpers::logical_gpu_value(handle))
 }
 
 async fn ge_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -540,6 +628,79 @@ pub(crate) mod tests {
             }
             other => panic!("expected logical array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ge_integer_contract_is_exact_broadcasting_to_logical() {
+        assert_eq!(GE_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(GE_INTEGER_CAPABILITIES[0].inputs.len(), 2);
+        assert!(GE_INTEGER_CAPABILITIES[0]
+            .inputs
+            .iter()
+            .all(|input| input.classes.len() == 8));
+        assert_eq!(
+            GE_INTEGER_CAPABILITIES[0].computation_domain,
+            BuiltinIntegerComputationDomain::Predicate
+        );
+        assert_eq!(
+            GE_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::Logical
+        );
+        assert_eq!(
+            GE_INTEGER_CAPABILITIES[0].overload,
+            BuiltinIntegerOverloadKind::BroadcastCompatible
+        );
+    }
+
+    #[test]
+    fn ge_gpu_wide_integer_scalar_fallback_is_exact_owner_resident_logical() {
+        test_support::with_test_provider(|provider| {
+            let lhs = Tensor::new_integer(
+                runmat_builtins::IntegerStorage::U64(vec![
+                    9_007_199_254_740_992,
+                    9_007_199_254_740_993,
+                ]),
+                vec![1, 2],
+            )
+            .expect("wide integer lhs");
+            let handle = gpu_helpers::upload_tensor(provider, &lhs).expect("upload exact lhs");
+            let result = run_ge(
+                Value::GpuTensor(handle),
+                Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993)),
+            )
+            .expect("resident exact ge");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident logical result");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(result_handle));
+            assert!(std::ptr::eq(
+                runmat_accelerate_api::provider_for_handle(result_handle).expect("result owner"),
+                provider
+            ));
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0]);
+        });
+    }
+
+    #[test]
+    fn ge_resident_single_does_not_round_a_double_scalar_for_comparison() {
+        test_support::with_test_provider(|provider| {
+            let lhs = Tensor::from_f32(vec![16_777_216.0], vec![1, 1]).expect("single lhs");
+            let handle = gpu_helpers::upload_tensor(provider, &lhs).expect("upload single lhs");
+            let result = run_ge(Value::GpuTensor(handle), Value::Num(16_777_217.0))
+                .expect("mixed-precision ge");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident logical result");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(result_handle));
+            assert!(std::ptr::eq(
+                runmat_accelerate_api::provider_for_handle(result_handle).expect("result owner"),
+                provider
+            ));
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.materialize_f64(), vec![0.0]);
+        });
     }
 
     #[cfg(feature = "wgpu")]

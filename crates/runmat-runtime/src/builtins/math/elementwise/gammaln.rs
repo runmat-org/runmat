@@ -6,7 +6,11 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, NumericDType, NumericScalar, NumericStorage, Tensor, Value,
 };
@@ -83,6 +87,48 @@ const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INVALID_INPUT, ERROR_DOMAIN, ERROR_INTERNAL];
 
+const INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gammaln-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gammaln with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GammalnIntegerInputExtension"),
+};
+const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gammaln-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gammaln with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GammalnLogicalInputExtension"),
+};
+const CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gammaln-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gammaln with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GammalnCharacterInputExtension"),
+};
+const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_INPUT_EXTENSION,
+    LOGICAL_INPUT_EXTENSION,
+    CHARACTER_INPUT_EXTENSION,
+];
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "A",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "RunMat mode admits all eight integer classes only when every value is exactly representable at the binary64 log-gamma boundary.",
+}];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = gammaln(integer_A)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Integer admission is checked before provider access; resident values gather through authoritative integer storage and produce floating output restored to the owning provider.",
+    }];
+
 pub const GAMMALN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -130,9 +176,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::gammaln::GAMMALN_DESCRIPTOR),
+    extensions(EXTENSIONS),
+    integer_capabilities(crate::builtins::math::elementwise::gammaln::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::gammaln"
 )]
 async fn gammaln_builtin(value: Value) -> BuiltinResult<Value> {
+    ensure_gammaln_extensions(&value)?;
     match value {
         Value::GpuTensor(handle) => gammaln_gpu(handle).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(error_with_detail(
@@ -152,6 +201,33 @@ async fn gammaln_builtin(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+fn ensure_gammaln_extensions(value: &Value) -> BuiltinResult<()> {
+    let integer = matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some());
+    if integer {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let logical = matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle));
+    if logical {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(value, Value::CharArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CHARACTER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
         return Err(error_with_detail(
@@ -160,29 +236,40 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         ));
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match gpu_has_negative_input(provider, &handle).await {
-            Ok(true) => {
-                return Err(error_with_detail(
-                    &ERROR_DOMAIN,
-                    "gpuArray contains negative values",
-                ))
-            }
-            Ok(false) => match provider.unary_gammaln(&handle).await {
-                Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
-                Err(err) if is_unsupported_provider_hook(&err) => {}
-                Err(err) => {
+    let provider = runmat_accelerate_api::provider_for_handle(&handle);
+    let requires_authoritative_host_path = runmat_accelerate_api::handle_integer_type(&handle)
+        .is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle);
+    if !requires_authoritative_host_path {
+        if let Some(provider) = provider {
+            match gpu_has_negative_input(provider, &handle).await {
+                Ok(true) => {
                     return Err(error_with_detail(
-                        &ERROR_INTERNAL,
-                        format!("provider unary_gammaln failed: {err}"),
+                        &ERROR_DOMAIN,
+                        "gpuArray contains negative values",
                     ))
                 }
-            },
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(err);
+                Ok(false) => match provider.unary_gammaln(&handle).await {
+                    Ok(out) if gammaln_native_output_matches(&handle, &out, provider) => {
+                        return Ok(gpu_helpers::resident_gpu_value(out))
+                    }
+                    Ok(out) => {
+                        free_rejected_gammaln_output(&out, &handle, provider);
+                    }
+                    Err(err) if is_unsupported_provider_hook(&err) => {}
+                    Err(err) => {
+                        return Err(error_with_detail(
+                            &ERROR_INTERNAL,
+                            format!("provider unary_gammaln failed: {err}"),
+                        ))
+                    }
+                },
+                Err(err) => {
+                    if err.message() == "interaction pending..." {
+                        return Err(err);
+                    }
+                    // Fall back to host evaluation when reduction proof is unavailable.
                 }
-                // Fall back to host evaluation when reduction proof is unavailable.
             }
         }
     }
@@ -190,7 +277,84 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    gammaln_tensor(tensor)
+    let output = gammaln_tensor(tensor)?;
+    if let Some(provider) = provider {
+        return restore_gammaln_gpu_output(provider, &handle, output);
+    }
+    Ok(output)
+}
+
+fn gammaln_native_output_matches(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gpu_handles_alias(output, input)
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::handle_precision(output)
+            == Some(
+                runmat_accelerate_api::handle_precision(input)
+                    .unwrap_or_else(|| provider.precision()),
+            )
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn free_rejected_gammaln_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &dyn AccelProvider,
+) {
+    if !gpu_handles_alias(output, input) {
+        let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(provider);
+        let _ = owner.free(output);
+    }
+}
+
+fn restore_gammaln_gpu_output(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let tensor = match value {
+        Value::Tensor(tensor) => tensor,
+        Value::Num(value) => Tensor::new(vec![value], input.shape.clone())
+            .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?,
+        other => {
+            return Err(error_with_detail(
+                &ERROR_INTERNAL,
+                format!("unexpected host fallback result {other:?}"),
+            ))
+        }
+    };
+    let dtype = tensor.numeric_dtype();
+    let output = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
+    if dtype == NumericDType::F32 {
+        runmat_accelerate_api::set_handle_precision(
+            &output,
+            runmat_accelerate_api::ProviderPrecision::F32,
+        );
+    }
+    if output.shape != input.shape
+        || runmat_accelerate_api::provider_for_handle(&output)
+            .is_none_or(|owner| !std::ptr::eq(owner, provider))
+    {
+        let _ = provider.free(&output);
+        return Err(error_with_detail(
+            &ERROR_INTERNAL,
+            "provider upload returned malformed fallback output",
+        ));
+    }
+    Ok(gpu_helpers::resident_gpu_value(output))
 }
 
 async fn gpu_has_negative_input(
@@ -216,6 +380,16 @@ fn gammaln_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn gammaln_tensor(tensor: Tensor) -> BuiltinResult<Value> {
+    if let Some(storage) = tensor.integer_storage() {
+        for integer in storage.exact_values() {
+            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+                return Err(error_with_detail(
+                    &ERROR_INVALID_INPUT,
+                    "integer values must be exactly representable as double",
+                ));
+            }
+        }
+    }
     let shape = tensor.shape.clone();
     let storage = tensor
         .into_numeric_storage()
@@ -440,6 +614,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gammaln_integer_bool_logical_and_char_promote() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         match call(Value::Int(IntValue::I32(5))).expect("gammaln") {
             Value::Num(v) => approx_eq(v, 24.0_f64.ln(), 1e-13),
             other => panic!("expected scalar result, got {other:?}"),
@@ -475,6 +650,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gammaln_reads_typed_integer_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let scalar =
             Tensor::new_integer(IntegerStorage::U16(vec![5]), vec![1, 1]).expect("int tensor");
         match call(Value::Tensor(scalar)).expect("gammaln") {
@@ -494,6 +670,60 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn gammaln_integer_and_logical_extensions_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = call(Value::Int(IntValue::I16(5))).unwrap_err();
+        assert_eq!(
+            integer.identifier(),
+            Some("RunMat:compatibility:GammalnIntegerInputExtension")
+        );
+        let logical = call(Value::Bool(true)).unwrap_err();
+        assert_eq!(
+            logical.identifier(),
+            Some("RunMat:compatibility:GammalnLogicalInputExtension")
+        );
+        let character = call(Value::CharArray(
+            CharArray::new(vec!['A'], 1, 1).expect("character"),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            character.identifier(),
+            Some("RunMat:compatibility:GammalnCharacterInputExtension")
+        );
+    }
+
+    #[test]
+    fn gammaln_integer_extension_covers_all_classes_and_exact_binary64_boundary() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = [
+            IntegerStorage::I8(vec![1, 5]),
+            IntegerStorage::I16(vec![1, 5]),
+            IntegerStorage::I32(vec![1, 5]),
+            IntegerStorage::I64(vec![1, 5]),
+            IntegerStorage::U8(vec![1, 5]),
+            IntegerStorage::U16(vec![1, 5]),
+            IntegerStorage::U32(vec![1, 5]),
+            IntegerStorage::U64(vec![1, 5]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            let Value::Tensor(output) = call(Value::Tensor(tensor)).expect("integer gammaln")
+            else {
+                panic!("expected tensor output")
+            };
+            assert_eq!(output.numeric_dtype(), NumericDType::F64);
+        }
+
+        let exact =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 54]), vec![1, 1]).unwrap();
+        call(Value::Tensor(exact)).expect("exact wide power of two");
+        let inexact =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap();
+        let error = call(Value::Tensor(inexact)).unwrap_err();
+        assert!(error.message().contains("exactly representable as double"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -569,6 +799,33 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let err = call(Value::GpuTensor(handle)).expect_err("negative gpu should error");
             assert_eq!(err.identifier(), ERROR_DOMAIN.identifier);
+        });
+    }
+
+    #[test]
+    fn gammaln_resident_integer_gate_precedes_provider_and_restores_double_output() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 5]), vec![1, 2])
+                .expect("integer input");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("integer upload");
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = call(Value::GpuTensor(handle.clone())).unwrap_err();
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:GammalnIntegerInputExtension")
+                );
+                assert!(runmat_accelerate_api::provider_for_handle(&handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            }
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let Value::GpuTensor(output) = call(Value::GpuTensor(handle)).expect("gammaln") else {
+                panic!("expected resident output")
+            };
+            assert!(runmat_accelerate_api::handle_integer_type(&output).is_none());
+            assert!(runmat_accelerate_api::provider_for_handle(&output)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
         });
     }
 

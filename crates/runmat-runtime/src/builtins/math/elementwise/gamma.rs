@@ -3,9 +3,12 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericStorage, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, NumericStorage, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -84,6 +87,27 @@ const GAMMA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     outputs: &GAMMA_OUTPUT,
 }];
 
+const GAMMA_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer input is rejected before host evaluation or provider dispatch; the documented numeric surface accepts only real single and double data.",
+    }];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = gamma(X) with typed-integer X",
+        inputs: &GAMMA_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "All eight typed-integer classes are unsupported in both compatibility modes and are rejected before provider access; real single and double inputs retain their documented host and GPU behavior.",
+    }];
+
 const GAMMA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GAMMA.INVALID_ARGUMENT",
     identifier: Some("RunMat:gamma:InvalidArgument"),
@@ -126,6 +150,7 @@ pub const GAMMA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "unary",
     type_resolver(gamma_type),
     descriptor(crate::builtins::math::elementwise::gamma::GAMMA_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::gamma::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::gamma"
 )]
 async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -155,6 +180,7 @@ fn gamma_type(args: &[Type], context: &ResolveContext) -> Type {
 
 async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
         || runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved
     {
         return Err(gamma_error_with_detail(
@@ -165,7 +191,10 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider_for_handle(&handle);
     if let Some(provider) = provider {
         if let Ok(out) = provider.unary_gamma(&handle).await {
-            return Ok(gpu_helpers::resident_gpu_value(out));
+            if gamma_native_output_matches(&handle, &out, provider) {
+                return Ok(gpu_helpers::resident_gpu_value(out));
+            }
+            free_rejected_gamma_output(&out, &handle, provider);
         }
     }
     let gathered = gpu_helpers::gather_tensor_async(&handle)
@@ -185,6 +214,41 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         Ok(gpu_helpers::resident_gpu_value(handle))
     } else {
         Ok(tensor::tensor_into_value(output))
+    }
+}
+
+fn gamma_native_output_matches(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gpu_handles_alias(output, input)
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::handle_precision(output)
+            == Some(
+                runmat_accelerate_api::handle_precision(input)
+                    .unwrap_or_else(|| provider.precision()),
+            )
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn free_rejected_gamma_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) {
+    if !gpu_handles_alias(output, input) {
+        let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(provider);
+        let _ = owner.free(output);
     }
 }
 
@@ -227,6 +291,11 @@ fn gamma_real_scalar(x: f64) -> f64 {
     }
     if is_non_positive_integer(x) {
         return f64::INFINITY;
+    }
+    // Form large positive real results through log-gamma so the Lanczos power
+    // and exponential factors cannot overflow separately before their product.
+    if x >= 128.0 {
+        return super::gammaln::gammaln_nonnegative_scalar(x).exp();
     }
     let result = gamma_complex_scalar(Complex64::new(x, 0.0));
     if result.im.abs() <= EPSILON * result.re.abs().max(1.0) {
@@ -417,6 +486,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn documented_overflow_thresholds_follow_input_precision() {
+        assert!(matches!(
+            call(Value::Num(171.0), Vec::new()).unwrap(),
+            Value::Num(value) if value.is_finite()
+        ));
+        assert!(matches!(
+            call(Value::Num(172.0), Vec::new()).unwrap(),
+            Value::Num(value) if value.is_infinite()
+        ));
+
+        let input = Tensor::from_f32(vec![35.0, 36.0], vec![1, 2]).unwrap();
+        let Value::Tensor(output) = call(Value::Tensor(input), Vec::new()).unwrap() else {
+            panic!("expected tensor output");
+        };
+        let values = output.materialize_f64();
+        assert!(values[0].is_finite());
+        assert!(values[1].is_infinite());
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+    }
+
+    #[test]
     fn integer_scalar_and_dense_integer_tensor_are_rejected() {
         let scalar = call(Value::Int(IntValue::I32(5)), Vec::new()).unwrap_err();
         assert_eq!(scalar.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
@@ -483,6 +573,19 @@ pub(crate) mod tests {
                 .unwrap();
             let error = call(Value::GpuTensor(handle), Vec::new()).unwrap_err();
             assert_eq!(error.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
+        });
+    }
+
+    #[test]
+    fn logical_gpu_input_is_rejected_before_provider_gamma() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let error = call(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
+            assert_eq!(error.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
+            assert!(runmat_accelerate_api::provider_for_handle(&handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
         });
     }
 

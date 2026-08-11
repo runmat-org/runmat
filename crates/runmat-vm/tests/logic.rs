@@ -536,6 +536,7 @@ fn typed_integer_conv_and_conv2_cross_to_documented_double_outputs() {
 
 #[test]
 fn typed_complex_integer_signal_operations_are_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let operations = [
         ("filter numerator", "filter(z(1, :), [1], [1 2])"),
         ("filter denominator", "filter([1], z(1, :), [1 2])"),
@@ -593,7 +594,7 @@ fn typed_complex_integer_rounding_operations_are_rejected_before_f64_coercion() 
         assert!(
             err.to_string().contains(
                 "operations involving complex numbers with integer types are not supported"
-            ),
+            ) || err.to_string().contains("inputs must be real"),
             "{name} returned an unexpected error: {err}"
         );
     }
@@ -616,6 +617,91 @@ fn ceil_preserves_all_integer_classes_through_compiled_dispatch() {
             vars[1], vars[0],
             "{constructor} ceil must preserve class and bits"
         );
+    }
+}
+
+#[test]
+fn compiled_fix_floor_and_flip_family_preserve_exact_wide_integer_storage() {
+    let base = 9_007_199_254_740_992_u64;
+    let vars = execute_source(
+        "base = uint64(9007199254740992); top = intmax('uint64'); a = reshape([base+uint64(1), base+uint64(2), top-uint64(1), top], 2, 2); fixed = fix(a); floored = floor(a); default_flip = flip(a); dim_flip = flip(a, 2); left_right = fliplr(a); up_down = flipud(a);",
+    )
+    .expect("compiled rounding and flip family");
+
+    let expected = [
+        IntegerStorage::U64(vec![base + 1, base + 2, u64::MAX - 1, u64::MAX]),
+        IntegerStorage::U64(vec![base + 2, base + 1, u64::MAX, u64::MAX - 1]),
+        IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, base + 1, base + 2]),
+    ];
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(value, Value::Tensor(tensor) if tensor.integer_storage() == Some(&expected[0])))
+            .count()
+            >= 3,
+        "source, fix, and floor must retain exact storage: {vars:?}"
+    );
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(value, Value::Tensor(tensor) if tensor.integer_storage() == Some(&expected[1])))
+            .count()
+            >= 2,
+        "default flip and flipud must retain exact reordered storage: {vars:?}"
+    );
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(value, Value::Tensor(tensor) if tensor.integer_storage() == Some(&expected[2])))
+            .count()
+            >= 2,
+        "dimension flip and fliplr must retain exact reordered storage: {vars:?}"
+    );
+}
+
+#[test]
+fn compiled_flip_and_gamma_family_extensions_obey_compatibility_mode() {
+    {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+        let flip_error = execute_source("a = uint64([1 2]); out = flip(a, uint8(2));")
+            .expect_err("typed flip dimension must be gated");
+        assert_eq!(
+            flip_error.identifier(),
+            Some("RunMat:compatibility:FlipTypedDimensionExtension")
+        );
+        let gamma_error = execute_source("out = gamma(uint16(5));")
+            .expect_err("gamma integer input remains unsupported");
+        assert_eq!(gamma_error.identifier(), Some("RunMat:gamma:InvalidInput"));
+        let gammaln_error = execute_source("out = gammaln(uint16(5));")
+            .expect_err("gammaln integer extension must be gated");
+        assert_eq!(
+            gammaln_error.identifier(),
+            Some("RunMat:compatibility:GammalnIntegerInputExtension")
+        );
+    }
+    {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+        let vars = execute_source(
+            "a = uint64([1 2]); out = flip(a, uint8(2)); values = gammaln(uint16([1 2 5]));",
+        )
+        .expect("RunMat flip and gammaln extensions");
+        assert!(vars.iter().any(|value| matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.integer_storage() == Some(&IntegerStorage::U64(vec![2, 1]))
+        )));
+        assert!(vars.iter().any(|value| matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.numeric_dtype() == NumericDType::F64
+                    && tensor.shape == vec![1, 3]
+                    && tensor.integer_storage().is_none()
+                    && tensor.materialize_f64().iter().zip([0.0, 0.0, 24.0_f64.ln()]).all(|(actual, expected)| (actual - expected).abs() < 1.0e-10)
+        )));
+        let gamma_error = execute_source("out = gamma(uint16(5));")
+            .expect_err("gamma must not be broadened by RunMat mode");
+        assert_eq!(gamma_error.identifier(), Some("RunMat:gamma:InvalidInput"));
+        let wide_error =
+            execute_source("wide = uint64(9007199254740992) + uint64(1); out = gammaln(wide);")
+                .expect_err("gammaln must reject inexact binary64 conversion");
+        assert_eq!(wide_error.identifier(), Some("RunMat:gammaln:InvalidInput"));
     }
 }
 
@@ -674,7 +760,8 @@ fn typed_complex_integer_analytic_operations_are_rejected_before_f64_coercion() 
                 "operations involving complex numbers with integer types are not supported"
             ) || err
                 .to_string()
-                .contains("expected real single or double input"),
+                .contains("expected real single or double input")
+                || err.to_string().contains("expected single or double input"),
             "{builtin} returned an unexpected error: {err}"
         );
     }
@@ -735,6 +822,7 @@ fn typed_complex_integer_relational_equality_preserves_exact_storage() {
 
 #[test]
 fn typed_complex_integer_arithmetic_reductions_are_rejected_before_f64_coercion() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for operation in ["sum(z)", "cumsum(z)", "cumprod(z)", "diff([z z])"] {
         let source =
             format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {operation};");
@@ -956,6 +1044,7 @@ fn typed_complex_integer_ndgrid_preserves_exact_components() {
 
 #[test]
 fn typed_complex_integer_meshgrid_preserves_exact_components() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "axis = complex(uint64([18446744073709551615 9223372036854775808]), uint64([5 6])); [x, y] = meshgrid(axis, [7 8]); real_x = real(x); imag_x = imag(x);",
     )
@@ -1172,6 +1261,7 @@ fn typed_complex_integer_numerical_integration_is_rejected_before_f64_coercion()
 
 #[test]
 fn typed_complex_integer_truthiness_uses_exact_paired_storage() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "z = complex(uint64([0 9223372036854775808 0]), uint64([0 0 1])); l = logical(z); n = ~z; a = all(z, 'all'); b = any(z, 'all'); c = nnz(z); [r, col, values] = find(z); p = z & z; q = z | 0; x = xor(z, 0);",
     )

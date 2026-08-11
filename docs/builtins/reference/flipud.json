@@ -19,7 +19,7 @@
       "bool"
     ],
     "broadcasting": "none",
-    "notes": "Uses the generic flip provider hook with axis=0; falls back to gather→flip→upload when unavailable."
+    "notes": "Uses the generic flip provider hook with axis=0 for floating and logical data. All eight integer classes use an exact gather→flip→owner-upload fallback."
   },
   "fusion": {
     "elementwise": false,
@@ -30,13 +30,14 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::array::shape::flipud::tests",
-    "integration": "["
+    "integration": "builtins::array::shape::flipud::tests::flipud_gpu_roundtrip"
   },
-  "description": "`flipud(A)` mirrors `A` across its horizontal axis by reversing row order (dimension 1). Inputs with fewer than two rows are unchanged, and type/device handling follows MATLAB semantics across numeric, logical, text, cell, and gpuArray inputs.",
+  "description": "`flipud(A)` mirrors `A` across its horizontal axis by reversing row order (dimension 1). Inputs with fewer than two rows are unchanged. Numeric, logical, complex, text, cell, and gpuArray paths are implemented; broader object parity remains pending.",
   "behaviors": [
     "Always reverses dimension 1 (rows) and leaves all other dimensions untouched, even for rank > 2 data.",
     "Inputs with a single row (row vectors, scalars) are returned unchanged because the first dimension is singleton.",
-    "Numeric, logical, complex, character, string, and cell arrays all retain their MATLAB types, layout, and metadata (including UTF-16 code units for char arrays).",
+    "Numeric, logical, complex, character, string, and cell arrays retain their types and full N-D shapes. All eight integer classes preserve authoritative values and class.",
+    "Struct, table, timetable, categorical, datetime, duration, and calendar-duration support is not yet implemented.",
     "gpuArray inputs execute on the device via the generic `flip` provider hook (axis = 0); when that hook is unavailable, RunMat gathers once, mirrors the data on the host, and uploads the result so the returned value is still a gpuArray.",
     "Dimensions larger than `ndims(A)` are treated as singleton axes, so `flipud` never errors when `A` has rank < 1.",
     "Behaviour matches `flip(A, 1)` exactly; `flipud` is provided for readability and compatibility with existing MATLAB code."
@@ -87,7 +88,7 @@
     },
     {
       "question": "Does `flipud` support string, character, and cell arrays?",
-      "answer": "Yes. String arrays reorder their elements, character arrays mirror each column while preserving UTF-8 data, and cell arrays reverse their rows without copying contained values."
+      "answer": "Yes. String arrays reorder their elements, character arrays preserve their character storage, and cell arrays reverse their rows without changing contained values."
     },
     {
       "question": "What happens on the GPU if there is no flip kernel?",
@@ -202,7 +203,7 @@
       "input": "B = flipud(A)"
     },
     "points": [
-      "`A` is a scalar, vector, matrix, or N-D array. It may hold any MATLAB class: numeric, logical, complex, character, string, or cell. `gpuArray` inputs are supported and stay device-resident when the provider offers a `flip` hook.",
+      "`A` is a scalar, vector, matrix, or N-D numeric, logical, complex, character, string, or cell array. `gpuArray` numeric and logical inputs stay device-resident through either a provider hook or the exact owner-upload fallback.",
       "`B` is the same size and class as `A` with its first dimension reversed: `B(i, :, ...) = A(end - i + 1, :, ...)`. All other dimensions are preserved. For arrays with more than two dimensions, higher pages are treated independently.",
       "`flipud(A)` is equivalent to `flip(A, 1)`. Use `fliplr(A)` to reverse columns instead, or `flip(A, dim)` when you need a dimension other than 1 or 2."
     ]

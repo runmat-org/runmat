@@ -55504,6 +55504,35 @@
           "when": "Internal tensor conversion or allocation failed.",
           "message": "fix: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = fix(X) with real integer X, including integer table or timetable variables",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every real integer class is already integral, so fix preserves its exact class, shape, and values without floating conversion, including inside table and timetable variables."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host integer storage is returned unchanged; resident integer storage is an exact identity operation that retains the original owning-provider handle."
+        }
       ]
     },
     {
@@ -55629,6 +55658,82 @@
           "when": "Input type is unsupported for flip.",
           "message": "flip: unsupported input type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "flip-typed-dimension",
+          "mode": "RunMatOnly",
+          "description": "flip(A,dim) with a typed-integer or logical dim is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FlipTypedDimensionExtension"
+        },
+        {
+          "id": "flip-dimension-vector",
+          "mode": "RunMatOnly",
+          "description": "flip(A,dims) with multiple or zero dimension entries is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FlipDimensionVectorExtension"
+        },
+        {
+          "id": "flip-direction-keyword",
+          "mode": "RunMatOnly",
+          "description": "flip(A,direction) is a RunMat convenience extension",
+          "error_identifier": "RunMat:compatibility:FlipDirectionExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = flip(integer_A[,dim])",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are reordered through authoritative storage without numeric conversion."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The operation only permutes elements; GPU fallback gathers and re-uploads exact integer storage to the owning provider."
+        },
+        {
+          "form": "B = flip(A,integer_dim)",
+          "inputs": [
+            {
+              "name": "dim",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Typed-integer dimensions are exact structural controls and are gated as a RunMat extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Strict compatibility rejects this extension before parsing the dimension value."
+        }
       ]
     },
     {
@@ -55670,6 +55775,35 @@
           "identifier": "RunMat:fliplr:UnsupportedInput",
           "when": "Input type is unsupported for fliplr.",
           "message": "fliplr: unsupported input type"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = fliplr(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are reordered through authoritative storage without numeric conversion."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Dimension 2 is reversed exactly; GPU fallback restores the result to the owning provider."
         }
       ]
     },
@@ -55713,6 +55847,35 @@
           "when": "Input type is unsupported for flipud.",
           "message": "flipud: unsupported input type"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = flipud(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are reordered through authoritative storage without numeric conversion."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Dimension 1 is reversed exactly; GPU fallback restores the result to the owning provider."
+        }
       ]
     },
     {
@@ -55740,104 +55903,6 @@
               "description": "Rounded output values."
             }
           ]
-        },
-        {
-          "label": "Y = floor(X, N)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric, logical, char, or complex input."
-            },
-            {
-              "name": "N",
-              "ty": "NumericScalar",
-              "arity": "Optional",
-              "default": "0",
-              "description": "Digits for decimal-place rounding."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Rounded output values."
-            }
-          ]
-        },
-        {
-          "label": "Y = floor(X, N, mode)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric, logical, char, or complex input."
-            },
-            {
-              "name": "N",
-              "ty": "NumericScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Digits argument."
-            },
-            {
-              "name": "mode",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"decimals\"",
-              "description": "Rounding mode ('decimals' or 'significant')."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Rounded output values."
-            }
-          ]
-        },
-        {
-          "label": "Y = floor(X, \"like\", prototype)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Numeric, logical, char, or complex input."
-            },
-            {
-              "name": "likeKeyword",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"like\"",
-              "description": "Output-template keyword."
-            },
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Output prototype (numeric or gpuArray)."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Rounded output values."
-            }
-          ]
         }
       ],
       "errors": [
@@ -55854,28 +55919,39 @@
           "message": "floor: invalid argument"
         },
         {
-          "code": "RM.FLOOR.INVALID_DIGITS",
-          "identifier": "RunMat:floor:InvalidDigits",
-          "when": "N is not an integer scalar or violates significant-digit constraints.",
-          "message": "floor: invalid digits argument"
-        },
-        {
-          "code": "RM.FLOOR.INVALID_MODE",
-          "identifier": "RunMat:floor:InvalidMode",
-          "when": "mode is not a supported text token.",
-          "message": "floor: invalid mode"
-        },
-        {
-          "code": "RM.FLOOR.INVALID_LIKE",
-          "identifier": "RunMat:floor:InvalidLike",
-          "when": "like/prototype arguments are invalid or unsupported.",
-          "message": "floor: invalid like prototype"
-        },
-        {
           "code": "RM.FLOOR.INTERNAL",
           "identifier": "RunMat:floor:Internal",
           "when": "Internal tensor conversion/allocation/provider interaction failed.",
           "message": "floor: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = floor(X) with real integer X, including integer table or timetable variables",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every real integer class is already integral, so floor preserves its exact class, shape, and values without floating conversion, including inside table and timetable variables."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host integer storage is returned unchanged; resident integer storage is an exact identity operation that retains the original owning-provider handle."
         }
       ]
     },
@@ -60796,42 +60872,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Real or complex numeric input."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "Y",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Gamma-function result."
-            }
-          ]
-        },
-        {
-          "label": "Y = gamma(X, \"like\", prototype)",
-          "inputs": [
-            {
-              "name": "X",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Real or complex numeric input."
-            },
-            {
-              "name": "like",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Literal string \"like\"."
-            },
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Output class/device prototype."
+              "description": "Real single or double input."
             }
           ],
           "outputs": [
@@ -60849,26 +60890,40 @@
         {
           "code": "RM.GAMMA.INVALID_ARGUMENT",
           "identifier": "RunMat:gamma:InvalidArgument",
-          "when": "Optional arguments are malformed or unsupported.",
+          "when": "The invocation has more than one input.",
           "message": "gamma: invalid argument"
         },
         {
           "code": "RM.GAMMA.INVALID_INPUT",
           "identifier": "RunMat:gamma:InvalidInput",
-          "when": "Input value or prototype cannot be converted to supported numeric forms.",
+          "when": "Input is not real single or double numeric data.",
           "message": "gamma: invalid input"
-        },
-        {
-          "code": "RM.GAMMA.GPU_UNSUPPORTED",
-          "identifier": "RunMat:gamma:GpuUnsupported",
-          "when": "GPU output via \"like\" is requested but no compatible provider is active.",
-          "message": "gamma: gpu output not supported"
         },
         {
           "code": "RM.GAMMA.INTERNAL",
           "identifier": "RunMat:gamma:Internal",
-          "when": "Internal gather/provider/tensor construction failed.",
+          "when": "Internal gather, provider, or tensor construction failed.",
           "message": "gamma: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = gamma(X) with typed-integer X",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer input is rejected before host evaluation or provider dispatch; the documented numeric surface accepts only real single and double data."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "All eight typed-integer classes are unsupported in both compatibility modes and are rejected before provider access; real single and double inputs retain their documented host and GPU behavior."
         }
       ]
     },
@@ -60917,6 +60972,55 @@
           "identifier": "RunMat:gammaln:Internal",
           "when": "Internal tensor construction or provider interaction failed.",
           "message": "gammaln: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "gammaln-integer-input",
+          "mode": "RunMatOnly",
+          "description": "gammaln with typed-integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GammalnIntegerInputExtension"
+        },
+        {
+          "id": "gammaln-logical-input",
+          "mode": "RunMatOnly",
+          "description": "gammaln with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GammalnLogicalInputExtension"
+        },
+        {
+          "id": "gammaln-character-input",
+          "mode": "RunMatOnly",
+          "description": "gammaln with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GammalnCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = gammaln(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode admits all eight integer classes only when every value is exactly representable at the binary64 log-gamma boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer admission is checked before provider access; resident values gather through authoritative integer storage and produce floating output restored to the owning provider."
         }
       ]
     },
@@ -61614,12 +61718,51 @@
           "identifier": "RunMat:ge:SizeMismatch",
           "when": "Operands are not broadcast-compatible.",
           "message": "ge: array sizes are not compatible for broadcasting"
-        },
+        }
+      ],
+      "integer_capabilities": [
         {
-          "code": "RM.GE.COMPLEX_UNSUPPORTED",
-          "identifier": "RunMat:ge:ComplexNotSupported",
-          "when": "At least one operand is complex.",
-          "message": "ge: complex numbers are not supported"
+          "form": "tf = ge(integer_A,integer_or_numeric_B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes compare exactly against integer, logical, single, and double operands."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Mixed signed/unsigned and integer/double comparisons do not convert authoritative integer storage to f64."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Compatible implicit expansion is supported; correctness-first GPU fallback restores a logical result to the owning provider."
         }
       ]
     },

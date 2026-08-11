@@ -57,6 +57,10 @@ fn direct_relational_builtins_keep_uint64_comparisons_exact() {
         a = uint64(9007199254740992) + uint64(1);
         equal_rounded = eq(a, 9007199254740992);
         greater_than_rounded = gt(a, 9007199254740992);
+        base = uint64(9007199254740992);
+        threshold = base + uint64(1);
+        values = base + uint64([0 1 2]);
+        greater_equal_exact = ge(values, threshold);
         "#,
     )
     .expect("direct relational builtins should execute");
@@ -68,6 +72,13 @@ fn direct_relational_builtins_keep_uint64_comparisons_exact() {
     assert!(
         vars.contains(&Value::Bool(true)),
         "gt must be true: {vars:?}"
+    );
+    assert!(
+        vars.iter().any(|value| matches!(
+            value,
+            Value::LogicalArray(array) if array.data == vec![0, 1, 1]
+        )),
+        "ge must preserve exact wide integer ordering: {vars:?}"
     );
 }
 
