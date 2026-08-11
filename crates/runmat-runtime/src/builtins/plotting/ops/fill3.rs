@@ -1,7 +1,11 @@
 //! MATLAB-compatible `fill3` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Value,
 };
@@ -19,6 +23,72 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "fill3";
+
+const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fill3-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fill3 with a typed-integer numeric axes alias is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Fill3IntegerAxesHandleExtension"),
+};
+
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INTEGER_AXES_EXTENSION];
+
+macro_rules! coordinate_capability {
+    ($name:literal) => {
+        [BuiltinIntegerInputCapability {
+            name: $name,
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::Documented,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "MATLAB documents every built-in integer class for this patch data role; authoritative class and shape are retained before explicit renderer conversion.",
+        }]
+    };
+}
+
+const INTEGER_X: [BuiltinIntegerInputCapability; 1] = coordinate_capability!("X");
+const INTEGER_Y: [BuiltinIntegerInputCapability; 1] = coordinate_capability!("Y");
+const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = coordinate_capability!("Z");
+const INTEGER_C: [BuiltinIntegerInputCapability; 1] = coordinate_capability!("C");
+const INTEGER_AX: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "ax",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    fill3_capability("p = fill3(integer_X, Y, Z, C, ...)", &INTEGER_X),
+    fill3_capability("p = fill3(X, integer_Y, Z, C, ...)", &INTEGER_Y),
+    fill3_capability("p = fill3(X, Y, integer_Z, C, ...)", &INTEGER_Z),
+    fill3_capability("p = fill3(X, Y, Z, integer_C, ...)", &INTEGER_C),
+    BuiltinIntegerCapabilityDescriptor {
+        form: "p = fill3(integer_ax, X, Y, Z, C, ...)",
+        inputs: &INTEGER_AX,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility extension gate runs before axes selection or input gathering.",
+    },
+];
+
+const fn fill3_capability(
+    form: &'static str,
+    inputs: &'static [BuiltinIntegerInputCapability],
+) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer source data remains authoritative on the Patch object; client rendering crosses an explicit floating-point boundary.",
+    }
+}
 
 const FILL3_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -282,12 +352,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::fill3::FILL3_DESCRIPTOR),
+    extensions(crate::builtins::plotting::fill3::EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::fill3::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::fill3"
 )]
 pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    gate_typed_integer_axes_alias(&args)?;
     let (axes_target, args) =
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_fill3_invalid_argument)?;
-    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_fill3_invalid_argument)?;
 
     let patch_arg_groups =
         parse_fill3_patch_arg_groups(args).map_err(map_fill3_invalid_argument)?;
@@ -300,6 +372,7 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             Ok(plot)
         })
         .collect::<crate::BuiltinResult<Vec<_>>>()?;
+    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_fill3_invalid_argument)?;
 
     let mut plots_opt = Some(std::mem::take(&mut plots));
     let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -374,23 +447,50 @@ fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Ve
             ));
         }
 
-        let mut group = vec![
-            Value::String("XData".into()),
-            positional[offset].clone(),
-            Value::String("YData".into()),
-            positional[offset + 1].clone(),
-            Value::String("ZData".into()),
-            positional[offset + 2].clone(),
-            Value::String("FaceColor".into()),
-            positional[offset + 3].clone(),
-        ];
+        let color_name = if is_string_like(&positional[offset + 3]) {
+            "FaceColor"
+        } else {
+            "CData"
+        };
+        let columns = super::patch::split_coordinate_group_columns(
+            &positional[offset..offset + 3],
+            &positional[offset + 3],
+            BUILTIN_NAME,
+        )?;
         offset += 4;
-
-        group.extend_from_slice(properties);
-        groups.push(group);
+        for (coordinates, color) in columns {
+            let mut group = vec![
+                Value::String("XData".into()),
+                coordinates[0].clone(),
+                Value::String("YData".into()),
+                coordinates[1].clone(),
+                Value::String("ZData".into()),
+                coordinates[2].clone(),
+                Value::String(color_name.into()),
+                color,
+            ];
+            group.extend_from_slice(properties);
+            groups.push(group);
+        }
     }
 
     Ok(groups)
+}
+
+fn gate_typed_integer_axes_alias(args: &[Value]) -> crate::BuiltinResult<()> {
+    let Some(first) = args.first() else {
+        return Ok(());
+    };
+    let typed_integer = matches!(first, Value::Int(_))
+        || matches!(first, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(first, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some());
+    if typed_integer && super::properties::resolve_plot_handle(first, BUILTIN_NAME).is_ok() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_AXES_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 fn find_trailing_property_start(args: &[Value]) -> usize {
@@ -422,6 +522,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
     use glam::Vec4;
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::figure::PlotElement;
     use runmat_plot::plots::{PatchEdgeColorMode, PatchFaceColorMode};
 
@@ -435,6 +536,45 @@ mod tests {
 
     fn tensor(rows: usize, cols: usize, data: &[f64]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("fill3 test tensor"))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("fill3 integer tensor"))
+    }
+
+    #[test]
+    fn fill3_preserves_wide_integer_coordinate_and_cdata_properties() {
+        let _guard = setup();
+        let wide = 9_007_199_254_740_993_u64;
+        let handle = fill3_builtin(vec![
+            integer_tensor(IntegerStorage::U64(vec![wide, 1, 0]), vec![1, 3]),
+            integer_tensor(IntegerStorage::U64(vec![0, 0, 1]), vec![1, 3]),
+            integer_tensor(IntegerStorage::I64(vec![0, 1, 2]), vec![1, 3]),
+            integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+        ])
+        .expect("integer fill3");
+        let Value::Num(handle) = handle else {
+            panic!("expected scalar Patch handle");
+        };
+        let Value::Tensor(x_data) =
+            get_builtin(vec![Value::Num(handle), Value::from("XData")]).unwrap()
+        else {
+            panic!("expected XData tensor");
+        };
+        assert_eq!(x_data.shape, vec![1, 3]);
+        assert_eq!(
+            x_data.integer_storage(),
+            Some(&IntegerStorage::U64(vec![wide, 1, 0]))
+        );
+        let Value::Tensor(c_data) =
+            get_builtin(vec![Value::Num(handle), Value::from("CData")]).unwrap()
+        else {
+            panic!("expected CData tensor");
+        };
+        assert_eq!(
+            c_data.integer_storage(),
+            Some(&IntegerStorage::U16(vec![1]))
+        );
     }
 
     #[test]
@@ -495,6 +635,145 @@ mod tests {
         };
         assert_eq!(second.vertices()[0].z, 1.0);
         assert_eq!(second.face_color(), Vec4::new(0.0, 0.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn fill3_matrix_columns_create_distinct_patches_with_exact_properties() {
+        let _guard = setup();
+        let wide = 9_007_199_254_740_993_u64;
+        let handles = fill3_builtin(vec![
+            integer_tensor(
+                IntegerStorage::U64(vec![wide, 2, 3, wide + 2, 5, 6]),
+                vec![3, 2],
+            ),
+            integer_tensor(IntegerStorage::I16(vec![0, 0, 1, 2, 2, 3]), vec![3, 2]),
+            integer_tensor(IntegerStorage::I32(vec![7, 8, 9, 10, 11, 12]), vec![3, 2]),
+            integer_tensor(
+                IntegerStorage::U16(vec![10, 20, 30, 40, 50, 60]),
+                vec![3, 2],
+            ),
+        ])
+        .expect("matrix fill3");
+        let Value::Tensor(handles) = handles else {
+            panic!("expected patch handle vector");
+        };
+        let handles = handles.materialize_f64();
+        assert_eq!(handles.len(), 2);
+        assert_eq!(clone_figure(current_figure_handle()).unwrap().len(), 2);
+
+        for (index, expected) in [
+            [
+                IntegerStorage::U64(vec![wide, 2, 3]),
+                IntegerStorage::I16(vec![0, 0, 1]),
+                IntegerStorage::I32(vec![7, 8, 9]),
+                IntegerStorage::U16(vec![10, 20, 30]),
+            ],
+            [
+                IntegerStorage::U64(vec![wide + 2, 5, 6]),
+                IntegerStorage::I16(vec![2, 2, 3]),
+                IntegerStorage::I32(vec![10, 11, 12]),
+                IntegerStorage::U16(vec![40, 50, 60]),
+            ],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for (property, expected) in ["XData", "YData", "ZData", "CData"]
+                .into_iter()
+                .zip(expected)
+            {
+                let Value::Tensor(data) =
+                    get_builtin(vec![Value::Num(handles[index]), Value::from(property)])
+                        .expect("exact Patch property")
+                else {
+                    panic!("expected typed {property}");
+                };
+                assert_eq!(data.shape, vec![3, 1]);
+                assert_eq!(data.integer_storage(), Some(&expected));
+            }
+        }
+    }
+
+    #[test]
+    fn fill3_accepts_equal_length_vectors_with_different_orientations() {
+        let _guard = setup();
+        let wide = 9_007_199_254_740_993_u64;
+        let handle = fill3_builtin(vec![
+            integer_tensor(IntegerStorage::U64(vec![wide, 2, 3]), vec![1, 3]),
+            integer_tensor(IntegerStorage::I16(vec![0, 0, 1]), vec![3, 1]),
+            integer_tensor(IntegerStorage::I32(vec![7, 8, 9]), vec![1, 3]),
+            integer_tensor(IntegerStorage::U16(vec![10]), vec![1, 1]),
+        ])
+        .expect("oriented vector fill3");
+        let Value::Num(handle) = handle else {
+            panic!("expected scalar Patch handle");
+        };
+        for (property, shape, expected) in [
+            ("XData", vec![1, 3], IntegerStorage::U64(vec![wide, 2, 3])),
+            ("YData", vec![3, 1], IntegerStorage::I16(vec![0, 0, 1])),
+            ("ZData", vec![1, 3], IntegerStorage::I32(vec![7, 8, 9])),
+        ] {
+            let Value::Tensor(data) =
+                get_builtin(vec![Value::Num(handle), Value::from(property)]).unwrap()
+            else {
+                panic!("expected typed {property}");
+            };
+            assert_eq!(data.shape, shape);
+            assert_eq!(data.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn fill3_broadcasts_shared_wide_integer_vector_across_matrix_columns() {
+        let _guard = setup();
+        let wide = 9_007_199_254_740_993_u64;
+        let handles = fill3_builtin(vec![
+            integer_tensor(IntegerStorage::U64(vec![wide, 2, 3]), vec![3, 1]),
+            integer_tensor(IntegerStorage::I16(vec![0, 0, 1, 2, 2, 3]), vec![3, 2]),
+            integer_tensor(IntegerStorage::I32(vec![7, 8, 9, 10, 11, 12]), vec![3, 2]),
+            integer_tensor(
+                IntegerStorage::U16(vec![10, 20, 30, 40, 50, 60]),
+                vec![3, 2],
+            ),
+        ])
+        .expect("shared-vector matrix fill3");
+        let Value::Tensor(handles) = handles else {
+            panic!("expected Patch handle vector");
+        };
+        let handles = handles.materialize_f64();
+        assert_eq!(handles.len(), 2);
+        for (index, expected_y, expected_z) in [
+            (
+                0,
+                IntegerStorage::I16(vec![0, 0, 1]),
+                IntegerStorage::I32(vec![7, 8, 9]),
+            ),
+            (
+                1,
+                IntegerStorage::I16(vec![2, 2, 3]),
+                IntegerStorage::I32(vec![10, 11, 12]),
+            ),
+        ] {
+            let Value::Tensor(x_data) =
+                get_builtin(vec![Value::Num(handles[index]), Value::from("XData")]).unwrap()
+            else {
+                panic!("expected XData");
+            };
+            assert_eq!(x_data.shape, vec![3, 1]);
+            assert_eq!(
+                x_data.integer_storage(),
+                Some(&IntegerStorage::U64(vec![wide, 2, 3]))
+            );
+            for (property, expected) in [("YData", expected_y), ("ZData", expected_z)] {
+                let Value::Tensor(data) =
+                    get_builtin(vec![Value::Num(handles[index]), Value::from(property)]).unwrap()
+                else {
+                    panic!("expected {property}");
+                };
+                assert_eq!(data.shape, vec![3, 1]);
+                assert_eq!(data.integer_storage(), Some(&expected));
+            }
+        }
     }
 
     #[test]

@@ -18,6 +18,13 @@ pub const DYNAMICPROPS_CLASS: &str = "dynamicprops";
 pub const DYNAMIC_PROPERTY_CLASS: &str = "matlab.metadata.DynamicProperty";
 pub const STATIC_PROPERTY_METADATA_CLASS: &str = "matlab.metadata.Property";
 
+pub const FINDPROP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "findprop accepts a scalar object or handle object and a textual property name. All eight integer classes, logical and complex values, and resident numeric handles are invalid targets and are never converted into object metadata.",
+    };
+
 const TARGET_FIELD: &str = "__runmat_dynamic_property_target__";
 const VALID_FIELD: &str = "__runmat_dynamic_property_valid__";
 
@@ -669,6 +676,7 @@ async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<
     category = "introspection",
     summary = "Find class-defined or dynamic property metadata on an object.",
     keywords = "dynamicprops,findprop,property metadata,meta.property,meta.DynamicProperty",
+    integer_audit(crate::builtins::introspection::dynamicprops::FINDPROP_INTEGER_AUDIT),
     descriptor(crate::builtins::introspection::dynamicprops::FINDPROP_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::dynamicprops"
 )]
@@ -1020,5 +1028,35 @@ mod tests {
             };
             assert!(!metadata_obj.properties.contains_key(TARGET_FIELD));
         });
+    }
+
+    #[test]
+    fn findprop_integer_audit_rejects_every_integer_target_class() {
+        assert_eq!(
+            FINDPROP_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        for target in [
+            Value::Int(runmat_builtins::IntValue::I8(1)),
+            Value::Int(runmat_builtins::IntValue::I16(1)),
+            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_builtins::IntValue::I64(1)),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_builtins::IntValue::U16(1)),
+            Value::Int(runmat_builtins::IntValue::U32(1)),
+            Value::Int(runmat_builtins::IntValue::U64(1)),
+        ] {
+            let error = findprop_builtin(target, "Name".into())
+                .expect_err("integer is not an object target");
+            assert_eq!(error.identifier(), DYNAMIC_ERROR_INVALID_TARGET.identifier);
+        }
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = findprop_builtin(resident, "Name".into())
+            .expect_err("resident numeric value is not an object target");
+        assert_eq!(error.identifier(), DYNAMIC_ERROR_INVALID_TARGET.identifier);
     }
 }

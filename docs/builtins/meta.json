@@ -26066,6 +26066,167 @@
       ]
     },
     {
+      "name": "createArray",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "X = createArray(sz1, ..., szN, classname?, Like=prototype?, FillValue=value?)",
+          "inputs": [
+            {
+              "name": "arguments",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Dimensions, optional class name, and Like/FillValue name-value arguments."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Constant-valued output array."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.CREATE_ARRAY.NON_SCALAR_VALUE",
+          "identifier": null,
+          "when": "The fill value is not scalar.",
+          "message": "createArray: FillValue must be a scalar"
+        },
+        {
+          "code": "RM.CREATE_ARRAY.INVALID_FILL_VALUE_TYPE",
+          "identifier": null,
+          "when": "The fill value type is unsupported.",
+          "message": "createArray: unsupported FillValue type"
+        },
+        {
+          "code": "RM.CREATE_ARRAY.LIKE_EXPECTED_PROTOTYPE",
+          "identifier": null,
+          "when": "The 'like' keyword is provided without a prototype argument.",
+          "message": "createArray: Like requires a prototype"
+        },
+        {
+          "code": "RM.CREATE_ARRAY.MULTIPLE_LIKE",
+          "identifier": null,
+          "when": "The 'like' keyword is provided multiple times.",
+          "message": "createArray: Like may be specified only once"
+        },
+        {
+          "code": "RM.CREATE_ARRAY.CLASS_CONFLICT",
+          "identifier": null,
+          "when": "A class keyword and a 'like' prototype are both provided.",
+          "message": "createArray: classname and Like cannot be combined"
+        },
+        {
+          "code": "RM.CREATE_ARRAY.UNSUPPORTED_CLASS",
+          "identifier": null,
+          "when": "An unsupported output class is requested.",
+          "message": "createArray: unsupported class"
+        },
+        {
+          "code": "RM.CREATE_ARRAY.UNRECOGNIZED_OPTION",
+          "identifier": null,
+          "when": "A trailing option string is not recognized.",
+          "message": "createArray: unrecognized option"
+        },
+        {
+          "code": "RM.CREATE_ARRAY.INVALID_DIMS",
+          "identifier": null,
+          "when": "Dimension arguments fail numeric/shape parsing.",
+          "message": "createArray: dimensions must be integer values"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = createArray(integer_dimensions, ...)",
+          "inputs": [
+            {
+              "name": "dimensions",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every built-in integer class is accepted exactly as a structural size; negative dimensions normalize to zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Dimensions are consumed exactly before allocation."
+        },
+        {
+          "form": "X = createArray(..., FillValue=integer_value)",
+          "inputs": [
+            {
+              "name": "FillValue",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer FillValue preserves its class unless classname or Like requests documented assignment conversion."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "GpuRestricted",
+          "overload": "FunctionSpecific",
+          "notes": "Without an override, output preserves FillValue class; documented assignment conversion applies for classname or Like. Real integer GPU FillValue forms preserve native storage, but typed complex integer GPU storage is not supported."
+        },
+        {
+          "form": "X = createArray(..., Like=integer_prototype)",
+          "inputs": [
+            {
+              "name": "Like",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer prototype preserves exact class and device residency."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GpuRestricted",
+          "overload": "FunctionSpecific",
+          "notes": "Real integer GPU prototypes preserve exact class and residency. Typed complex integer GPU prototypes require device storage that is not currently supported."
+        }
+      ]
+    },
+    {
       "name": "cross",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -51385,264 +51546,151 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "A = fill(value)",
+          "label": "p = fill(X, Y, C, ..., Name, Value)",
           "inputs": [
             {
-              "name": "value",
+              "name": "arguments",
               "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Scalar fill value."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Constant-valued output array."
-            }
-          ]
-        },
-        {
-          "label": "A = fill(value, n)",
-          "inputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Scalar fill value."
-            },
-            {
-              "name": "n",
-              "ty": "SizeArg",
-              "arity": "Optional",
-              "default": null,
-              "description": "Square size."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Constant-valued output array."
-            }
-          ]
-        },
-        {
-          "label": "A = fill(value, size_vector)",
-          "inputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Scalar fill value."
-            },
-            {
-              "name": "size_vector",
-              "ty": "SizeArg",
-              "arity": "Optional",
-              "default": null,
-              "description": "Size vector defining output dimensions."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Constant-valued output array."
-            }
-          ]
-        },
-        {
-          "label": "A = fill(value, m, n, ...)",
-          "inputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Scalar fill value."
-            },
-            {
-              "name": "dims",
-              "ty": "SizeArg",
               "arity": "Variadic",
               "default": null,
-              "description": "Dimension sizes."
+              "description": "One or more X,Y,C groups followed by Patch name/value properties."
             }
           ],
           "outputs": [
             {
-              "name": "A",
+              "name": "p",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Constant-valued output array."
-            }
-          ]
-        },
-        {
-          "label": "A = fill(value, prototype)",
-          "inputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Scalar fill value."
-            },
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype value when no numeric dimension arguments are provided."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Constant-valued output array."
-            }
-          ]
-        },
-        {
-          "label": "A = fill(value, ..., typename)",
-          "inputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Scalar fill value."
-            },
-            {
-              "name": "dims",
-              "ty": "SizeArg",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Dimension sizes."
-            },
-            {
-              "name": "typename",
-              "ty": "StringScalar",
-              "arity": "Optional",
-              "default": "\"double\"",
-              "description": "Class override ('double'|'logical'|'complex'|'int8'|'int16'|'int32'|'int64'|'uint8'|'uint16'|'uint32'|'uint64')."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Constant-valued output array."
-            }
-          ]
-        },
-        {
-          "label": "A = fill(value, ..., \"like\", prototype)",
-          "inputs": [
-            {
-              "name": "value",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Scalar fill value."
-            },
-            {
-              "name": "dims",
-              "ty": "SizeArg",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Dimension sizes."
-            },
-            {
-              "name": "like_kw",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": "\"like\"",
-              "description": "Like keyword."
-            },
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype array used for class/device."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "Constant-valued output array."
+              "description": "Patch handle or row vector of patch handles."
             }
           ]
         }
       ],
       "errors": [
         {
-          "code": "RM.FILL.NON_SCALAR_VALUE",
-          "identifier": null,
-          "when": "The fill value is not scalar.",
-          "message": "fill: fill value must be a scalar"
+          "code": "RM.FILL.INVALID_ARGUMENT",
+          "identifier": "RunMat:fill:InvalidArgument",
+          "when": "Coordinate/color groups, axes targeting, or properties are invalid.",
+          "message": "fill: invalid argument"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fill-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "fill with a typed-integer numeric axes alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FillIntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = fill(integer_X, Y, C, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents every built-in integer class; exact class and shape remain authoritative on the Patch object before renderer conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Patch data remains authoritative; client rendering is the explicit floating-point boundary."
         },
         {
-          "code": "RM.FILL.INVALID_FILL_VALUE_TYPE",
-          "identifier": null,
-          "when": "The fill value type is unsupported.",
-          "message": "fill: fill value must be numeric, logical, or complex scalar"
+          "form": "p = fill(X, integer_Y, C, ...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents every built-in integer class; exact class and shape remain authoritative on the Patch object before renderer conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Patch data remains authoritative; client rendering is the explicit floating-point boundary."
         },
         {
-          "code": "RM.FILL.LIKE_EXPECTED_PROTOTYPE",
-          "identifier": null,
-          "when": "The 'like' keyword is provided without a prototype argument.",
-          "message": "fill: expected prototype after 'like'"
+          "form": "p = fill(X, Y, integer_C, ...)",
+          "inputs": [
+            {
+              "name": "C",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents every built-in integer class; exact class and shape remain authoritative on the Patch object before renderer conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Patch data remains authoritative; client rendering is the explicit floating-point boundary."
         },
         {
-          "code": "RM.FILL.MULTIPLE_LIKE",
-          "identifier": null,
-          "when": "The 'like' keyword is provided multiple times.",
-          "message": "fill: multiple 'like' specifications are not supported"
-        },
-        {
-          "code": "RM.FILL.CLASS_CONFLICT",
-          "identifier": null,
-          "when": "A class keyword and a 'like' prototype are both provided.",
-          "message": "fill: cannot combine 'like' with class specifiers"
-        },
-        {
-          "code": "RM.FILL.UNSUPPORTED_CLASS",
-          "identifier": null,
-          "when": "An unsupported output class is requested.",
-          "message": "fill: single precision output is not implemented yet"
-        },
-        {
-          "code": "RM.FILL.UNRECOGNIZED_OPTION",
-          "identifier": null,
-          "when": "A trailing option string is not recognized.",
-          "message": "fill: unrecognised option"
-        },
-        {
-          "code": "RM.FILL.INVALID_DIMS",
-          "identifier": null,
-          "when": "Dimension arguments fail numeric/shape parsing.",
-          "message": "fill: dimension arguments must be numeric and nonnegative"
+          "form": "p = fill(integer_ax, X, Y, C, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The compatibility extension gate runs before axes selection or input gathering."
         }
       ]
     },
@@ -51868,6 +51916,151 @@
           "when": "Internal patch construction or rendering fails unexpectedly.",
           "message": "fill3: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fill3-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "fill3 with a typed-integer numeric axes alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Fill3IntegerAxesHandleExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "p = fill3(integer_X, Y, Z, C, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents every built-in integer class for this patch data role; authoritative class and shape are retained before explicit renderer conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer source data remains authoritative on the Patch object; client rendering crosses an explicit floating-point boundary."
+        },
+        {
+          "form": "p = fill3(X, integer_Y, Z, C, ...)",
+          "inputs": [
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents every built-in integer class for this patch data role; authoritative class and shape are retained before explicit renderer conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer source data remains authoritative on the Patch object; client rendering crosses an explicit floating-point boundary."
+        },
+        {
+          "form": "p = fill3(X, Y, integer_Z, C, ...)",
+          "inputs": [
+            {
+              "name": "Z",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents every built-in integer class for this patch data role; authoritative class and shape are retained before explicit renderer conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer source data remains authoritative on the Patch object; client rendering crosses an explicit floating-point boundary."
+        },
+        {
+          "form": "p = fill3(X, Y, Z, integer_C, ...)",
+          "inputs": [
+            {
+              "name": "C",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents every built-in integer class for this patch data role; authoritative class and shape are retained before explicit renderer conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Integer source data remains authoritative on the Patch object; client rendering crosses an explicit floating-point boundary."
+        },
+        {
+          "form": "p = fill3(integer_ax, X, Y, Z, C, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The compatibility extension gate runs before axes selection or input gathering."
+        }
       ]
     },
     {
@@ -51929,6 +52122,76 @@
           "identifier": "RunMat:missing:InternalError",
           "when": "Internal shape or table materialization fails.",
           "message": "missing-value builtin: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fillmissing-integer-data",
+          "mode": "RunMatOnly",
+          "description": "fillmissing with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FillmissingIntegerDataExtension"
+        },
+        {
+          "id": "fillmissing-aggregate-integer-data",
+          "mode": "RunMatOnly",
+          "description": "fillmissing with integer data nested in a table or cell array is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FillmissingAggregateIntegerDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[F, TF] = fillmissing(integer_A, method, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer arrays have no standard missing value. RunMat mode preserves authoritative same-class storage and returns an all-false filled-entry mask."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The RunMat-only integer form is an exact no-op because integer classes have no default missing representation; TF is logical false with the input shape."
+        },
+        {
+          "form": "[F, TF] = fillmissing(table_or_cell_with_integer_data, method, ...)",
+          "inputs": [
+            {
+              "name": "table variables or nested cell contents",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The aggregate is recursively classified before any resident child can be gathered; integer children retain exact same-class storage and contribute false entries to the filled mask."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Nested table/cell integer data is a separately declared RunMat-only aggregate extension and is classified recursively before provider access."
         }
       ]
     },
@@ -52165,6 +52428,115 @@
           "identifier": "RunMat:outliers:TooManyOutputs",
           "when": "More outputs are requested than the builtin can return.",
           "message": "outlier builtin: too many outputs"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "filloutliers-integer-data",
+          "mode": "RunMatOnly",
+          "description": "filloutliers with typed-integer input data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FilloutliersIntegerDataExtension"
+        },
+        {
+          "id": "filloutliers-integer-fill-scalar",
+          "mode": "RunMatOnly",
+          "description": "filloutliers with a typed-integer constant fill scalar is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FilloutliersIntegerFillExtension"
+        },
+        {
+          "id": "filloutliers-numeric-outlier-locations",
+          "mode": "RunMatOnly",
+          "description": "filloutliers with numeric rather than logical OutlierLocations is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FilloutliersNumericMaskExtension"
+        },
+        {
+          "id": "filloutliers-resident-input",
+          "mode": "RunMatOnly",
+          "description": "filloutliers with a direct provider-resident input or argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FilloutliersResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[B, TF, L, U, C] = filloutliers(integer_A, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight classes are admitted only when the exact input span is at most 2^53. Wider spans are rejected before statistics rather than collapsing distinct observations at the double boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "For admitted inputs, exact anchored integer differences are representable in binary64. Inputs spanning more than 2^53 are rejected; B, L, U, and C deliberately cross to double, while TF is logical."
+        },
+        {
+          "form": "filloutliers(A, integer_fill_scalar, ...)",
+          "inputs": [
+            {
+              "name": "fillmethod",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "A typed-integer scalar constant is decoded from authoritative storage and converted once to the output computation domain."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveNondoubleInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The typed-integer constant-fill role is independently mode-gated."
+        },
+        {
+          "form": "filloutliers(A, ..., OutlierLocations=integer_mask)",
+          "inputs": [
+            {
+              "name": "OutlierLocations",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Documented masks are logical; numeric masks are accepted only in RunMat mode and must exactly match A's shape."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Zero is false and nonzero is true after the independently gated numeric-mask extension is admitted."
         }
       ]
     },
@@ -53193,6 +53565,130 @@
           "when": "Internal tensor conversion/materialization fails while building outputs.",
           "message": "find: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "find-direction-only",
+          "mode": "RunMatOnly",
+          "description": "find(X,direction) is a RunMat convenience extension",
+          "error_identifier": "RunMat:compatibility:FindDirectionOnlyExtension"
+        },
+        {
+          "id": "find-integer-sparse-input",
+          "mode": "RunMatOnly",
+          "description": "find on typed-integer sparse storage is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FindIntegerSparseExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "k = find(integer_X,___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes use authoritative storage for the exact nonzero predicate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Linear indices are exact binary64 indices; resident integer inputs gather without an f64 value mirror."
+        },
+        {
+          "form": "[row,col,v] = find(integer_X,___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes use authoritative storage for the exact nonzero predicate."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "row and col are exact doubles; v preserves the authoritative integer class and value."
+        },
+        {
+          "form": "find(X,integer_K[,direction])",
+          "inputs": [
+            {
+              "name": "K",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "K is an exact positive scalar count; zero, negative, and out-of-platform-range values reject."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The positive count is converted exactly to a platform index before any input traversal."
+        },
+        {
+          "form": "[k|row,col,v] = find(integer_sparse_X,___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB sparse values are single, double, or logical; typed-integer sparse storage is RunMat-only."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Strict compatibility gates this RunMat-only form before CSC traversal; v preserves integer storage."
+        }
       ]
     },
     {
@@ -53236,7 +53732,11 @@
           "when": "Inputs are not a supported htmlTree or extractHTMLText form.",
           "message": "HTML Text Analytics helper received invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "findElement accepts a scalar htmlTree object and a textual CSS selector. All eight integer classes, logical and complex values, and resident numeric handles reject without numeric-to-object conversion or provider access."
+      }
     },
     {
       "name": "findgroups",
@@ -53283,6 +53783,115 @@
           "identifier": "RunMat:grouping:TooLarge",
           "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
           "message": "grouping builtin: output is too large"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "findgroups-resident-input",
+          "mode": "RunMatOnly",
+          "description": "findgroups on GPU-resident grouping data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FindgroupsResidentInputExtension"
+        },
+        {
+          "id": "findgroups-matrix-as-columns",
+          "mode": "RunMatOnly",
+          "description": "findgroups matrix inputs interpreted as grouping columns are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FindgroupsMatrixColumnsExtension"
+        },
+        {
+          "id": "findgroups-table-selector",
+          "mode": "RunMatOnly",
+          "description": "findgroups(T,selector) is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FindgroupsTableSelectorExtension"
+        },
+        {
+          "id": "findgroups-timetable-input",
+          "mode": "RunMatOnly",
+          "description": "findgroups on timetable input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FindgroupsTimetableExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[G,ID] = findgroups(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Every integer class is a documented numeric grouping vector and is compared from authoritative storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "G is double with A's orientation; ID preserves A's integer class and exact values, including values above flintmax."
+        },
+        {
+          "form": "[G,ID1,...,IDN] = findgroups(integer_A1,...,integer_AN)",
+          "inputs": [
+            {
+              "name": "A1,...,AN",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Each integer grouping role retains its own class while exact tuples are sorted lexicographically."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "G is double and each ID output preserves the corresponding input class."
+        },
+        {
+          "form": "[G,TID] = findgroups(T_with_integer_variables)",
+          "inputs": [
+            {
+              "name": "integer table variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer table variables are exact grouping roles and retain their class in TID."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "G is double; TID preserves variable names, integer classes, and exact group identifiers."
         }
       ]
     },
@@ -53361,6 +53970,115 @@
           "when": "Arguments, search roots, depth, operators, property names, or regexp patterns are malformed.",
           "message": "findobj: invalid argument"
         }
+      ],
+      "extensions": [
+        {
+          "id": "findobj-integer-root-aliases",
+          "mode": "RunMatOnly",
+          "description": "findobj with typed-integer numeric graphics-handle aliases is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FindobjIntegerRootExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = findobj(integer_objhandles, ...)",
+          "inputs": [
+            {
+              "name": "objhandles",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat mode accepts exactly representable nonnegative host integers as aliases for its numeric graphics-handle registry; MATLAB accepts graphics objects."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "A separately gated RunMat alias validates exact representability before searching the host graphics hierarchy; output follows RunMat's current double handle representation."
+        },
+        {
+          "form": "h = findobj(objhandles, '-depth', integer_d, ...)",
+          "inputs": [
+            {
+              "name": "d",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonnegative integer depth is read exactly from any built-in integer scalar; positive double Inf retains its documented unlimited-depth meaning."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Depth remains exact through nonnegative platform-bound validation and controls traversal without a floating computation boundary."
+        },
+        {
+          "form": "h = findobj(..., prop, integer_value, ...)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Property values may use any legal property class; integer values compare from authoritative storage with class-sensitive exact equality."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer scalar and array property values compare class-sensitively from authoritative storage, including values above flintmax; no numeric coercion is performed."
+        },
+        {
+          "form": "findobj(resident_integer, ...)",
+          "inputs": [
+            {
+              "name": "resident root, depth, or property value",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Graphics search is host metadata work; resident numeric buffers are not graphics objects or metadata values and are never gathered."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Host graphics metadata search rejects resident numeric values without provider lookup, transfer, or kernel dispatch."
+        }
       ]
     },
     {
@@ -53428,7 +54146,11 @@
           "when": "A metadata property assignment uses an unsupported property name or value.",
           "message": "dynamicprops: unsupported dynamic property metadata assignment"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "findprop accepts a scalar object or handle object and a textual property name. All eight integer classes, logical and complex values, and resident numeric handles are invalid targets and are never converted into object metadata."
+      }
     },
     {
       "name": "fir1",

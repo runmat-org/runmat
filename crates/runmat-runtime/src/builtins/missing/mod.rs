@@ -196,6 +196,63 @@ pub const ANYMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overload: BuiltinIntegerOverloadKind::Multiple,
         notes: "Integer scalars and arrays return logical false because integer classes have no default missing representation; resident inputs gather without floating conversion.",
     }];
+
+const FILLMISSING_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fillmissing-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fillmissing with typed-integer input data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FillmissingIntegerDataExtension"),
+};
+const FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fillmissing-aggregate-integer-data",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "fillmissing with integer data nested in a table or cell array is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FillmissingAggregateIntegerDataExtension"),
+    };
+pub const FILLMISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    FILLMISSING_INTEGER_DATA_EXTENSION,
+    FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION,
+];
+const FILLMISSING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer arrays have no standard missing value. RunMat mode preserves authoritative same-class storage and returns an all-false filled-entry mask.",
+    }];
+const FILLMISSING_AGGREGATE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "table variables or nested cell contents",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The aggregate is recursively classified before any resident child can be gathered; integer children retain exact same-class storage and contribute false entries to the filled mask.",
+    }];
+pub const FILLMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[F, TF] = fillmissing(integer_A, method, ...)",
+        inputs: &FILLMISSING_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The RunMat-only integer form is an exact no-op because integer classes have no default missing representation; TF is logical false with the input shape.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[F, TF] = fillmissing(table_or_cell_with_integer_data, method, ...)",
+        inputs: &FILLMISSING_AGGREGATE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Nested table/cell integer data is a separately declared RunMat-only aggregate extension and is classified recursively before provider access.",
+    },
+];
 descriptor!(
     FILLMISSING_DESCRIPTOR,
     FILLMISSING_SIGNATURES,
@@ -583,9 +640,22 @@ async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     accel = "cpu",
     type_resolver(any_type),
     descriptor(crate::builtins::missing::FILLMISSING_DESCRIPTOR),
+    extensions(crate::builtins::missing::FILLMISSING_EXTENSIONS),
+    integer_capabilities(crate::builtins::missing::FILLMISSING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::missing"
 )]
 async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if is_real_typed_integer_value(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FILLMISSING_INTEGER_DATA_EXTENSION,
+            "fillmissing",
+        )?;
+    } else if fillmissing_aggregate_contains_integer(&value)? {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION,
+            "fillmissing",
+        )?;
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid_argument(format!("fillmissing: failed to gather input: {err}")))?;
@@ -599,6 +669,33 @@ async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Va
             vec![result, Value::LogicalArray(mask)],
         )),
         None => Ok(result),
+    }
+}
+
+fn fillmissing_aggregate_contains_integer(value: &Value) -> BuiltinResult<bool> {
+    match value {
+        Value::Cell(cell) => {
+            for child in &cell.data {
+                if is_real_typed_integer_value(child)
+                    || fillmissing_aggregate_contains_integer(child)?
+                {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        Value::Object(object) if is_tabular_object(object) => {
+            let variables = table_variables(object)?;
+            for child in variables.fields.values() {
+                if is_real_typed_integer_value(child)
+                    || fillmissing_aggregate_contains_integer(child)?
+                {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -1686,6 +1783,12 @@ fn fill_missing_value(value: Value, options: &FillOptions) -> BuiltinResult<(Val
         Value::StringArray(array) => fill_missing_string_array(array, options),
         Value::Object(object) if is_tabular_object(&object) => fill_missing_table(object, options),
         Value::Cell(cell) => fill_missing_cell(cell, options),
+        Value::ComplexTensor(_) => Err(unsupported_type(
+            "fillmissing: complex arrays are not supported yet",
+        )),
+        Value::SparseTensor(_) => Err(unsupported_type(
+            "fillmissing: sparse arrays are not supported yet",
+        )),
         other => {
             let missing = any_missing(&other)?;
             let mask =
@@ -1757,7 +1860,7 @@ fn fill_missing_tensor(
     let dtype = tensor.numeric_dtype();
     let shape = tensor.shape.clone();
     let mut data = tensor_utils::tensor_into_values_f64(tensor);
-    let mask: Vec<u8> = data.iter().map(|value| u8::from(value.is_nan())).collect();
+    let mut mask: Vec<u8> = data.iter().map(|value| u8::from(value.is_nan())).collect();
     match &options.method {
         FillMethod::Constant(fill) => {
             let fill = numeric_scalar(fill, "fillmissing constant")?;
@@ -1776,6 +1879,11 @@ fn fill_missing_tensor(
         FillMethod::Nearest => fill_nearest_numeric(&mut data, rows, cols, dim),
         FillMethod::Linear => fill_linear_numeric(&mut data, rows, cols, dim),
     }
+    for (flag, value) in mask.iter_mut().zip(&data) {
+        if value.is_nan() {
+            *flag = 0;
+        }
+    }
     Ok((
         Value::Tensor(Tensor::new_with_dtype(data, shape, dtype).map_err(internal_error)?),
         LogicalArray::new(mask, vec![rows, cols]).map_err(internal_error)?,
@@ -1793,7 +1901,7 @@ fn fill_missing_string_array(
         .unwrap_or_else(|| first_nonsingleton_dim(rows, cols));
     validate_matrix_dim(dim, "fillmissing")?;
     let mut data = array.data.clone();
-    let mask: Vec<u8> = data
+    let mut mask: Vec<u8> = data
         .iter()
         .map(|text| u8::from(is_missing_text(text)))
         .collect();
@@ -1814,6 +1922,11 @@ fn fill_missing_string_array(
             return Err(unsupported_type(
                 "fillmissing: string arrays support constant, previous, next, and nearest",
             ))
+        }
+    }
+    for (flag, text) in mask.iter_mut().zip(&data) {
+        if is_missing_text(text) {
+            *flag = 0;
         }
     }
     Ok((
@@ -1843,6 +1956,11 @@ fn fill_missing_cell(
             return Err(unsupported_type(
                 "fillmissing: cell arrays currently support the constant method",
             ))
+        }
+    }
+    for (flag, item) in mask.iter_mut().zip(&data) {
+        if any_missing(item)? {
+            *flag = 0;
         }
     }
     Ok((
@@ -2887,12 +3005,163 @@ mod tests {
     }
 
     #[test]
+    fn fillmissing_integer_data_is_gated_and_all_classes_are_exact_noops() {
+        let storages = [
+            IntegerStorage::I8(vec![-1, 2]),
+            IntegerStorage::I16(vec![-1, 2]),
+            IntegerStorage::I32(vec![-1, 2]),
+            IntegerStorage::I64(vec![-1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+        ];
+        for storage in storages {
+            let input = Value::Tensor(Tensor::new_integer(storage.clone(), vec![2, 1]).unwrap());
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(fillmissing_builtin(
+                    input.clone(),
+                    vec![Value::from("constant"), Value::Num(0.0)],
+                ))
+                .expect_err("strict integer fillmissing");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:FillmissingIntegerDataExtension")
+                );
+            }
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let output = block_on(fillmissing_builtin(
+                input,
+                vec![Value::from("constant"), Value::Num(0.0)],
+            ))
+            .expect("RunMat integer fillmissing");
+            let Value::OutputList(values) = output else {
+                panic!("expected output list");
+            };
+            assert!(
+                matches!(&values[0], Value::Tensor(tensor) if tensor.integer_storage() == Some(&storage))
+            );
+            assert!(
+                matches!(&values[1], Value::LogicalArray(mask) if mask.shape == vec![2, 1] && mask.data == vec![0, 0])
+            );
+        }
+    }
+
+    #[test]
+    fn fillmissing_integer_table_variable_and_nested_cell_are_aggregate_gated() {
+        let integer = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap(),
+        );
+        let table = crate::builtins::table::table_from_columns(
+            vec!["I".to_string()],
+            vec![integer.clone()],
+        )
+        .unwrap();
+        let nested = Value::Cell(
+            CellArray::new(
+                vec![Value::Cell(CellArray::new(vec![integer], 1, 1).unwrap())],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for aggregate in [table, nested] {
+            let error = block_on(fillmissing_builtin(
+                aggregate,
+                vec![Value::from("constant"), Value::Num(0.0)],
+            ))
+            .expect_err("strict aggregate integer fillmissing");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:FillmissingAggregateIntegerDataExtension")
+            );
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn fillmissing_nested_resident_integer_is_gated_before_provider_access() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[u64::MAX]),
+                    shape: &[1, 1],
+                })
+                .expect("integer upload");
+            let nested = Value::Cell(
+                CellArray::new(
+                    vec![Value::Cell(
+                        CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).unwrap(),
+                    )],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            );
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(fillmissing_builtin(
+                nested,
+                vec![Value::from("constant"), Value::Num(0.0)],
+            ))
+            .expect_err("strict nested resident integer fillmissing");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:FillmissingAggregateIntegerDataExtension")
+            );
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[test]
+    fn fillmissing_rejects_complex_and_sparse_arrays_instead_of_aggregate_replacement() {
+        let complex = Value::ComplexTensor(
+            runmat_builtins::ComplexTensor::new(vec![(f64::NAN, 0.0)], vec![1, 1]).unwrap(),
+        );
+        let error = fill_missing_value(
+            complex,
+            &FillOptions {
+                method: FillMethod::Constant(Value::Num(0.0)),
+                dim: None,
+            },
+        )
+        .expect_err("complex arrays are unsupported");
+        assert!(error.message().contains("complex arrays are not supported"));
+
+        let sparse = Value::SparseTensor(
+            runmat_builtins::SparseTensor::new(2, 1, vec![0, 1], vec![0], vec![f64::NAN]).unwrap(),
+        );
+        let error = fill_missing_value(
+            sparse,
+            &FillOptions {
+                method: FillMethod::Constant(Value::Num(0.0)),
+                dim: None,
+            },
+        )
+        .expect_err("sparse arrays are unsupported");
+        assert!(error.message().contains("sparse arrays are not supported"));
+    }
+
+    #[test]
     fn fillmissing_nearest_uses_original_neighbors() {
         let value = tensor(vec![1.0, f64::NAN, f64::NAN, 4.0], vec![1, 4]);
         let result = block_on(fillmissing_builtin(value, vec![Value::from("nearest")])).unwrap();
         assert!(
             matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 1.0, 4.0, 4.0])
         );
+    }
+
+    #[test]
+    fn fillmissing_mask_marks_only_entries_actually_filled() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let value = tensor(vec![f64::NAN, 2.0, 3.0], vec![3, 1]);
+        let output = block_on(fillmissing_builtin(value, vec![Value::from("previous")])).unwrap();
+        let Value::OutputList(values) = output else {
+            panic!("expected output list");
+        };
+        assert!(matches!(&values[1], Value::LogicalArray(mask) if mask.data == vec![0, 0, 0]));
     }
 
     #[test]

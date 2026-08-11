@@ -31,10 +31,12 @@
   "behaviors": [
     "`findobj()` returns the graphics root, figures, axes, and searchable descendants in traversal order.",
     "`findobj(prop, value)` returns objects whose property exactly matches `value`.",
-    "`findobj(objhandles, ...)` restricts the search to the supplied numeric graphics handle or numeric handle array. Duplicate roots can produce duplicate result handles, matching MATLAB traversal behavior.",
+    "`findobj(objhandles, ...)` restricts the search to supplied graphics roots. RunMat currently represents graphics objects with numeric double handles; typed-integer aliases for that registry are a RunMat-only extension and must be exactly representable as double.",
     "`findobj(objhandles, 'flat', ...)` searches only the supplied root handles.",
     "`findobj(objhandles, '-depth', d, ...)` limits descendant traversal to depth `d`; `Inf` means unlimited depth.",
     "Multiple property predicates are combined with implicit `-and` when no logical operator is supplied.",
+    "Typed-integer property values compare class-sensitively and exactly from authoritative storage, including values above `flintmax`; they are not rounded through double.",
+    "Provider-resident numeric buffers are not graphics objects or host property metadata and are never gathered by `findobj`.",
     "An empty result is returned as a numeric `0x0` tensor; nonempty results are returned as a numeric column vector of handles."
   ],
   "options": [
@@ -79,7 +81,7 @@
     },
     {
       "question": "Can `findobj` search only a figure or axes?",
-      "answer": "Yes. Pass a numeric figure, axes, or plot-object handle as the first argument to use that object as the search root."
+      "answer": "Yes. Pass a RunMat numeric figure, axes, or plot-object handle as the first argument to use that object as the search root. Typed-integer numeric aliases require RunMat extension mode because MATLAB's public contract uses graphics objects."
     },
     {
       "question": "Does `findobj` gather GPU arrays?",

@@ -2,7 +2,11 @@
 
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     NumericDType, Tensor, Value,
 };
@@ -12,6 +16,7 @@ use super::properties::{get_properties, map_figure_error, resolve_plot_handle, P
 use super::state::{self, FigureHandle, PlotObjectKind};
 use super::style::{parse_color_value, LineStyleParseOptions};
 use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::plotting::op_common::handles::numeric_handle_from_integer;
 use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -86,12 +91,63 @@ pub const FINDOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &FINDOBJ_ERRORS,
 };
 
+pub const FINDOBJ_INTEGER_ROOT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "findobj-integer-root-aliases",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "findobj with typed-integer numeric graphics-handle aliases is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FindobjIntegerRootExtension"),
+};
+
+pub const FINDOBJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FINDOBJ_INTEGER_ROOT_EXTENSION];
+
+const FINDOBJ_INTEGER_ROOT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "objhandles",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode accepts exactly representable nonnegative host integers as aliases for its numeric graphics-handle registry; MATLAB accepts graphics objects.",
+    }];
+const FINDOBJ_INTEGER_DEPTH: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "d",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented nonnegative integer depth is read exactly from any built-in integer scalar; positive double Inf retains its documented unlimited-depth meaning.",
+    }];
+const FINDOBJ_INTEGER_PROPERTY_VALUE: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Property values may use any legal property class; integer values compare from authoritative storage with class-sensitive exact equality.",
+    }];
+const FINDOBJ_RESIDENT_INTEGER: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "resident root, depth, or property value",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Graphics search is host metadata work; resident numeric buffers are not graphics objects or metadata values and are never gathered.",
+    }];
+
+pub const FINDOBJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(integer_objhandles, ...)", inputs: &FINDOBJ_INTEGER_ROOT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "A separately gated RunMat alias validates exact representability before searching the host graphics hierarchy; output follows RunMat's current double handle representation." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(objhandles, '-depth', integer_d, ...)", inputs: &FINDOBJ_INTEGER_DEPTH, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "Depth remains exact through nonnegative platform-bound validation and controls traversal without a floating computation boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(..., prop, integer_value, ...)", inputs: &FINDOBJ_INTEGER_PROPERTY_VALUE, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer scalar and array property values compare class-sensitively from authoritative storage, including values above flintmax; no numeric coercion is performed." },
+    BuiltinIntegerCapabilityDescriptor { form: "findobj(resident_integer, ...)", inputs: &FINDOBJ_RESIDENT_INTEGER, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Host graphics metadata search rejects resident numeric values without provider lookup, transfer, or kernel dispatch." },
+];
+
 #[runtime_builtin(
     name = "findobj",
     category = "plotting",
     summary = "Find graphics objects with matching properties.",
     keywords = "findobj,graphics,handle,property,plotting",
     suppress_auto_output = true,
+    extensions(crate::builtins::plotting::findobj::FINDOBJ_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::findobj::FINDOBJ_INTEGER_CAPABILITIES),
     type_resolver(handle_array_type),
     descriptor(crate::builtins::plotting::findobj::FINDOBJ_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::findobj"
@@ -114,6 +170,12 @@ struct FindRequest {
 
 impl FindRequest {
     fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+        if args.first().is_some_and(is_host_integer_handle_alias) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FINDOBJ_INTEGER_ROOT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
         let (roots, rest) = if let Some((roots, rest)) = split_root_handles(&args)? {
             (roots, rest)
         } else {
@@ -145,10 +207,32 @@ fn split_root_handles(args: &[Value]) -> crate::BuiltinResult<Option<(Vec<f64>, 
     };
     match first {
         Value::Num(value) => Ok(Some((vec![*value], &args[1..]))),
-        Value::Int(value) => Ok(Some((vec![value.to_f64()], &args[1..]))),
-        Value::Tensor(tensor) => Ok(Some((tensor_utils::tensor_values_f64(tensor), &args[1..]))),
+        Value::Int(value) => Ok(Some((vec![exact_numeric_root(value)?], &args[1..]))),
+        Value::Tensor(tensor) => {
+            let roots = if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .exact_values()
+                    .iter()
+                    .map(exact_numeric_root)
+                    .collect::<crate::BuiltinResult<Vec<_>>>()?
+            } else {
+                tensor_utils::tensor_values_f64(tensor)
+            };
+            Ok(Some((roots, &args[1..])))
+        }
         _ => Ok(None),
     }
+}
+
+fn exact_numeric_root(value: &runmat_builtins::IntValue) -> crate::BuiltinResult<f64> {
+    numeric_handle_from_integer(value).ok_or_else(|| {
+        invalid_argument("integer root handle must be nonnegative and exactly representable")
+    })
+}
+
+fn is_host_integer_handle_alias(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
 fn parse_depth(args: &[Value]) -> crate::BuiltinResult<(Option<usize>, &[Value])> {
@@ -481,8 +565,7 @@ fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
     match (actual, expected) {
         (Value::Num(left), Value::Num(right)) => numbers_equal(*left, *right),
         (Value::Int(left), Value::Int(right)) => left == right,
-        (Value::Num(left), Value::Int(right)) => numbers_equal(*left, right.to_f64()),
-        (Value::Int(left), Value::Num(right)) => numbers_equal(left.to_f64(), *right),
+        (Value::Num(_), Value::Int(_)) | (Value::Int(_), Value::Num(_)) => false,
         (Value::Bool(left), Value::Bool(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
         (Value::CharArray(left), Value::CharArray(right)) => left.data == right.data,
@@ -504,7 +587,31 @@ fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
 
 fn tensor_values_match(left: &Tensor, right: &Tensor) -> bool {
     let dtype = left.numeric_dtype();
-    if dtype == right.numeric_dtype() && !matches!(dtype, NumericDType::F64 | NumericDType::F32) {
+    let right_dtype = right.numeric_dtype();
+    if matches!(
+        dtype,
+        NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64
+    ) || matches!(
+        right_dtype,
+        NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::I64
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32
+            | NumericDType::U64
+    ) {
+        if dtype != right_dtype {
+            return false;
+        }
         return (0..left.len())
             .all(|index| left.numeric_value_at(index) == right.numeric_value_at(index));
     }
@@ -560,9 +667,6 @@ fn value_texts(value: Value) -> Vec<String> {
         Value::CharArray(chars) => vec![chars.data.into_iter().collect()],
         Value::StringArray(strings) => strings.data,
         Value::Cell(cell) => cell.data.into_iter().flat_map(value_texts).collect(),
-        Value::Num(value) => vec![format!("{value}")],
-        Value::Int(value) => vec![format!("{}", value.to_f64())],
-        Value::Bool(value) => vec![if value { "on" } else { "off" }.to_string()],
         _ => Vec::new(),
     }
 }
@@ -664,6 +768,57 @@ mod tests {
     }
 
     #[test]
+    fn findobj_integer_capabilities_cover_roots_depth_properties_and_residency() {
+        assert_eq!(FINDOBJ_INTEGER_CAPABILITIES.len(), 4);
+        assert_eq!(
+            FINDOBJ_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(
+            FINDOBJ_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            FINDOBJ_INTEGER_CAPABILITIES[2].computation_domain,
+            BuiltinIntegerComputationDomain::ExactInteger
+        );
+        assert_eq!(
+            FINDOBJ_INTEGER_CAPABILITIES[3].backend,
+            BuiltinIntegerBackendRule::GpuRestricted
+        );
+    }
+
+    #[test]
+    fn findobj_integer_root_aliases_are_exact_and_compatibility_gated() {
+        for storage in [
+            IntegerStorage::I8(vec![3]),
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I32(vec![3]),
+            IntegerStorage::I64(vec![3]),
+            IntegerStorage::U8(vec![3]),
+            IntegerStorage::U16(vec![3]),
+            IntegerStorage::U32(vec![3]),
+            IntegerStorage::U64(vec![3]),
+        ] {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer root");
+            let (roots, _) = split_root_handles(&[Value::Tensor(tensor)])
+                .expect("root parse")
+                .expect("root list");
+            assert_eq!(roots, vec![3.0]);
+        }
+        assert!(exact_numeric_root(&runmat_builtins::IntValue::I64(-1)).is_err());
+        assert!(exact_numeric_root(&runmat_builtins::IntValue::U64((1_u64 << 53) + 1)).is_err());
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = findobj_builtin(vec![Value::Int(runmat_builtins::IntValue::U8(1))])
+            .expect_err("integer root aliases must be gated");
+        assert_eq!(
+            error.identifier(),
+            FINDOBJ_INTEGER_ROOT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
     fn findobj_root_handles_reads_typed_integer_storage_exactly() {
         let roots = Tensor::new_integer(IntegerStorage::U16(vec![11, 13]), vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(roots), Value::String("Type".into())];
@@ -688,6 +843,17 @@ mod tests {
 
         assert!(!values_match("UserData", &left, &right));
         assert!(values_match("UserData", &left, &left));
+
+        let other_class = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I64(vec![9_007_199_254_740_992]), vec![1, 1])
+                .unwrap(),
+        );
+        assert!(!values_match("UserData", &left, &other_class));
+        assert!(!values_match(
+            "UserData",
+            &Value::Num(9_007_199_254_740_992.0),
+            &Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_992)),
+        ));
     }
 
     #[test]

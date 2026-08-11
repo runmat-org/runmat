@@ -1,6 +1,6 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Tensor, Value};
 use runmat_plot::plots::{
-    ColorMap, LegendStyle, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
+    ColorMap, LegendStyle, PatchData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
 };
 use std::borrow::Cow;
 
@@ -3551,23 +3551,18 @@ fn get_patch_property(
             format!("{builtin}: invalid patch handle"),
         ));
     };
+    let (source_x, source_y, source_z, source_c) = patch.source_data();
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("patch", patch_handle.figure, patch_handle.axes_index);
             st.insert("Faces", faces_tensor(patch.faces()));
             st.insert("Vertices", vertices_tensor(patch.vertices()));
-            st.insert(
-                "XData",
-                tensor_from_vec(patch.vertices().iter().map(|p| p.x as f64).collect()),
-            );
-            st.insert(
-                "YData",
-                tensor_from_vec(patch.vertices().iter().map(|p| p.y as f64).collect()),
-            );
-            st.insert(
-                "ZData",
-                tensor_from_vec(patch.vertices().iter().map(|p| p.z as f64).collect()),
-            );
+            st.insert("XData", patch_source_or_vertices(source_x, &patch, 0));
+            st.insert("YData", patch_source_or_vertices(source_y, &patch, 1));
+            st.insert("ZData", patch_source_or_vertices(source_z, &patch, 2));
+            if let Some(c_data) = source_c {
+                st.insert("CData", patch_data_value(c_data));
+            }
             st.insert(
                 "FaceColor",
                 patch_color_property(patch.face_color_mode(), patch.face_color()),
@@ -3593,15 +3588,12 @@ fn get_patch_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("faces") => Ok(faces_tensor(patch.faces())),
         Some("vertices") => Ok(vertices_tensor(patch.vertices())),
-        Some("xdata") => Ok(tensor_from_vec(
-            patch.vertices().iter().map(|p| p.x as f64).collect(),
-        )),
-        Some("ydata") => Ok(tensor_from_vec(
-            patch.vertices().iter().map(|p| p.y as f64).collect(),
-        )),
-        Some("zdata") => Ok(tensor_from_vec(
-            patch.vertices().iter().map(|p| p.z as f64).collect(),
-        )),
+        Some("xdata") => Ok(patch_source_or_vertices(source_x, &patch, 0)),
+        Some("ydata") => Ok(patch_source_or_vertices(source_y, &patch, 1)),
+        Some("zdata") => Ok(patch_source_or_vertices(source_z, &patch, 2)),
+        Some("cdata") | Some("colordata") => source_c
+            .map(patch_data_value)
+            .ok_or_else(|| plotting_error(builtin, format!("{builtin}: patch has no CData"))),
         Some("facecolor") | Some("color") => Ok(patch_color_property(
             patch.face_color_mode(),
             patch.face_color(),
@@ -3620,6 +3612,33 @@ fn get_patch_property(
             format!("{builtin}: unsupported patch property `{other}`"),
         )),
     }
+}
+
+fn patch_source_or_vertices(
+    source: Option<&PatchData>,
+    patch: &runmat_plot::plots::PatchPlot,
+    component: usize,
+) -> Value {
+    source.map(patch_data_value).unwrap_or_else(|| {
+        tensor_from_vec(
+            patch
+                .vertices()
+                .iter()
+                .map(|point| match component {
+                    0 => point.x as f64,
+                    1 => point.y as f64,
+                    _ => point.z as f64,
+                })
+                .collect(),
+        )
+    })
+}
+
+fn patch_data_value(data: &PatchData) -> Value {
+    Value::Tensor(
+        Tensor::from_numeric_storage(data.storage.clone(), data.shape.clone())
+            .expect("patch source shape matches storage"),
+    )
 }
 
 fn get_line3_property(
@@ -4436,7 +4455,7 @@ fn apply_histogram_property(
             Ok(())
         }
         "facealpha" => {
-            let alpha = value_as_f64(value).ok_or_else(|| {
+            let alpha = patch_scalar_f64(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FaceAlpha must be numeric"))
             })?;
             let alpha = alpha.clamp(0.0, 1.0);
@@ -5951,6 +5970,50 @@ fn apply_patch_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if !matches!(
+        key,
+        "facecolor"
+            | "color"
+            | "edgecolor"
+            | "facealpha"
+            | "edgealpha"
+            | "linewidth"
+            | "displayname"
+            | "visible"
+    ) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported patch property `{key}`"),
+        ));
+    }
+    match key {
+        "facealpha" | "edgealpha" => {
+            let alpha = value_as_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: {key} must be numeric"))
+            })?;
+            if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: {key} must be in the range [0, 1]"),
+                ));
+            }
+        }
+        "linewidth" => {
+            let width = patch_scalar_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: LineWidth must be numeric"))
+            })?;
+            if !width.is_finite() || width <= 0.0 {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: LineWidth must be a positive finite value"),
+                ));
+            }
+        }
+        "visible" => {
+            validate_patch_visible(value, builtin)?;
+        }
+        _ => {}
+    }
     super::state::update_plot_element(patch_handle.figure, patch_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot {
             match key {
@@ -6027,6 +6090,31 @@ fn apply_patch_property(
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn validate_patch_visible(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
+    if let Some(text) = value_as_string(value) {
+        if matches!(text.trim().to_ascii_lowercase().as_str(), "on" | "off") {
+            return Ok(());
+        }
+    } else if matches!(value, Value::Bool(_)) {
+        return Ok(());
+    } else if let Some(value) = patch_scalar_f64(value) {
+        if value == 0.0 || value == 1.0 {
+            return Ok(());
+        }
+    }
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: Visible must be on/off or numeric/logical 0 or 1"),
+    ))
+}
+
+fn patch_scalar_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Tensor(tensor) if tensor.len() != 1 => None,
+        _ => value_as_f64(value),
+    }
 }
 
 fn apply_line3_property(

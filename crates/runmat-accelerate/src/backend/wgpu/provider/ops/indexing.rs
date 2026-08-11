@@ -1024,6 +1024,10 @@ impl WgpuProvider {
         direction: FindDirection,
     ) -> Result<ProviderFindResult> {
         let entry = self.get_entry(a)?;
+        ensure!(
+            entry.precision == NumericPrecision::F64,
+            "find: exact double index outputs require f64 provider precision"
+        );
         let total = entry.len;
         if total == 0 {
             let shape = vec![0, 1];

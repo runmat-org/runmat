@@ -303,7 +303,9 @@ pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
     #[cfg(feature = "wgpu")]
     {
         if let Value::GpuTensor(ref h) = value {
-            if h.device_id != 0 {
+            let active_owner = runmat_accelerate_api::provider()
+                .is_some_and(|provider| provider.device_id() == h.device_id);
+            if h.device_id != 0 && !active_owner {
                 let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                     runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
                 );

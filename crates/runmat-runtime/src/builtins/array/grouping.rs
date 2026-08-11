@@ -27,6 +27,98 @@ use crate::{
 
 const MAX_MATERIALIZED_ELEMENTS: usize = 50_000_000;
 
+const FINDGROUPS_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "findgroups-resident-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "findgroups on GPU-resident grouping data is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FindgroupsResidentInputExtension"),
+    };
+const FINDGROUPS_MATRIX_COLUMNS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "findgroups-matrix-as-columns",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description:
+            "findgroups matrix inputs interpreted as grouping columns are a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FindgroupsMatrixColumnsExtension"),
+    };
+const FINDGROUPS_TABLE_SELECTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "findgroups-table-selector",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "findgroups(T,selector) is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FindgroupsTableSelectorExtension"),
+    };
+const FINDGROUPS_TIMETABLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "findgroups-timetable-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "findgroups on timetable input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FindgroupsTimetableExtension"),
+};
+pub const FINDGROUPS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FINDGROUPS_RESIDENT_INPUT_EXTENSION,
+    FINDGROUPS_MATRIX_COLUMNS_EXTENSION,
+    FINDGROUPS_TABLE_SELECTOR_EXTENSION,
+    FINDGROUPS_TIMETABLE_EXTENSION,
+];
+
+const FINDGROUPS_INTEGER_VECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every integer class is a documented numeric grouping vector and is compared from authoritative storage.",
+    }];
+const FINDGROUPS_INTEGER_MULTI_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A1,...,AN",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Each integer grouping role retains its own class while exact tuples are sorted lexicographically.",
+    }];
+const FINDGROUPS_INTEGER_TABLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "integer table variables",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer table variables are exact grouping roles and retain their class in TID.",
+    }];
+pub const FINDGROUPS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[G,ID] = findgroups(integer_A)",
+        inputs: &FINDGROUPS_INTEGER_VECTOR_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "G is double with A's orientation; ID preserves A's integer class and exact values, including values above flintmax.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[G,ID1,...,IDN] = findgroups(integer_A1,...,integer_AN)",
+        inputs: &FINDGROUPS_INTEGER_MULTI_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "G is double and each ID output preserves the corresponding input class.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[G,TID] = findgroups(T_with_integer_variables)",
+        inputs: &FINDGROUPS_INTEGER_TABLE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "G is double; TID preserves variable names, integer classes, and exact group identifiers.",
+    },
+];
+
 const DISCRETIZE_INTEGER_X_EDGES_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "X",
@@ -585,6 +677,7 @@ enum Atom {
     Logical(bool),
     Number(f64),
     Integer(IntValue),
+    CalendarDuration(f64, f64),
     Text(String),
 }
 
@@ -595,7 +688,8 @@ impl Atom {
             Self::Logical(_) => 1,
             Self::Number(_) => 2,
             Self::Integer(_) => 3,
-            Self::Text(_) => 4,
+            Self::CalendarDuration(_, _) => 4,
+            Self::Text(_) => 5,
         }
     }
 
@@ -611,6 +705,7 @@ impl Atom {
             }
             Self::Number(value) => format_key_number(*value),
             Self::Integer(value) => format_integer_key(value),
+            Self::CalendarDuration(months, days) => format!("{months}mo {days}d"),
             Self::Text(text) => text.clone(),
         }
     }
@@ -639,8 +734,12 @@ impl Ord for Atom {
         match (self, other) {
             (Self::Missing, Self::Missing) => Ordering::Equal,
             (Self::Logical(a), Self::Logical(b)) => a.cmp(b),
-            (Self::Number(a), Self::Number(b)) => a.total_cmp(b),
+            (Self::Number(a), Self::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
             (Self::Integer(a), Self::Integer(b)) => compare_integer_values(a, b),
+            (Self::CalendarDuration(am, ad), Self::CalendarDuration(bm, bd)) => am
+                .partial_cmp(bm)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| ad.partial_cmp(bd).unwrap_or(Ordering::Equal)),
             (Self::Text(a), Self::Text(b)) => a.cmp(b),
             _ => Ordering::Equal,
         }
@@ -768,17 +867,20 @@ fn too_large_error(message: impl Into<String>) -> RuntimeError {
     keywords = "findgroups,groups,grouping,table,categorical",
     accel = "cpu",
     descriptor(crate::builtins::array::grouping::GROUPING_DESCRIPTOR),
+    extensions(crate::builtins::array::grouping::FINDGROUPS_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::grouping::FINDGROUPS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::grouping"
 )]
 pub(crate) async fn findgroups_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_findgroups_extensions(&first, &rest)?;
     let mut args = Vec::with_capacity(rest.len() + 1);
     args.push(gather_if_needed_async(&first).await?);
     for value in rest {
         args.push(gather_if_needed_async(&value).await?);
     }
-    let (columns, table_mode) = findgroups_columns(args)?;
+    let (columns, table_mode, output_shape) = findgroups_columns(args)?;
     let grouping = build_grouping(&columns)?;
-    let outputs = findgroups_outputs(&columns, &grouping, table_mode)?;
+    let outputs = findgroups_outputs(&columns, &grouping, table_mode, output_shape)?;
     multi_output(outputs)
 }
 
@@ -1037,7 +1139,53 @@ pub(crate) async fn combinations_builtin(first: Value, rest: Vec<Value>) -> Buil
     combinations_impl(first, rest)
 }
 
-fn findgroups_columns(args: Vec<Value>) -> BuiltinResult<(Vec<GroupColumn>, bool)> {
+fn ensure_findgroups_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if crate::value_contains_gpu(first) || rest.iter().any(crate::value_contains_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FINDGROUPS_RESIDENT_INPUT_EXTENSION,
+            "findgroups",
+        )?;
+    }
+    if value_is_grouping_matrix(first) || rest.iter().any(value_is_grouping_matrix) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FINDGROUPS_MATRIX_COLUMNS_EXTENSION,
+            "findgroups",
+        )?;
+    }
+    if let Value::Object(object) = first {
+        if object.is_class("timetable") {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FINDGROUPS_TIMETABLE_EXTENSION,
+                "findgroups",
+            )?;
+        }
+        if is_tabular_object(object) && !rest.is_empty() {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FINDGROUPS_TABLE_SELECTOR_EXTENSION,
+                "findgroups",
+            )?;
+            if rest.len() != 1 {
+                return Err(grouping_error(
+                    "findgroups: table selector form accepts exactly one selector",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn value_is_grouping_matrix(value: &Value) -> bool {
+    let shape = match value {
+        Value::Tensor(tensor) => &tensor.shape,
+        Value::LogicalArray(array) => &array.shape,
+        Value::StringArray(array) => &array.shape,
+        Value::GpuTensor(handle) => &handle.shape,
+        _ => return false,
+    };
+    shape.first().copied().unwrap_or(1) > 1 && shape.get(1).copied().unwrap_or(1) > 1
+}
+
+fn findgroups_columns(args: Vec<Value>) -> BuiltinResult<(Vec<GroupColumn>, bool, Vec<usize>)> {
     if args.is_empty() {
         return Err(grouping_error("findgroups: expected at least one input"));
     }
@@ -1055,16 +1203,125 @@ fn findgroups_columns(args: Vec<Value>) -> BuiltinResult<(Vec<GroupColumn>, bool
                 let value = variables.fields.get(&name).cloned().ok_or_else(|| {
                     grouping_error(format!("findgroups: missing table variable '{name}'"))
                 })?;
+                validate_findgroups_grouping_value(&value)?;
+                if value_is_grouping_matrix(&value) {
+                    return Err(grouping_error(format!(
+                        "findgroups: table variable '{name}' must be a vector"
+                    )));
+                }
                 columns.push(GroupColumn {
-                    rows: value_row_count(&value)?,
+                    rows: findgroups_value_row_count(&value)?,
                     name,
                     value,
                 });
             }
-            return Ok((columns, true));
+            let height = columns.first().map(|column| column.rows).unwrap_or(0);
+            return Ok((columns, true, vec![height, 1]));
         }
     }
-    Ok((columns_from_group_args(args)?, false))
+    for value in &args {
+        validate_findgroups_grouping_value(value)?;
+    }
+    let output_shape = findgroups_vector_shape(&args[0])?;
+    for value in args.iter().skip(1) {
+        if findgroups_vector_shape(value)? != output_shape {
+            return Err(grouping_error(
+                "findgroups: grouping vectors must have matching sizes",
+            ));
+        }
+    }
+    Ok((columns_from_group_args(args)?, false, output_shape))
+}
+
+fn findgroups_vector_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
+    match value {
+        Value::Tensor(tensor) if tensor.rows() > 1 && tensor.cols() > 1 => {
+            Ok(vec![tensor.rows(), 1])
+        }
+        Value::Tensor(tensor) => Ok(tensor.shape.clone()),
+        Value::LogicalArray(array)
+            if array.shape.first().copied().unwrap_or(1) > 1
+                && array.shape.get(1).copied().unwrap_or(1) > 1 =>
+        {
+            Ok(vec![array.shape[0], 1])
+        }
+        Value::LogicalArray(array) => Ok(array.shape.clone()),
+        Value::StringArray(array) if array.rows() > 1 && array.cols() > 1 => {
+            Ok(vec![array.rows(), 1])
+        }
+        Value::StringArray(array) => Ok(array.shape.clone()),
+        Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
+        Value::Object(object) if object.is_class("categorical") => object
+            .properties
+            .get("Codes")
+            .map(findgroups_vector_shape)
+            .transpose()
+            .map(|shape| shape.unwrap_or_else(|| vec![0, 1])),
+        Value::Object(object) if object.is_class("datetime") => {
+            crate::builtins::datetime::serials_from_datetime_value(value).map(|tensor| tensor.shape)
+        }
+        Value::Object(object) if object.is_class("duration") => {
+            crate::builtins::duration::duration_tensor_from_duration_value(value)
+                .map(|tensor| tensor.shape)
+        }
+        Value::Object(object) if object.is_class("calendarDuration") => object
+            .properties
+            .get("__months")
+            .map(findgroups_vector_shape)
+            .transpose()
+            .map(|shape| shape.unwrap_or_else(|| vec![0, 1])),
+        _ => Ok(vec![1, 1]),
+    }
+}
+
+fn validate_findgroups_grouping_value(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Tensor(_)
+        | Value::LogicalArray(_)
+        | Value::StringArray(_)
+        | Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_) => Ok(()),
+        Value::Cell(cell)
+            if cell
+                .data
+                .iter()
+                .all(|value| matches!(value, Value::CharArray(chars) if chars.rows <= 1)) =>
+        {
+            Ok(())
+        }
+        Value::Object(object)
+            if object.is_class("categorical")
+                || object.is_class("datetime")
+                || object.is_class("duration")
+                || object.is_class("calendarDuration") =>
+        {
+            Ok(())
+        }
+        Value::SparseTensor(_) => Err(grouping_error(
+            "findgroups: sparse grouping variables are not supported",
+        )),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(grouping_error(
+            "findgroups: complex grouping variables are not supported",
+        )),
+        other => Err(grouping_error(format!(
+            "findgroups: unsupported grouping variable {other:?}"
+        ))),
+    }
+}
+
+fn findgroups_value_row_count(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Object(object) = value {
+        if object.is_class("calendarDuration") {
+            return object
+                .properties
+                .get("__months")
+                .map(value_row_count)
+                .transpose()
+                .map(|rows| rows.unwrap_or(0));
+        }
+    }
+    value_row_count(value)
 }
 
 fn columns_from_group_args(args: Vec<Value>) -> BuiltinResult<Vec<GroupColumn>> {
@@ -1106,6 +1363,19 @@ fn columns_from_group_value(
         }]),
         Value::Object(object) if object.is_class("categorical") => {
             let rows = value_row_count(&Value::Object(object.clone()))?;
+            Ok(vec![GroupColumn {
+                rows,
+                name: base_name.to_string(),
+                value: Value::Object(object),
+            }])
+        }
+        Value::Object(object) if object.is_class("calendarDuration") => {
+            let rows = object
+                .properties
+                .get("__months")
+                .map(value_row_count)
+                .transpose()?
+                .unwrap_or(0);
             Ok(vec![GroupColumn {
                 rows,
                 name: base_name.to_string(),
@@ -1371,6 +1641,15 @@ fn atom_at(value: &Value, row: usize) -> BuiltinResult<Atom> {
                 Ok(Atom::Number(value))
             }
         }
+        Value::Object(object) if object.is_class("calendarDuration") => {
+            let months = calendar_duration_component(object, "__months", row)?;
+            let days = calendar_duration_component(object, "__days", row)?;
+            if months.is_nan() || days.is_nan() {
+                Ok(Atom::Missing)
+            } else {
+                Ok(Atom::CalendarDuration(months, days))
+            }
+        }
         other if row == 0 => scalar_atom(other),
         _ => Ok(Atom::Missing),
     }
@@ -1421,8 +1700,47 @@ fn scalar_atom(value: &Value) -> BuiltinResult<Atom> {
                 Ok(Atom::Text(text.clone()))
             }
         }
-        Value::CharArray(chars) if chars.rows == 1 => Ok(Atom::Text(chars.data.iter().collect())),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            let text: String = chars.data.iter().collect();
+            if text.is_empty() {
+                Ok(Atom::Missing)
+            } else {
+                Ok(Atom::Text(text))
+            }
+        }
         other => Ok(Atom::Text(format!("{other}"))),
+    }
+}
+
+fn calendar_duration_component(
+    object: &ObjectInstance,
+    field: &str,
+    row: usize,
+) -> BuiltinResult<f64> {
+    match object.properties.get(field) {
+        Some(Value::Tensor(tensor)) => tensor
+            .numeric_value_at(row)
+            .map(numeric_scalar_to_f64)
+            .ok_or_else(|| grouping_error("findgroups: calendarDuration row out of bounds")),
+        Some(Value::Num(value)) if row == 0 => Ok(*value),
+        _ => Err(grouping_error(format!(
+            "findgroups: invalid calendarDuration {field} storage"
+        ))),
+    }
+}
+
+fn numeric_scalar_to_f64(value: NumericScalar) -> f64 {
+    match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        NumericScalar::I8(value) => f64::from(value),
+        NumericScalar::I16(value) => f64::from(value),
+        NumericScalar::I32(value) => f64::from(value),
+        NumericScalar::I64(value) => value as f64,
+        NumericScalar::U8(value) => f64::from(value),
+        NumericScalar::U16(value) => f64::from(value),
+        NumericScalar::U32(value) => f64::from(value),
+        NumericScalar::U64(value) => value as f64,
     }
 }
 
@@ -1430,17 +1748,16 @@ fn findgroups_outputs(
     columns: &[GroupColumn],
     grouping: &Grouping,
     table_mode: bool,
+    output_shape: Vec<usize>,
 ) -> BuiltinResult<Vec<Value>> {
-    let g = Value::Tensor(
-        Tensor::new(grouping.ids.clone(), vec![grouping.ids.len(), 1]).map_err(grouping_error)?,
-    );
+    let g = Value::Tensor(Tensor::new(grouping.ids.clone(), output_shape).map_err(grouping_error)?);
     let mut outputs = vec![g];
     if table_mode {
         let mut names = Vec::with_capacity(columns.len());
         let mut values = Vec::with_capacity(columns.len());
         for column in columns {
             names.push(column.name.clone());
-            values.push(select_rows(&column.value, &grouping.first_rows)?);
+            values.push(select_group_rows(&column.value, &grouping.first_rows)?);
         }
         outputs.push(table_from_columns(names, values)?);
     } else {
@@ -1452,8 +1769,29 @@ fn findgroups_outputs(
 fn group_label_outputs(columns: &[GroupColumn], grouping: &Grouping) -> BuiltinResult<Vec<Value>> {
     columns
         .iter()
-        .map(|column| select_rows(&column.value, &grouping.first_rows))
+        .map(|column| select_group_rows(&column.value, &grouping.first_rows))
         .collect()
+}
+
+fn select_group_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
+    let Value::Object(object) = value else {
+        return select_rows(value, rows);
+    };
+    if !object.is_class("calendarDuration") {
+        return select_rows(value, rows);
+    }
+    let mut selected = object.clone();
+    for field in ["__months", "__days"] {
+        let component = object.properties.get(field).ok_or_else(|| {
+            grouping_error(format!(
+                "findgroups: missing calendarDuration {field} storage"
+            ))
+        })?;
+        selected
+            .properties
+            .insert(field.to_string(), select_rows(component, rows)?);
+    }
+    Ok(Value::Object(selected))
 }
 
 fn split_option_tail(args: Vec<Value>) -> BuiltinResult<(Vec<Value>, Vec<Value>)> {
@@ -3646,6 +3984,129 @@ mod tests {
         match counted {
             Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn findgroups_preserves_row_vector_group_orientation() {
+        let groups = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![7, 3, 7]), vec![1, 3]).unwrap(),
+        );
+        let Value::Tensor(g) = block_on(findgroups_builtin(groups, Vec::new())).unwrap() else {
+            panic!("expected group tensor");
+        };
+        assert_eq!(g.shape, vec![1, 3]);
+        assert_eq!(g.materialize_f64(), vec![2.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn findgroups_identifier_output_preserves_exact_integer_storage() {
+        let large = 9_007_199_254_740_992_u64;
+        let columns = columns_from_group_args(vec![Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![large + 1, large, large + 1]),
+                vec![1, 3],
+            )
+            .unwrap(),
+        )])
+        .unwrap();
+        let grouping = build_grouping(&columns).unwrap();
+        let outputs = findgroups_outputs(&columns, &grouping, false, vec![1, 3]).unwrap();
+        let Value::Tensor(ids) = &outputs[1] else {
+            panic!("expected typed integer identifiers");
+        };
+        assert_eq!(
+            ids.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large, large + 1]))
+        );
+    }
+
+    #[test]
+    fn findgroups_empty_character_vectors_are_missing() {
+        let groups = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::CharArray(runmat_builtins::CharArray::new(Vec::new(), 1, 0).unwrap()),
+                    Value::CharArray(runmat_builtins::CharArray::new(vec!['a'], 1, 1).unwrap()),
+                ],
+                2,
+                1,
+            )
+            .unwrap(),
+        );
+        let Value::Tensor(g) = block_on(findgroups_builtin(groups, Vec::new())).unwrap() else {
+            panic!("expected group tensor");
+        };
+        assert!(g.materialize_f64()[0].is_nan());
+        assert_eq!(g.materialize_f64()[1], 1.0);
+    }
+
+    #[test]
+    fn findgroups_strict_mode_gates_matrix_selector_and_timetable_forms() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let matrix = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+        let err =
+            block_on(findgroups_builtin(matrix, Vec::new())).expect_err("matrix form must gate");
+        assert_eq!(
+            err.identifier(),
+            FINDGROUPS_MATRIX_COLUMNS_EXTENSION.error_identifier
+        );
+
+        let table = Value::Object(ObjectInstance::new("table".to_string()));
+        let err = ensure_findgroups_extensions(&table, &[Value::from("A")])
+            .expect_err("table selector must gate");
+        assert_eq!(
+            err.identifier(),
+            FINDGROUPS_TABLE_SELECTOR_EXTENSION.error_identifier
+        );
+
+        let timetable = Value::Object(ObjectInstance::new("timetable".to_string()));
+        let err = ensure_findgroups_extensions(&timetable, &[]).expect_err("timetable must gate");
+        assert_eq!(
+            err.identifier(),
+            FINDGROUPS_TIMETABLE_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn findgroups_strict_mode_gates_resident_input_before_provider_access() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let err = block_on(findgroups_builtin(resident, Vec::new()))
+            .expect_err("resident form must gate before provider lookup");
+        assert_eq!(
+            err.identifier(),
+            FINDGROUPS_RESIDENT_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn findgroups_rejects_sparse_and_complex_grouping_values() {
+        let sparse =
+            runmat_builtins::SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![1.0]).unwrap();
+        block_on(findgroups_builtin(Value::SparseTensor(sparse), Vec::new()))
+            .expect_err("sparse grouping must reject");
+        block_on(findgroups_builtin(Value::Complex(1.0, 2.0), Vec::new()))
+            .expect_err("complex grouping must reject");
+    }
+
+    #[test]
+    fn findgroups_integer_metadata_covers_vector_multi_and_table_roles() {
+        assert_eq!(FINDGROUPS_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(FINDGROUPS_EXTENSIONS.len(), 4);
+        for capability in FINDGROUPS_INTEGER_CAPABILITIES {
+            assert_eq!(
+                capability.inputs[0].classes,
+                &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+            );
+            assert_eq!(
+                capability.computation_domain,
+                BuiltinIntegerComputationDomain::ExactInteger
+            );
         }
     }
 

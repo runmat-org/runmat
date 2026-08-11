@@ -4,25 +4,24 @@ use glam::{Vec3, Vec4};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Tensor, Value,
+    IntegerStorage, NumericStorage, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
-use runmat_plot::plots::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
+use runmat_plot::plots::{PatchData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_helpers;
+use crate::builtins::plotting::plotting_error;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::common::gather_tensor_from_gpu;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::state::{render_active_plot, PlotRenderOptions};
-use super::style::{
-    parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
-};
+use super::style::{parse_color_value, value_as_f64, value_as_string, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "patch";
 
@@ -282,6 +281,7 @@ struct PatchOptions {
     z_data: Option<Tensor>,
     faces: Option<Tensor>,
     vertices: Option<Tensor>,
+    c_data: Option<Tensor>,
     face_color: Vec4,
     edge_color: Vec4,
     face_color_mode: PatchFaceColorMode,
@@ -301,6 +301,7 @@ impl Default for PatchOptions {
             z_data: None,
             faces: None,
             vertices: None,
+            c_data: None,
             face_color: Vec4::new(0.0, 0.447, 0.741, 1.0),
             edge_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
             face_color_mode: PatchFaceColorMode::Color,
@@ -328,8 +329,8 @@ impl Default for PatchOptions {
 pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (axes_target, args) =
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_patch_invalid)?;
-    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_patch_invalid)?;
     let mut plot = Some(parse_patch_plot(args).map_err(map_patch_invalid)?);
+    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_patch_invalid)?;
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
@@ -390,6 +391,12 @@ pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
 
     let mut plot =
         PatchPlot::new(vertices, faces).map_err(|err| patch_invalid(format!("patch: {err}")))?;
+    plot.set_source_data(
+        opts.x_data.as_ref().map(patch_data_from_tensor),
+        opts.y_data.as_ref().map(patch_data_from_tensor),
+        opts.z_data.as_ref().map(patch_data_from_tensor),
+        opts.c_data.as_ref().map(patch_data_from_tensor),
+    );
     plot.set_face_color(opts.face_color);
     plot.set_edge_color(opts.edge_color);
     plot.set_face_color_mode(opts.face_color_mode);
@@ -505,36 +512,292 @@ fn apply_property(opts: &mut PatchOptions, key: &str, value: &Value) -> BuiltinR
         "zdata" => opts.z_data = Some(tensor_from_value(value.clone())?),
         "faces" => opts.faces = Some(tensor_from_value(value.clone())?),
         "vertices" => opts.vertices = Some(tensor_from_value(value.clone())?),
+        "cdata" => apply_c_data(opts, value)?,
         "facecolor" | "color" => apply_face_color(opts, value)?,
         "edgecolor" => apply_edge_color(opts, value)?,
         "facealpha" => {
-            opts.face_alpha = value_as_f64(value)
-                .ok_or_else(|| patch_invalid("patch: FaceAlpha must be numeric"))?
-                .clamp(0.0, 1.0) as f32;
+            let alpha = property_scalar_f64(value)
+                .ok_or_else(|| patch_invalid("patch: FaceAlpha must be numeric"))?;
+            if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+                return Err(patch_invalid(
+                    "patch: FaceAlpha must be in the range [0, 1]",
+                ));
+            }
+            opts.face_alpha = alpha as f32;
         }
         "edgealpha" => {
-            opts.edge_alpha = value_as_f64(value)
-                .ok_or_else(|| patch_invalid("patch: EdgeAlpha must be numeric"))?
-                .clamp(0.0, 1.0) as f32;
+            let alpha = property_scalar_f64(value)
+                .ok_or_else(|| patch_invalid("patch: EdgeAlpha must be numeric"))?;
+            if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+                return Err(patch_invalid(
+                    "patch: EdgeAlpha must be in the range [0, 1]",
+                ));
+            }
+            opts.edge_alpha = alpha as f32;
         }
         "linewidth" => {
-            opts.line_width = value_as_f64(value)
-                .ok_or_else(|| patch_invalid("patch: LineWidth must be numeric"))?
-                .max(0.0) as f32;
+            let width = property_scalar_f64(value)
+                .ok_or_else(|| patch_invalid("patch: LineWidth must be numeric"))?;
+            if !width.is_finite() || width <= 0.0 {
+                return Err(patch_invalid(
+                    "patch: LineWidth must be a positive finite value",
+                ));
+            }
+            opts.line_width = width as f32;
         }
         "displayname" => opts.label = value_as_string(value),
         "visible" => {
-            opts.visible = value_as_bool(value)
-                .ok_or_else(|| patch_invalid("patch: Visible must be on/off"))?;
+            opts.visible = visible_value(value)?;
         }
-        _ => {}
+        _ => {
+            return Err(patch_invalid(format!(
+                "patch: unsupported property `{key}`"
+            )))
+        }
     }
     Ok(())
+}
+
+fn property_scalar_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Tensor(tensor) if tensor.len() != 1 => None,
+        _ => value_as_f64(value),
+    }
+}
+
+fn visible_value(value: &Value) -> BuiltinResult<bool> {
+    if let Some(text) = value_as_string(value) {
+        return match text.trim().to_ascii_lowercase().as_str() {
+            "on" => Ok(true),
+            "off" => Ok(false),
+            _ => Err(patch_invalid(
+                "patch: Visible must be on/off or numeric/logical 0 or 1",
+            )),
+        };
+    }
+    let numeric = match value {
+        Value::Bool(value) => return Ok(*value),
+        Value::Num(value) => *value,
+        Value::Int(value) => value.to_f64(),
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor_helpers::tensor_value_f64(tensor, 0),
+        _ => {
+            return Err(patch_invalid(
+                "patch: Visible must be on/off or numeric/logical 0 or 1",
+            ))
+        }
+    };
+    match numeric {
+        0.0 => Ok(false),
+        1.0 => Ok(true),
+        _ => Err(patch_invalid(
+            "patch: Visible numeric values must be exactly 0 or 1",
+        )),
+    }
+}
+
+fn apply_c_data(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
+    let tensor = tensor_from_value(value.clone())?;
+    if tensor.len() == 3 {
+        if let Ok(color) = parse_color_value(
+            &LineStyleParseOptions::generic(BUILTIN_NAME),
+            &Value::Tensor(tensor.clone()),
+        ) {
+            opts.face_color = color;
+            opts.face_color_mode = PatchFaceColorMode::Color;
+        } else {
+            opts.face_color_mode = PatchFaceColorMode::Flat;
+        }
+    } else {
+        opts.face_color_mode = PatchFaceColorMode::Flat;
+    }
+    opts.c_data = Some(tensor);
+    Ok(())
+}
+
+fn patch_data_from_tensor(tensor: &Tensor) -> PatchData {
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .expect("numeric tensor storage");
+    PatchData {
+        storage,
+        shape: tensor.shape.clone(),
+    }
+}
+
+pub(super) fn split_coordinate_group_columns(
+    coordinates: &[Value],
+    color: &Value,
+    context: &'static str,
+) -> BuiltinResult<Vec<(Vec<Value>, Value)>> {
+    let coordinates = coordinates
+        .iter()
+        .cloned()
+        .map(|value| numeric_tensor_for_plot(value, context))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let Some(first) = coordinates.first() else {
+        return Err(plotting_error(
+            context,
+            format!("{context}: missing coordinates"),
+        ));
+    };
+    // MATLAB treats row and column vectors as the same logical polygon axis.
+    // Once any true matrix is present, its rows define polygon length and its
+    // columns define independent Patch objects; a matching-length vector is
+    // shared without changing its authoritative orientation. This also makes
+    // square matrices deterministically column-grouped.
+    let matrix = coordinates.iter().find(|tensor| !is_vector_tensor(tensor));
+    let (polygon_length, polygon_count) = if let Some(matrix) = matrix {
+        for tensor in &coordinates {
+            if is_vector_tensor(tensor) {
+                if tensor.len() != matrix.rows {
+                    return Err(plotting_error(
+                        context,
+                        format!(
+                            "{context}: shared coordinate vectors must match the matrix row count"
+                        ),
+                    ));
+                }
+            } else if tensor.rows != matrix.rows || tensor.cols != matrix.cols {
+                return Err(plotting_error(
+                    context,
+                    format!("{context}: coordinate matrices must have the same size"),
+                ));
+            }
+        }
+        (matrix.rows, matrix.cols)
+    } else {
+        if coordinates.iter().any(|tensor| tensor.len() != first.len()) {
+            return Err(plotting_error(
+                context,
+                format!("{context}: coordinate vectors must have the same length"),
+            ));
+        }
+        (first.len(), 1)
+    };
+
+    let literal_color =
+        matches!(color, Value::String(_) | Value::CharArray(_)).then(|| color.clone());
+    let color = if literal_color.is_some() {
+        None
+    } else {
+        Some(numeric_tensor_for_plot(color.clone(), context)?)
+    };
+    let split_color = color.as_ref().is_some_and(|tensor| {
+        let rgb_triplet = is_rgb_triplet_tensor(tensor);
+        polygon_count > 1
+            && (tensor.rows == polygon_length && tensor.cols == polygon_count
+                || tensor.rows == 1 && tensor.cols == polygon_count)
+            && !rgb_triplet
+    });
+
+    (0..polygon_count)
+        .map(|column| {
+            let coordinates = coordinates
+                .iter()
+                .map(|tensor| {
+                    if polygon_count == 1 || is_vector_tensor(tensor) {
+                        Ok(Value::Tensor(tensor.clone()))
+                    } else {
+                        tensor_column_value(tensor, column, context)
+                    }
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            let color = match &color {
+                Some(tensor) if split_color => tensor_column_value(tensor, column, context)?,
+                Some(tensor) => Value::Tensor(tensor.clone()),
+                None => literal_color
+                    .clone()
+                    .expect("nonnumeric color is retained exactly"),
+            };
+            Ok((coordinates, color))
+        })
+        .collect()
+}
+
+fn is_rgb_triplet_tensor(tensor: &Tensor) -> bool {
+    if tensor.len() != 3 {
+        return false;
+    }
+    match tensor.clone().into_numeric_storage() {
+        Ok(NumericStorage::F64(values)) => values
+            .iter()
+            .all(|value| value.is_finite() && (0.0..=1.0).contains(value)),
+        Ok(NumericStorage::F32(values)) => values
+            .iter()
+            .all(|value| value.is_finite() && (0.0..=1.0).contains(value)),
+        Ok(NumericStorage::I8(values)) => values.iter().all(|value| (0..=1).contains(value)),
+        Ok(NumericStorage::I16(values)) => values.iter().all(|value| (0..=1).contains(value)),
+        Ok(NumericStorage::I32(values)) => values.iter().all(|value| (0..=1).contains(value)),
+        Ok(NumericStorage::I64(values)) => values.iter().all(|value| (0..=1).contains(value)),
+        Ok(NumericStorage::U8(values)) => values.iter().all(|value| *value <= 1),
+        Ok(NumericStorage::U16(values)) => values.iter().all(|value| *value <= 1),
+        Ok(NumericStorage::U32(values)) => values.iter().all(|value| *value <= 1),
+        Ok(NumericStorage::U64(values)) => values.iter().all(|value| *value <= 1),
+        Err(_) => false,
+    }
+}
+
+fn numeric_tensor_for_plot(value: Value, context: &'static str) -> BuiltinResult<Tensor> {
+    match value {
+        Value::GpuTensor(handle) => gather_tensor_from_gpu(handle, context),
+        Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
+            .map_err(|error| plotting_error(context, format!("{context}: {error}"))),
+        Value::Int(value) => Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+            .map_err(|error| plotting_error(context, format!("{context}: {error}"))),
+        Value::Tensor(tensor) => Ok(tensor),
+        other => Err(plotting_error(
+            context,
+            format!("{context}: expected numeric data, got {other:?}"),
+        )),
+    }
+}
+
+fn tensor_column_value(
+    tensor: &Tensor,
+    column: usize,
+    context: &'static str,
+) -> BuiltinResult<Value> {
+    let start = column
+        .checked_mul(tensor.rows)
+        .ok_or_else(|| plotting_error(context, format!("{context}: column offset overflow")))?;
+    let end = start + tensor.rows;
+    macro_rules! column_storage {
+        ($storage:expr, $variant:ident) => {
+            NumericStorage::$variant($storage[start..end].to_vec())
+        };
+    }
+    let storage = match tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|error| plotting_error(context, format!("{context}: {error}")))?
+    {
+        NumericStorage::F64(values) => column_storage!(values, F64),
+        NumericStorage::F32(values) => column_storage!(values, F32),
+        NumericStorage::I8(values) => column_storage!(values, I8),
+        NumericStorage::I16(values) => column_storage!(values, I16),
+        NumericStorage::I32(values) => column_storage!(values, I32),
+        NumericStorage::I64(values) => column_storage!(values, I64),
+        NumericStorage::U8(values) => column_storage!(values, U8),
+        NumericStorage::U16(values) => column_storage!(values, U16),
+        NumericStorage::U32(values) => column_storage!(values, U32),
+        NumericStorage::U64(values) => column_storage!(values, U64),
+    };
+    Tensor::from_numeric_storage(storage, vec![tensor.rows, 1])
+        .map(Value::Tensor)
+        .map_err(|error| plotting_error(context, format!("{context}: {error}")))
 }
 
 fn tensor_from_value(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::GpuTensor(handle) => gather_tensor_from_gpu(handle, BUILTIN_NAME),
+        Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
+            .map_err(|err| patch_invalid(format!("patch: {err}"))),
+        Value::Int(value) => Tensor::new_integer(
+            runmat_builtins::IntegerStorage::from_scalar(value),
+            vec![1, 1],
+        )
+        .map_err(|err| patch_invalid(format!("patch: {err}"))),
         other => Tensor::try_from(&other).map_err(|err| patch_invalid(format!("patch: {err}"))),
     }
 }
@@ -636,19 +899,10 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
         .y_data
         .as_ref()
         .ok_or_else(|| patch_invalid("patch: missing YData"))?;
-    if x.rows != y.rows || x.cols != y.cols {
-        return Err(patch_invalid(
-            "patch: XData and YData must have the same size",
-        ));
-    }
-    if let Some(z) = &opts.z_data {
-        if z.rows != x.rows || z.cols != x.cols {
-            return Err(patch_invalid(
-                "patch: ZData must have the same size as XData and YData",
-            ));
-        }
-    }
-    if is_vector_tensor(x) && is_vector_tensor(y) {
+    let all_vectors = is_vector_tensor(x)
+        && is_vector_tensor(y)
+        && opts.z_data.as_ref().is_none_or(is_vector_tensor);
+    if all_vectors {
         let x_values = tensor_helpers::tensor_values_f64(x);
         let y_values = tensor_helpers::tensor_values_f64(y);
         let z_values = opts.z_data.as_ref().map(tensor_helpers::tensor_values_f64);
@@ -675,6 +929,18 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
             vertices.push(Vec3::new(xv as f32, yv as f32, zv as f32));
         }
         return Ok((vertices, vec![face]));
+    }
+    if x.rows != y.rows || x.cols != y.cols {
+        return Err(patch_invalid(
+            "patch: XData and YData must have the same size",
+        ));
+    }
+    if let Some(z) = &opts.z_data {
+        if z.rows != x.rows || z.cols != x.cols {
+            return Err(patch_invalid(
+                "patch: ZData must have the same size as XData and YData",
+            ));
+        }
     }
     let mut vertices = Vec::new();
     let mut faces = Vec::new();
@@ -715,6 +981,7 @@ pub(super) fn is_property_name(value: &Value) -> bool {
                     | "zdata"
                     | "faces"
                     | "vertices"
+                    | "cdata"
                     | "facecolor"
                     | "edgecolor"
                     | "facealpha"
@@ -877,6 +1144,30 @@ mod tests {
         assert_eq!(plot.vertices()[0], Vec3::new(0.0, 0.0, 0.0));
         assert_eq!(plot.vertices()[1], Vec3::new(1.0, 0.0, 0.0));
         assert_eq!(plot.vertices()[2], Vec3::new(0.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn patch_rejects_invalid_integer_relevant_properties_without_clamping() {
+        let base = || {
+            vec![
+                Value::String("XData".into()),
+                tensor(3, 1, &[0.0, 1.0, 0.0]),
+                Value::String("YData".into()),
+                tensor(3, 1, &[0.0, 0.0, 1.0]),
+            ]
+        };
+        for (name, value) in [
+            ("FaceAlpha", Value::Num(2.0)),
+            ("EdgeAlpha", Value::Num(-0.5)),
+            ("LineWidth", Value::Int(runmat_builtins::IntValue::I16(0))),
+            ("Visible", Value::Int(runmat_builtins::IntValue::U8(2))),
+            ("FutureProperty", Value::Num(1.0)),
+        ] {
+            let mut args = base();
+            args.push(Value::String(name.into()));
+            args.push(value);
+            assert!(parse_patch_plot(args).is_err(), "{name} must be rejected");
+        }
     }
 
     #[test]

@@ -18,7 +18,9 @@ pub async fn gather_tensor_async(
     // This mirrors the guard used in test_support::gather.
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if handle.device_id != 0 {
+        let active_owner = runmat_accelerate_api::provider()
+            .is_some_and(|provider| provider.device_id() == handle.device_id);
+        if handle.device_id != 0 && !active_owner {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );

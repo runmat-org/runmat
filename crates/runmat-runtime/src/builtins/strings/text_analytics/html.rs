@@ -40,6 +40,12 @@ pub const EXTRACT_HTML_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "extractHTMLText accepts host text or htmlTree input and textual ExtractionMethod values only. All eight integer classes, logical and complex values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
     };
+pub const FIND_ELEMENT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "findElement accepts a scalar htmlTree object and a textual CSS selector. All eight integer classes, logical and complex values, and resident numeric handles reject without numeric-to-object conversion or provider access.",
+    };
 
 const OUT_TREE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tree",
@@ -326,6 +332,7 @@ fn html_cell_is_broad(value: &Value) -> bool {
     summary = "Find elements in an htmlTree using common CSS selectors.",
     keywords = "findElement,htmlTree,HTML,CSS selector,text analytics",
     accel = "metadata",
+    integer_audit(crate::builtins::strings::text_analytics::html::FIND_ELEMENT_INTEGER_AUDIT),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::html::FIND_ELEMENT_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::html"
@@ -335,6 +342,15 @@ async fn find_element_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return Err(html_error(
             "findElement",
             "findElement: expected htmlTree and selector",
+        ));
+    }
+    if args
+        .iter()
+        .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value))
+    {
+        return Err(html_error(
+            "findElement",
+            "findElement: expected htmlTree and textual CSS selector",
         ));
     }
     let tree = gather_if_needed_async(&args[0]).await.map_err(|err| {
@@ -2439,6 +2455,42 @@ mod tests {
         ]))
         .expect_err("repeated combinator");
         assert!(err.to_string().contains("repeated combinators"));
+    }
+
+    #[test]
+    fn find_element_integer_audit_rejects_numeric_inputs_before_provider_access() {
+        assert_eq!(
+            FIND_ELEMENT_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(1)),
+            Value::Int(runmat_builtins::IntValue::I16(1)),
+            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_builtins::IntValue::I64(1)),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_builtins::IntValue::U16(1)),
+            Value::Int(runmat_builtins::IntValue::U32(1)),
+            Value::Int(runmat_builtins::IntValue::U64(1)),
+        ] {
+            let error = futures::executor::block_on(find_element_builtin(vec![
+                value,
+                Value::String("p".into()),
+            ]))
+            .expect_err("integer tree input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = futures::executor::block_on(find_element_builtin(vec![
+            resident,
+            Value::String("p".into()),
+        ]))
+        .expect_err("resident tree input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

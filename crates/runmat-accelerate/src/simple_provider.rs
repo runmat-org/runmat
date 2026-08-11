@@ -66,7 +66,6 @@ const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
 static INTEGER_REGISTRY: OnceCell<Mutex<HashMap<u64, HostIntegerDataOwned>>> = OnceCell::new();
 static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
-static NEXT_INPROCESS_DEVICE_ID: AtomicU64 = AtomicU64::new(1);
 
 fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
@@ -1646,12 +1645,7 @@ pub struct InProcessProvider {
 
 impl InProcessProvider {
     pub fn new() -> Self {
-        let device_id = NEXT_INPROCESS_DEVICE_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                current.checked_add(1)
-            })
-            .expect("in-process provider device ids exhausted");
-        let device_id = u32::try_from(device_id).expect("in-process provider device ids exhausted");
+        let device_id = runmat_accelerate_api::next_device_id();
         let id_base = NEXT_PROVIDER_ID_BASE
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(PROVIDER_ID_BLOCK_SIZE)

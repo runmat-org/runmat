@@ -4,6 +4,7 @@ use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, Rend
 use crate::geometry::stroke3d::{tessellate_polyline, StrokeCap3D, StrokeStyle3D};
 use crate::plots::line::LineStyle;
 use glam::{Vec2, Vec3, Vec4};
+use runmat_builtins::NumericStorage;
 
 const TRIANGULATION_EPSILON: f32 = 1.0e-6;
 
@@ -20,6 +21,15 @@ pub enum PatchFaceColorMode {
 pub enum PatchEdgeColorMode {
     Color,
     None,
+}
+
+/// Authoritative numeric data retained by a patch independently of the f32
+/// renderer geometry. Graphics properties use this snapshot so integer class,
+/// exact values, and the original array shape survive rendering conversion.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatchData {
+    pub storage: NumericStorage,
+    pub shape: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +51,10 @@ pub struct PatchPlot {
     bounds: Option<BoundingBox>,
     force_3d: bool,
     dirty: bool,
+    x_data: Option<PatchData>,
+    y_data: Option<PatchData>,
+    z_data: Option<PatchData>,
+    c_data: Option<PatchData>,
 }
 
 impl PatchPlot {
@@ -72,11 +86,44 @@ impl PatchPlot {
             bounds: None,
             force_3d: false,
             dirty: true,
+            x_data: None,
+            y_data: None,
+            z_data: None,
+            c_data: None,
         })
     }
 
     pub fn vertices(&self) -> &[Vec3] {
         &self.vertices
+    }
+
+    pub fn source_data(
+        &self,
+    ) -> (
+        Option<&PatchData>,
+        Option<&PatchData>,
+        Option<&PatchData>,
+        Option<&PatchData>,
+    ) {
+        (
+            self.x_data.as_ref(),
+            self.y_data.as_ref(),
+            self.z_data.as_ref(),
+            self.c_data.as_ref(),
+        )
+    }
+
+    pub fn set_source_data(
+        &mut self,
+        x_data: Option<PatchData>,
+        y_data: Option<PatchData>,
+        z_data: Option<PatchData>,
+        c_data: Option<PatchData>,
+    ) {
+        self.x_data = x_data;
+        self.y_data = y_data;
+        self.z_data = z_data;
+        self.c_data = c_data;
     }
 
     pub fn faces(&self) -> &[Vec<usize>] {
