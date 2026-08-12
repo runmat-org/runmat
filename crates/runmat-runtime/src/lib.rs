@@ -2301,6 +2301,7 @@ mod tests {
 
     #[test]
     fn getmethod_classref_returns_typed_external_function_handle() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::ClassRef("Point".to_string()),
@@ -2315,6 +2316,7 @@ mod tests {
 
     #[test]
     fn getmethod_rejects_empty_method_name() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::ClassRef("Point".to_string()),
             "   ".to_string(),
@@ -2325,6 +2327,7 @@ mod tests {
 
     #[test]
     fn getmethod_rejects_unsupported_receiver_with_identifier() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::Num(1.0),
             "origin".to_string(),

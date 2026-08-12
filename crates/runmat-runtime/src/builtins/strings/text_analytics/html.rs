@@ -46,6 +46,12 @@ pub const FIND_ELEMENT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "findElement accepts a scalar htmlTree object and a textual CSS selector. All eight integer classes, logical and complex values, and resident numeric handles reject without numeric-to-object conversion or provider access.",
     };
+pub const GET_ATTRIBUTE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "htmlTree.getAttribute accepts host htmlTree objects and a host text attribute name only. All eight integer classes and provider-resident numeric values reject without implicit conversion, gather, or provider access.",
+    };
 
 const OUT_TREE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tree",
@@ -295,9 +301,11 @@ fn numeric_or_resident(value: &Value) -> bool {
             | Value::Int(_)
             | Value::Bool(_)
             | Value::Tensor(_)
+            | Value::SparseTensor(_)
             | Value::LogicalArray(_)
             | Value::Complex(_, _)
             | Value::ComplexTensor(_)
+            | Value::Symbolic(_)
             | Value::GpuTensor(_)
     )
 }
@@ -375,6 +383,7 @@ async fn find_element_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     summary = "Read an HTML attribute from htmlTree root nodes.",
     keywords = "getAttribute,htmlTree,HTML,attribute,text analytics",
     accel = "metadata",
+    integer_audit(crate::builtins::strings::text_analytics::html::GET_ATTRIBUTE_INTEGER_AUDIT),
     type_resolver(string_type),
     descriptor(crate::builtins::strings::text_analytics::html::GET_ATTRIBUTE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::html"
@@ -386,20 +395,34 @@ async fn get_attribute_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "getAttribute: expected htmlTree and attribute name",
         ));
     }
-    let tree = gather_if_needed_async(&args[0]).await.map_err(|err| {
-        html_error(
+    if args
+        .iter()
+        .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value))
+    {
+        return Err(html_error(
             "getAttribute",
-            format!("getAttribute: failed to gather tree: {err}"),
-        )
-    })?;
-    let attr = gather_if_needed_async(&args[1]).await.map_err(|err| {
-        html_error(
+            "getAttribute: expected htmlTree and textual attribute name",
+        ));
+    }
+    let attr = attribute_name_text(&args[1])?;
+    get_attribute_value(args[0].clone(), &attr)
+}
+
+fn attribute_name_text(value: &Value) -> BuiltinResult<String> {
+    if let Value::Cell(cell) = value {
+        if cell.data.len() == 1 {
+            if let Value::CharArray(array) = &cell.data[0] {
+                if array.rows <= 1 {
+                    return scalar_text(&cell.data[0], "getAttribute");
+                }
+            }
+        }
+        return Err(html_error(
             "getAttribute",
-            format!("getAttribute: failed to gather attribute name: {err}"),
-        )
-    })?;
-    let attr = scalar_text(&attr, "getAttribute")?;
-    get_attribute_value(tree, &attr)
+            "getAttribute: attribute name cell must contain one character vector",
+        ));
+    }
+    scalar_text(value, "getAttribute")
 }
 
 async fn parse_extract_args(args: Vec<Value>) -> BuiltinResult<(Value, ExtractionMethod)> {
@@ -2332,6 +2355,27 @@ mod tests {
         assert_eq!(string_value(out), MISSING);
     }
 
+    #[test]
+    fn get_attribute_accepts_scalar_cell_character_attribute_name() {
+        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+            "<a href='/home'>Home</a>".to_string(),
+        )]))
+        .expect("tree");
+        let attr = Value::Cell(
+            CellArray::new(
+                vec![Value::CharArray(runmat_builtins::CharArray::new_row(
+                    "href",
+                ))],
+                1,
+                1,
+            )
+            .expect("scalar cell attribute"),
+        );
+        let out = futures::executor::block_on(get_attribute_builtin(vec![tree, attr]))
+            .expect("attribute");
+        assert_eq!(string_value(out), "/home");
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_element_handles_quoted_attribute_selectors_and_empty_results() {
@@ -2490,6 +2534,61 @@ mod tests {
             Value::String("p".into()),
         ]))
         .expect_err("resident tree input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn get_attribute_integer_audit_rejects_all_numeric_roles_before_provider_access() {
+        assert_eq!(
+            GET_ATTRIBUTE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(1)),
+            Value::Int(runmat_builtins::IntValue::I16(1)),
+            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_builtins::IntValue::I64(1)),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_builtins::IntValue::U16(1)),
+            Value::Int(runmat_builtins::IntValue::U32(1)),
+            Value::Int(runmat_builtins::IntValue::U64(1)),
+        ] {
+            let error = futures::executor::block_on(get_attribute_builtin(vec![
+                value.clone(),
+                Value::String("href".into()),
+            ]))
+            .expect_err("integer tree input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+            let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+                "<a href='x'>x</a>".into(),
+            )]))
+            .expect("tree");
+            let error = futures::executor::block_on(get_attribute_builtin(vec![tree, value]))
+                .expect_err("integer attribute input");
+            assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        }
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = futures::executor::block_on(get_attribute_builtin(vec![
+            resident,
+            Value::String("href".into()),
+        ]))
+        .expect_err("resident tree input");
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn get_attribute_remains_scoped_to_html_tree_objects() {
+        let object = ObjectInstance::new("OtherClass".to_string());
+        let error = futures::executor::block_on(get_attribute_builtin(vec![
+            Value::Object(object),
+            Value::String("href".into()),
+        ]))
+        .expect_err("non-html object");
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
     }
 

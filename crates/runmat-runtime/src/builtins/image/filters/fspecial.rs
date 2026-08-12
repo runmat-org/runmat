@@ -6,9 +6,13 @@ use std::f64::consts::PI;
 use log::warn;
 use runmat_accelerate_api::{self, FspecialFilter, FspecialRequest};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, Tensor, Value,
+    IntValue, NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -135,6 +139,83 @@ pub const FSPECIAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &FSPECIAL_ERRORS,
 };
+
+const FSPECIAL_NONDOUBLE_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fspecial-nondouble-size",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fspecial with a single, integer, or logical size control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FspecialNondoubleSizeExtension"),
+};
+
+const FSPECIAL_NONDOUBLE_PARAMETER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "fspecial-nondouble-parameter",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "fspecial with a single, integer, or logical computational parameter is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:FspecialNondoubleParameterExtension"),
+    };
+
+const FSPECIAL_UNSHARP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fspecial-unsharp-filter",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fspecial with the unsharp filter type is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FspecialUnsharpExtension"),
+};
+
+const FSPECIAL_RESIDENT_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fspecial-resident-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fspecial evaluated under ambient interactive resident-output policy is a RunMat extension; unsupported provider forms fall back to host output",
+    error_identifier: Some("RunMat:compatibility:FspecialResidentOutputExtension"),
+};
+
+pub const FSPECIAL_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FSPECIAL_NONDOUBLE_SIZE_EXTENSION,
+    FSPECIAL_NONDOUBLE_PARAMETER_EXTENSION,
+    FSPECIAL_UNSHARP_EXTENSION,
+    FSPECIAL_RESIDENT_OUTPUT_EXTENSION,
+];
+
+const FSPECIAL_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "hsize or len",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are decoded from authoritative storage as exact positive structural dimensions.",
+    }];
+
+const FSPECIAL_INTEGER_PARAMETER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "radius, sigma, alpha, or theta",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are admitted only when exactly representable at the binary64 kernel-computation boundary.",
+    }];
+
+pub const FSPECIAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "H = fspecial(type, integer_hsize_or_len, ...)",
+        inputs: &FSPECIAL_INTEGER_SIZE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "RunMat-only exact structural controls; host kernels are double, while the independently gated resident-output extension follows provider F32/F64 precision when supported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "H = fspecial(type, integer_parameter, ...)",
+        inputs: &FSPECIAL_INTEGER_PARAMETER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "RunMat-only computational controls cross one exact binary64 boundary; host kernels are double, while the independently gated resident-output extension follows provider F32/F64 precision when supported.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::fspecial")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -375,12 +456,59 @@ pub fn spec_from_request(filter: &FspecialFilter) -> BuiltinResult<FspecialFilte
     accel = "array_construct",
     type_resolver(fspecial_type),
     descriptor(crate::builtins::image::filters::fspecial::FSPECIAL_DESCRIPTOR),
+    extensions(crate::builtins::image::filters::fspecial::FSPECIAL_EXTENSIONS),
+    integer_capabilities(crate::builtins::image::filters::fspecial::FSPECIAL_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::filters::fspecial"
 )]
 async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    ensure_fspecial_extensions_enabled(&kind, &rest)?;
+    if should_materialize_on_gpu() {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FSPECIAL_RESIDENT_OUTPUT_EXTENSION,
+            NAME,
+        )?;
+    }
     let spec = build_filter_spec(&kind, &rest)?;
     let tensor = spec.generate_tensor()?;
     finalize_output(&spec, tensor)
+}
+
+fn ensure_fspecial_extensions_enabled(kind: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    let filter_kind = parse_filter_kind(kind)?;
+    if matches!(filter_kind, FilterKind::Unsharp) {
+        crate::compatibility::ensure_builtin_extension_enabled(&FSPECIAL_UNSHARP_EXTENSION, NAME)?;
+    }
+    let (size_indices, parameter_indices): (&[usize], &[usize]) = match filter_kind {
+        FilterKind::Average => (&[0], &[]),
+        FilterKind::Disk | FilterKind::Laplacian | FilterKind::Unsharp => (&[], &[0]),
+        FilterKind::Gaussian | FilterKind::Log => (&[0], &[1]),
+        FilterKind::Motion => (&[0], &[1]),
+        FilterKind::Prewitt | FilterKind::Sobel => (&[], &[]),
+    };
+    for &index in size_indices {
+        if rest.get(index).is_some_and(is_nondouble_numeric_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FSPECIAL_NONDOUBLE_SIZE_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    for &index in parameter_indices {
+        if rest.get(index).is_some_and(is_nondouble_numeric_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FSPECIAL_NONDOUBLE_PARAMETER_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn is_nondouble_numeric_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_)
+    ) || matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() != NumericDType::F64)
 }
 
 fn build_filter_spec(kind: &Value, rest: &[Value]) -> BuiltinResult<FspecialFilterSpec> {
@@ -983,6 +1111,9 @@ fn parse_lengths_inner(
             }
             Ok(vec![len])
         }
+        Value::Bool(value) => {
+            parse_numeric_dimension(if *value { 1.0 } else { 0.0 }).map(|dimension| vec![dimension])
+        }
         Value::Num(n) => parse_numeric_dimension(*n).map(|d| vec![d]),
         Value::Tensor(tensor) => {
             let dims = (0..tensor.len())
@@ -1071,8 +1202,36 @@ fn fits_platform_usize(value: f64) -> bool {
 fn to_scalar(value: &Value, err: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
-        Value::Int(i) => Ok(i.to_f64()),
+        Value::Int(integer) => exact_integer_f64(integer, err),
+        Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
+        Value::LogicalArray(logical) if logical.data.len() == 1 => {
+            Ok(if logical.data[0] == 0 { 0.0 } else { 1.0 })
+        }
+        Value::Tensor(tensor) if tensor.len() == 1 => {
+            let scalar = tensor
+                .numeric_value_at(0)
+                .ok_or_else(|| fspecial_error(err))?;
+            numeric_scalar_f64(scalar, err)
+        }
         _ => Err(fspecial_error(err)),
+    }
+}
+
+fn numeric_scalar_f64(value: NumericScalar, err: &str) -> BuiltinResult<f64> {
+    if let Some(integer) = value.clone().into_int_value() {
+        exact_integer_f64(&integer, err)
+    } else {
+        Ok(value.materialize_f64())
+    }
+}
+
+fn exact_integer_f64(value: &IntValue, err: &str) -> BuiltinResult<f64> {
+    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+        Ok(value.to_f64())
+    } else {
+        Err(fspecial_error(format!(
+            "{err}; integer value must be exactly representable as double"
+        )))
     }
 }
 
@@ -1196,6 +1355,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
     use std::ffi::OsString;
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -1248,6 +1408,19 @@ pub(crate) mod tests {
         }
     }
 
+    fn all_integer_scalar_tensors(value: u8) -> Vec<Tensor> {
+        vec![
+            Tensor::new_integer(IntegerStorage::I8(vec![value as i8]), vec![1, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I16(vec![value as i16]), vec![1, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I32(vec![value as i32]), vec![1, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::I64(vec![value as i64]), vec![1, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U8(vec![value]), vec![1, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U16(vec![value as u16]), vec![1, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U32(vec![value as u32]), vec![1, 1]).unwrap(),
+            Tensor::new_integer(IntegerStorage::U64(vec![value as u64]), vec![1, 1]).unwrap(),
+        ]
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_default() {
@@ -1261,7 +1434,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_scalar_size() {
-        let args = vec![Value::from(5)];
+        let args = vec![Value::from(5.0)];
         let tensor = fspecial_host_tensor("average", args);
         assert_eq!(tensor.shape, vec![5, 5]);
         let sum: f64 = tensor.materialize_f64().iter().sum();
@@ -1304,6 +1477,119 @@ pub(crate) mod tests {
             "fspecial: LENGTHS must be positive integers",
         )
         .is_err());
+    }
+
+    #[test]
+    fn fspecial_accepts_all_integer_classes_from_authoritative_storage() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        for tensor in all_integer_scalar_tensors(2) {
+            let spec = build_filter_spec(&Value::from("average"), &[Value::Tensor(tensor)])
+                .expect("integer size");
+            assert!(matches!(
+                spec,
+                FspecialFilterSpec::Average { rows: 2, cols: 2 }
+            ));
+        }
+        for tensor in all_integer_scalar_tensors(1) {
+            let spec = build_filter_spec(&Value::from("laplacian"), &[Value::Tensor(tensor)])
+                .expect("integer parameter");
+            assert!(matches!(spec, FspecialFilterSpec::Laplacian { alpha: 1.0 }));
+        }
+    }
+
+    #[test]
+    fn fspecial_rejects_inexact_wide_integer_computational_parameters() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = (1_u64 << 53) + 1;
+        let radius = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
+        let error = build_filter_spec(&Value::from("disk"), &[Value::Tensor(radius)])
+            .expect_err("inexact radius");
+        assert!(error.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn fspecial_nondouble_roles_and_runmat_forms_are_independently_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let integer_size = block_on(fspecial_builtin(
+            Value::from("average"),
+            vec![Value::Int(IntValue::U8(2))],
+        ))
+        .expect_err("integer size extension");
+        assert_eq!(
+            integer_size.identifier(),
+            FSPECIAL_NONDOUBLE_SIZE_EXTENSION.error_identifier
+        );
+
+        let integer_parameter = block_on(fspecial_builtin(
+            Value::from("laplacian"),
+            vec![Value::Int(IntValue::U8(1))],
+        ))
+        .expect_err("integer parameter extension");
+        assert_eq!(
+            integer_parameter.identifier(),
+            FSPECIAL_NONDOUBLE_PARAMETER_EXTENSION.error_identifier
+        );
+
+        let logical_size = block_on(fspecial_builtin(
+            Value::from("average"),
+            vec![Value::Bool(true)],
+        ))
+        .expect_err("logical size extension");
+        assert_eq!(
+            logical_size.identifier(),
+            FSPECIAL_NONDOUBLE_SIZE_EXTENSION.error_identifier
+        );
+
+        let single_parameter = Tensor::from_numeric_storage(
+            runmat_builtins::NumericStorage::F32(vec![1.0]),
+            vec![1, 1],
+        )
+        .unwrap();
+        let single_parameter = block_on(fspecial_builtin(
+            Value::from("laplacian"),
+            vec![Value::Tensor(single_parameter)],
+        ))
+        .expect_err("single parameter extension");
+        assert_eq!(
+            single_parameter.identifier(),
+            FSPECIAL_NONDOUBLE_PARAMETER_EXTENSION.error_identifier
+        );
+
+        let unsharp = block_on(fspecial_builtin(Value::from("unsharp"), Vec::new()))
+            .expect_err("unsharp extension");
+        assert_eq!(
+            unsharp.identifier(),
+            FSPECIAL_UNSHARP_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn fspecial_resident_output_policy_is_gated_before_provider_dispatch() {
+        let _env_guard = fspecial_env_guard();
+        let _restore = fspecial_device_env_restore();
+        std::env::set_var("RUNMAT_ACCEL_FSPECIAL_DEVICE", "1");
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(fspecial_builtin(Value::from("average"), Vec::new()))
+            .expect_err("resident output extension");
+        assert_eq!(
+            error.identifier(),
+            FSPECIAL_RESIDENT_OUTPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn fspecial_integer_capabilities_distinguish_structural_and_floating_roles() {
+        assert_eq!(FSPECIAL_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(FSPECIAL_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(
+            FSPECIAL_INTEGER_CAPABILITIES[0].computation_domain,
+            BuiltinIntegerComputationDomain::Structural
+        );
+        assert_eq!(
+            FSPECIAL_INTEGER_CAPABILITIES[1].computation_domain,
+            BuiltinIntegerComputationDomain::FloatingPoint
+        );
     }
 
     #[test]
@@ -1368,7 +1654,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_average_rejects_zero_size() {
-        let args = vec![Value::from(0)];
+        let args = vec![Value::from(0.0)];
         let err = block_on(fspecial_builtin(Value::from("average"), args))
             .expect_err("fspecial should error");
         assert!(error_message(err).contains("positive"));
@@ -1398,7 +1684,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_gaussian_size_sigma() {
-        let args = vec![Value::from(7), Value::from(2.0)];
+        let args = vec![Value::from(7.0), Value::from(2.0)];
         let tensor = fspecial_host_tensor("gaussian", args);
         assert_eq!(tensor.shape, vec![7, 7]);
         let center = tensor.rows / 2;
@@ -1434,6 +1720,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_unsharp_default() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let t = fspecial_host_tensor("unsharp", Vec::new());
         assert_eq!(t.shape, vec![3, 3]);
         let sum: f64 = t.materialize_f64().iter().sum();
@@ -1443,7 +1730,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_log_basic_properties() {
-        let t = fspecial_host_tensor("log", vec![Value::from(5), Value::from(0.5)]);
+        let t = fspecial_host_tensor("log", vec![Value::from(5.0), Value::from(0.5)]);
         assert_eq!(t.shape, vec![5, 5]);
         let sum: f64 = t.materialize_f64().iter().sum();
         assert_close(sum, 0.0, 1e-12);
@@ -1455,7 +1742,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_disk_sum_is_one() {
-        let t = fspecial_host_tensor("disk", vec![Value::from(5)]);
+        let t = fspecial_host_tensor("disk", vec![Value::from(5.0)]);
         assert_eq!(t.shape, vec![11, 11]);
         let sum: f64 = t.materialize_f64().iter().sum();
         assert_close(sum, 1.0, 1e-10);
@@ -1479,7 +1766,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fspecial_motion_sum_is_one() {
-        let t = fspecial_host_tensor("motion", vec![Value::from(15), Value::from(45.0)]);
+        let t = fspecial_host_tensor("motion", vec![Value::from(15.0), Value::from(45.0)]);
         assert_eq!(t.shape, vec![15, 15]);
         let sum: f64 = t.materialize_f64().iter().sum();
         assert_close(sum, 1.0, 1e-10);

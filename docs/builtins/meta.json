@@ -60106,6 +60106,88 @@
           "when": "Kernel generation fails internally.",
           "message": "fspecial: internal kernel generation failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "fspecial-nondouble-size",
+          "mode": "RunMatOnly",
+          "description": "fspecial with a single, integer, or logical size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FspecialNondoubleSizeExtension"
+        },
+        {
+          "id": "fspecial-nondouble-parameter",
+          "mode": "RunMatOnly",
+          "description": "fspecial with a single, integer, or logical computational parameter is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FspecialNondoubleParameterExtension"
+        },
+        {
+          "id": "fspecial-unsharp-filter",
+          "mode": "RunMatOnly",
+          "description": "fspecial with the unsharp filter type is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FspecialUnsharpExtension"
+        },
+        {
+          "id": "fspecial-resident-output",
+          "mode": "RunMatOnly",
+          "description": "fspecial evaluated under ambient interactive resident-output policy is a RunMat extension; unsupported provider forms fall back to host output",
+          "error_identifier": "RunMat:compatibility:FspecialResidentOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "H = fspecial(type, integer_hsize_or_len, ...)",
+          "inputs": [
+            {
+              "name": "hsize or len",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are decoded from authoritative storage as exact positive structural dimensions."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only exact structural controls; host kernels are double, while the independently gated resident-output extension follows provider F32/F64 precision when supported."
+        },
+        {
+          "form": "H = fspecial(type, integer_parameter, ...)",
+          "inputs": [
+            {
+              "name": "radius, sigma, alpha, or theta",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are admitted only when exactly representable at the binary64 kernel-computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "ScalarOnly",
+          "notes": "RunMat-only computational controls cross one exact binary64 boundary; host kernels are double, while the independently gated resident-output extension follows provider F32/F64 precision when supported."
+        }
       ]
     },
     {
@@ -60307,6 +60389,193 @@
           "identifier": "RunMat:fsurf:Internal",
           "when": "Surface construction or rendering fails unexpectedly.",
           "message": "fsurf: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "fsurf-integer-domain",
+          "mode": "RunMatOnly",
+          "description": "fsurf with a typed-integer domain vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsurfIntegerDomainExtension"
+        },
+        {
+          "id": "fsurf-logical-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "fsurf with a logical numeric domain, control, or callback sample is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsurfLogicalNumericInputExtension"
+        },
+        {
+          "id": "fsurf-single-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "fsurf with a single-precision numeric domain, control, or callback sample is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsurfSingleNumericInputExtension"
+        },
+        {
+          "id": "fsurf-integer-mesh-density",
+          "mode": "RunMatOnly",
+          "description": "fsurf with a typed-integer MeshDensity is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsurfIntegerMeshDensityExtension"
+        },
+        {
+          "id": "fsurf-integer-axes-handle",
+          "mode": "RunMatOnly",
+          "description": "fsurf with a typed-integer numeric axes alias is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsurfIntegerAxesHandleExtension"
+        },
+        {
+          "id": "fsurf-integer-callback-output",
+          "mode": "RunMatOnly",
+          "description": "fsurf with a callback returning typed-integer samples is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsurfIntegerCallbackOutputExtension"
+        },
+        {
+          "id": "fsurf-integer-style-property",
+          "mode": "RunMatOnly",
+          "description": "fsurf with a typed-integer surface style property is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsurfIntegerStylePropertyExtension"
+        },
+        {
+          "id": "fsurf-resident-callback-output",
+          "mode": "RunMatOnly",
+          "description": "fsurf with a provider-resident callback result is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:FsurfResidentCallbackOutputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = fsurf(f, integer_xyinterval)",
+          "inputs": [
+            {
+              "name": "xyinterval or uvinterval",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat admits exact typed-integer domain bounds only when every value is exactly representable at the binary64 sampling boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The independently gated bounds cross one checked binary64 plotting-domain boundary; the result is an opaque graphics handle."
+        },
+        {
+          "form": "h = fsurf(..., 'MeshDensity', integer_density)",
+          "inputs": [
+            {
+              "name": "MeshDensity",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat admits all eight integer classes as exact bounded host sampling counts."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The independently gated exact count controls bounded host callback sampling and does not become integer output."
+        },
+        {
+          "form": "h = fsurf(integer_ax, ...)",
+          "inputs": [
+            {
+              "name": "ax",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The compatibility extension gate runs before axes selection and sampling."
+        },
+        {
+          "form": "h = fsurf(f_returning_integer, ...)",
+          "inputs": [
+            {
+              "name": "callback result",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat admits scalar typed-integer callback samples only when exactly representable at the binary64 surface-geometry boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "Each independently gated authoritative callback sample crosses one checked binary64 surface-geometry boundary."
+        },
+        {
+          "form": "h = fsurf(..., property_name, integer_property_value)",
+          "inputs": [
+            {
+              "name": "surface style property",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat accepts typed-integer RGB, alpha, and boolean-style controls only behind one independent surface-property gate and validates exact plotting conversion before sampling."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "The independently gated value is validated from authoritative storage before callback sampling and then crosses the applicable renderer-property boundary."
         }
       ]
     },
@@ -61980,6 +62249,100 @@
           "when": "Internal tensor construction or GPU gather fails.",
           "message": "gauspuls: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "gauspuls-integer-time",
+          "mode": "RunMatOnly",
+          "description": "gauspuls with typed-integer sample times is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GauspulsIntegerTimeExtension"
+        },
+        {
+          "id": "gauspuls-logical-time",
+          "mode": "RunMatOnly",
+          "description": "gauspuls with logical sample times is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GauspulsLogicalTimeExtension"
+        },
+        {
+          "id": "gauspuls-integer-control",
+          "mode": "RunMatOnly",
+          "description": "gauspuls with a typed-integer scalar control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GauspulsIntegerControlExtension"
+        },
+        {
+          "id": "gauspuls-logical-control",
+          "mode": "RunMatOnly",
+          "description": "gauspuls with a logical scalar control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GauspulsLogicalControlExtension"
+        },
+        {
+          "id": "gauspuls-single-control",
+          "mode": "RunMatOnly",
+          "description": "gauspuls with a single-precision scalar control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GauspulsSingleControlExtension"
+        },
+        {
+          "id": "gauspuls-resident-input",
+          "mode": "RunMatOnly",
+          "description": "gauspuls with an interactive resident input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GauspulsResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = gauspuls(integer_T, FC, BW, BWR)",
+          "inputs": [
+            {
+              "name": "T",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are read from authoritative storage and admitted only when exactly representable as binary64 sample times."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat-only integer sample times cross one exact binary64 boundary and produce host double output."
+        },
+        {
+          "form": "Y or TC = gauspuls(..., integer_control, ...)",
+          "inputs": [
+            {
+              "name": "FC, BW, BWR, or TPE",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are scalar-only and must be exactly representable at the binary64 signal-computation boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "RunMat-only scalar controls cross one exact binary64 boundary; output follows the documented floating form."
+        }
       ]
     },
     {
@@ -61993,10 +62356,10 @@
           "outputs": [
             {
               "name": "ax",
-              "ty": "NumericScalar",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Current axes handle."
+              "description": "Current axes graphics object; RunMat currently returns its encoded numeric axes handle."
             }
           ]
         },
@@ -62014,10 +62377,10 @@
           "outputs": [
             {
               "name": "ax",
-              "ty": "NumericScalar",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Current axes handle."
+              "description": "Current axes graphics object; RunMat currently returns its encoded numeric axes handle."
             }
           ]
         },
@@ -62049,6 +62412,55 @@
           "identifier": "RunMat:gca:InvalidArgument",
           "when": "Unsupported arguments are provided.",
           "message": "gca: unsupported arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "gca-figure-argument",
+          "mode": "RunMatOnly",
+          "description": "gca with an explicit figure argument is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GcaFigureArgumentExtension"
+        },
+        {
+          "id": "gca-struct-output",
+          "mode": "RunMatOnly",
+          "description": "gca('struct') is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GcaStructOutputExtension"
+        },
+        {
+          "id": "gca-integer-figure-alias",
+          "mode": "RunMatOnly",
+          "description": "typed-integer numeric figure aliases for gca are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GcaIntegerFigureAliasExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "ax = gca(integer_fig_alias)",
+          "inputs": [
+            {
+              "name": "fig",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a gca has no input form and returns a graphics object; typed integers are exact aliases for RunMat's numeric figure registry only."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The alias is decoded exactly and gated before graphics lookup or mutation. RunMat currently returns its numeric axes representation rather than a MATLAB graphics object."
         }
       ]
     },
@@ -62525,7 +62937,11 @@
           "when": "Internal string, cell, or character array construction failed.",
           "message": "genvarname: internal error"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "genvarname accepts host text names and exclusions only. All eight integer classes and provider-resident numeric values reject without implicit text conversion, gather, or provider access."
+      }
     },
     {
       "name": "geomean",
@@ -62907,7 +63323,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Graphics handle (figure, axes, plot object, text, legend, etc.)."
+              "description": "Graphics object (figure, axes, plot object, text, legend, etc.); RunMat currently also resolves its numeric handle representation."
             }
           ],
           "outputs": [
@@ -62928,7 +63344,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Graphics handle (figure, axes, plot object, text, legend, etc.)."
+              "description": "Graphics object (figure, axes, plot object, text, legend, etc.); RunMat currently also resolves its numeric handle representation."
             },
             {
               "name": "property",
@@ -62961,6 +63377,43 @@
           "identifier": "RunMat:get:Internal",
           "when": "Internal handle/property retrieval fails unexpectedly.",
           "message": "get: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "get-integer-handle-alias",
+          "mode": "RunMatOnly",
+          "description": "typed-integer numeric graphics aliases for get are a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GetIntegerHandleAliasExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "value = get(integer_graphics_alias, property?)",
+          "inputs": [
+            {
+              "name": "h",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents graphics objects, not typed numeric aliases; RunMat resolves exact aliases only under extension policy."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Only handle resolution is integer-sensitive. Property payload Values are returned unchanged, including authoritative integer storage."
         }
       ]
     },
@@ -63005,7 +63458,11 @@
           "when": "Inputs are not a supported htmlTree or extractHTMLText form.",
           "message": "HTML Text Analytics helper received invalid input"
         }
-      ]
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "htmlTree.getAttribute accepts host htmlTree objects and a host text attribute name only. All eight integer classes and provider-resident numeric values reject without implicit conversion, gather, or provider access."
+      }
     },
     {
       "name": "getcallinfo",
@@ -63451,7 +63908,19 @@
           "when": "Resolved method exists but is inaccessible from the current class scope.",
           "message": "getmethod: method is not accessible from current scope"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "getmethod-bound-method-handle",
+          "mode": "RunMatOnly",
+          "description": "getmethod bound method-handle creation is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GetmethodExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "RunMat getmethod accepts an object or class reference and a host text method name only. All eight integer classes and provider-resident numeric values reject without conversion, gather, or provider access; this audit does not imply compatibility with MATLAB methods or ismethod."
+      }
     },
     {
       "name": "getpref",
@@ -63459,28 +63928,69 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "value = getpref(group, preference, default)",
+          "label": "value = getpref()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "value = getpref(group, pref)",
           "inputs": [
             {
-              "name": "input1",
+              "name": "group",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Custom setting group name."
+            },
+            {
+              "name": "pref",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "First input argument."
-            },
+              "description": "Setting name or cell/string array of setting names."
+            }
+          ],
+          "outputs": [
             {
-              "name": "input2",
+              "name": "value",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Second input argument."
+              "description": "Result value."
+            }
+          ]
+        },
+        {
+          "label": "value = getpref(group, pref, value)",
+          "inputs": [
+            {
+              "name": "group",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Custom setting group name."
             },
             {
-              "name": "input3",
+              "name": "pref",
               "ty": "Any",
-              "arity": "Optional",
+              "arity": "Required",
               "default": null,
-              "description": "Optional third input argument."
+              "description": "Setting name or cell/string array of setting names."
+            },
+            {
+              "name": "value",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Default value, or cell array of defaults for multiple setting names."
             }
           ],
           "outputs": [
@@ -63494,7 +64004,54 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "extensions": [
+        {
+          "id": "getpref-group-query",
+          "mode": "RunMatOnly",
+          "description": "getpref(group) group-structure query is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GetprefGroupQueryExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "value = getpref(group, pref, integer_default)",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight host integer classes are stored and returned unchanged when used as a missing preference default; group and preference controls remain text-only."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "A missing preference is stored for the current RunMat preference session as the exact integer scalar or array and returned without floating conversion; an existing preference wins unchanged. Durable cross-session storage remains a general preference-system gap."
+        },
+        {
+          "form": "integer_value = getpref(group, pref)",
+          "inputs": [],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "A host integer scalar or array stored in the current RunMat preference session is returned with its exact class, shape, and value; multiple names wrap values in a shape-preserving cell array. Durable cross-session storage remains a general preference-system gap."
+        }
+      ]
     },
     {
       "name": "gobjects",
@@ -63507,10 +64064,10 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericArray",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Array of invalid graphics-handle placeholders for preallocation."
+              "description": "Graphics-placeholder array; RunMat currently uses NaN numeric handle slots as its bounded representation."
             }
           ]
         },
@@ -63528,15 +64085,57 @@
           "outputs": [
             {
               "name": "h",
-              "ty": "NumericArray",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "Array of invalid graphics-handle placeholders for preallocation."
+              "description": "Graphics-placeholder array; RunMat currently uses NaN numeric handle slots as its bounded representation."
             }
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.GOBJECTS.INVALID_SIZE",
+          "identifier": "RunMat:gobjects:InvalidSize",
+          "when": "A size is nonnumeric, nonintegral, logical, resident, or has invalid vector geometry.",
+          "message": "gobjects: invalid size argument"
+        },
+        {
+          "code": "RM.GOBJECTS.ALLOCATION",
+          "identifier": "RunMat:gobjects:AllocationLimit",
+          "when": "The requested shape exceeds addressable or allocatable placeholder storage.",
+          "message": "gobjects: requested placeholder array is too large"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "H = gobjects(integer_sizes...)",
+          "inputs": [
+            {
+              "name": "size",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "R2026a documents all eight integer classes plus integral single and double sizes. Negative signed dimensions are treated as zero."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Scalar input creates a square shape; two or more scalar inputs create those dimensions; one row-vector input supplies dimensions exactly. RunMat retains a documented representation gap: NaN numeric slots stand in for GraphicsPlaceholder objects."
+        }
+      ]
     },
     {
       "name": "gpuArray",

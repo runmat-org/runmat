@@ -1,9 +1,13 @@
 //! MATLAB-compatible `fsurf` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, Value,
+    IntValue, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
@@ -35,6 +39,150 @@ const DEFAULT_DOMAIN: Domain = Domain {
 };
 const DEFAULT_MESH_DENSITY: usize = 35;
 const MAX_MESH_DENSITY: usize = 400;
+
+const INTEGER_DOMAIN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fsurf-integer-domain",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fsurf with a typed-integer domain vector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FsurfIntegerDomainExtension"),
+};
+const LOGICAL_NUMERIC_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fsurf-logical-numeric-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "fsurf with a logical numeric domain, control, or callback sample is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FsurfLogicalNumericInputExtension"),
+};
+const SINGLE_NUMERIC_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fsurf-single-numeric-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fsurf with a single-precision numeric domain, control, or callback sample is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FsurfSingleNumericInputExtension"),
+};
+const INTEGER_MESH_DENSITY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fsurf-integer-mesh-density",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fsurf with a typed-integer MeshDensity is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FsurfIntegerMeshDensityExtension"),
+};
+const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fsurf-integer-axes-handle",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fsurf with a typed-integer numeric axes alias is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FsurfIntegerAxesHandleExtension"),
+};
+const INTEGER_CALLBACK_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fsurf-integer-callback-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fsurf with a callback returning typed-integer samples is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FsurfIntegerCallbackOutputExtension"),
+};
+const INTEGER_STYLE_PROPERTY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fsurf-integer-style-property",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fsurf with a typed-integer surface style property is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FsurfIntegerStylePropertyExtension"),
+};
+const RESIDENT_CALLBACK_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fsurf-resident-callback-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fsurf with a provider-resident callback result is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FsurfResidentCallbackOutputExtension"),
+};
+pub const EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
+    INTEGER_DOMAIN_EXTENSION,
+    LOGICAL_NUMERIC_INPUT_EXTENSION,
+    SINGLE_NUMERIC_INPUT_EXTENSION,
+    INTEGER_MESH_DENSITY_EXTENSION,
+    INTEGER_AXES_EXTENSION,
+    INTEGER_CALLBACK_OUTPUT_EXTENSION,
+    INTEGER_STYLE_PROPERTY_EXTENSION,
+    RESIDENT_CALLBACK_OUTPUT_EXTENSION,
+];
+
+const fn integer_input(name: &'static str, notes: &'static str) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes,
+    }
+}
+
+const INTEGER_DOMAIN_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
+    "xyinterval or uvinterval",
+    "RunMat admits exact typed-integer domain bounds only when every value is exactly representable at the binary64 sampling boundary.",
+)];
+const INTEGER_MESH_DENSITY_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
+    "MeshDensity",
+    "RunMat admits all eight integer classes as exact bounded host sampling counts.",
+)];
+const INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
+    "ax",
+    "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension.",
+)];
+const INTEGER_CALLBACK_OUTPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
+    "callback result",
+    "RunMat admits scalar typed-integer callback samples only when exactly representable at the binary64 surface-geometry boundary.",
+)];
+const INTEGER_STYLE_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
+    "surface style property",
+    "RunMat accepts typed-integer RGB, alpha, and boolean-style controls only behind one independent surface-property gate and validates exact plotting conversion before sampling.",
+)];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = fsurf(f, integer_xyinterval)",
+        inputs: &INTEGER_DOMAIN_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The independently gated bounds cross one checked binary64 plotting-domain boundary; the result is an opaque graphics handle.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = fsurf(..., 'MeshDensity', integer_density)",
+        inputs: &INTEGER_MESH_DENSITY_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The independently gated exact count controls bounded host callback sampling and does not become integer output.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = fsurf(integer_ax, ...)",
+        inputs: &INTEGER_AXES_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The compatibility extension gate runs before axes selection and sampling.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = fsurf(f_returning_integer, ...)",
+        inputs: &INTEGER_CALLBACK_OUTPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Each independently gated authoritative callback sample crosses one checked binary64 surface-geometry boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = fsurf(..., property_name, integer_property_value)",
+        inputs: &INTEGER_STYLE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The independently gated value is validated from authoritative storage before callback sampling and then crosses the applicable renderer-property boundary.",
+    },
+];
 
 const FSURF_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -238,12 +386,160 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::fsurf::FSURF_DESCRIPTOR),
+    extensions(crate::builtins::plotting::fsurf::EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::fsurf::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::fsurf"
 )]
 pub async fn fsurf_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    preflight_fsurf_extensions(&args)?;
     let parsed = parse_fsurf_args(args).map_err(map_fsurf_invalid)?;
     let surface = sample_surface(&parsed).await?;
     render_fsurf(surface, &parsed).map_err(map_fsurf_internal)
+}
+
+fn preflight_fsurf_extensions(args: &[Value]) -> BuiltinResult<()> {
+    gate_typed_integer_axes_alias(args)?;
+    let mut values = args
+        .iter()
+        .skip_while(|value| !is_function_handle(value))
+        .skip_while(|value| is_function_handle(value));
+    if let Some(value) = values
+        .next()
+        .filter(|value| value_as_string(value).is_none())
+    {
+        if is_typed_integer_value(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGER_DOMAIN_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &LOGICAL_NUMERIC_INPUT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SINGLE_NUMERIC_INPUT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
+    for pair in args.windows(2) {
+        let Some(key) = value_as_string(&pair[0]) else {
+            continue;
+        };
+        if key.trim().eq_ignore_ascii_case("MeshDensity") {
+            if is_typed_integer_value(&pair[1]) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_MESH_DENSITY_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if matches!(&pair[1], Value::Bool(_) | Value::LogicalArray(_)) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &LOGICAL_NUMERIC_INPUT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if matches!(&pair[1], Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &SINGLE_NUMERIC_INPUT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+        } else {
+            preflight_surface_style_extension(key.trim(), &pair[1])?;
+        }
+    }
+    Ok(())
+}
+
+fn preflight_surface_style_extension(key: &str, value: &Value) -> BuiltinResult<()> {
+    let key = key.to_ascii_lowercase();
+    if is_typed_integer_value(value) {
+        match key.as_str() {
+            "facealpha" | "alpha" | "facecolor" | "colormap" => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_STYLE_PROPERTY_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+                ensure_integer_value_exact_f64(value, "surface style property")?;
+            }
+            "flattenz" | "lighting" | "visible" => {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_STYLE_PROPERTY_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            _ => {}
+        }
+    } else if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        if matches!(key.as_str(), "flattenz" | "lighting" | "visible") {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &LOGICAL_NUMERIC_INPUT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    } else if matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        && matches!(
+            key.as_str(),
+            "facealpha" | "alpha" | "facecolor" | "colormap"
+        )
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINGLE_NUMERIC_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn gate_typed_integer_axes_alias(args: &[Value]) -> BuiltinResult<()> {
+    let Some(first) = args.first() else {
+        return Ok(());
+    };
+    if !is_typed_integer_value(first) {
+        return Ok(());
+    }
+    let Ok(super::properties::PlotHandle::Axes(handle, axes_index)) =
+        super::properties::resolve_plot_handle(first, BUILTIN_NAME)
+    else {
+        return Ok(());
+    };
+    let expected = super::state::encode_axes_handle(handle, axes_index) as u64;
+    let actual = exact_integer_scalar(first).and_then(|value| value.try_to_u64());
+    if actual != Some(expected) {
+        return Err(fsurf_invalid(
+            "typed-integer axes alias must equal the canonical encoded axes handle",
+        ));
+    }
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_AXES_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_integer_value_exact_f64(value: &Value, role: &str) -> BuiltinResult<()> {
+    match value {
+        Value::Int(value) => checked_integer_f64(value, role).map(|_| ()),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => tensor
+            .integer_storage()
+            .expect("checked integer storage")
+            .exact_values()
+            .into_iter()
+            .try_for_each(|value| checked_integer_f64(&value, role).map(|_| ())),
+        _ => Ok(()),
+    }
 }
 
 #[derive(Clone)]
@@ -370,7 +666,7 @@ fn is_function_handle(value: &Value) -> bool {
 fn is_numeric_domain_value(value: &Value) -> bool {
     matches!(
         value,
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_)
+        Value::Tensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_)
     )
 }
 
@@ -408,12 +704,37 @@ fn domain_from_values(x_min: f64, x_max: f64, y_min: f64, y_max: f64) -> Builtin
 fn numeric_vector(value: &Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(n) => Ok(vec![*n]),
-        Value::Int(i) => Ok(vec![i.to_f64()]),
+        Value::Int(i) => Ok(vec![checked_integer_f64(i, "domain bound")?]),
         Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
-        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
+        Value::LogicalArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|value| if *value == 0 { 0.0 } else { 1.0 })
+            .collect()),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .exact_values()
+                    .into_iter()
+                    .map(|value| checked_integer_f64(&value, "domain bound"))
+                    .collect()
+            } else {
+                Ok(tensor_utils::tensor_values_f64(tensor))
+            }
+        }
         other => Err(fsurf_invalid(format!(
             "expected numeric domain vector, got {other:?}"
         ))),
+    }
+}
+
+fn checked_integer_f64(value: &IntValue, role: &str) -> BuiltinResult<f64> {
+    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+        Ok(value.to_f64())
+    } else {
+        Err(fsurf_invalid(format!(
+            "integer {role} must be exactly representable as double"
+        )))
     }
 }
 
@@ -561,6 +882,19 @@ async fn call_surface_function(function: &Value, a: f64, b: f64) -> BuiltinResul
     let value = call_function(function, vec![Value::Num(a), Value::Num(b)])
         .await
         .map_err(map_fsurf_eval)?;
+    if matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_CALLBACK_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if matches!(&value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESIDENT_CALLBACK_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let value = crate::dispatcher::gather_if_needed_async(&value)
         .await
         .map_err(map_fsurf_eval)?;
@@ -570,18 +904,51 @@ async fn call_surface_function(function: &Value, a: f64, b: f64) -> BuiltinResul
 fn surface_value_to_scalar(value: Value) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(value),
-        Value::Int(value) => Ok(value.to_f64()),
-        Value::Bool(value) => Ok(if value { 1.0 } else { 0.0 }),
+        Value::Int(value) => checked_integer_callback_f64(&value),
+        Value::Bool(value) => {
+            gate_callback_extension(&LOGICAL_NUMERIC_INPUT_EXTENSION)?;
+            Ok(if value { 1.0 } else { 0.0 })
+        }
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(&tensor) => {
-            Ok(tensor_utils::tensor_value_f64(&tensor, 0))
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                checked_integer_callback_f64(&value)
+            } else {
+                if tensor.numeric_dtype() == NumericDType::F32 {
+                    gate_callback_extension(&SINGLE_NUMERIC_INPUT_EXTENSION)?;
+                }
+                Ok(tensor_utils::tensor_value_f64(&tensor, 0))
+            }
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
+            gate_callback_extension(&LOGICAL_NUMERIC_INPUT_EXTENSION)?;
             Ok(if array.data[0] != 0 { 1.0 } else { 0.0 })
         }
         other => Err(fsurf_error_with_detail(
             &FSURF_ERROR_EVALUATION,
             format!("function output must be a scalar real numeric value, got {other:?}"),
         )),
+    }
+}
+
+fn gate_callback_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)
+}
+
+fn checked_integer_callback_f64(value: &IntValue) -> BuiltinResult<f64> {
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &INTEGER_CALLBACK_OUTPUT_EXTENSION,
+        BUILTIN_NAME,
+    )?;
+    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+        Ok(value.to_f64())
+    } else {
+        Err(fsurf_error_with_detail(
+            &FSURF_ERROR_EVALUATION,
+            "integer callback result must be exactly representable as double",
+        ))
     }
 }
 
@@ -717,6 +1084,247 @@ mod tests {
             numeric_vector(&Value::Tensor(domain)).expect("numeric vector"),
             vec![-2.0, 2.0]
         );
+
+        let wide = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1, (1_u64 << 53) + 3]),
+            vec![1, 2],
+        )
+        .expect("wide typed domain vector");
+        assert!(numeric_vector(&Value::Tensor(wide)).is_err());
+    }
+
+    #[test]
+    fn fsurf_gates_integer_forms_independently() {
+        let function = Value::BoundFunctionHandle {
+            name: "surface".into(),
+            function: 1,
+        };
+        let domain = Value::Tensor(
+            runmat_builtins::Tensor::new_integer(
+                runmat_builtins::IntegerStorage::I16(vec![-2, 2]),
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        let mesh = Value::Int(IntValue::U8(35));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let domain_err = preflight_fsurf_extensions(&[function.clone(), domain])
+            .expect_err("strict mode rejects integer domain");
+        assert_eq!(
+            domain_err.identifier(),
+            INTEGER_DOMAIN_EXTENSION.error_identifier
+        );
+
+        let mesh_err =
+            preflight_fsurf_extensions(&[function, Value::String("MeshDensity".into()), mesh])
+                .expect_err("strict mode rejects integer mesh density");
+        assert_eq!(
+            mesh_err.identifier(),
+            INTEGER_MESH_DENSITY_EXTENSION.error_identifier
+        );
+
+        let callback_err = surface_value_to_scalar(Value::Int(IntValue::I8(1)))
+            .expect_err("strict mode rejects integer callback result");
+        assert_eq!(
+            callback_err.identifier(),
+            INTEGER_CALLBACK_OUTPUT_EXTENSION.error_identifier
+        );
+
+        let padded_mesh_err = preflight_fsurf_extensions(&[
+            Value::BoundFunctionHandle {
+                name: "surface".into(),
+                function: 1,
+            },
+            Value::String(" MeshDensity ".into()),
+            Value::Int(IntValue::U8(35)),
+        ])
+        .expect_err("normalized integer mesh density remains gated");
+        assert_eq!(
+            padded_mesh_err.identifier(),
+            INTEGER_MESH_DENSITY_EXTENSION.error_identifier
+        );
+
+        let style_err = preflight_fsurf_extensions(&[
+            Value::BoundFunctionHandle {
+                name: "surface".into(),
+                function: 1,
+            },
+            Value::String("FaceAlpha".into()),
+            Value::Int(IntValue::U8(1)),
+        ])
+        .expect_err("integer style remains independently gated");
+        assert_eq!(
+            style_err.identifier(),
+            INTEGER_STYLE_PROPERTY_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn fsurf_declares_all_integer_roles_and_extensions() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 5);
+        assert_eq!(EXTENSIONS.len(), 8);
+        assert!(INTEGER_CAPABILITIES.iter().all(|capability| capability
+            .inputs
+            .iter()
+            .all(|input| input.classes.len() == 8)));
+    }
+
+    #[test]
+    fn fsurf_all_integer_classes_use_exact_domain_and_callback_boundaries() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in [
+            runmat_builtins::IntegerStorage::I8(vec![1, 2]),
+            runmat_builtins::IntegerStorage::I16(vec![1, 2]),
+            runmat_builtins::IntegerStorage::I32(vec![1, 2]),
+            runmat_builtins::IntegerStorage::I64(vec![1, 2]),
+            runmat_builtins::IntegerStorage::U8(vec![1, 2]),
+            runmat_builtins::IntegerStorage::U16(vec![1, 2]),
+            runmat_builtins::IntegerStorage::U32(vec![1, 2]),
+            runmat_builtins::IntegerStorage::U64(vec![1, 2]),
+        ] {
+            let tensor = runmat_builtins::Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            assert_eq!(
+                numeric_vector(&Value::Tensor(tensor)).unwrap(),
+                vec![1.0, 2.0]
+            );
+        }
+        for value in [
+            IntValue::I8(2),
+            IntValue::I16(2),
+            IntValue::I32(2),
+            IntValue::I64(2),
+            IntValue::U8(2),
+            IntValue::U16(2),
+            IntValue::U32(2),
+            IntValue::U64((1_u64 << 53) + 2),
+        ] {
+            let expected = value.to_f64();
+            assert_eq!(
+                surface_value_to_scalar(Value::Int(value)).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn fsurf_integer_axes_alias_must_be_canonical() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        let _ = clear_figure(None);
+        let axes = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
+        let Value::Num(encoded) = axes else {
+            panic!("numeric axes representation");
+        };
+        let function = Value::BoundFunctionHandle {
+            name: "surface".into(),
+            function: 1,
+        };
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = preflight_fsurf_extensions(&[
+                Value::Int(IntValue::U64(encoded as u64)),
+                function.clone(),
+            ])
+            .expect_err("canonical typed axes alias is gated");
+            assert_eq!(error.identifier(), INTEGER_AXES_EXTENSION.error_identifier);
+        }
+        {
+            let _enabled = crate::compatibility::push_runmat_extensions_enabled(true);
+            let wrapped = (encoded as u64) + (1_u64 << 52);
+            let error = preflight_fsurf_extensions(&[Value::Int(IntValue::U64(wrapped)), function])
+                .expect_err("wrapped axes aliases are noncanonical");
+            assert_eq!(error.identifier(), FSURF_ERROR_INVALID_ARGUMENT.identifier);
+        }
+    }
+
+    #[test]
+    fn fsurf_resident_integer_callback_is_gated_before_provider_access() {
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |_function, _args, _requested_outputs| {
+                Box::pin(async {
+                    let handle = runmat_accelerate_api::GpuTensorHandle {
+                        shape: vec![1, 1],
+                        device_id: 999_992,
+                        buffer_id: 999_992,
+                    };
+                    runmat_accelerate_api::set_handle_integer_type(
+                        &handle,
+                        runmat_accelerate_api::IntegerElementType::U64,
+                    );
+                    Ok(Value::GpuTensor(handle))
+                })
+            },
+        )));
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(call_surface_function(
+            &Value::BoundFunctionHandle {
+                name: "surface".into(),
+                function: 1,
+            },
+            0.0,
+            0.0,
+        ))
+        .expect_err("resident integer callback is rejected before gather");
+        assert_eq!(
+            error.identifier(),
+            INTEGER_CALLBACK_OUTPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn fsurf_logical_and_single_callback_samples_are_gated() {
+        let single = runmat_builtins::Tensor::from_numeric_storage(
+            runmat_builtins::NumericStorage::F32(vec![1.0]),
+            vec![1, 1],
+        )
+        .unwrap();
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let logical_error = surface_value_to_scalar(Value::Bool(true))
+            .expect_err("logical callback sample is gated");
+        assert_eq!(
+            logical_error.identifier(),
+            LOGICAL_NUMERIC_INPUT_EXTENSION.error_identifier
+        );
+        let single_error = surface_value_to_scalar(Value::Tensor(single))
+            .expect_err("single callback sample is gated");
+        assert_eq!(
+            single_error.identifier(),
+            SINGLE_NUMERIC_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn fsurf_style_preflight_is_property_specific() {
+        let _enabled = crate::compatibility::push_runmat_extensions_enabled(true);
+        preflight_surface_style_extension("FaceAlpha", &Value::Int(IntValue::U8(1)))
+            .expect("integer alpha extension");
+        preflight_surface_style_extension("Visible", &Value::Int(IntValue::U64(u64::MAX)))
+            .expect("boolean-style integers do not cross binary64");
+        preflight_surface_style_extension("DisplayName", &Value::Int(IntValue::U8(1)))
+            .expect("unsupported text value is not misclassified as an integer style extension");
+
+        let defaults = SurfaceStyleDefaults::new(
+            ColorMap::Parula,
+            ShadingMode::Smooth,
+            false,
+            1.0,
+            false,
+            true,
+        );
+        let style = parse_surface_style_args(
+            BUILTIN_NAME,
+            &[
+                Value::String("FaceAlpha".into()),
+                Value::Int(IntValue::U8(1)),
+                Value::String("Visible".into()),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ],
+            defaults,
+        )
+        .expect("enabled supported integer styles");
+        assert_eq!(style.alpha, 1.0);
+        assert_eq!(style.visible, Some(true));
     }
 
     #[test]
@@ -915,6 +1523,7 @@ mod tests {
 
     #[test]
     fn fsurf_function_scalar_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = runmat_builtins::Tensor::new_integer(
             runmat_builtins::IntegerStorage::I16(vec![12]),
             vec![1, 1],
@@ -925,6 +1534,13 @@ mod tests {
             surface_value_to_scalar(Value::Tensor(tensor)).unwrap(),
             12.0
         );
+
+        let wide = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            vec![1, 1],
+        )
+        .unwrap();
+        assert!(surface_value_to_scalar(Value::Tensor(wide)).is_err());
     }
 
     #[test]

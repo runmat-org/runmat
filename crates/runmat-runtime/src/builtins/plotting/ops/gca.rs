@@ -1,7 +1,11 @@
 //! MATLAB-compatible `gca` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_builtins::{StructValue, Value};
@@ -18,12 +22,59 @@ use super::style::value_as_string;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::gca_type;
 
+const BUILTIN_NAME: &str = "gca";
+
+const GCA_FIGURE_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gca-figure-argument",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gca with an explicit figure argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GcaFigureArgumentExtension"),
+};
+const GCA_STRUCT_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gca-struct-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gca('struct') is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GcaStructOutputExtension"),
+};
+const GCA_INTEGER_FIGURE_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gca-integer-figure-alias",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "typed-integer numeric figure aliases for gca are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GcaIntegerFigureAliasExtension"),
+};
+pub const GCA_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    GCA_FIGURE_ARGUMENT_EXTENSION,
+    GCA_STRUCT_OUTPUT_EXTENSION,
+    GCA_INTEGER_FIGURE_ALIAS_EXTENSION,
+];
+
+const GCA_INTEGER_FIGURE_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fig",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a gca has no input form and returns a graphics object; typed integers are exact aliases for RunMat's numeric figure registry only.",
+    }];
+pub const GCA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "ax = gca(integer_fig_alias)",
+        inputs: &GCA_INTEGER_FIGURE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The alias is decoded exactly and gated before graphics lookup or mutation. RunMat currently returns its numeric axes representation rather than a MATLAB graphics object.",
+    }];
+
 const GCA_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ax",
-    ty: BuiltinParamType::NumericScalar,
+    ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Current axes handle.",
+    description:
+        "Current axes graphics object; RunMat currently returns its encoded numeric axes handle.",
 }];
 
 const GCA_OUTPUT_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -94,6 +145,8 @@ pub const GCA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(gca_type),
     descriptor(crate::builtins::plotting::gca::GCA_DESCRIPTOR),
+    extensions(crate::builtins::plotting::gca::GCA_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::gca::GCA_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::gca"
 )]
 pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -108,11 +161,25 @@ pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() == 1 {
         if let Some(mode) = value_as_string(&rest[0]) {
             if mode.trim().eq_ignore_ascii_case("struct") {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &GCA_STRUCT_OUTPUT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
                 let state = current_axes_state();
                 return Ok(axes_struct_response(state));
             }
         }
+        if is_typed_integer_figure_alias(&rest[0]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &GCA_INTEGER_FIGURE_ALIAS_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
         if let Some(handle) = figure_handle_arg(&rest[0])? {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &GCA_FIGURE_ARGUMENT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
             let axes = current_axes_handle_for_figure(handle)
                 .map_err(|err| map_figure_error("gca", err))?;
             return Ok(Value::Num(axes));
@@ -123,6 +190,11 @@ pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         "gca",
         "gca: unsupported arguments (pass no inputs, a figure handle, or 'struct')",
     ))
+}
+
+fn is_typed_integer_figure_alias(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
 fn axes_struct_response(state: FigureAxesState) -> Value {
@@ -139,6 +211,21 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
 }
 
 fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
+    match value {
+        Value::Int(integer) => return Ok(Some(handle_from_integer(integer, "gca")?)),
+        Value::Tensor(tensor)
+            if tensor_utils::is_scalar_tensor(tensor) && tensor.integer_storage().is_some() =>
+        {
+            return Ok(Some(handle_from_integer(
+                &tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                    .expect("one-element integer storage"),
+                "gca",
+            )?));
+        }
+        _ => {}
+    }
     if let Ok(handle) = resolve_plot_handle(value, "gca") {
         return match handle {
             PlotHandle::Figure(handle) => Ok(Some(handle)),
@@ -156,19 +243,9 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
 
     match value {
         Value::Num(v) => Ok(Some(handle_from_scalar(*v, "gca")?)),
-        Value::Int(i) => Ok(Some(handle_from_integer(i, "gca")?)),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                return Ok(Some(handle_from_integer(
-                    &storage.value_at(0).expect("one-element integer storage"),
-                    "gca",
-                )?));
-            }
-            Ok(Some(handle_from_scalar(
-                tensor_utils::tensor_value_f64(tensor, 0),
-                "gca",
-            )?))
-        }
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => Ok(Some(
+            handle_from_scalar(tensor_utils::tensor_value_f64(tensor, 0), "gca")?,
+        )),
         _ => Ok(None),
     }
 }
@@ -225,6 +302,7 @@ pub(crate) mod tests {
     #[test]
     fn struct_mode_returns_struct() {
         setup_plot_tests();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = gca_builtin(vec![Value::String("struct".to_string())]).unwrap();
         assert!(matches!(value, Value::Struct(_)));
     }
@@ -233,6 +311,7 @@ pub(crate) mod tests {
     #[test]
     fn figure_handle_returns_that_figures_current_axes() {
         setup_plot_tests();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = gca_builtin(vec![Value::Num(42.0)]).unwrap();
         assert!(matches!(value, Value::Num(v) if v > 0.0));
     }
@@ -259,6 +338,7 @@ pub(crate) mod tests {
         let _guard = lock_plot_registry();
         setup_plot_tests();
         crate::builtins::plotting::reset_plot_state();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let axes = gca_builtin(Vec::new()).unwrap();
         let err = gca_builtin(vec![axes]).expect_err("axes handle should not be accepted");
@@ -267,6 +347,58 @@ pub(crate) mod tests {
             text.contains("expected a figure handle"),
             "unexpected error: {text}"
         );
+    }
+
+    #[test]
+    fn gca_runmat_only_forms_and_integer_alias_are_independently_gated() {
+        assert_eq!(GCA_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let struct_error = gca_builtin(vec![Value::from("struct")]).unwrap_err();
+        assert_eq!(
+            struct_error.identifier(),
+            Some("RunMat:compatibility:GcaStructOutputExtension")
+        );
+        for integer in [
+            runmat_builtins::IntValue::I8(1),
+            runmat_builtins::IntValue::I16(1),
+            runmat_builtins::IntValue::I32(1),
+            runmat_builtins::IntValue::I64(1),
+            runmat_builtins::IntValue::U8(1),
+            runmat_builtins::IntValue::U16(1),
+            runmat_builtins::IntValue::U32(1),
+            runmat_builtins::IntValue::U64(1),
+        ] {
+            let error = gca_builtin(vec![Value::Int(integer)]).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:GcaIntegerFigureAliasExtension")
+            );
+        }
+        let figure_error = gca_builtin(vec![Value::Num(1.0)]).unwrap_err();
+        assert_eq!(
+            figure_error.identifier(),
+            Some("RunMat:compatibility:GcaFigureArgumentExtension")
+        );
+    }
+
+    #[test]
+    fn gca_rejects_wide_integer_figure_alias_without_lossy_lookup() {
+        setup_plot_tests();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = gca_builtin(vec![Value::Int(runmat_builtins::IntValue::U64(
+            (1_u64 << 53) + 1,
+        ))])
+        .expect_err("wide figure identifier is not rounded into the registry");
+        assert!(error.message().contains("too large"));
+
+        let tensor = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            vec![1, 1],
+        )
+        .unwrap();
+        let error = gca_builtin(vec![Value::Tensor(tensor)])
+            .expect_err("wide tensor figure identifier is not rounded into the registry");
+        assert!(error.message().contains("too large"));
     }
 
     #[test]
