@@ -488,6 +488,22 @@ pub fn execute_reduction(
     num_slices: usize,
     workgroup_size: u32,
 ) -> Result<Value> {
+    execute_reduction_with_shape(
+        request,
+        reduce_len,
+        num_slices,
+        &[num_slices],
+        workgroup_size,
+    )
+}
+
+pub fn execute_reduction_with_shape(
+    request: FusionExecutionRequest<'_>,
+    reduce_len: usize,
+    num_slices: usize,
+    output_shape: &[usize],
+    workgroup_size: u32,
+) -> Result<Value> {
     if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION").is_ok() {
         return Err(anyhow!("fused reduction disabled by env"));
     }
@@ -571,7 +587,15 @@ pub fn execute_reduction(
     timer.mark("prepare_inputs");
 
     let handles: Vec<GpuTensorHandle> = prepared.iter().map(|p| p.handle.clone()).collect();
-    let output_shape = vec![num_slices];
+    let output_len = output_shape.iter().copied().product::<usize>();
+    if output_len != num_slices {
+        return Err(anyhow!(
+            "fusion: reduction output shape {:?} contains {} elements, expected {}",
+            output_shape,
+            output_len,
+            num_slices
+        ));
+    }
 
     let scalar_ty = match provider.precision() {
         ProviderPrecision::F32 => "f32",
@@ -609,7 +633,7 @@ pub fn execute_reduction(
     let output = provider.fused_reduction(
         &shader,
         &handles,
-        &output_shape,
+        output_shape,
         reduce_len,
         num_slices,
         wg,

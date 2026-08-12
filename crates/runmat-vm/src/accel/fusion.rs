@@ -8,7 +8,7 @@ use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
     execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
-    execute_reduction, FusionExecutionRequest,
+    execute_reduction_with_shape, FusionExecutionRequest,
 };
 use runmat_accelerate::InstrSpan;
 use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
@@ -540,6 +540,54 @@ pub struct ReductionGeometry {
     pub axis: usize,
     pub reduce_len: usize,
     pub num_slices: usize,
+    pub output_shape: Vec<usize>,
+}
+
+fn validate_fused_reduction_domain(
+    axes: Option<&runmat_accelerate::ReductionAxes>,
+    runtime_shape: Option<&[usize]>,
+    reduce_all: bool,
+) -> Result<(), RuntimeError> {
+    if matches!(
+        axes,
+        Some(runmat_accelerate::ReductionAxes::Explicit(dims)) if dims.len() != 1
+    ) {
+        return Err(mex(
+            "FusionReductionAxesUnsupported",
+            "fusion: multi-axis reduction requires the provider N-D reduction path",
+        ));
+    }
+    if !reduce_all && runtime_shape.is_some_and(|shape| shape.len() > 2) {
+        return Err(mex(
+            "FusionReductionRankUnsupported",
+            "fusion: N-D reduction requires the provider N-D reduction path",
+        ));
+    }
+    Ok(())
+}
+
+fn fused_reduction_output_shape(
+    runtime_shape: Option<Vec<usize>>,
+    rows: usize,
+    columns: usize,
+    axis: usize,
+    reduce_all: bool,
+) -> Result<Vec<usize>, RuntimeError> {
+    if reduce_all {
+        return Ok(vec![1, 1]);
+    }
+    let mut shape = runtime_shape.unwrap_or_else(|| vec![rows, columns]);
+    if shape.len() < 2 {
+        shape.resize(2, 1);
+    }
+    if axis >= shape.len() {
+        return Err(mex(
+            "FusionReductionAxisUnsupported",
+            "fusion: reduction dimension exceeds the runtime tensor rank",
+        ));
+    }
+    shape[axis] = 1;
+    Ok(shape)
 }
 
 pub fn resolve_reduction_geometry(
@@ -794,8 +842,32 @@ pub fn resolve_reduction_geometry(
         );
     }
 
-    let (r, c) =
-        derive_rows_cols(plan, graph, request, consumed_inputs, vars, context).unwrap_or((1, 1));
+    let runtime_shape = plan.reduction_data_shape(graph).or_else(|| {
+        consumed_inputs
+            .iter()
+            .filter_map(|value| value.as_ref())
+            .chain(request.inputs.iter())
+            .find_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.shape.clone()),
+                Value::Tensor(tensor) => Some(tensor.shape.clone()),
+                _ => None,
+            })
+    });
+    validate_fused_reduction_domain(
+        plan.reduction_axes.as_ref(),
+        runtime_shape.as_deref(),
+        reduce_all,
+    )?;
+    let (r, c) = runtime_shape
+        .as_ref()
+        .map(|shape| {
+            (
+                shape.first().copied().unwrap_or(1).max(1),
+                shape.get(1).copied().unwrap_or(1).max(1),
+            )
+        })
+        .or_else(|| derive_rows_cols(plan, graph, request, consumed_inputs, vars, context))
+        .unwrap_or((1, 1));
     let (reduce_len, num_slices) = if reduce_all {
         let total_from_runtime = consumed_inputs
             .iter()
@@ -921,6 +993,7 @@ pub fn resolve_reduction_geometry(
             "fusion: reduction shape unresolved",
         ));
     }
+    let output_shape = fused_reduction_output_shape(runtime_shape, r, c, axis, reduce_all)?;
     if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION")
         .ok()
         .as_deref()
@@ -936,6 +1009,7 @@ pub fn resolve_reduction_geometry(
         axis,
         reduce_len,
         num_slices,
+        output_shape,
     })
 }
 
@@ -949,7 +1023,13 @@ pub fn execute_fusion_reduction(
     context: &ExecutionContext,
 ) -> Result<Value, RuntimeError> {
     let geom = resolve_reduction_geometry(plan, graph, &request, consumed_inputs, vars, context)?;
-    match execute_reduction(request, geom.reduce_len, geom.num_slices, 256u32) {
+    match execute_reduction_with_shape(
+        request,
+        geom.reduce_len,
+        geom.num_slices,
+        &geom.output_shape,
+        256u32,
+    ) {
         Ok(result) => {
             stack_guard.commit();
             Ok(result)
@@ -1001,7 +1081,10 @@ pub async fn try_execute_fusion_group(
 
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
-    use super::write_elementwise_materialized_stores;
+    use super::{
+        fused_reduction_output_shape, validate_fused_reduction_domain,
+        write_elementwise_materialized_stores,
+    };
     use crate::bytecode::program::ExecutionContext;
     use runmat_accelerate::fusion::FusionStoreMaterialization;
     use runmat_accelerate::fusion_residency;
@@ -1009,6 +1092,50 @@ mod tests {
     use runmat_accelerate::VarKind;
     use runmat_accelerate_api::GpuTensorHandle;
     use runmat_builtins::Value;
+
+    #[test]
+    fn fused_reduction_domain_defers_multi_axis_and_nd_work_to_provider_paths() {
+        use runmat_accelerate::ReductionAxes;
+
+        assert!(validate_fused_reduction_domain(
+            Some(&ReductionAxes::Explicit(vec![2, 3])),
+            Some(&[2, 4, 5]),
+            false,
+        )
+        .is_err());
+        assert!(validate_fused_reduction_domain(
+            Some(&ReductionAxes::Explicit(vec![2])),
+            Some(&[2, 4, 5]),
+            false,
+        )
+        .is_err());
+        assert!(
+            validate_fused_reduction_domain(Some(&ReductionAxes::All), Some(&[2, 4, 5]), true,)
+                .is_ok()
+        );
+        assert!(validate_fused_reduction_domain(
+            Some(&ReductionAxes::Explicit(vec![2])),
+            Some(&[2, 4]),
+            false,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn fused_reduction_output_shape_retains_matlab_singleton_axes() {
+        assert_eq!(
+            fused_reduction_output_shape(Some(vec![3, 5]), 3, 5, 0, false).unwrap(),
+            vec![1, 5]
+        );
+        assert_eq!(
+            fused_reduction_output_shape(Some(vec![3, 5]), 3, 5, 1, false).unwrap(),
+            vec![3, 1]
+        );
+        assert_eq!(
+            fused_reduction_output_shape(Some(vec![2, 4, 5]), 2, 4, 0, true).unwrap(),
+            vec![1, 1]
+        );
+    }
 
     #[test]
     fn fusion_writeback_preserves_shared_gpu_handles() {
