@@ -191,7 +191,17 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         .map_err(map_invalid_argument)?;
     let explicit_display_name = style.label.clone();
     let labels = histogram_labels_from_edges(&edges);
-    let render_values = apply_histogram_normalization(&counts, &edges, &parsed.normalization);
+    let normalization_denominator = parsed
+        .data
+        .as_ref()
+        .map(|data| data.len() as f64)
+        .unwrap_or_else(|| counts.iter().sum());
+    let render_values = apply_histogram_normalization(
+        &counts,
+        &edges,
+        &parsed.normalization,
+        normalization_denominator,
+    );
     let mut chart = BarChart::new(labels, render_values.clone())
         .map_err(|err| internal(format!("chart construction failed: {err}")))?;
     chart.set_histogram_bin_edges(edges.clone());
@@ -247,6 +257,7 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         edges.clone(),
         counts.clone(),
         parsed.normalization.clone(),
+        normalization_denominator,
         polar_histogram_metadata(&edges, &style, parsed.data, parsed.display_style),
     );
     if let Some(display_name) = explicit_display_name {
@@ -610,7 +621,16 @@ fn polar_histogram_metadata(
         PolarHistogramDisplayStyle::Bar => "bar",
         PolarHistogramDisplayStyle::Stairs => "stairs",
     };
-    histogram_metadata(edges, style, data, true, display_style)
+    histogram_metadata(
+        edges,
+        style,
+        data.map(|values| {
+            Tensor::new(values.clone(), vec![values.len(), 1])
+                .expect("polar histogram data shape matches storage")
+        }),
+        true,
+        display_style,
+    )
 }
 
 fn histogram_labels_from_edges(edges: &[f64]) -> Vec<String> {

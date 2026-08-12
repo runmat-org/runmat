@@ -392,6 +392,7 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         &y_axis,
         ColorMap::Parula,
         color_limits,
+        "scaled",
     )
     .await
     .map_err(map_heatmap_invalid)?;

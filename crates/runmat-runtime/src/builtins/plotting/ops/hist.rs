@@ -4,7 +4,11 @@ use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     IntValue, NumericDType, Tensor, Value,
 };
@@ -72,6 +76,22 @@ const HIST_OUTPUT_COUNTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor 
     default: None,
     description: "Histogram bin counts.",
 }];
+const HIST_OUTPUT_COUNTS_CENTERS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Histogram bin counts.",
+    },
+    BuiltinParamDescriptor {
+        name: "centers",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Histogram bin centers.",
+    },
+];
 
 const HIST_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
@@ -156,7 +176,7 @@ const HIST_INPUTS_X_BINS_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const HIST_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+const HIST_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     BuiltinSignatureDescriptor {
         label: "N = hist(X)",
         inputs: &HIST_INPUTS_X,
@@ -182,6 +202,16 @@ const HIST_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
         inputs: &HIST_INPUTS_X_BINS_NAMEVALUE,
         outputs: &HIST_OUTPUT_COUNTS,
     },
+    BuiltinSignatureDescriptor {
+        label: "[counts, centers] = hist(X)",
+        inputs: &HIST_INPUTS_X,
+        outputs: &HIST_OUTPUT_COUNTS_CENTERS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[counts, centers] = hist(X, bins)",
+        inputs: &HIST_INPUTS_X_BINS,
+        outputs: &HIST_OUTPUT_COUNTS_CENTERS,
+    },
 ];
 
 const HIST_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -202,10 +232,94 @@ const HIST_ERRORS: [BuiltinErrorDescriptor; 2] = [HIST_ERROR_INVALID_ARGUMENT, H
 
 pub const HIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &HIST_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &HIST_ERRORS,
 };
+
+const HIST_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hist-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hist with integer sample data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HistIntegerDataExtension"),
+};
+
+const HIST_INTEGER_CENTERS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hist-integer-centers",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hist with integer bin centers is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HistIntegerCentersExtension"),
+};
+const HIST_MODERN_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hist-modern-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "hist with histogram-style normalization or name-value options is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HistModernOptionsExtension"),
+};
+
+pub const HIST_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    HIST_INTEGER_DATA_EXTENSION,
+    HIST_INTEGER_CENTERS_EXTENSION,
+    HIST_MODERN_OPTIONS_EXTENSION,
+];
+
+const HIST_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB documents single, double, logical, and categorical sample data for legacy hist; integer samples are compatibility-gated.",
+    }];
+const HIST_INTEGER_BIN_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "nbins",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All integer classes are documented for scalar nbins.",
+    }];
+const HIST_INTEGER_CENTERS_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "xbins",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "MATLAB documents single or double numeric center vectors; typed integer centers are compatibility-gated.",
+    }];
+pub const HIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[counts, centers] = hist(integer_X, ...)",
+        inputs: &HIST_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "A gated RunMat extension; legacy hist outputs double counts and centers.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[counts, centers] = hist(X, integer_nbins)",
+        inputs: &HIST_INTEGER_BIN_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Scalar integer nbins is documented and parsed exactly before conversion to a platform bin count.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[counts, centers] = hist(X, integer_xbins)",
+        inputs: &HIST_INTEGER_CENTERS_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Integer center vectors are a gated RunMat extension and cross to the floating histogram domain after the gate.",
+    },
+];
 
 fn hist_descriptor_error(
     error: &'static BuiltinErrorDescriptor,
@@ -245,7 +359,8 @@ fn hist_err(message: impl Into<String>) -> RuntimeError {
 struct HistComputation {
     counts: Vec<f64>,
     centers: Vec<f64>,
-    chart: BarChart,
+    output_shape: Vec<usize>,
+    charts: Vec<BarChart>,
 }
 
 /// Captures the evaluated histogram so both the renderer and MATLAB outputs share the same data.
@@ -253,7 +368,7 @@ pub struct HistEvaluation {
     counts: Tensor,
     #[allow(dead_code)]
     centers: Tensor,
-    chart: BarChart,
+    charts: Vec<BarChart>,
     normalization: HistNormalization,
 }
 
@@ -261,20 +376,19 @@ impl HistEvaluation {
     fn new(
         counts: Vec<f64>,
         centers: Vec<f64>,
-        chart: BarChart,
+        output_shape: Vec<usize>,
+        charts: Vec<BarChart>,
         normalization: HistNormalization,
     ) -> BuiltinResult<Self> {
         if counts.len() != centers.len() {
             return Err(hist_internal("mismatch between counts and bin centers"));
         }
-        let cols = counts.len();
-        let shape = vec![1, cols];
-        let counts_tensor = Tensor::new(counts, shape.clone())?;
-        let centers_tensor = Tensor::new(centers, shape)?;
+        let counts_tensor = Tensor::new(counts, output_shape.clone())?;
+        let centers_tensor = Tensor::new(centers, output_shape)?;
         Ok(Self {
             counts: counts_tensor,
             centers: centers_tensor,
-            chart,
+            charts,
             normalization,
         })
     }
@@ -294,7 +408,7 @@ impl HistEvaluation {
             HistNormalization::Probability => "Probability",
             HistNormalization::Pdf => "PDF",
         };
-        let mut chart_opt = Some(self.chart.clone());
+        let mut charts = Some(self.charts.clone());
         let opts = PlotRenderOptions {
             title: "Histogram",
             x_label: "Bin",
@@ -302,10 +416,12 @@ impl HistEvaluation {
             ..Default::default()
         };
         render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-            let chart = chart_opt
+            let charts = charts
                 .take()
-                .expect("hist chart consumed exactly once at render time");
-            figure.add_bar_chart_on_axes(chart, axes);
+                .expect("hist charts consumed exactly once at render time");
+            for chart in charts {
+                figure.add_bar_chart_on_axes(chart, axes);
+            }
             Ok(())
         })?;
         Ok(())
@@ -314,7 +430,13 @@ impl HistEvaluation {
 
 impl HistComputation {
     fn into_evaluation(self, normalization: HistNormalization) -> BuiltinResult<HistEvaluation> {
-        HistEvaluation::new(self.counts, self.centers, self.chart, normalization)
+        HistEvaluation::new(
+            self.counts,
+            self.centers,
+            self.output_shape,
+            self.charts,
+            normalization,
+        )
     }
 }
 
@@ -375,6 +497,27 @@ enum HistWeightsInput {
 }
 
 impl HistWeightsInput {
+    fn gpu_fast_path_eligible(&self, samples: &GpuTensorHandle) -> bool {
+        match self {
+            Self::None | Self::Host(_) => true,
+            Self::Gpu(handle) => {
+                let same_provider = match (
+                    runmat_accelerate_api::provider_for_handle(handle),
+                    runmat_accelerate_api::provider_for_handle(samples),
+                ) {
+                    (Some(weights_provider), Some(samples_provider)) => {
+                        std::ptr::eq(weights_provider, samples_provider)
+                    }
+                    _ => false,
+                };
+                handle.device_id == samples.device_id
+                    && same_provider
+                    && runmat_accelerate_api::handle_integer_type(handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(handle)
+            }
+        }
+    }
+
     fn from_value(value: Value, expected_len: usize) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
@@ -387,8 +530,8 @@ impl HistWeightsInput {
                 Ok(HistWeightsInput::Gpu(handle))
             }
             other => {
-                let tensor =
-                    Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: Weights {e}")))?;
+                let tensor = tensor_utils::value_into_tensor_for("hist Weights", other)
+                    .map_err(|e| hist_err(format!("hist: Weights {e}")))?;
                 let len = tensor_utils::tensor_element_len(&tensor);
                 if len != expected_len {
                     return Err(hist_err(format!(
@@ -491,12 +634,44 @@ impl HistWeightsInput {
     suppress_auto_output = true,
     type_resolver(hist_type),
     descriptor(crate::builtins::plotting::hist::HIST_DESCRIPTOR),
+    extensions(crate::builtins::plotting::hist::HIST_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::hist::HIST_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::hist"
 )]
 pub async fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if value_has_integer_storage(&data) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HIST_INTEGER_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if rest
+        .iter()
+        .any(|value| matches!(value, Value::String(_) | Value::CharArray(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HIST_MODERN_OPTIONS_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let evaluation = evaluate_async(data, &rest).await?;
     evaluation.render_plot()?;
-    Ok(evaluation.counts_value())
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(1) => Ok(Value::OutputList(vec![evaluation.counts_value()])),
+        Some(2) => Ok(Value::OutputList(vec![
+            evaluation.counts_value(),
+            evaluation.centers_value(),
+        ])),
+        Some(_) => Err(hist_err("hist: too many output arguments")),
+        None => Ok(evaluation.counts_value()),
+    }
+}
+
+fn value_has_integer_storage(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 /// Evaluate the histogram inputs once so renderers and MATLAB outputs share the same data.
@@ -514,8 +689,8 @@ pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEv
     };
 
     let computation = if !bar_style.requires_cpu_path() {
-        if let Some(handle) = input.as_ref().and_then(|value| value.gpu_handle()) {
-            if bin_options.is_uniform() {
+        if let Some(handle) = input.as_ref().and_then(|value| value.vector_gpu_handle()) {
+            if bin_options.is_uniform() && weights_input.gpu_fast_path_eligible(handle) {
                 match build_histogram_gpu_chart_async(
                     handle,
                     &bin_options,
@@ -550,12 +725,14 @@ pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEv
                 HistInput::Host(tensor) => tensor,
                 HistInput::Gpu(handle) => gather_tensor_from_gpu_async(handle, "hist").await?,
             };
+            let tensor_shape = tensor.shape.clone();
             let samples = numeric_vector(tensor);
             let (weight_values, total_weight) = weights_input
                 .resolve_for_cpu_async("hist weights", sample_len)
                 .await?;
-            build_histogram_chart(
+            build_histogram_charts(
                 samples,
+                &tensor_shape,
                 &bin_options,
                 normalization,
                 weight_values.as_deref(),
@@ -565,7 +742,14 @@ pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEv
     };
 
     let mut evaluation = computation.into_evaluation(normalization)?;
-    apply_bar_style(&mut evaluation.chart, &bar_style, HIST_DEFAULT_LABEL);
+    let chart_count = evaluation.charts.len();
+    for (index, chart) in evaluation.charts.iter_mut().enumerate() {
+        apply_bar_style(chart, &bar_style, HIST_DEFAULT_LABEL);
+        if chart_count > 1 {
+            chart.group_index = index;
+            chart.group_count = chart_count;
+        }
+    }
     Ok(evaluation)
 }
 
@@ -694,6 +878,14 @@ fn parse_hist_arguments(
 }
 
 fn parse_hist_bins(arg: Option<Value>, sample_len: usize) -> BuiltinResult<HistBinSpec> {
+    if arg.as_ref().is_some_and(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some() && !tensor_utils::is_scalar_tensor(tensor))
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HIST_INTEGER_CENTERS_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let spec = match arg {
         None => HistBinSpec::Auto,
         Some(Value::Tensor(tensor)) => parse_center_vector(tensor)?,
@@ -1207,7 +1399,99 @@ fn value_as_string(value: &Value) -> Option<String> {
 }
 
 fn default_bin_count(sample_len: usize) -> usize {
-    ((sample_len as f64).sqrt().floor() as usize).max(1)
+    let _ = sample_len;
+    10
+}
+
+fn build_histogram_charts(
+    data: Vec<f64>,
+    shape: &[usize],
+    bin_options: &HistBinOptions,
+    normalization: HistNormalization,
+    weights: Option<&[f64]>,
+    total_weight: f64,
+) -> BuiltinResult<HistComputation> {
+    let rows = shape.first().copied().unwrap_or(data.len());
+    let columns = if shape.len() >= 2 {
+        shape[1..].iter().copied().product::<usize>()
+    } else {
+        1
+    };
+    if columns <= 1 {
+        return build_histogram_chart(data, bin_options, normalization, weights, total_weight);
+    }
+
+    let column_local_bins = matches!(bin_options.spec, HistBinSpec::Auto | HistBinSpec::Count(_))
+        && bin_options.bin_width.is_none()
+        && bin_options.bin_limits.is_none()
+        && bin_options.bin_method.is_none();
+    let shared_bins = if column_local_bins {
+        None
+    } else {
+        let stats = HistDataStats::from_samples(&data);
+        Some(realize_bins(
+            bin_options,
+            rows,
+            Some(&stats),
+            data.first().copied(),
+        )?)
+    };
+    let expected_bin_count = shared_bins
+        .as_ref()
+        .map(RealizedBins::bin_count)
+        .unwrap_or_else(|| match bin_options.spec {
+            HistBinSpec::Count(count) => count.max(1),
+            _ => default_bin_count(rows),
+        });
+    let mut all_counts = Vec::with_capacity(expected_bin_count * columns);
+    let mut all_centers = Vec::with_capacity(expected_bin_count * columns);
+    let mut charts = Vec::with_capacity(columns);
+    for column in 0..columns {
+        let start = column
+            .checked_mul(rows)
+            .ok_or_else(|| hist_internal("matrix column offset overflow"))?;
+        let end = start
+            .checked_add(rows)
+            .ok_or_else(|| hist_internal("matrix column extent overflow"))?;
+        let samples = data
+            .get(start..end)
+            .ok_or_else(|| hist_internal("matrix data does not match its shape"))?;
+        let local_bins;
+        let bins = if let Some(shared) = shared_bins.as_ref() {
+            shared
+        } else {
+            let stats = HistDataStats::from_samples(samples);
+            local_bins = realize_bins(bin_options, rows, Some(&stats), samples.first().copied())?;
+            &local_bins
+        };
+        if bins.bin_count() != expected_bin_count {
+            return Err(hist_internal(
+                "matrix columns produced incompatible histogram widths",
+            ));
+        }
+        let column_weights = weights.and_then(|values| values.get(start..end));
+        let column_total = column_weights
+            .map(|values| values.iter().copied().sum())
+            .unwrap_or(rows as f64);
+        let mut counts = vec![0.0; bins.bin_count()];
+        for (sample_index, value) in samples.iter().enumerate() {
+            let bin_index = find_bin_index(&bins.edges, *value);
+            counts[bin_index] += column_weights
+                .and_then(|values| values.get(sample_index).copied())
+                .unwrap_or(1.0);
+        }
+        apply_normalization(&mut counts, &bins.widths, normalization, column_total);
+        let chart = build_hist_cpu_chart(&bins, counts.clone())?.with_group(column, columns);
+        all_counts.extend_from_slice(&counts);
+        all_centers.extend_from_slice(&bins.centers);
+        charts.push(chart);
+    }
+    Ok(HistComputation {
+        counts: all_counts,
+        centers: all_centers,
+        output_shape: vec![expected_bin_count, columns],
+        charts,
+    })
 }
 
 fn build_histogram_chart(
@@ -1250,14 +1534,20 @@ fn build_empty_histogram_chart(
 }
 
 fn build_hist_cpu_result(bins: &RealizedBins, counts: Vec<f64>) -> BuiltinResult<HistComputation> {
-    let mut bar = BarChart::new(bins.labels.clone(), counts.clone())
-        .map_err(|err| hist_err(format!("hist: {err}")))?;
-    bar.label = Some(HIST_DEFAULT_LABEL.to_string());
+    let bar = build_hist_cpu_chart(bins, counts.clone())?;
     Ok(HistComputation {
         counts,
         centers: bins.centers.clone(),
-        chart: bar,
+        output_shape: vec![1, bins.bin_count()],
+        charts: vec![bar],
     })
+}
+
+fn build_hist_cpu_chart(bins: &RealizedBins, counts: Vec<f64>) -> BuiltinResult<BarChart> {
+    let mut bar = BarChart::new(bins.labels.clone(), counts)
+        .map_err(|err| hist_err(format!("hist: {err}")))?;
+    bar.label = Some(HIST_DEFAULT_LABEL.to_string());
+    Ok(bar)
 }
 
 fn validate_monotonic(values: &[f64]) -> BuiltinResult<()> {
@@ -1495,7 +1785,8 @@ async fn build_histogram_gpu_chart_async(
     Ok(HistComputation {
         counts,
         centers: bins.centers.clone(),
-        chart: bar,
+        output_shape: vec![1, bins.bin_count()],
+        charts: vec![bar],
     })
 }
 
@@ -1526,17 +1817,24 @@ impl HistInput {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor =
-                    Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: {e}")))?;
+                let tensor = tensor_utils::value_into_tensor_for("hist", other)
+                    .map_err(|e| hist_err(format!("hist: {e}")))?;
                 Ok(Self::Host(tensor))
             }
         }
     }
 
-    fn gpu_handle(&self) -> Option<&GpuTensorHandle> {
+    fn vector_gpu_handle(&self) -> Option<&GpuTensorHandle> {
         match self {
-            Self::Gpu(handle) => Some(handle),
+            Self::Gpu(handle)
+                if handle.shape.iter().filter(|&&dim| dim > 1).count() <= 1
+                    && runmat_accelerate_api::handle_integer_type(handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(handle) =>
+            {
+                Some(handle)
+            }
             Self::Host(_) => None,
+            Self::Gpu(_) => None,
         }
     }
 
@@ -1552,9 +1850,11 @@ impl HistInput {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::array::type_resolvers::row_vector_type;
+    use crate::builtins::common::test_support;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -1592,6 +1892,27 @@ pub(crate) mod tests {
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
+    }
+
+    #[test]
+    fn hist_legacy_default_is_ten_bins() {
+        assert_eq!(default_bin_count(0), 10);
+        assert_eq!(default_bin_count(4), 10);
+        assert_eq!(default_bin_count(10_000), 10);
+    }
+
+    #[test]
+    fn hist_integer_samples_are_strictly_extension_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(hist_builtin(
+            Value::Tensor(int_tensor(vec![1, 2, 3])),
+            Vec::new(),
+        ))
+        .expect_err("integer samples require RunMat mode");
+        assert_eq!(
+            error.identifier(),
+            HIST_INTEGER_DATA_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1671,9 +1992,92 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn resident_integer_hist_uses_compatibility_gate_before_owner_gather() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U8(&[1, 2, 2, 3]),
+                    shape: &[1, 4],
+                })
+                .expect("resident uint8 histogram input");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(hist_builtin(Value::GpuTensor(input), Vec::new()))
+                .expect_err("strict compatibility rejects resident integer hist data");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:HistIntegerDataExtension")
+            );
+        });
+    }
+
+    #[test]
+    fn resident_integer_hist_gathers_exactly_in_runmat_mode() {
+        test_support::with_test_provider(|provider| {
+            ensure_plot_test_env();
+            let input = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[9_007_199_254_740_993, 9_007_199_254_740_994]),
+                    shape: &[1, 2],
+                })
+                .expect("resident wide histogram input");
+            let centers = Value::Tensor(
+                Tensor::new_integer(
+                    runmat_builtins::IntegerStorage::U64(vec![
+                        9_007_199_254_740_993,
+                        9_007_199_254_740_994,
+                    ]),
+                    vec![1, 2],
+                )
+                .unwrap(),
+            );
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let output = block_on(hist_builtin(Value::GpuTensor(input), vec![centers]))
+                .expect("resident wide histogram");
+            let counts = Tensor::try_from(&output).expect("histogram counts");
+            let counts = counts.as_f64_slice().expect("double counts");
+            assert_eq!(counts.iter().sum::<f64>(), 2.0);
+            assert_eq!(counts.iter().filter(|&&count| count == 1.0).count(), 2);
+        });
+    }
+
+    #[test]
+    fn resident_logical_hist_data_and_weights_gather_through_owner() {
+        test_support::with_test_provider(|provider| {
+            ensure_plot_test_env();
+            let data = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[0.0, 1.0, 1.0, 0.0],
+                    shape: &[1, 4],
+                })
+                .expect("resident logical data");
+            runmat_accelerate_api::set_handle_logical(&data, true);
+            let weights = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0, 0.0, 1.0, 0.0],
+                    shape: &[1, 4],
+                })
+                .expect("resident logical weights");
+            runmat_accelerate_api::set_handle_logical(&weights, true);
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let output = block_on(hist_builtin(
+                Value::GpuTensor(data),
+                vec![
+                    Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+                    Value::String("Weights".into()),
+                    Value::GpuTensor(weights),
+                ],
+            ))
+            .expect("resident logical histogram");
+            let counts = Tensor::try_from(&output).expect("histogram counts");
+            assert_eq!(counts.as_f64_slice().unwrap().iter().sum::<f64>(), 2.0);
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_probability_normalization() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = block_on(hist_builtin(
@@ -1688,6 +2092,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_string_only_normalization() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = block_on(hist_builtin(data, vec![Value::String("pdf".into())]));
@@ -1699,6 +2104,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_normalization_name_value_pair() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
         let result = block_on(hist_builtin(
@@ -1716,6 +2122,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn hist_accepts_bin_edges_option() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         setup_plot_tests();
         let data = Value::Tensor(tensor_from(&[0.1, 0.4, 0.7]));
         let edges = Value::Tensor(tensor_from(&[0.0, 0.5, 1.0]));
@@ -1738,12 +2145,53 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected value: {other:?}"),
         };
-        assert_eq!(counts.len(), 2);
+        assert_eq!(counts.len(), 10);
         let centers = match eval.centers_value() {
             Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
-        assert_eq!(centers.len(), 2);
+        assert_eq!(centers.len(), 10);
+    }
+
+    #[test]
+    fn hist_matrix_input_returns_one_count_column_per_data_column() {
+        setup_plot_tests();
+        let data = Value::Tensor(
+            Tensor::new(vec![1.0, 1.0, 2.0, 10.0, 10.0, 20.0], vec![3, 2]).expect("hist matrix"),
+        );
+        let bins = [Value::Tensor(
+            Tensor::new(vec![1.0, 10.0], vec![2]).expect("hist centers"),
+        )];
+        let eval = block_on(evaluate_async(data, &bins)).expect("matrix hist evaluation");
+        let counts = Tensor::try_from(&eval.counts_value()).expect("matrix counts");
+        let centers = Tensor::try_from(&eval.centers_value()).expect("matrix centers");
+        assert_eq!(counts.shape, vec![2, 2]);
+        assert_eq!(counts.materialize_f64(), vec![3.0, 0.0, 0.0, 3.0]);
+        assert_eq!(centers.shape, vec![2, 2]);
+        assert_eq!(centers.materialize_f64(), vec![1.0, 10.0, 1.0, 10.0]);
+        assert_eq!(eval.charts.len(), 2);
+        assert_eq!(
+            (eval.charts[0].group_index, eval.charts[0].group_count),
+            (0, 2)
+        );
+        assert_eq!(
+            (eval.charts[1].group_index, eval.charts[1].group_count),
+            (1, 2)
+        );
+    }
+
+    #[test]
+    fn hist_matrix_automatic_bins_are_selected_per_column() {
+        setup_plot_tests();
+        let data = Value::Tensor(
+            Tensor::new(vec![0.0, 1.0, 2.0, 100.0, 110.0, 120.0], vec![3, 2]).expect("hist matrix"),
+        );
+        let eval = block_on(evaluate_async(data, &[])).expect("matrix hist evaluation");
+        let centers = Tensor::try_from(&eval.centers_value()).expect("matrix centers");
+        assert_eq!(centers.shape, vec![10, 2]);
+        let values = centers.materialize_f64();
+        assert!(values[0] < 1.0);
+        assert!(values[10] > 100.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

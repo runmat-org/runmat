@@ -112,7 +112,7 @@ impl SurfaceDataInput {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = Tensor::try_from(&other)
+                let tensor = tensor::value_into_tensor_for(context, other)
                     .map_err(|e| plotting_error(context, format!("{context}: {e}")))?;
                 Ok(Self::Host(tensor))
             }
@@ -178,7 +178,8 @@ pub async fn gather_tensor_from_gpu_async(
     let gathered = crate::gather_if_needed_async(&value)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
-    Tensor::try_from(&gathered).map_err(|e| plotting_error(context, format!("{context}: {e}")))
+    tensor::value_into_tensor_for(context, gathered)
+        .map_err(|e| plotting_error(context, format!("{context}: {e}")))
 }
 
 pub fn gather_tensor_from_gpu(

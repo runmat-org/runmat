@@ -2227,8 +2227,6 @@ fn get_histogram_property(
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let normalized =
-        apply_histogram_normalization(&hist.raw_counts, &hist.bin_edges, &hist.normalization);
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = StructValue::new();
@@ -2242,17 +2240,18 @@ fn get_histogram_property(
             );
             st.insert("Children", handles_value(Vec::new()));
             st.insert("BinEdges", tensor_from_vec(hist.bin_edges.clone()));
-            st.insert("BinCounts", tensor_from_vec(normalized));
+            st.insert("BinCounts", tensor_from_vec(hist.raw_counts.clone()));
             st.insert(
                 "Values",
                 tensor_from_vec(apply_histogram_normalization(
                     &hist.raw_counts,
                     &hist.bin_edges,
                     &hist.normalization,
+                    hist.normalization_denominator,
                 )),
             );
             if let Some(data) = &hist.metadata.data {
-                st.insert("Data", tensor_from_vec(data.clone()));
+                st.insert("Data", Value::Tensor(data.clone()));
             }
             st.insert("Normalization", Value::String(hist.normalization.clone()));
             st.insert("NumBins", Value::Num(hist.raw_counts.len() as f64));
@@ -2281,15 +2280,16 @@ fn get_histogram_property(
         ))),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("binedges") => Ok(tensor_from_vec(hist.bin_edges.clone())),
-        Some("bincounts") => Ok(tensor_from_vec(normalized)),
+        Some("bincounts") => Ok(tensor_from_vec(hist.raw_counts.clone())),
         Some("values") => Ok(tensor_from_vec(apply_histogram_normalization(
             &hist.raw_counts,
             &hist.bin_edges,
             &hist.normalization,
+            hist.normalization_denominator,
         ))),
-        Some("data") => Ok(tensor_from_vec(
-            hist.metadata.data.clone().unwrap_or_default(),
-        )),
+        Some("data") => Ok(Value::Tensor(hist.metadata.data.clone().unwrap_or_else(
+            || Tensor::new(Vec::new(), vec![0, 0]).expect("valid empty tensor"),
+        ))),
         Some("normalization") => Ok(Value::String(hist.normalization.clone())),
         Some("numbins") => Ok(Value::Num(hist.raw_counts.len() as f64)),
         Some("binwidth") => Ok(Value::Num(hist.metadata.bin_width)),
@@ -2318,7 +2318,10 @@ fn get_histogram2_property(
         None => {
             let mut st = child_base_struct("histogram2", hist.figure, hist.axes_index);
             st.insert("Values", Value::Tensor(hist.values.clone()));
-            st.insert("BinCounts", Value::Tensor(hist.values.clone()));
+            st.insert("BinCounts", Value::Tensor(hist.raw_counts.clone()));
+            if let Some(data) = &hist.data {
+                st.insert("Data", Value::Tensor(data.clone()));
+            }
             st.insert("XBinEdges", tensor_from_vec(hist.x_bin_edges.clone()));
             st.insert("YBinEdges", tensor_from_vec(hist.y_bin_edges.clone()));
             st.insert("NumBins", tensor_from_vec(histogram2_num_bins(hist)));
@@ -2338,9 +2341,12 @@ fn get_histogram2_property(
         Some("type") => Ok(Value::String("histogram2".into())),
         Some("parent") => Ok(child_parent_handle(hist.figure, hist.axes_index)),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("values") | Some("bincounts") | Some("bindata") => {
-            Ok(Value::Tensor(hist.values.clone()))
-        }
+        Some("values") => Ok(Value::Tensor(hist.values.clone())),
+        Some("bincounts") => Ok(Value::Tensor(hist.raw_counts.clone())),
+        Some("bindata") => Ok(Value::Tensor(hist.values.clone())),
+        Some("data") => Ok(Value::Tensor(hist.data.clone().unwrap_or_else(|| {
+            Tensor::new(Vec::new(), vec![0, 0]).expect("valid empty tensor")
+        }))),
         Some("xbinedges") => Ok(tensor_from_vec(hist.x_bin_edges.clone())),
         Some("ybinedges") => Ok(tensor_from_vec(hist.y_bin_edges.clone())),
         Some("numbins") => Ok(tensor_from_vec(histogram2_num_bins(hist))),
@@ -4248,13 +4254,12 @@ fn get_image_property(
             st.insert("Children", handles_value(Vec::new()));
             st.insert("XData", tensor_from_vec(surface.x_data.clone()));
             st.insert("YData", tensor_from_vec(surface.y_data.clone()));
+            if let Some(c_data) = &image_handle.c_data {
+                st.insert("CData", Value::Tensor(c_data.clone()));
+            }
             st.insert(
                 "CDataMapping",
-                Value::String(if surface.color_grid.is_some() {
-                    "direct".into()
-                } else {
-                    "scaled".into()
-                }),
+                Value::String(image_handle.c_data_mapping.clone()),
             );
             Ok(Value::Struct(st))
         }
@@ -4266,11 +4271,10 @@ fn get_image_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(tensor_from_vec(surface.x_data.clone())),
         Some("ydata") => Ok(tensor_from_vec(surface.y_data.clone())),
-        Some("cdatamapping") => Ok(Value::String(if surface.color_grid.is_some() {
-            "direct".into()
-        } else {
-            "scaled".into()
-        })),
+        Some("colordata") => Ok(Value::Tensor(image_handle.c_data.clone().unwrap_or_else(
+            || Tensor::new(Vec::new(), vec![0, 0]).expect("valid empty tensor"),
+        ))),
+        Some("cdatamapping") => Ok(Value::String(image_handle.c_data_mapping.clone())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported image property `{other}`"),
@@ -4464,8 +4468,12 @@ fn apply_histogram_property(
                 .trim()
                 .to_ascii_lowercase();
             validate_histogram_normalization(&norm, builtin)?;
-            let normalized =
-                apply_histogram_normalization(&hist.raw_counts, &hist.bin_edges, &norm);
+            let normalized = apply_histogram_normalization(
+                &hist.raw_counts,
+                &hist.bin_edges,
+                &norm,
+                hist.normalization_denominator,
+            );
             let labels = histogram_labels_from_edges(&hist.bin_edges);
             super::state::update_histogram_plot_data(
                 hist.figure,
@@ -4660,6 +4668,7 @@ fn apply_histogram2_property_to_state(
                 &next.x_bin_edges,
                 &next.y_bin_edges,
                 &next.normalization,
+                next.normalization_denominator,
             )?;
         }
         "displaystyle" => {
@@ -4719,6 +4728,7 @@ fn refresh_histogram2_chart(
             state.show_empty_bins = next.show_empty_bins;
             state.face_alpha = next.face_alpha;
             state.display_name = next.display_name;
+            state.data = next.data;
         },
     )
     .map_err(|err| map_figure_error(builtin, err))?;
@@ -4969,6 +4979,57 @@ fn apply_image_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if key == "colordata" {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: setting image CData is not implemented"),
+        ));
+    }
+    if key == "cdatamapping" {
+        let mapping = value_as_string(value)
+            .map(|text| text.trim().to_ascii_lowercase())
+            .ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: CDataMapping must be text"))
+            })?;
+        if !matches!(mapping.as_str(), "direct" | "scaled") {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: CDataMapping must be 'direct' or 'scaled'"),
+            ));
+        }
+        let renderer_limits = if mapping == "direct" {
+            let integer = image_handle
+                .c_data
+                .as_ref()
+                .is_some_and(|tensor| tensor.integer_storage().is_some());
+            Some(crate::builtins::plotting::image::direct_colormap_limits(
+                integer,
+                super::state::colormap_length_for_axes(
+                    image_handle.figure,
+                    image_handle.axes_index,
+                ),
+            ))
+        } else {
+            super::state::clone_figure(image_handle.figure).and_then(|figure| {
+                figure
+                    .axes_metadata(image_handle.axes_index)
+                    .and_then(|metadata| metadata.color_limits)
+            })
+        };
+        super::state::update_image_plot(image_handle.figure, image_handle.plot_index, |surface| {
+            surface.set_color_limits(renderer_limits);
+        })
+        .map_err(|err| map_figure_error(builtin, err))?;
+        super::state::update_image_handle_for_plot(
+            image_handle.figure,
+            image_handle.axes_index,
+            image_handle.plot_index,
+            |state| state.c_data_mapping = mapping,
+        )
+        .map_err(|err| map_figure_error(builtin, err))?;
+        return Ok(());
+    }
+    let mut retained_mapping = None;
     super::state::update_image_plot(image_handle.figure, image_handle.plot_index, |surface| {
         match key {
             "xdata" => {
@@ -4983,8 +5044,12 @@ fn apply_image_property(
             }
             "cdatamapping" => {
                 if let Some(text) = value_as_string(value) {
-                    if text.trim().eq_ignore_ascii_case("direct") {
+                    let normalized = text.trim().to_ascii_lowercase();
+                    if normalized == "direct" {
                         surface.image_mode = true;
+                    }
+                    if matches!(normalized.as_str(), "direct" | "scaled") {
+                        retained_mapping = Some(normalized);
                     }
                 }
             }
@@ -4992,6 +5057,19 @@ fn apply_image_property(
         }
     })
     .map_err(|err| map_figure_error(builtin, err))?;
+    if retained_mapping.is_some() {
+        super::state::update_image_handle_for_plot(
+            image_handle.figure,
+            image_handle.axes_index,
+            image_handle.plot_index,
+            |state| {
+                if let Some(mapping) = retained_mapping {
+                    state.c_data_mapping = mapping;
+                }
+            },
+        )
+        .map_err(|err| map_figure_error(builtin, err))?;
+    }
     Ok(())
 }
 
@@ -7445,7 +7523,9 @@ pub(crate) fn validate_histogram_normalization(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     match norm {
-        "count" | "probability" | "countdensity" | "pdf" | "cumcount" | "cdf" => Ok(()),
+        "count" | "probability" | "percentage" | "countdensity" | "pdf" | "cumcount" | "cdf" => {
+            Ok(())
+        }
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported histogram normalization `{other}`"),
@@ -7457,14 +7537,22 @@ pub(crate) fn apply_histogram_normalization(
     raw_counts: &[f64],
     edges: &[f64],
     norm: &str,
+    normalization_denominator: f64,
 ) -> Vec<f64> {
     let widths: Vec<f64> = edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
-    let total: f64 = raw_counts.iter().sum();
+    let total = normalization_denominator;
     match norm {
         "count" => raw_counts.to_vec(),
         "probability" => {
             if total > 0.0 {
                 raw_counts.iter().map(|&c| c / total).collect()
+            } else {
+                vec![0.0; raw_counts.len()]
+            }
+        }
+        "percentage" => {
+            if total > 0.0 {
+                raw_counts.iter().map(|&c| 100.0 * c / total).collect()
             } else {
                 vec![0.0; raw_counts.len()]
             }

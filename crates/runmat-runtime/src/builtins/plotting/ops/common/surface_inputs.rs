@@ -6,37 +6,6 @@ use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_ve
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
-pub fn parse_surface_call_args(
-    args: Vec<Value>,
-    builtin: &'static str,
-) -> BuiltinResult<(Value, Value, Value, Vec<Value>)> {
-    match args.len() {
-        0 => Err(plotting_error(
-            builtin,
-            format!("{builtin}: expected Z or X,Y,Z input"),
-        )),
-        1 => {
-            let z = args.into_iter().next().expect("one arg");
-            let (rows, cols) = inferred_grid_shape(&z, builtin)?;
-            let x = Value::Tensor(default_surface_axis(rows));
-            let y = Value::Tensor(default_surface_axis(cols));
-            Ok((x, y, z, Vec::new()))
-        }
-        2 => Err(plotting_error(
-            builtin,
-            format!("{builtin}: expected Z or X,Y,Z input"),
-        )),
-        _ => {
-            let mut it = args.into_iter();
-            let x = it.next().expect("x");
-            let y = it.next().expect("y");
-            let z = it.next().expect("z");
-            let rest = it.collect();
-            Ok((x, y, z, rest))
-        }
-    }
-}
-
 /// Parse surface-like call arguments using MATLAB's X/Y convention:
 /// X indexes columns of Z, Y indexes rows of Z.
 pub fn parse_surface_call_args_matlab_xy(
@@ -70,6 +39,34 @@ pub fn parse_surface_call_args_matlab_xy(
     }
 }
 
+/// Parse image-family inputs without confusing `C,Name,Value` with `X,Y,C`.
+pub fn parse_image_call_args(
+    args: Vec<Value>,
+    builtin: &'static str,
+) -> BuiltinResult<(Value, Value, Value, Vec<Value>)> {
+    if args.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected C or X,Y,C input"),
+        ));
+    }
+    let c_only =
+        args.len() < 3 || matches!(args.get(1), Some(Value::String(_) | Value::CharArray(_)));
+    if c_only {
+        let mut values = args.into_iter();
+        let c = values.next().expect("nonempty image arguments");
+        let rest = values.collect();
+        let (rows, cols) = inferred_grid_shape(&c, builtin)?;
+        return Ok((
+            Value::Tensor(default_surface_axis(cols)),
+            Value::Tensor(default_surface_axis(rows)),
+            c,
+            rest,
+        ));
+    }
+    parse_surface_call_args_matlab_xy(args, builtin)
+}
+
 fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(usize, usize)> {
     match value {
         Value::GpuTensor(handle) => {
@@ -84,7 +81,7 @@ fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(u
             Ok((rows, cols))
         }
         other => {
-            let tensor = Tensor::try_from(other)
+            let tensor = tensor_utils::value_into_tensor_for(builtin, other.clone())
                 .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
             if tensor.rows == 0 || tensor.cols == 0 {
                 return Err(plotting_error(
@@ -105,23 +102,6 @@ fn default_surface_axis(len: usize) -> Tensor {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_surface_call_args_supports_z_only_shorthand() {
-        let z = Value::Tensor(
-            Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("surface matrix"),
-        );
-        let (x, y, z_out, rest) = parse_surface_call_args(vec![z.clone()], "surf").unwrap();
-        let x = Tensor::try_from(&x).unwrap();
-        let y = Tensor::try_from(&y).unwrap();
-        assert_eq!(x.materialize_f64(), vec![1.0, 2.0]);
-        assert_eq!(y.materialize_f64(), vec![1.0, 2.0]);
-        assert!(rest.is_empty());
-        assert_eq!(
-            Tensor::try_from(&z_out).unwrap().materialize_f64(),
-            Tensor::try_from(&z).unwrap().materialize_f64()
-        );
-    }
 
     #[test]
     fn parse_surface_call_args_matlab_xy_uses_column_then_row_defaults() {

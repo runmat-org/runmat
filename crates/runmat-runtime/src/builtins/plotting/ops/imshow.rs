@@ -438,12 +438,19 @@ async fn tensor_from_value(value: Value) -> crate::BuiltinResult<Tensor> {
 }
 
 async fn render_grayscale_value(value: Value, range: DisplayRange) -> crate::BuiltinResult<f64> {
+    let retained = tensor_from_value(value.clone()).await?;
     let c_input = SurfaceDataInput::from_value(value, BUILTIN_NAME)?;
     let (rows, cols) = c_input.grid_shape(BUILTIN_NAME)?;
     let x_axis = default_axis_vec(cols);
     let y_axis = default_image_y_axis(rows);
     let color_limits = display_range_for_input(&c_input, range).await?;
-    let mut surface = build_grayscale_image_surface(c_input, x_axis, y_axis, color_limits).await?;
+    let mut surface = build_grayscale_image_surface(
+        SurfaceDataInput::Host(retained.clone()),
+        x_axis,
+        y_axis,
+        color_limits,
+    )
+    .await?;
 
     surface = surface
         .with_flatten_z(true)
@@ -451,23 +458,24 @@ async fn render_grayscale_value(value: Value, range: DisplayRange) -> crate::Bui
         .with_colormap(ColorMap::Gray)
         .with_shading(ShadingMode::None)
         .with_color_limits(Some(color_limits));
-    render_surface(surface, Some(color_limits)).await
+    render_surface(surface, Some(color_limits), retained).await
 }
 
 async fn render_truecolor_tensor(tensor: Tensor) -> crate::BuiltinResult<f64> {
     let (rows, cols) = truecolor_shape(&tensor)?;
     let x_host = default_axis_vec(cols);
     let y_host = default_image_y_axis(rows);
-    let surface = build_truecolor_image_surface(tensor, x_host, y_host)?
+    let surface = build_truecolor_image_surface(tensor.clone(), x_host, y_host)?
         .with_flatten_z(true)
         .with_image_mode(true)
         .with_shading(ShadingMode::None);
-    render_surface(surface, None).await
+    render_surface(surface, None, tensor).await
 }
 
 async fn render_surface(
     surface: SurfacePlot,
     color_limits: Option<(f64, f64)>,
+    c_data: Tensor,
 ) -> crate::BuiltinResult<f64> {
     let mut surface = Some(surface);
     let plot_index_out = Rc::new(RefCell::new(None));
@@ -492,8 +500,13 @@ async fn render_surface(
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
-    let handle =
-        crate::builtins::plotting::state::register_image_handle(figure_handle, axes, plot_index);
+    let handle = crate::builtins::plotting::state::register_image_handle(
+        figure_handle,
+        axes,
+        plot_index,
+        Some(c_data),
+        "scaled",
+    );
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {

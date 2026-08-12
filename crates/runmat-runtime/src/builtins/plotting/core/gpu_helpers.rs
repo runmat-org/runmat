@@ -95,7 +95,8 @@ pub async fn gather_tensor_from_gpu_async(
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
-    Tensor::try_from(&gathered).map_err(|e| plotting_error(name, format!("{name}: {e}")))
+    crate::builtins::common::tensor::value_into_tensor_for(name, gathered)
+        .map_err(|e| plotting_error(name, format!("{name}: {e}")))
 }
 
 /// Convert a runtime value (potentially GPU-resident) into a concrete scalar.

@@ -67641,7 +67641,7 @@
     },
     {
       "name": "hist",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
@@ -67783,6 +67783,69 @@
               "description": "Histogram bin counts."
             }
           ]
+        },
+        {
+          "label": "[counts, centers] = hist(X)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input sample data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts."
+            },
+            {
+              "name": "centers",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin centers."
+            }
+          ]
+        },
+        {
+          "label": "[counts, centers] = hist(X, bins)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Input sample data."
+            },
+            {
+              "name": "bins",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Bin count scalar or explicit center vector."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin counts."
+            },
+            {
+              "name": "centers",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Histogram bin centers."
+            }
+          ]
         }
       ],
       "errors": [
@@ -67797,6 +67860,109 @@
           "identifier": "RunMat:hist:Internal",
           "when": "Internal histogram rendering or device conversion fails.",
           "message": "hist: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "hist-integer-data",
+          "mode": "RunMatOnly",
+          "description": "hist with integer sample data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HistIntegerDataExtension"
+        },
+        {
+          "id": "hist-integer-centers",
+          "mode": "RunMatOnly",
+          "description": "hist with integer bin centers is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HistIntegerCentersExtension"
+        },
+        {
+          "id": "hist-modern-options",
+          "mode": "RunMatOnly",
+          "description": "hist with histogram-style normalization or name-value options is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HistModernOptionsExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[counts, centers] = hist(integer_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents single, double, logical, and categorical sample data for legacy hist; integer samples are compatibility-gated."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "A gated RunMat extension; legacy hist outputs double counts and centers."
+        },
+        {
+          "form": "[counts, centers] = hist(X, integer_nbins)",
+          "inputs": [
+            {
+              "name": "nbins",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All integer classes are documented for scalar nbins."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Scalar integer nbins is documented and parsed exactly before conversion to a platform bin count."
+        },
+        {
+          "form": "[counts, centers] = hist(X, integer_xbins)",
+          "inputs": [
+            {
+              "name": "xbins",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents single or double numeric center vectors; typed integer centers are compatibility-gated."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Integer center vectors are a gated RunMat extension and cross to the floating histogram domain after the gate."
         }
       ]
     },
@@ -67958,6 +68124,88 @@
           "identifier": "RunMat:histc:Internal",
           "when": "Internal tensor conversion, GPU gather, or allocation fails.",
           "message": "histc: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "histc-wide-integer",
+          "mode": "RunMatOnly",
+          "description": "histc with int64 or uint64 input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HistcWideIntegerExtension"
+        },
+        {
+          "id": "histc-logical",
+          "mode": "RunMatOnly",
+          "description": "histc with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HistcLogicalExtension"
+        },
+        {
+          "id": "histc-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "histc with gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HistcGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[bincounts, ind] = histc(integer_x, integer_binranges, dim)",
+          "inputs": [
+            {
+              "name": "x",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents integer classes through 32 bits; int64 and uint64 are gated RunMat extensions."
+            },
+            {
+              "name": "binranges",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "MATLAB documents integer classes through 32 bits for bin ranges."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Documented integer inputs are host-only and produce double counts and indices; unsupported classes and residency gate before conversion or gather."
+        },
+        {
+          "form": "[bincounts, ind] = histc(wide_integer_x_or_binranges, ...)",
+          "inputs": [
+            {
+              "name": "x_or_binranges",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "int64 and uint64 are not documented for legacy histc and require the wide-integer extension gate."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "A gated RunMat extension; values enter the legacy floating histogram domain only after the compatibility gate."
         }
       ]
     },
@@ -68659,6 +68907,125 @@
               "description": "Y-axis bin edges."
             }
           ]
+        },
+        {
+          "label": "[N, Xedges, Yedges, binX, binY] = histcounts2(X, Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input data."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input data."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "2-D histogram bin counts."
+            },
+            {
+              "name": "Xedges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis bin edges."
+            },
+            {
+              "name": "Yedges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis bin edges."
+            },
+            {
+              "name": "binX",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based X-bin indices, or zero for unbinned observations."
+            },
+            {
+              "name": "binY",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based Y-bin indices, or zero for unbinned observations."
+            }
+          ]
+        },
+        {
+          "label": "[N, Xedges, Yedges, binX, binY] = histcounts2(X, Y, Name, Value, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis input data."
+            },
+            {
+              "name": "Y",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis input data."
+            },
+            {
+              "name": "name_value",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Name/value pairs controlling binning and normalization."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "N",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "2-D histogram bin counts."
+            },
+            {
+              "name": "Xedges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "X-axis bin edges."
+            },
+            {
+              "name": "Yedges",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Y-axis bin edges."
+            },
+            {
+              "name": "binX",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based X-bin indices, or zero for unbinned observations."
+            },
+            {
+              "name": "binY",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "One-based Y-bin indices, or zero for unbinned observations."
+            }
+          ]
         }
       ],
       "errors": [
@@ -68685,6 +69052,65 @@
           "identifier": "RunMat:histcounts2:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "histcounts2: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "histcounts2-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "histcounts2 with gpuArray inputs is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Histcounts2GpuInputExtension"
+        },
+        {
+          "id": "histcounts2-extra-bin-syntax",
+          "mode": "RunMatOnly",
+          "description": "histcounts2 axis-specific or scalar-width convenience syntax is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Histcounts2ExtraBinSyntaxExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[N, Xedges, Yedges, binX, binY] = histcounts2(integer_X, integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X_and_Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented; X and Y may use different classes but must have identical sizes."
+            },
+            {
+              "name": "bin_controls",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Typed NumBins and explicit integer edges follow their scalar/vector contracts; same-class wide explicit edges are classified exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Counts, returned edges, and bin indices are double; source-domain exact comparisons are retained for same-class explicit integer edges before that output boundary."
         }
       ]
     },
@@ -68958,6 +69384,62 @@
           "identifier": "RunMat:histogram:Internal",
           "when": "Internal render preparation or histogram state registration fails.",
           "message": "histogram: internal operation failed"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = histogram(integer_Data, ...)",
+          "inputs": [
+            {
+              "name": "Data",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Histogram data accepts every built-in integer class and remains authoritative on the chart object."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact typed Data is retained while raw double counts and renderer coordinates remain explicit statistical and client boundaries."
+        },
+        {
+          "form": "h = histogram(X, integer_BinEdges)",
+          "inputs": [
+            {
+              "name": "BinEdges",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Explicit integer edges are ordered exactly before the floating rendering boundary."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Bin membership compares against authoritative explicit edges before chart geometry materializes as double."
         }
       ]
     },
@@ -69396,6 +69878,62 @@
           "when": "RunMat cannot compute bins, register state, or render the chart.",
           "message": "histogram2: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = histogram2(integer_X, integer_Y, ...)",
+          "inputs": [
+            {
+              "name": "X and Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Paired histogram observations accept every integer class and are retained as the chart Data matrix using the language concatenation dominance rule."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Authoritative typed observations are retained on the chart while counts and rendering use explicit double boundaries."
+        },
+        {
+          "form": "h = histogram2(X, Y, integer_XBinEdges, integer_YBinEdges)",
+          "inputs": [
+            {
+              "name": "XBinEdges and YBinEdges",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Explicit integer edge vectors are classified exactly before renderer materialization."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "StructuralParameter",
+          "notes": "Wide same-class integer edges remain exact during bin membership classification."
+        }
       ]
     },
     {
@@ -69602,6 +70140,35 @@
           "identifier": "RunMat:hsv2rgb:Internal",
           "when": "RGB output tensor construction fails internally.",
           "message": "hsv2rgb: internal conversion failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "hsv2rgb(integer_HSV)",
+          "inputs": [
+            {
+              "name": "HSV",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented HSV image surface accepts double, single, or logical and the colormap surface accepts double; every typed-integer class is rejected."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Host integer storage and resident integer dtype metadata reject before conversion; RunMat mode does not widen the documented input-class surface."
         }
       ]
     },
@@ -71681,13 +72248,41 @@
               "description": "Converted image data in double precision."
             }
           ]
+        },
+        {
+          "label": "J = im2double(I, \"indexed\")",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed image data to convert."
+            },
+            {
+              "name": "indexed",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "The literal \"indexed\", selecting indexed-image offset semantics."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "J",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Converted image data in double precision."
+            }
+          ]
         }
       ],
       "errors": [
         {
           "code": "RM.IM2DOUBLE.TOO_MANY_INPUTS",
           "identifier": "RunMat:im2double:TooManyInputs",
-          "when": "More than one input argument is supplied.",
+          "when": "More than two input arguments are supplied.",
           "message": "im2double: too many input arguments"
         },
         {
@@ -71707,6 +72302,75 @@
           "identifier": "RunMat:im2double:Internal",
           "when": "Internal conversion step fails while building output tensor.",
           "message": "im2double: internal conversion failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "J = im2double(integer_I)",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int16",
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Intensity and truecolor uint8, uint16, and int16 inputs are rescaled to double in [0,1] from authoritative storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The host reference path preserves shape and produces double output; documented resident input gathers through its owner before conversion."
+        },
+        {
+          "form": "J = im2double(integer_I, \"indexed\")",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Indexed integer values are zero-based and convert to one-based double indices by adding exactly one."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The zero-based integer index is read exactly, incremented once, and emitted as one-based double image data."
+        },
+        {
+          "form": "im2double(unsupported_integer_I, ...)",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int8",
+                "Int32",
+                "Int64",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "These integer image classes are outside the documented im2double input surface and reject before conversion."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Unsupported integer dtype metadata is rejected consistently for host and resident inputs."
         }
       ]
     },
@@ -71735,13 +72399,41 @@
               "description": "Converted image data in uint16 class."
             }
           ]
+        },
+        {
+          "label": "J = im2uint16(I, \"indexed\")",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed image data to convert."
+            },
+            {
+              "name": "indexed",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "The literal \"indexed\", selecting indexed-image offset semantics."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "J",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Converted image data in uint16 class."
+            }
+          ]
         }
       ],
       "errors": [
         {
           "code": "RM.IM2UINT16.TOO_MANY_INPUTS",
           "identifier": "RunMat:im2uint16:TooManyInputs",
-          "when": "More than one input argument is supplied.",
+          "when": "More than two input arguments are supplied.",
           "message": "im2uint16: too many input arguments"
         },
         {
@@ -71761,6 +72453,75 @@
           "identifier": "RunMat:im2uint16:Internal",
           "when": "Internal conversion step fails while building output tensor.",
           "message": "im2uint16: internal conversion failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "J = im2uint16(integer_I)",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int16",
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Intensity and truecolor uint8, uint16, and int16 inputs map exactly into the uint16 image range."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "uint8 expands by exact byte replication, int16 is offset exactly, and uint16 is retained in exact uint16 storage."
+        },
+        {
+          "form": "J = im2uint16(integer_I, \"indexed\")",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Indexed uint8 and uint16 values are already zero-based and widen or copy without intensity scaling."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Indexed zero-based integer values are copied or widened exactly into uint16 storage."
+        },
+        {
+          "form": "im2uint16(unsupported_integer_I, ...)",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int8",
+                "Int32",
+                "Int64",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "These integer image classes are outside the documented im2uint16 input surface and reject before conversion."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Unsupported integer dtype metadata is rejected consistently for host and resident inputs."
         }
       ]
     },
@@ -71789,13 +72550,41 @@
               "description": "Converted image data in uint8 class."
             }
           ]
+        },
+        {
+          "label": "J = im2uint8(I, \"indexed\")",
+          "inputs": [
+            {
+              "name": "I",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed image data to convert."
+            },
+            {
+              "name": "indexed",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "The literal \"indexed\", selecting indexed-image offset semantics."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "J",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Converted image data in uint8 class."
+            }
+          ]
         }
       ],
       "errors": [
         {
           "code": "RM.IM2UINT8.TOO_MANY_INPUTS",
           "identifier": "RunMat:im2uint8:TooManyInputs",
-          "when": "More than one input argument is supplied.",
+          "when": "More than two input arguments are supplied.",
           "message": "im2uint8: too many input arguments"
         },
         {
@@ -71815,6 +72604,75 @@
           "identifier": "RunMat:im2uint8:Internal",
           "when": "Internal conversion step fails while building output tensor.",
           "message": "im2uint8: internal conversion failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "J = im2uint8(integer_I)",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int16",
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Intensity and truecolor uint8, uint16, and int16 inputs quantize into the uint8 image range."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "uint16 and offset int16 inputs quantize at the documented half-byte boundaries; output is exact uint8 storage."
+        },
+        {
+          "form": "J = im2uint8(integer_I, \"indexed\")",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Indexed uint8 values are retained; indexed uint16 values must not exceed 255 and narrow without intensity scaling."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Indexed conversion preserves zero-based integer indices and errors when a uint16 index cannot fit in uint8."
+        },
+        {
+          "form": "im2uint8(unsupported_integer_I, ...)",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int8",
+                "Int32",
+                "Int64",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "These integer image classes are outside the documented im2uint8 input surface and reject before conversion."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Unsupported integer dtype metadata is rejected consistently for host and resident inputs."
         }
       ]
     },
@@ -72005,6 +72863,43 @@
           "when": "Internal image/surface construction or rendering fails unexpectedly.",
           "message": "image: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "image-four-channel-cdata",
+          "mode": "RunMatOnly",
+          "description": "image with M-by-N-by-4 CData is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ImageFourChannelCDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = image(integer_CData, ...)",
+          "inputs": [
+            {
+              "name": "CData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Indexed and truecolor CData accept every built-in integer class; exact CData remains authoritative on the image object."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Indexed values retain direct-mapping provenance, truecolor values normalize across their native class range, and renderer conversion is explicit."
+        }
       ]
     },
     {
@@ -72056,6 +72951,34 @@
               "arity": "Required",
               "default": null,
               "description": "Indexed image matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "h",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Handle to the rendered scaled image object."
+            }
+          ]
+        },
+        {
+          "label": "h = imagesc(C, clims)",
+          "inputs": [
+            {
+              "name": "C",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Indexed image matrix."
+            },
+            {
+              "name": "clims",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Two-element color limits."
             }
           ],
           "outputs": [
@@ -72151,6 +73074,43 @@
           "identifier": "RunMat:imagesc:Internal",
           "when": "Internal image/surface construction or rendering fails unexpectedly.",
           "message": "imagesc: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "imagesc-four-channel-cdata",
+          "mode": "RunMatOnly",
+          "description": "imagesc with M-by-N-by-4 CData is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ImagescFourChannelCDataExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "h = imagesc(integer_CData, ...)",
+          "inputs": [
+            {
+              "name": "CData",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Scaled indexed and truecolor CData accept every built-in integer class and remain authoritative on the image object."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact CData and scaled-mapping provenance are retained while colormap normalization and rendering cross an explicit client boundary."
         }
       ]
     },
