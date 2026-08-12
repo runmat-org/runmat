@@ -31,6 +31,11 @@ pub async fn execute_stochastic_evolution(
                 steps_u32,
             ) {
                 Ok(output) => {
+                    if runmat_accelerate_api::handle_is_explicit(&state_handle) {
+                        runmat_accelerate_api::mark_handle_explicit(&output);
+                    } else {
+                        runmat_accelerate_api::mark_handle_automatic(&output);
+                    }
                     if let Some(temp) = state_owned {
                         let _ = provider.free(&temp);
                     }
@@ -42,8 +47,20 @@ pub async fn execute_stochastic_evolution(
                     if let Some(temp) = state_owned {
                         let _ = provider.free(&temp);
                     }
+                    if matches!(&state, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+                    {
+                        return Err(format!(
+                            "stochastic_evolution: explicit gpuArray execution failed: {err}"
+                        )
+                        .into());
+                    }
                 }
             }
+        } else if matches!(&state, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+        {
+            return Err(
+                "stochastic_evolution: no provider owns the explicit gpuArray state".into(),
+            );
         }
     }
 

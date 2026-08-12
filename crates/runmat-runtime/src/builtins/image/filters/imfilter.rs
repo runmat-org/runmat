@@ -1211,13 +1211,13 @@ pub(crate) mod tests {
         let kernel = Tensor::new(vec![3.0], shape.clone()).expect("higher-rank kernel");
         let image_handle = provider
             .upload(&HostTensorView {
-                data: &image.data,
+                data: image.as_f64_slice().expect("double image storage"),
                 shape: &image.shape,
             })
             .expect("upload image");
         let kernel_handle = provider
             .upload(&HostTensorView {
-                data: &kernel.data,
+                data: kernel.as_f64_slice().expect("double kernel storage"),
                 shape: &kernel.shape,
             })
             .expect("upload kernel");
@@ -1231,7 +1231,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(filtered).expect("gather higher-rank output");
 
         assert_eq!(gathered.shape, shape);
-        assert_eq!(gathered.data, vec![6.0]);
+        assert_eq!(gathered.materialize_f64(), vec![6.0]);
     }
 
     #[test]

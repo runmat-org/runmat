@@ -3,7 +3,11 @@
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, NumericDType, SparseTensor, Tensor, Type, Value,
 };
@@ -11,13 +15,16 @@ use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
-use crate::builtins::common::random_args::complex_tensor_into_value;
+use crate::builtins::common::random_args::{
+    complex_tensor_into_value, extract_constructor_dimensions, normalize_constructor_shape,
+    validate_constructor_gpu_output,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, shape::normalize_scalar_shape, tensor};
+use crate::builtins::common::{gpu_helpers, tensor};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::inf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -105,14 +112,6 @@ const INF_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor
     description: "Dimension sizes.",
 }];
 
-const INF_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "prototype",
-    ty: BuiltinParamType::LikePrototype,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Prototype value when no numeric dimension arguments are provided.",
-}];
-
 const INF_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "dims",
@@ -154,7 +153,7 @@ const INF_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const INF_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+const INF_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "A = inf()",
         inputs: &INF_SIG_EMPTY_INPUTS,
@@ -176,11 +175,6 @@ const INF_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
         outputs: &INF_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "A = inf(prototype)",
-        inputs: &INF_SIG_PROTOTYPE_INPUTS,
-        outputs: &INF_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
         label: "A = inf(..., typename)",
         inputs: &INF_SIG_CLASS_INPUTS,
         outputs: &INF_OUTPUT,
@@ -189,6 +183,54 @@ const INF_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
         label: "A = inf(..., \"like\", prototype)",
         inputs: &INF_SIG_LIKE_INPUTS,
         outputs: &INF_OUTPUT,
+    },
+];
+
+const INF_COLUMN_SIZE_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "inf-column-size-vector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "inf with a column size vector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:InfColumnSizeVectorExtension"),
+};
+const INF_RESIDENT_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "inf-resident-size-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "inf with a resident size control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:InfResidentSizeControlExtension"),
+};
+pub const INF_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    INF_COLUMN_SIZE_VECTOR_EXTENSION,
+    INF_RESIDENT_SIZE_EXTENSION,
+];
+
+const INF_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n/sz1...szN/sz",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = inf(integer_n[, integer_sz2, ...])",
+        inputs: &INF_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The default output is host double; typename can select single and explicit gpuArray syntax selects residency.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = inf(integer_sz)",
+        inputs: &INF_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented size vector is a row vector of exact integer values.",
     },
 ];
 
@@ -276,6 +318,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     type_resolver(inf_type),
     descriptor(crate::builtins::array::creation::inf::INF_DESCRIPTOR),
+    extensions(INF_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::creation::inf::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::inf"
 )]
 async fn inf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -292,7 +336,7 @@ struct ParsedInf {
 enum OutputTemplate {
     Double,
     Single,
-    GpuArray,
+    GpuArray(NumericDType),
     Like(Value),
 }
 
@@ -300,10 +344,9 @@ impl ParsedInf {
     async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
-        let mut shape_source: Option<Vec<usize>> = None;
         let mut like_proto: Option<Value> = None;
         let mut class_override: Option<OutputTemplate> = None;
-        let mut implicit_proto: Option<Value> = None;
+        let mut saw_size_vector = false;
 
         let mut idx = 0;
         while idx < args.len() {
@@ -321,9 +364,6 @@ impl ParsedInf {
                             return Err(inf_error(&INF_ERROR_LIKE_EXPECTED_PROTOTYPE));
                         };
                         like_proto = Some(proto.clone());
-                        if shape_source.is_none() && !saw_dims_arg {
-                            shape_source = Some(shape_from_value(&proto)?);
-                        }
                         idx += 2;
                         continue;
                     }
@@ -333,6 +373,9 @@ impl ParsedInf {
                                 &INF_ERROR_CLASS_CONFLICT,
                                 "double class override",
                             ));
+                        }
+                        if class_override.is_some() {
+                            return Err(inf_error(&INF_ERROR_CLASS_CONFLICT));
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -345,6 +388,9 @@ impl ParsedInf {
                                 "single class override",
                             ));
                         }
+                        if class_override.is_some() {
+                            return Err(inf_error(&INF_ERROR_CLASS_CONFLICT));
+                        }
                         class_override = Some(OutputTemplate::Single);
                         idx += 1;
                         continue;
@@ -356,7 +402,12 @@ impl ParsedInf {
                                 "gpuArray class override",
                             ));
                         }
-                        class_override = Some(OutputTemplate::GpuArray);
+                        let dtype = match class_override.take() {
+                            Some(OutputTemplate::Single) => NumericDType::F32,
+                            Some(OutputTemplate::Double) | None => NumericDType::F64,
+                            Some(_) => unreachable!("inf class override is floating"),
+                        };
+                        class_override = Some(OutputTemplate::GpuArray(dtype));
                         idx += 1;
                         continue;
                     }
@@ -369,36 +420,50 @@ impl ParsedInf {
                 }
             }
 
-            if let Some(parsed_dims) = extract_dims(&arg).await? {
+            if matches!(arg, Value::GpuTensor(_)) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INF_RESIDENT_SIZE_EXTENSION,
+                    "inf",
+                )?;
+            }
+            if let Some(parsed_dims) = extract_constructor_dimensions(&arg, "inf")
+                .await
+                .map_err(builtin_error)?
+            {
+                if parsed_dims.is_column_vector {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &INF_COLUMN_SIZE_VECTOR_EXTENSION,
+                        "inf",
+                    )?;
+                }
+                if parsed_dims.values.len() > 1 {
+                    if saw_size_vector || saw_dims_arg {
+                        return Err(builtin_error(
+                            "inf: a size vector must be the only dimension argument",
+                        ));
+                    }
+                    saw_size_vector = true;
+                } else if saw_size_vector {
+                    return Err(builtin_error(
+                        "inf: a size vector must be the only dimension argument",
+                    ));
+                }
                 saw_dims_arg = true;
                 if dims.is_empty() {
-                    dims = parsed_dims;
+                    dims = parsed_dims.values;
                 } else {
-                    dims.extend(parsed_dims);
+                    dims.extend(parsed_dims.values);
                 }
                 idx += 1;
                 continue;
             }
-
-            if shape_source.is_none() {
-                shape_source = Some(shape_from_value(&arg)?);
-            }
-            if implicit_proto.is_none() {
-                implicit_proto = Some(arg.clone());
-            }
-            idx += 1;
+            return Err(builtin_error(format!(
+                "inf: unsupported dimension or option {arg:?}"
+            )));
         }
 
         let shape = if saw_dims_arg {
-            if dims.is_empty() {
-                vec![0, 0]
-            } else if dims.len() == 1 {
-                vec![dims[0], dims[0]]
-            } else {
-                dims
-            }
-        } else if let Some(shape) = shape_source {
-            shape
+            normalize_constructor_shape(dims)
         } else {
             vec![1, 1]
         };
@@ -407,8 +472,6 @@ impl ParsedInf {
             OutputTemplate::Like(proto)
         } else if let Some(spec) = class_override {
             spec
-        } else if let Some(proto) = implicit_proto {
-            OutputTemplate::Like(proto)
         } else {
             OutputTemplate::Double
         };
@@ -421,40 +484,45 @@ async fn build_output(parsed: ParsedInf) -> crate::BuiltinResult<Value> {
     match parsed.template {
         OutputTemplate::Double => inf_double(&parsed.shape),
         OutputTemplate::Single => inf_single(&parsed.shape),
-        OutputTemplate::GpuArray => inf_gpu(&parsed.shape).await,
+        OutputTemplate::GpuArray(dtype) => inf_gpu(&parsed.shape, dtype).await,
         OutputTemplate::Like(proto) => inf_like(&proto, &parsed.shape).await,
     }
 }
 
 fn inf_double(shape: &[usize]) -> crate::BuiltinResult<Value> {
-    if !force_host_allocation(shape) {
-        if let Some(value) = inf_gpu_alloc(shape, NumericDType::F64)? {
-            return Ok(value);
-        }
-    }
     inf_tensor(shape, NumericDType::F64).map(tensor::tensor_into_value)
 }
 
 fn inf_single(shape: &[usize]) -> crate::BuiltinResult<Value> {
-    if !force_host_allocation(shape) {
-        if let Some(value) = inf_gpu_alloc(shape, NumericDType::F32)? {
-            return Ok(value);
-        }
-    }
     inf_tensor(shape, NumericDType::F32).map(tensor::tensor_into_value)
 }
 
-fn force_host_allocation(shape: &[usize]) -> bool {
-    tensor::element_count(shape) <= 1
-}
-
-async fn inf_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
+async fn inf_gpu(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let precision = provider.precision();
+        let precision = match dtype {
+            NumericDType::F32 => ProviderPrecision::F32,
+            NumericDType::F64 => ProviderPrecision::F64,
+            _ => unreachable!("inf GPU output is floating"),
+        };
+        if provider.precision() != precision {
+            return Err(builtin_error(
+                "inf: active provider cannot preserve requested gpuArray precision",
+            ));
+        }
         match provider.fill(shape, f64::INFINITY) {
             Ok(handle) => {
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
-                return Ok(Value::GpuTensor(handle));
+                if let Ok(handle) = validate_constructor_gpu_output(
+                    "inf",
+                    provider,
+                    handle,
+                    shape,
+                    GpuTensorStorage::Real,
+                    Some(precision),
+                    None,
+                    false,
+                ) {
+                    return Ok(Value::GpuTensor(handle));
+                }
             }
             Err(err) => {
                 log::debug!("inf_gpu: provider.fill failed ({err}); falling back to host upload");
@@ -462,17 +530,30 @@ async fn inf_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
         }
         let host = inf_tensor(shape, dtype_from_precision(precision))?;
         if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
+            if let Ok(gpu) = validate_constructor_gpu_output(
+                "inf",
+                provider,
+                gpu,
+                shape,
+                GpuTensorStorage::Real,
+                Some(precision),
+                None,
+                false,
+            ) {
+                return Ok(Value::GpuTensor(gpu));
+            }
         }
     }
-    inf_double(shape)
+    Err(builtin_error(
+        "inf: gpuArray output requires an active provider",
+    ))
 }
 
 #[async_recursion::async_recursion(?Send)]
 async fn inf_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
-        Value::ComplexTensor(_) | Value::Complex(_, _) => inf_complex(shape),
+        Value::ComplexTensor(tensor) => inf_complex(shape, tensor.numeric_dtype()),
+        Value::Complex(_, _) => inf_complex(shape, NumericDType::F64),
         Value::GpuTensor(handle) => inf_like_gpu(handle, shape).await,
         Value::Tensor(t) => match t.numeric_dtype() {
             NumericDType::F32 => inf_single(shape),
@@ -490,24 +571,53 @@ async fn inf_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value>
             Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE))
         }
         Value::SparseTensor(sparse) => match sparse.numeric_dtype() {
-            Some(NumericDType::F32) => inf_single(shape),
-            Some(NumericDType::F64) | None => inf_double(shape),
+            Some(NumericDType::F32) => inf_sparse(shape, NumericDType::F32),
+            Some(NumericDType::F64) => inf_sparse(shape, NumericDType::F64),
+            None => Err(builtin_error(
+                "inf: 'like' prototype must be single or double",
+            )),
             Some(_) => unreachable!("integer sparse prototypes are rejected above"),
         },
         Value::Int(_) => Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE)),
-        Value::Num(_) | Value::Bool(_) => inf_double(shape),
-        Value::LogicalArray(_) => inf_double(shape),
-        Value::CharArray(_) | Value::Cell(_) => inf_double(shape),
-        _ => inf_double(shape),
+        Value::Num(_) => inf_double(shape),
+        _ => Err(builtin_error(
+            "inf: 'like' prototype must be single or double",
+        )),
     }
 }
 
-fn inf_complex(shape: &[usize]) -> crate::BuiltinResult<Value> {
+fn inf_complex(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Value> {
     let len = tensor::element_count(shape);
     let data = vec![(f64::INFINITY, 0.0); len];
-    ComplexTensor::new(data, shape.to_vec())
+    ComplexTensor::from_f64_values_with_dtype(data, shape.to_vec(), dtype)
         .map(complex_tensor_into_value)
         .map_err(|e| builtin_error(format!("inf: {e}")))
+}
+
+fn inf_sparse(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Value> {
+    if shape.len() > 2 {
+        return Err(builtin_error(
+            "inf: sparse 'like' output must be two-dimensional",
+        ));
+    }
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
+    let len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| builtin_error("inf: sparse output size overflow"))?;
+    let col_ptrs = (0..=cols).map(|column| column * rows).collect();
+    let row_indices = (0..cols).flat_map(|_| 0..rows).collect();
+    let sparse = match dtype {
+        NumericDType::F32 => {
+            SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, vec![f32::INFINITY; len])
+        }
+        NumericDType::F64 => {
+            SparseTensor::new(rows, cols, col_ptrs, row_indices, vec![f64::INFINITY; len])
+        }
+        _ => unreachable!("inf sparse output is floating"),
+    }
+    .map_err(|error| builtin_error(format!("inf: {error}")))?;
+    Ok(Value::SparseTensor(sparse))
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -515,23 +625,40 @@ async fn inf_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Built
     if runmat_accelerate_api::handle_integer_type(handle).is_some() {
         return Err(inf_error(&INF_ERROR_INTEGER_LIKE_PROTOTYPE));
     }
-    if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
-    {
+    if runmat_accelerate_api::handle_is_logical(handle) {
+        return Err(builtin_error(
+            "inf: 'like' prototype must be single or double",
+        ));
+    }
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
         let precision =
             runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
         let storage = runmat_accelerate_api::handle_storage(handle);
-        if handle.shape != shape && storage == GpuTensorStorage::ComplexInterleaved {
+        if storage == GpuTensorStorage::ComplexInterleaved {
             let len = tensor::element_count(shape);
-            let tensor = ComplexTensor::new(vec![(f64::INFINITY, 0.0); len], shape.to_vec())
-                .map_err(|e| builtin_error(format!("inf: {e}")))?;
-            match gpu_helpers::upload_complex_tensor(provider, &tensor) {
-                Ok(gpu) => {
-                    runmat_accelerate_api::set_handle_precision(&gpu, precision);
+            let tensor = ComplexTensor::from_f64_values_with_dtype(
+                vec![(f64::INFINITY, 0.0); len],
+                shape.to_vec(),
+                dtype_from_precision(precision),
+            )
+            .map_err(|e| builtin_error(format!("inf: {e}")))?;
+            if let Ok(gpu) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
+                if let Ok(gpu) = validate_constructor_gpu_output(
+                    "inf",
+                    provider,
+                    gpu,
+                    shape,
+                    GpuTensorStorage::ComplexInterleaved,
+                    Some(precision),
+                    None,
+                    false,
+                ) {
                     return Ok(Value::GpuTensor(gpu));
                 }
-                Err(_) => return Ok(complex_tensor_into_value(tensor)),
             }
+            return Err(builtin_error(
+                "inf: provider cannot preserve explicit complex gpuArray output",
+            ));
         }
         let attempt = if handle.shape == shape {
             provider.fill_like(handle, f64::INFINITY)
@@ -539,52 +666,40 @@ async fn inf_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Built
             provider.fill(shape, f64::INFINITY)
         };
         if let Ok(gpu) = attempt {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
+            if let Ok(gpu) = validate_constructor_gpu_output(
+                "inf",
+                provider,
+                gpu,
+                shape,
+                GpuTensorStorage::Real,
+                Some(precision),
+                None,
+                false,
+            ) {
+                return Ok(Value::GpuTensor(gpu));
+            }
         }
 
         let host = inf_tensor(shape, dtype_from_precision(precision))?;
         if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
-            runmat_accelerate_api::set_handle_precision(&gpu, precision);
-            return Ok(Value::GpuTensor(gpu));
+            if let Ok(gpu) = validate_constructor_gpu_output(
+                "inf",
+                provider,
+                gpu,
+                shape,
+                GpuTensorStorage::Real,
+                Some(precision),
+                None,
+                false,
+            ) {
+                return Ok(Value::GpuTensor(gpu));
+            }
         }
     }
 
-    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
-        .await
-        .map_err(|e| builtin_error(format!("inf: {e}")))?;
-    inf_like(&gathered, shape).await
-}
-
-fn inf_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Option<Value>> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(None);
-    };
-    let precision = match dtype {
-        NumericDType::F32 => ProviderPrecision::F32,
-        NumericDType::F64 => ProviderPrecision::F64,
-        NumericDType::I8
-        | NumericDType::I16
-        | NumericDType::I32
-        | NumericDType::I64
-        | NumericDType::U8
-        | NumericDType::U16
-        | NumericDType::U32
-        | NumericDType::U64 => return Ok(None),
-    };
-    if provider.precision() != precision {
-        return Ok(None);
-    }
-    match provider.fill(shape, f64::INFINITY) {
-        Ok(handle) => {
-            runmat_accelerate_api::set_handle_precision(&handle, precision);
-            Ok(Some(Value::GpuTensor(handle)))
-        }
-        Err(err) => {
-            log::warn!("inf: provider fill failed ({err}); falling back to host tensor path");
-            Ok(None)
-        }
-    }
+    Err(builtin_error(
+        "inf: provider cannot preserve explicit gpuArray output",
+    ))
 }
 
 fn inf_tensor(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult<Tensor> {
@@ -612,44 +727,6 @@ fn keyword_of(value: &Value) -> Option<String> {
             Some(text.to_ascii_lowercase())
         }
         _ => None,
-    }
-}
-
-async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
-    if matches!(value, Value::LogicalArray(_)) {
-        return Ok(None);
-    }
-    let gpu_scalar = match value {
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
-        _ => false,
-    };
-    match tensor::dims_from_value_async(value).await {
-        Ok(dims) => Ok(dims),
-        Err(err) => {
-            if matches!(value, Value::Tensor(_))
-                || (matches!(value, Value::GpuTensor(_)) && !gpu_scalar)
-            {
-                Ok(None)
-            } else {
-                Err(builtin_error(format!("inf: {err}")))
-            }
-        }
-    }
-}
-
-fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
-    match value {
-        Value::Tensor(t) => Ok(t.shape.clone()),
-        Value::SparseTensor(SparseTensor { rows, cols, .. }) => Ok(vec![*rows, *cols]),
-        Value::ComplexTensor(t) => Ok(t.shape.clone()),
-        Value::LogicalArray(l) => Ok(l.shape.clone()),
-        Value::GpuTensor(h) => Ok(normalize_scalar_shape(&h.shape)),
-        Value::CharArray(ca) => Ok(ca.shape.clone()),
-        Value::Cell(cell) => Ok(cell.shape.clone()),
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
-        other => Err(builtin_error(format!(
-            "inf: unsupported prototype {other:?}"
-        ))),
     }
 }
 
@@ -727,6 +804,42 @@ pub(crate) mod tests {
         assert_all_pos_inf(&tensor);
     }
 
+    #[test]
+    fn inf_integer_dimensions_clamp_negative_and_normalize_trailing_singletons() {
+        let _guard = clear_accel_provider_state();
+        let result = block_on(inf_builtin(vec![
+            Value::Int(runmat_builtins::IntValue::I16(-2)),
+            Value::Int(runmat_builtins::IntValue::U8(3)),
+            Value::Int(runmat_builtins::IntValue::U64(1)),
+        ]))
+        .expect("inf integer dimensions");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected empty host tensor");
+        };
+        assert_eq!(tensor.shape, vec![0, 3]);
+    }
+
+    #[test]
+    fn inf_without_explicit_gpu_intent_remains_host_resident() {
+        test_support::with_test_provider(|_| {
+            let result = block_on(inf_builtin(vec![Value::Num(2.0)])).expect("inf");
+            assert!(matches!(result, Value::Tensor(tensor) if tensor.shape == vec![2, 2]));
+        });
+    }
+
+    #[test]
+    fn inf_column_size_vector_follows_compatibility_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let size =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2, 3]), vec![2, 1])
+                .expect("column size vector");
+        let error = block_on(inf_builtin(vec![Value::Tensor(size)])).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:InfColumnSizeVectorExtension")
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inf_single_output_marks_dtype() {
@@ -745,13 +858,10 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn inf_like_tensor_infers_shape() {
+    fn inf_implicit_prototype_is_rejected() {
         let _guard = clear_accel_provider_state();
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let result = block_on(inf_builtin(vec![Value::Tensor(proto)])).expect("inf");
-        let tensor = test_support::gather(result).expect("gather tensor");
-        assert_eq!(tensor.shape, vec![2, 2]);
-        assert_all_pos_inf(&tensor);
+        assert!(block_on(inf_builtin(vec![Value::Tensor(proto)])).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -776,11 +886,28 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn inf_like_complex_single_preserves_native_single() {
+        let prototype =
+            ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).expect("complex single");
+        let result = block_on(inf_builtin(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+            Value::ComplexTensor(prototype),
+        ]))
+        .expect("inf complex single like");
+        let Value::ComplexTensor(output) = result else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inf_like_uses_shape_argument_when_combined_with_like() {
         let _guard = clear_accel_provider_state();
-        let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+        let shape_source = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
         let proto = Tensor::new_with_dtype(vec![7.0, 8.0], vec![1, 2], NumericDType::F32).unwrap();
         let result = block_on(inf_builtin(vec![
             Value::Tensor(shape_source),
@@ -796,19 +923,19 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn inf_like_without_explicit_shape_uses_prototype_shape() {
+    fn inf_like_without_explicit_shape_returns_scalar() {
         let _guard = clear_accel_provider_state();
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let result =
             block_on(inf_builtin(vec![Value::from("like"), Value::Tensor(proto)])).expect("inf");
-        let tensor = test_support::gather(result).expect("gather tensor");
-        assert_eq!(tensor.shape, vec![2, 2]);
-        assert_all_pos_inf(&tensor);
+        assert!(
+            matches!(result, Value::Num(value) if value.is_infinite() && value.is_sign_positive())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn inf_like_single_sparse_returns_dense_single() {
+    fn inf_like_single_sparse_preserves_sparse_single() {
         let prototype = SparseTensor::zeros_f32(1, 1);
         let result = block_on(inf_builtin(vec![
             Value::Num(2.0),
@@ -816,10 +943,10 @@ pub(crate) mod tests {
             Value::SparseTensor(prototype),
         ]))
         .expect("inf single sparse like");
-        let Value::Tensor(output) = result else {
-            panic!("expected dense tensor");
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse tensor");
         };
-        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
         assert!(output
             .as_f32_slice()
             .expect("single storage")
@@ -922,6 +1049,34 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn inf_same_shape_complex_gpu_like_stays_complex_and_resident() {
+        test_support::with_f32_test_provider(|provider| {
+            let prototype = ComplexTensor::from_f32(vec![(1.0, -1.0); 4], vec![2, 2])
+                .expect("complex single prototype");
+            let handle = gpu_helpers::upload_complex_tensor(provider, &prototype).expect("upload");
+            let result = block_on(inf_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(handle),
+            ]))
+            .expect("inf complex gpu like");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected resident output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&output),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            );
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
         });
     }
 }

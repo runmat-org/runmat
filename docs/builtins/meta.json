@@ -62076,6 +62076,43 @@
           "when": "Internal output container construction failed.",
           "message": "gather: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "gather-recursive-container",
+          "mode": "RunMatOnly",
+          "description": "recursively gathering gpuArray values nested in containers is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GatherRecursiveContainerExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[X1, X2, ...] = gather(integer_A1, integer_A2, ...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Host integer inputs pass through unchanged; integer gpuArray inputs download exact native storage without changing class or shape."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Each result preserves its corresponding input's exact integer class and shape. Explicit gather creates a host copy and leaves the source gpuArray valid and resident."
+        }
       ]
     },
     {
@@ -64352,6 +64389,18 @@
           "message": "gpuArray: unsupported input type"
         },
         {
+          "code": "RM.GPUARRAY.TYPED_COMPLEX_INTEGER",
+          "identifier": "RunMat:gpuArray:TypedComplexIntegerUnsupported",
+          "when": "A typed complex integer array is uploaded without a matching provider storage format.",
+          "message": "gpuArray: typed complex integer arrays are not supported by the active acceleration provider"
+        },
+        {
+          "code": "RM.GPUARRAY.TYPED_INTEGER",
+          "identifier": "RunMat:gpuArray:TypedIntegerUnsupported",
+          "when": "A native integer value or integer GPU class is requested without matching provider storage.",
+          "message": "gpuArray: native integer storage is not supported by the active acceleration provider"
+        },
+        {
           "code": "RM.GPUARRAY.CONVERSION",
           "identifier": "RunMat:gpuArray:ConversionFailed",
           "when": "Requested dtype conversion cannot be performed (for example NaN->logical).",
@@ -64394,6 +64443,68 @@
           "mode": "RunMatOnly",
           "description": "the gpuArray \"like\" prototype selector is a RunMat extension",
           "error_identifier": "RunMat:compatibility:GpuArrayLikeExtension"
+        },
+        {
+          "id": "gpuarray-text-upload",
+          "mode": "RunMatOnly",
+          "description": "uploading character vectors or string scalars with gpuArray is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GpuArrayTextUploadExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "G = gpuArray(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes upload as exact same-class gpuArray storage with the original shape."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The transfer preserves exact values, class, and shape. An existing gpuArray input is returned unchanged and remains valid."
+        },
+        {
+          "form": "G = gpuArray(X, integer_dtype)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat-only dtype selectors may explicitly convert X to any supported integer gpuArray class."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "RunMat-only conversion uses the requested native integer class and never consumes or invalidates a gpuArray input."
         }
       ]
     },
@@ -64473,6 +64584,76 @@
           "identifier": "RunMat:gpuDevice:DeviceNotAvailable",
           "when": "Requested device index does not match the currently active provider index.",
           "message": "gpuDevice: requested device index is not available"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "gpudevice-provider-info",
+          "mode": "RunMatOnly",
+          "description": "gpuDevice returning RunMat acceleration-provider metadata instead of a MATLAB GPUDevice object is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GpuDeviceProviderInfoExtension"
+        },
+        {
+          "id": "gpudevice-logical-selector",
+          "mode": "RunMatOnly",
+          "description": "using a logical scalar as a gpuDevice index is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GpuDeviceLogicalSelectorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "D = gpuDevice(integer_ind)",
+          "inputs": [
+            {
+              "name": "ind",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented selector is a positive scalar integer in the available device-index range, but RunMat does not yet implement the required GPUDevice object and reset lifecycle."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "[integer-audit-open] MATLAB selection returns a GPUDevice object and resets the selected device even when already current; RunMat does not yet implement that object/lifecycle surface."
+        },
+        {
+          "form": "info = gpuDevice(integer_ind)",
+          "inputs": [
+            {
+              "name": "ind",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "RunMat's provider-info facade accepts an exact positive integer scalar selecting its currently active provider."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The compatibility-gated RunMat facade returns provider metadata rather than a MATLAB GPUDevice object."
         }
       ]
     },
@@ -74703,27 +74884,6 @@
           ]
         },
         {
-          "label": "A = inf(prototype)",
-          "inputs": [
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype value when no numeric dimension arguments are provided."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Inf-filled output array."
-            }
-          ]
-        },
-        {
           "label": "A = inf(..., typename)",
           "inputs": [
             {
@@ -74811,6 +74971,82 @@
           "identifier": null,
           "when": "The 'like' keyword is specified more than once.",
           "message": "inf: multiple 'like' specifications are not supported"
+        },
+        {
+          "code": "RM.INF.INTEGER_LIKE_PROTOTYPE",
+          "identifier": null,
+          "when": "The 'like' prototype has an integer data type that cannot represent Inf.",
+          "message": "inf: integer 'like' prototypes are not supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "inf-column-size-vector",
+          "mode": "RunMatOnly",
+          "description": "inf with a column size vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:InfColumnSizeVectorExtension"
+        },
+        {
+          "id": "inf-resident-size-control",
+          "mode": "RunMatOnly",
+          "description": "inf with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:InfResidentSizeControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = inf(integer_n[, integer_sz2, ...])",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default output is host double; typename can select single and explicit gpuArray syntax selects residency."
+        },
+        {
+          "form": "X = inf(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The documented size vector is a row vector of exact integer values."
         }
       ]
     },
@@ -78286,7 +78522,36 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [],
+      "integer_capabilities": [
+        {
+          "form": "tf = isgpuarray(integer_gpuArray)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An explicitly constructed gpuArray may contain any of the eight integer classes; the predicate inspects residency intent without downloading its payload."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ScalarOnly",
+          "notes": "The metadata query returns true for explicit integer gpuArray values and false for host integers or RunMat-internal automatic residency; it performs no gather or numeric conversion."
+        }
+      ]
     },
     {
       "name": "isgraphics",
@@ -97996,27 +98261,6 @@
           ]
         },
         {
-          "label": "A = nan(prototype)",
-          "inputs": [
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype value when no numeric dimension arguments are provided."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "NaN-filled output array."
-            }
-          ]
-        },
-        {
           "label": "A = nan(..., typename)",
           "inputs": [
             {
@@ -98104,6 +98348,82 @@
           "identifier": null,
           "when": "The 'like' keyword is specified more than once.",
           "message": "nan: multiple 'like' specifications are not supported"
+        },
+        {
+          "code": "RM.NAN.INTEGER_LIKE_PROTOTYPE",
+          "identifier": null,
+          "when": "The 'like' prototype has an integer data type that cannot represent NaN.",
+          "message": "nan: integer 'like' prototypes are not supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "nan-column-size-vector",
+          "mode": "RunMatOnly",
+          "description": "nan with a column size vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NanColumnSizeVectorExtension"
+        },
+        {
+          "id": "nan-resident-size-control",
+          "mode": "RunMatOnly",
+          "description": "nan with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:NanResidentSizeControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = nan(integer_n[, integer_sz2, ...])",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default output is host double; typename can select single and explicit gpuArray syntax selects residency."
+        },
+        {
+          "form": "X = nan(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The documented size vector is a row vector of exact integer values."
         }
       ]
     },
@@ -102771,27 +103091,6 @@
           ]
         },
         {
-          "label": "A = ones(prototype)",
-          "inputs": [
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype value when no numeric dimension arguments are provided."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Output array."
-            }
-          ]
-        },
-        {
           "label": "A = ones(..., typename)",
           "inputs": [
             {
@@ -102879,6 +103178,113 @@
           "identifier": null,
           "when": "The 'like' keyword is specified more than once.",
           "message": "ones: multiple 'like' specifications are not supported"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ones-column-size-vector",
+          "mode": "RunMatOnly",
+          "description": "ones with a column size vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OnesColumnSizeVectorExtension"
+        },
+        {
+          "id": "ones-resident-size-control",
+          "mode": "RunMatOnly",
+          "description": "ones with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:OnesResidentSizeControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = ones(integer_n[, integer_sz2, ...])",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default output is double; typename or like can select logical, single, or an exact integer class."
+        },
+        {
+          "form": "X = ones(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The documented size vector is a row vector of exact integer values."
+        },
+        {
+          "form": "X = ones(..., integer_typename)",
+          "inputs": [],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Every integer typename creates exact native one storage in the selected class, including explicit gpuArray construction."
+        },
+        {
+          "form": "X = ones(..., like=integer_p)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "An integer prototype selects exact output class, sparsity, complexity, and applicable residency; without dimensions the output is scalar."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Integer prototypes preserve exact class; resident prototypes use typed owning-provider upload when available."
         }
       ]
     },
@@ -113396,27 +113802,6 @@
           ]
         },
         {
-          "label": "A = rand(prototype)",
-          "inputs": [
-            {
-              "name": "prototype",
-              "ty": "LikePrototype",
-              "arity": "Required",
-              "default": null,
-              "description": "Prototype value when no numeric dimension arguments are provided."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "A",
-              "ty": "NumericArray",
-              "arity": "Required",
-              "default": null,
-              "description": "Uniform random array in (0,1)."
-            }
-          ]
-        },
-        {
           "label": "A = rand(..., typename)",
           "inputs": [
             {
@@ -113478,6 +113863,47 @@
               "description": "Uniform random array in (0,1)."
             }
           ]
+        },
+        {
+          "label": "seed = rand(\"seed\")",
+          "inputs": [
+            {
+              "name": "seed_option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"seed\"",
+              "description": "Legacy seed query option."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "seed",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy restorable RNG state token."
+            }
+          ]
+        },
+        {
+          "label": "rand(\"seed\", seed)",
+          "inputs": [
+            {
+              "name": "seed_option",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": "\"seed\"",
+              "description": "Legacy seed control option."
+            },
+            {
+              "name": "seed",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Non-negative integer seed."
+            }
+          ],
+          "outputs": []
         }
       ],
       "errors": [
@@ -113504,6 +113930,103 @@
           "identifier": null,
           "when": "Dimension arguments fail numeric/shape parsing.",
           "message": "rand: dimension arguments must be numeric and nonnegative"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rand-column-size-vector",
+          "mode": "RunMatOnly",
+          "description": "rand with a column size vector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandColumnSizeVectorExtension"
+        },
+        {
+          "id": "rand-resident-size-control",
+          "mode": "RunMatOnly",
+          "description": "rand with a resident size control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:RandResidentSizeControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "X = rand(integer_n[, integer_sz2, ...])",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default output is host double; typename can select single and explicit gpuArray syntax selects residency."
+        },
+        {
+          "form": "X = rand(integer_sz)",
+          "inputs": [
+            {
+              "name": "n/sz1...szN/sz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The documented size vector is a row vector of exact integer values."
+        },
+        {
+          "form": "rand('seed', integer_seed)",
+          "inputs": [
+            {
+              "name": "seed",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The discouraged legacy seed syntax accepts a nonnegative exact integer scalar within the runtime's restorable seed-token domain."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "[integer-audit-open] This legacy control form updates the shared RunMat random stream and synchronizes the active provider when supported, but exact MATLAB stream/state equivalence is not yet established."
         }
       ]
     },

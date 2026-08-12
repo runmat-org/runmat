@@ -20,7 +20,7 @@ pub fn gather_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.len() {
         0 => Type::Unknown,
         1 => args[0].clone(),
-        _ => Type::cell(),
+        _ => Type::OutputList(args.to_vec()),
     }
 }
 

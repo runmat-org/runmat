@@ -5,9 +5,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::{build_runtime_error, make_cell, RuntimeError};
+use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -25,7 +29,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Downloads gpuArray handles via the provider's `download` hook and clears residency metadata; host inputs pass through unchanged.",
+    notes: "Downloads gpuArray handles via the provider's `download` hook without mutating the source handle; host inputs pass through unchanged.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]
@@ -36,10 +40,40 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Acts as a residency sink for fusion planning; always materialises host data and clears gpuArray residency tracking.",
+    notes: "Acts as a fusion output sink and materialises a host copy without clearing source gpuArray residency.",
 };
 
 const BUILTIN_NAME: &str = "gather";
+
+const GATHER_CONTAINER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gather-recursive-container",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "recursively gathering gpuArray values nested in containers is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GatherRecursiveContainerExtension"),
+};
+
+pub const GATHER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GATHER_CONTAINER_EXTENSION];
+
+const GATHER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Host integer inputs pass through unchanged; integer gpuArray inputs download exact native storage without changing class or shape.",
+    }];
+
+pub const GATHER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[X1, X2, ...] = gather(integer_A1, integer_A2, ...)",
+        inputs: &GATHER_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each result preserves its corresponding input's exact integer class and shape. Explicit gather creates a host copy and leaves the source gpuArray valid and resident.",
+    }];
 
 const GATHER_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
@@ -160,6 +194,8 @@ fn gather_error_with_message(
     accel = "sink",
     type_resolver(gather_type),
     descriptor(crate::builtins::acceleration::gpu::gather::GATHER_DESCRIPTOR),
+    extensions(crate::builtins::acceleration::gpu::gather::GATHER_EXTENSIONS),
+    integer_capabilities(crate::builtins::acceleration::gpu::gather::GATHER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
 async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -183,10 +219,7 @@ async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if len == 1 {
         Ok(eval.into_first())
     } else {
-        let outputs = eval.into_outputs();
-        make_cell(outputs, 1, len).map_err(|err| {
-            gather_error_with_message(format!("gather: {err}"), &GATHER_ERROR_INTERNAL).into()
-        })
+        Ok(Value::OutputList(eval.into_outputs()))
     }
 }
 
@@ -242,6 +275,12 @@ pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<GatherResult> {
 }
 
 async fn gather_argument(value: &Value) -> crate::BuiltinResult<Value> {
+    if !matches!(value, Value::GpuTensor(_)) && crate::dispatcher::value_contains_gpu(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GATHER_CONTAINER_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     crate::dispatcher::gather_if_needed_async(value).await
 }
 
@@ -271,7 +310,9 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = block_on(gather_builtin(vec![Value::GpuTensor(handle)])).expect("gather");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            let result =
+                block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())])).expect("gather");
             match result {
                 Value::Tensor(host) => {
                     assert_eq!(host.shape, tensor.shape);
@@ -279,6 +320,10 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected tensor result, got {other:?}"),
             }
+            assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+            block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())]))
+                .expect("source handle remains gatherable");
+            provider.free(&handle).ok();
         });
     }
 
@@ -308,6 +353,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_recurses_into_cells() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
@@ -337,6 +383,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_recurses_into_structs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.5, -1.25], vec![2, 1]).unwrap();
             let view = HostTensorView {
@@ -366,16 +413,36 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gather_returns_cell_for_multiple_inputs() {
+    fn gather_returns_output_list_for_multiple_inputs() {
         let result = block_on(gather_builtin(vec![Value::Num(1.0), Value::from("two")]))
-            .expect("gather cell");
-        let Value::Cell(cell) = result else {
-            panic!("expected cell for multiple inputs");
+            .expect("gather outputs");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list for multiple inputs");
         };
-        assert_eq!(cell.rows, 1);
-        assert_eq!(cell.cols, 2);
-        assert_eq!(cell.get(0, 0).unwrap(), Value::Num(1.0));
-        assert_eq!(cell.get(0, 1).unwrap(), Value::from("two"));
+        assert_eq!(outputs, vec![Value::Num(1.0), Value::from("two")]);
+    }
+
+    #[test]
+    fn gather_recursive_container_form_is_gated() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let values = tensor.materialize_f64();
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &tensor.shape,
+                })
+                .expect("upload");
+            let cell = CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(gather_builtin(vec![Value::Cell(cell)]))
+                .expect_err("recursive gather is an extension");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:GatherRecursiveContainerExtension")
+            );
+            provider.free(&handle).ok();
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -402,10 +469,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn gather_type_resolves_multiple_outputs_to_cell() {
+    fn gather_type_resolves_corresponding_multiple_outputs() {
         assert_eq!(
             gather_type(&[Type::Num, Type::String], &ResolveContext::new(Vec::new())),
-            Type::cell()
+            Type::OutputList(vec![Type::Num, Type::String])
         );
     }
 

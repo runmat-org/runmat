@@ -135,7 +135,12 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
         &self,
         host: &runmat_accelerate_api::HostTensorView,
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-        self.inner.upload(host)
+        let handle = self.inner.upload(host)?;
+        runmat_accelerate_api::set_handle_precision(
+            &handle,
+            runmat_accelerate_api::ProviderPrecision::F32,
+        );
+        Ok(handle)
     }
 
     fn download<'a>(

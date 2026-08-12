@@ -849,6 +849,7 @@ impl NativeAutoOffload {
                     shape: &tensor.shape,
                 })
                 .map_err(|e| anyhow!(e.to_string()))?;
+            runmat_accelerate_api::mark_handle_automatic(&handle);
             return Ok(Value::GpuTensor(handle));
         }
         let data = tensor.materialize_f64();
@@ -860,6 +861,7 @@ impl NativeAutoOffload {
             .provider
             .upload(&view)
             .map_err(|e| anyhow!(e.to_string()))?;
+        runmat_accelerate_api::mark_handle_automatic(&handle);
         Ok(Value::GpuTensor(handle))
     }
 
