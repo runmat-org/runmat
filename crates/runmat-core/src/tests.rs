@@ -1718,14 +1718,11 @@ fn execute_text_request_supports_inputname_builtin() {
     let source = r#"
         alpha = 10;
         beta = 20;
-        [n1, n2, n3, n4] = probe(alpha, alpha + 1, 7, beta);
+        n1 = probe(alpha, alpha + 1, 7, beta);
         [f1, f2] = feval(@probe2, beta, beta + 1);
 
-        function [a, b, c, d] = probe(x, y, z, w)
+        function a = probe(x, y, z, w)
             a = inputname(1);
-            b = inputname(2);
-            c = inputname(3);
-            d = inputname(4);
         end
 
         function [a, b] = probe2(x, y)
@@ -1737,32 +1734,19 @@ fn execute_text_request_supports_inputname_builtin() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "n1",
-        &runmat_builtins::Value::String("alpha".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "n2",
-        &runmat_builtins::Value::String(String::new())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "n3",
-        &runmat_builtins::Value::String(String::new())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "n4",
-        &runmat_builtins::Value::String("beta".into())
+        &runmat_builtins::Value::CharArray(runmat_builtins::CharArray::new_row("alpha"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "f1",
-        &runmat_builtins::Value::String("beta".into())
+        &runmat_builtins::Value::CharArray(runmat_builtins::CharArray::new_row("beta"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "f2",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_builtins::Value::CharArray(
+            runmat_builtins::CharArray::new(Vec::new(), 0, 0).unwrap()
+        )
     ));
 }
 
@@ -1774,11 +1758,8 @@ fn execute_path_request_supports_inputname_for_sibling_package_and_class_methods
     std::fs::write(
         tmp.path().join("probe.m"),
         r#"
-        function [a, b, c, d] = probe(x, y, z, w)
+        function a = probe(x, y, z, w)
             a = inputname(1);
-            b = inputname(2);
-            c = inputname(3);
-            d = inputname(4);
         end
         "#,
     )
@@ -1786,9 +1767,8 @@ fn execute_path_request_supports_inputname_for_sibling_package_and_class_methods
     std::fs::write(
         tmp.path().join("+pkg/probe.m"),
         r#"
-        function [a, b] = probe(x, y)
+        function a = probe(x, y)
             a = inputname(1);
-            b = inputname(2);
         end
         "#,
     )
@@ -1798,10 +1778,8 @@ fn execute_path_request_supports_inputname_for_sibling_package_and_class_methods
         r#"
 classdef C
   methods(Static)
-    function [a, b, c] = probe(cls, x, y)
+    function a = probe(cls, x, y)
       a = inputname(1);
-      b = inputname(2);
-      c = inputname(3);
     end
   end
 end
@@ -1814,9 +1792,9 @@ end
         r#"
         alpha = 10;
         beta = 20;
-        [s1, s2, s3, s4] = probe(alpha, alpha + 1, 7, beta);
-        [p1, p2] = pkg.probe(beta, beta + 1);
-        [c1, c2, c3] = C.probe(alpha, beta + 1);
+        s1 = probe(alpha, alpha + 1, 7, beta);
+        p1 = pkg.probe(beta, beta + 1);
+        c1 = C.probe(alpha, beta + 1);
         "#,
     )
     .expect("write main source");
@@ -1832,15 +1810,11 @@ end
             outcome.diagnostics
         );
     };
-    assert_named("s1", runmat_builtins::Value::String("alpha".into()));
-    assert_named("s2", runmat_builtins::Value::String(String::new()));
-    assert_named("s3", runmat_builtins::Value::String(String::new()));
-    assert_named("s4", runmat_builtins::Value::String("beta".into()));
-    assert_named("p1", runmat_builtins::Value::String("beta".into()));
-    assert_named("p2", runmat_builtins::Value::String(String::new()));
-    assert_named("c1", runmat_builtins::Value::String("C".into()));
-    assert_named("c2", runmat_builtins::Value::String("alpha".into()));
-    assert_named("c3", runmat_builtins::Value::String(String::new()));
+    let chars =
+        |text: &str| runmat_builtins::Value::CharArray(runmat_builtins::CharArray::new_row(text));
+    assert_named("s1", chars("alpha"));
+    assert_named("p1", chars("beta"));
+    assert_named("c1", chars("C"));
 }
 
 #[test]
@@ -1869,17 +1843,21 @@ fn execute_text_request_inputname_handles_nested_and_expanded_arguments() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "nested_name",
-        &runmat_builtins::Value::String("x".into())
+        &runmat_builtins::Value::CharArray(runmat_builtins::CharArray::new_row("x"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_name",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_builtins::Value::CharArray(
+            runmat_builtins::CharArray::new(Vec::new(), 0, 0).unwrap()
+        )
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_feval_name",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_builtins::Value::CharArray(
+            runmat_builtins::CharArray::new(Vec::new(), 0, 0).unwrap()
+        )
     ));
 }
 

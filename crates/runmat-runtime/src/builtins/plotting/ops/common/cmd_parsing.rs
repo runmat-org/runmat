@@ -99,27 +99,41 @@ pub fn to_positive_index(value: f64, name: &str) -> BuiltinResult<usize> {
 
 pub fn parse_hold_mode(value: &Value) -> BuiltinResult<crate::builtins::plotting::state::HoldMode> {
     use crate::builtins::plotting::state::HoldMode;
+    if let Some(value) = tensor::scalar_integer_value(value) {
+        return match value.try_to_i64() {
+            Some(0) => Ok(HoldMode::Off),
+            Some(1) => Ok(HoldMode::On),
+            _ => Err(plotting_error(
+                "hold",
+                "hold: numeric state must be exactly 0 or 1",
+            )),
+        };
+    }
     match value {
         Value::CharArray(chars) => {
             let text: String = chars.data.iter().collect();
             parse_hold_mode_str(text.trim())
         }
         Value::String(s) => parse_hold_mode_str(s.trim()),
-        Value::Num(v) => Ok(if *v == 0.0 {
-            HoldMode::Off
-        } else {
-            HoldMode::On
-        }),
+        Value::Num(0.0) => Ok(HoldMode::Off),
+        Value::Num(1.0) => Ok(HoldMode::On),
+        Value::Num(_) => Err(plotting_error(
+            "hold",
+            "hold: numeric state must be exactly 0 or 1",
+        )),
         Value::Bool(b) => Ok(if *b { HoldMode::On } else { HoldMode::Off }),
         Value::Tensor(tensor) => {
             if !tensor::is_scalar_tensor(tensor) {
                 return Err(plotting_error("hold", "hold: logical scalar expected"));
             }
-            Ok(if tensor::tensor_values_f64(tensor)[0] == 0.0 {
-                HoldMode::Off
-            } else {
-                HoldMode::On
-            })
+            match tensor::tensor_value_f64(tensor, 0) {
+                0.0 => Ok(HoldMode::Off),
+                1.0 => Ok(HoldMode::On),
+                _ => Err(plotting_error(
+                    "hold",
+                    "hold: numeric state must be exactly 0 or 1",
+                )),
+            }
         }
         _ => Err(plotting_error("hold", "hold: unsupported argument type")),
     }
@@ -156,6 +170,15 @@ mod tests {
             parse_hold_mode(&hold).expect("hold"),
             crate::builtins::plotting::state::HoldMode::On
         ));
+    }
+
+    #[test]
+    fn hold_parser_rejects_numeric_values_outside_documented_state_domain() {
+        for value in [Value::Num(-1.0), Value::Num(2.0), Value::Num(f64::NAN)] {
+            assert!(parse_hold_mode(&value).is_err());
+        }
+        let typed = Value::Int(IntValue::U64(u64::MAX));
+        assert!(parse_hold_mode(&typed).is_err());
     }
 
     #[test]

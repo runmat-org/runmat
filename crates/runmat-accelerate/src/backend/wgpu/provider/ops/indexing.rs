@@ -412,6 +412,16 @@ impl WgpuProvider {
         {
             return Err(anyhow!("ind2sub: dimensions exceed GPU kernel limits"));
         }
+        let storage_bindings =
+            super::backend_shared::checked_binding_count("ind2sub", dims.len(), 2)?;
+        let total_bindings =
+            super::backend_shared::checked_binding_count("ind2sub", dims.len(), 3)?;
+        super::backend_shared::validate_compute_binding_counts(
+            "ind2sub",
+            storage_bindings,
+            total_bindings,
+            &self.device_ref().limits(),
+        )?;
 
         let entry = self.get_entry(indices)?;
         if entry.len != len {
@@ -550,10 +560,7 @@ impl WgpuProvider {
         if code != 0 {
             let err = match code {
                 1..=3 => anyhow!("Linear indices must be positive integers."),
-                4 => anyhow!(
-                    "Index exceeds number of array elements. Index must not exceed {}.",
-                    total
-                ),
+                4 => anyhow!("Linear index exceeds GPU kernel limits."),
                 _ => anyhow!("ind2sub: kernel reported error code {}", code),
             };
             return Err(err);

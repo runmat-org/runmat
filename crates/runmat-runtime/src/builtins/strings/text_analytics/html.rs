@@ -30,6 +30,23 @@ const EXTRACT_HTML_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExt
         "extractHTMLText with string-valued or mixed htmlTree/text cells is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:ExtractHTMLTextBroadCellExtension"),
 };
+const HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "htmltree-cell-object-array",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "htmlTree nonscalar input currently returns a shape-preserving cell array of scalar htmlTree objects because RunMat does not yet have a native object-array container",
+        error_identifier: Some("RunMat:compatibility:HtmlTreeCellObjectArrayExtension"),
+    };
+const HTML_TREE_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "htmltree-broad-cell-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "htmlTree accepts string-valued cells only as a RunMat extension; the public cell form is a cell array of character vectors",
+    error_identifier: Some("RunMat:compatibility:HtmlTreeBroadCellExtension"),
+};
+const HTML_TREE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION,
+    HTML_TREE_BROAD_CELL_EXTENSION,
+];
 const EXTRACT_HTML_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
     EXTRACT_HTML_CHAR_MATRIX_EXTENSION,
     EXTRACT_HTML_BROAD_CELL_EXTENSION,
@@ -52,6 +69,11 @@ pub const GET_ATTRIBUTE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "htmlTree.getAttribute accepts host htmlTree objects and a host text attribute name only. All eight integer classes and provider-resident numeric values reject without implicit conversion, gather, or provider access.",
     };
+pub const HTML_TREE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "htmlTree accepts host string arrays, character vectors, and cell arrays of character vectors. All eight integer classes, logical and complex values, and resident numeric handles reject before parsing, conversion, gather, or provider access.",
+};
 
 const OUT_TREE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tree",
@@ -224,6 +246,8 @@ fn html_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError 
     summary = "Parse HTML code into a lightweight htmlTree object.",
     keywords = "htmlTree,HTML,text analytics,DOM",
     accel = "metadata",
+    extensions(HTML_TREE_EXTENSIONS),
+    integer_audit(crate::builtins::strings::text_analytics::html::HTML_TREE_INTEGER_AUDIT),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::html::HTML_TREE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::html"
@@ -235,6 +259,7 @@ async fn html_tree_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "htmlTree: expected exactly one input",
         ));
     }
+    preflight_html_tree_input(&args[0])?;
     let value = gather_if_needed_async(&args[0]).await.map_err(|err| {
         html_error(
             "htmlTree",
@@ -242,6 +267,40 @@ async fn html_tree_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )
     })?;
     html_tree_value(value)
+}
+
+fn preflight_html_tree_input(value: &Value) -> BuiltinResult<()> {
+    if numeric_or_resident(value) || contains_numeric_or_resident(value) {
+        return Err(html_error(
+            "htmlTree",
+            "htmlTree: expected a string array, character vector, or cell array of character vectors",
+        ));
+    }
+    if let Value::Cell(cell) = value {
+        if cell
+            .data
+            .iter()
+            .any(|value| !matches!(value, Value::CharArray(array) if array.rows <= 1))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &HTML_TREE_BROAD_CELL_EXTENSION,
+                "htmlTree",
+            )?;
+        }
+    }
+    let nonscalar = match value {
+        Value::StringArray(array) => array.data.len() != 1,
+        Value::CharArray(array) => array.rows > 1,
+        Value::Cell(cell) => cell.data.len() != 1,
+        _ => false,
+    };
+    if nonscalar {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION,
+            "htmlTree",
+        )?;
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -2196,6 +2255,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn html_tree_preserves_array_shape_as_cell_of_objects() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = StringArray::new(
             vec!["<p>one</p>".to_string(), "<p>two</p>".to_string()],
             vec![1, 2],
@@ -2210,6 +2270,50 @@ mod tests {
         assert!(cell.data.iter().all(
             |value| matches!(value, Value::Object(object) if object.is_class(HTML_TREE_CLASS))
         ));
+    }
+
+    #[test]
+    fn html_tree_rejects_numeric_and_resident_inputs_before_gather() {
+        let numeric = futures::executor::block_on(html_tree_builtin(vec![Value::Num(1.0)]))
+            .expect_err("numeric input must reject");
+        assert_eq!(numeric.identifier(), Some("RunMat:html:InvalidInput"));
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_001,
+        });
+        let resident = futures::executor::block_on(html_tree_builtin(vec![resident]))
+            .expect_err("resident input must reject before provider access");
+        assert_eq!(resident.identifier(), Some("RunMat:html:InvalidInput"));
+        assert_eq!(
+            HTML_TREE_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+    }
+
+    #[test]
+    fn html_tree_truthfully_gates_runmat_cell_container_and_broad_cell_forms() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = StringArray::new(
+            vec!["<p>one</p>".to_string(), "<p>two</p>".to_string()],
+            vec![1, 2],
+        )
+        .unwrap();
+        let array = futures::executor::block_on(html_tree_builtin(vec![Value::StringArray(input)]))
+            .expect_err("cell object-array representation is gated");
+        assert_eq!(
+            array.identifier(),
+            Some("RunMat:compatibility:HtmlTreeCellObjectArrayExtension")
+        );
+
+        let broad = Value::Cell(CellArray::new(vec![Value::from("<p>x</p>")], 1, 1).unwrap());
+        let broad = futures::executor::block_on(html_tree_builtin(vec![broad]))
+            .expect_err("string-valued cell is gated");
+        assert_eq!(
+            broad.identifier(),
+            Some("RunMat:compatibility:HtmlTreeBroadCellExtension")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

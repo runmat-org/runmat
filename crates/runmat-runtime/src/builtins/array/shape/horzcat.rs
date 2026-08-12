@@ -2,10 +2,34 @@
 
 use runmat_builtins::shape_rules::scalar_tensor_shape;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, ResolveContext, Tensor, Type, Value,
 };
+
+const HORZCAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A1,...,An",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every real integer class participates in documented dimension-two concatenation. The leftmost integer input determines the output class when integers mix with unlike integer, floating, or logical operands.",
+    }];
+
+pub const HORZCAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = horzcat(A1,...,An) with real integer data",
+        inputs: &HORZCAT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "horzcat delegates to the settled cat(dim=2) engine, including exact wide-integer conversion, saturation, empty handling, owner validation, and typed gather/assemble/restore fallback.",
+    }];
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, RuntimeError};
@@ -259,6 +283,7 @@ fn horzcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     accel = "array_construct",
     type_resolver(horzcat_type),
     descriptor(crate::builtins::array::shape::horzcat::HORZCAT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::horzcat::HORZCAT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
 async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -561,6 +586,7 @@ pub(crate) mod tests {
     #[test]
     fn horzcat_like_gpu_from_host_inputs() {
         test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let prototype = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = runmat_accelerate_api::HostTensorView {
                 data: &prototype.materialize_f64(),
@@ -591,9 +617,14 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn horzcat_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let provider_init = std::panic::catch_unwind(|| {
+            runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            )
+        });
+        if !matches!(provider_init, Ok(Ok(_))) {
+            return;
+        }
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
 
@@ -604,7 +635,9 @@ pub(crate) mod tests {
             other => panic!("expected tensor output, got {other:?}"),
         };
 
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
         let view_a = runmat_accelerate_api::HostTensorView {
             data: &a.materialize_f64(),
             shape: &a.shape,

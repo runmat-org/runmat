@@ -161,6 +161,10 @@ pub fn replace_call_counts(call_counts: Vec<(usize, usize)>) -> ArityCallCountsG
     ArityCallCountsGuard { previous }
 }
 
+pub(crate) fn current_input_count() -> Option<usize> {
+    CALL_COUNTS.with(|slot| slot.borrow().last().map(|(inputs, _)| *inputs))
+}
+
 #[derive(Clone, Copy)]
 enum ArityBound {
     Finite(usize),

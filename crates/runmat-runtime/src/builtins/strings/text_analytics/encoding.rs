@@ -4,10 +4,14 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, LogicalArray, ObjectInstance, PropertyDef, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ClassDef, IntValue, LogicalArray, ObjectInstance,
+    PropertyDef, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -22,6 +26,50 @@ use crate::builtins::strings::text_analytics::embeddings::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 pub const WORD_ENCODING_CLASS: &str = "wordEncoding";
+
+const IND2WORD_TYPED_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ind2word-typed-integer-indices",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ind2word with a typed-integer index vector is an evidence-open RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Ind2wordTypedIntegerExtension"),
+};
+const IND2WORD_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ind2word-nonvector-indices",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ind2word with matrix or multidimensional indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Ind2wordNonvectorExtension"),
+};
+const IND2WORD_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "ind2word-resident-indices",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "ind2word with resident indices is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Ind2wordResidentExtension"),
+};
+pub const IND2WORD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    IND2WORD_TYPED_INTEGER_EXTENSION,
+    IND2WORD_NONVECTOR_EXTENSION,
+    IND2WORD_RESIDENT_EXTENSION,
+];
+
+const IND2WORD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "M",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "[integer-audit-open] The current public reference specifies positive integer values but does not publish a numeric class table; typed-integer vectors are therefore gated and read from authoritative integer storage.",
+    }];
+pub const IND2WORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "words = ind2word(enc, integer_M)",
+        inputs: &IND2WORD_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "[integer-audit-open] MATLAB documents a host positive-integer vector and string-vector output. RunMat gates typed-integer and resident forms independently, validates exact indices without an f64 mirror, and always returns host strings.",
+    }];
 
 thread_local! {
     static WORD_ENCODING_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
@@ -355,9 +403,14 @@ async fn word2ind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::encoding::IND2WORD_DESCRIPTOR),
+    extensions(crate::builtins::strings::text_analytics::encoding::IND2WORD_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::encoding::IND2WORD_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
 async fn ind2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_ind2word_extensions(&args)?;
     let gathered = gather_args(args, "ind2word").await?;
     let (object, indices) = parse_ind2word_args(gathered)?;
     let encoding = word_encoding_from_object(&object, "ind2word")?;
@@ -372,6 +425,51 @@ async fn ind2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     StringArray::new(words, indices.shape)
         .map(Value::StringArray)
         .map_err(|err| encoding_error("ind2word", err))
+}
+
+fn ensure_ind2word_extensions(args: &[Value]) -> BuiltinResult<()> {
+    if args.len() != 2 {
+        return Ok(());
+    }
+    let indices = &args[1];
+    if is_typed_integer_value(indices) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IND2WORD_TYPED_INTEGER_EXTENSION,
+            "ind2word",
+        )?;
+    }
+    if crate::dispatcher::value_contains_gpu(indices) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IND2WORD_RESIDENT_EXTENSION,
+            "ind2word",
+        )?;
+    }
+    if value_shape(indices).is_some_and(|shape| !is_vector_shape(shape)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IND2WORD_NONVECTOR_EXTENSION,
+            "ind2word",
+        )?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn value_shape(value: &Value) -> Option<&[usize]> {
+    match value {
+        Value::Tensor(tensor) => Some(&tensor.shape),
+        Value::GpuTensor(handle) => Some(&handle.shape),
+        Value::Num(_) | Value::Int(_) => Some(&[1, 1]),
+        _ => None,
+    }
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    shape.len() <= 2 && shape.iter().filter(|extent| **extent > 1).count() <= 1
 }
 
 #[runtime_builtin(
@@ -792,24 +890,47 @@ fn word_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<WordInpu
 }
 
 struct NumericInput {
-    values: Vec<f64>,
+    values: Vec<NumericIndex>,
     shape: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum NumericIndex {
+    Float(f64),
+    Integer(IntValue),
 }
 
 fn numeric_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<NumericInput> {
     match value {
         Value::Num(value) => Ok(NumericInput {
-            values: vec![*value],
+            values: vec![NumericIndex::Float(*value)],
             shape: vec![1, 1],
         }),
         Value::Int(value) => Ok(NumericInput {
-            values: vec![int_value_to_f64(value)],
+            values: vec![NumericIndex::Integer(value.clone())],
             shape: vec![1, 1],
         }),
-        Value::Tensor(tensor) => Ok(NumericInput {
-            values: tensor_utils::tensor_values_f64(tensor),
-            shape: tensor.shape.clone(),
-        }),
+        Value::Tensor(tensor) => {
+            let values = if let Some(storage) = tensor.integer_storage() {
+                (0..storage.len())
+                    .map(|index| {
+                        storage
+                            .value_at(index)
+                            .map(NumericIndex::Integer)
+                            .expect("integer index is within storage bounds")
+                    })
+                    .collect()
+            } else {
+                tensor_utils::tensor_values_f64(tensor)
+                    .into_iter()
+                    .map(NumericIndex::Float)
+                    .collect()
+            };
+            Ok(NumericInput {
+                values,
+                shape: tensor.shape.clone(),
+            })
+        }
         other => Err(encoding_error(
             fn_name,
             format!("{fn_name}: expected numeric positive integer indices, got {other:?}"),
@@ -817,14 +938,36 @@ fn numeric_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Numer
     }
 }
 
-fn positive_index(value: f64, len: usize, fn_name: &str) -> BuiltinResult<usize> {
-    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+fn positive_index(value: NumericIndex, len: usize, fn_name: &str) -> BuiltinResult<usize> {
+    let idx = match value {
+        NumericIndex::Float(value) => {
+            if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+                return Err(encoding_error(
+                    fn_name,
+                    format!("{fn_name}: indices must be positive integers, got {value}"),
+                ));
+            }
+            if value > usize::MAX as f64 {
+                return Err(encoding_error(
+                    fn_name,
+                    format!("{fn_name}: index exceeds platform limits"),
+                ));
+            }
+            value as usize
+        }
+        NumericIndex::Integer(value) => value.try_to_usize().ok_or_else(|| {
+            encoding_error(
+                fn_name,
+                format!("{fn_name}: indices must be positive integers"),
+            )
+        })?,
+    };
+    if idx == 0 {
         return Err(encoding_error(
             fn_name,
-            format!("{fn_name}: indices must be positive integers, got {value}"),
+            format!("{fn_name}: indices must be positive integers"),
         ));
     }
-    let idx = value as usize;
     if idx > len {
         return Err(encoding_error(
             fn_name,
@@ -999,7 +1142,13 @@ mod tests {
         )
         .expect("numeric");
 
-        assert_eq!(input.values, vec![2.0, 3.0]);
+        assert_eq!(
+            input.values,
+            vec![
+                NumericIndex::Integer(IntValue::I16(2)),
+                NumericIndex::Integer(IntValue::I16(3))
+            ]
+        );
         assert_eq!(input.shape, vec![1, 2]);
     }
 
@@ -1123,6 +1272,63 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("exceeds vocabulary"), "{err}");
+    }
+
+    #[test]
+    fn ind2word_extensions_gate_before_gather_and_integer_indices_stay_exact() {
+        let enc = futures::executor::block_on(word_encoding_builtin(vec![Value::StringArray(
+            StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap(),
+        )]))
+        .unwrap();
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let integer_error = futures::executor::block_on(ind2word_builtin(vec![
+                enc.clone(),
+                poisoned_integer_vector(IntegerStorage::U64(vec![1]), 1),
+            ]))
+            .unwrap_err();
+            assert_eq!(
+                integer_error.identifier(),
+                Some("RunMat:compatibility:Ind2wordTypedIntegerExtension")
+            );
+            let matrix_error = futures::executor::block_on(ind2word_builtin(vec![
+                enc.clone(),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).unwrap()),
+            ]))
+            .unwrap_err();
+            assert_eq!(
+                matrix_error.identifier(),
+                Some("RunMat:compatibility:Ind2wordNonvectorExtension")
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = futures::executor::block_on(ind2word_builtin(vec![
+            enc.clone(),
+            poisoned_integer_vector(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1),
+        ]))
+        .unwrap_err();
+        assert!(wide.message().contains("exceeds vocabulary"));
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("resident indices");
+            runmat_accelerate::fusion_residency::mark(&handle);
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = futures::executor::block_on(ind2word_builtin(vec![
+                enc.clone(),
+                Value::GpuTensor(handle.clone()),
+            ]))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:Ind2wordResidentExtension")
+            );
+            assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+            let _ = provider.free(&handle);
+        });
     }
 
     #[tokio::test]

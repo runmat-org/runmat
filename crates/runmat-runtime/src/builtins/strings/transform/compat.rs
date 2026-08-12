@@ -321,18 +321,144 @@ const fn extract_boundary_extension(
         error_identifier: Some(error_identifier),
     }
 }
-descriptor!(
-    INSERT_BEFORE_DESCRIPTOR,
-    "s = insertBefore(text, boundary, newText)",
-    &IN_TEXT_REST,
-    &OUT_ANY
+const INSERT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    BuiltinErrorDescriptor {
+        code: "RM.INSERT.INVALID_INPUT",
+        identifier: Some("RunMat:insert:InvalidInput"),
+        when: "The call does not contain exactly one text input, one text or numeric boundary, and one replacement-text input.",
+        message: "text insertion: invalid input",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.INSERT.INVALID_BOUNDARY",
+        identifier: Some("RunMat:insert:InvalidBoundary"),
+        when: "A numeric position is not a positive integer or a textual boundary is invalid or absent.",
+        message: "text insertion: invalid boundary",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.INSERT.SIZE_MISMATCH",
+        identifier: Some("RunMat:insert:SizeMismatch"),
+        when: "A nonscalar boundary or replacement-text array does not have the same shape as the input text array.",
+        message: "text insertion: array size must match input text",
+    },
+];
+pub const INSERT_BEFORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "newStr = insertBefore(str, patOrPos, newText)",
+        inputs: &IN_TEXT_REST,
+        outputs: &OUT_ANY,
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INSERT_ERRORS,
+};
+pub const INSERT_AFTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "newStr = insertAfter(str, patOrPos, newText)",
+        inputs: &IN_TEXT_REST,
+        outputs: &OUT_ANY,
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INSERT_ERRORS,
+};
+
+const INSERT_POSITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "pos",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The numeric position is a one-based structural control and accepts scalar or same-size arrays from every built-in integer class, single, or double; logical is not numeric.",
+    }];
+const INSERT_TEXT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "str",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The source is text; integer data is rejected before provider access.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "newText",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The inserted value is text; integer data is rejected before provider access.",
+    },
+];
+const fn insert_position_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs: &INSERT_POSITION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+        notes: "Positions are read exactly and output preserves the source text container class and shape.",
+    }
+}
+const fn insert_text_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
+    BuiltinIntegerCapabilityDescriptor {
+        form,
+        inputs: &INSERT_TEXT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer source and replacement inputs are outside the public text domain and reject without numeric-to-text conversion.",
+    }
+}
+pub const INSERT_BEFORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    insert_position_capability("newStr = insertBefore(str, integer_pos, newText)"),
+    insert_text_capability("newStr = insertBefore(integer_str, boundary, integer_newText)"),
+];
+pub const INSERT_AFTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    insert_position_capability("newStr = insertAfter(str, integer_pos, newText)"),
+    insert_text_capability("newStr = insertAfter(integer_str, boundary, integer_newText)"),
+];
+
+const INSERT_BEFORE_RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor = insert_extension(
+    "insertbefore-resident-position",
+    "insertBefore with an interactive resident numeric position is a RunMat extension",
+    "RunMat:compatibility:InsertBeforeResidentPositionExtension",
 );
-descriptor!(
-    INSERT_AFTER_DESCRIPTOR,
-    "s = insertAfter(text, boundary, newText)",
-    &IN_TEXT_REST,
-    &OUT_ANY
+const INSERT_AFTER_RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor = insert_extension(
+    "insertafter-resident-position",
+    "insertAfter with an interactive resident numeric position is a RunMat extension",
+    "RunMat:compatibility:InsertAfterResidentPositionExtension",
 );
+const INSERT_BEFORE_BROAD_TEXT_EXTENSION: BuiltinExtensionDescriptor = insert_extension(
+    "insertbefore-broad-text-containers",
+    "insertBefore row-wise character matrices and non-cellstr text cells are RunMat extensions",
+    "RunMat:compatibility:InsertBeforeBroadTextExtension",
+);
+const INSERT_AFTER_BROAD_TEXT_EXTENSION: BuiltinExtensionDescriptor = insert_extension(
+    "insertafter-broad-text-containers",
+    "insertAfter row-wise character matrices and non-cellstr text cells are RunMat extensions",
+    "RunMat:compatibility:InsertAfterBroadTextExtension",
+);
+const fn insert_extension(
+    id: &'static str,
+    description: &'static str,
+    error_identifier: &'static str,
+) -> BuiltinExtensionDescriptor {
+    BuiltinExtensionDescriptor {
+        id,
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description,
+        error_identifier: Some(error_identifier),
+    }
+}
+pub const INSERT_BEFORE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    INSERT_BEFORE_RESIDENT_POSITION_EXTENSION,
+    INSERT_BEFORE_BROAD_TEXT_EXTENSION,
+];
+pub const INSERT_AFTER_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    INSERT_AFTER_RESIDENT_POSITION_EXTENSION,
+    INSERT_AFTER_BROAD_TEXT_EXTENSION,
+];
 descriptor!(
     REPLACE_BETWEEN_DESCRIPTOR,
     "s = replaceBetween(text, start, end, newText)",
@@ -803,6 +929,8 @@ async fn extract_after_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<V
     summary = "Insert text before a position or boundary.",
     keywords = "insertBefore,string,text,boundary",
     accel = "sink",
+    extensions(INSERT_BEFORE_EXTENSIONS),
+    integer_capabilities(INSERT_BEFORE_INTEGER_CAPABILITIES),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::INSERT_BEFORE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::compat"
@@ -817,6 +945,8 @@ async fn insert_before_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<V
     summary = "Insert text after a position or boundary.",
     keywords = "insertAfter,string,text,boundary",
     accel = "sink",
+    extensions(INSERT_AFTER_EXTENSIONS),
+    integer_capabilities(INSERT_AFTER_INTEGER_CAPABILITIES),
     type_resolver(any_type),
     descriptor(crate::builtins::strings::transform::compat::INSERT_AFTER_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::compat"
@@ -1120,11 +1250,41 @@ async fn insert_transform(
     fn_name: &'static str,
     after: bool,
 ) -> BuiltinResult<Value> {
-    if rest.len() < 2 {
-        return Err(transform_error(
+    if rest.len() != 2 {
+        return Err(insert_error(
             fn_name,
-            format!("{fn_name}: expected boundary and new text"),
+            0,
+            format!("{fn_name}: expected exactly three inputs"),
         ));
+    }
+    let (resident_extension, broad_extension) = if after {
+        (
+            &INSERT_AFTER_RESIDENT_POSITION_EXTENSION,
+            &INSERT_AFTER_BROAD_TEXT_EXTENSION,
+        )
+    } else {
+        (
+            &INSERT_BEFORE_RESIDENT_POSITION_EXTENSION,
+            &INSERT_BEFORE_BROAD_TEXT_EXTENSION,
+        )
+    };
+    if crate::dispatcher::value_contains_gpu(&text)
+        || crate::dispatcher::value_contains_gpu(&rest[1])
+    {
+        return Err(insert_error(
+            fn_name,
+            0,
+            format!("{fn_name}: source and inserted values must be host text"),
+        ));
+    }
+    if crate::dispatcher::value_contains_gpu(&rest[0]) {
+        crate::compatibility::ensure_builtin_extension_enabled(resident_extension, fn_name)?;
+    }
+    if [&text, &rest[0], &rest[1]]
+        .into_iter()
+        .any(|value| is_multirow_char(value) || contains_string_or_nested_cell(value))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(broad_extension, fn_name)?;
     }
     let boundary = gather_if_needed_async(&rest[0])
         .await
@@ -1132,16 +1292,33 @@ async fn insert_transform(
     let new_text = gather_if_needed_async(&rest[1])
         .await
         .map_err(map_flow(fn_name))?;
-    let boundary = Boundary::from_value(&boundary, fn_name)?;
-    let new_text = scalar_text(&new_text, fn_name)?;
+    let boundaries = BoundaryList::from_value(&boundary, fn_name)
+        .map_err(|error| insert_error(fn_name, 1, error.to_string()))?;
+    let replacements = TextList::from_value(&new_text, fn_name)
+        .map_err(|error| insert_error(fn_name, 0, error.to_string()))?;
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow(fn_name))?;
-    map_text_try_preserve(text, fn_name, |s| {
-        let (start, end) = locate_boundary(s, &boundary)?;
-        let idx = if after { end } else { start };
-        Ok(format!("{}{}{}", &s[..idx], new_text, &s[idx..]))
-    })
+    let text_shape = boundary_text_shape(&text)
+        .ok_or_else(|| insert_error(fn_name, 0, format!("{fn_name}: expected text input")))?;
+    if !shape_is_scalar_or_same(&boundaries.shape, &text_shape)
+        || !shape_is_scalar_or_same(&replacements.shape, &text_shape)
+    {
+        return Err(insert_error(
+            fn_name,
+            2,
+            format!("{fn_name}: boundary and newText must be scalar or match str"),
+        ));
+    }
+    map_text_with_insertions(text, &boundaries, &replacements, fn_name, after)
+}
+
+fn insert_error(name: &str, error_index: usize, message: impl Into<String>) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(name);
+    if let Some(identifier) = INSERT_ERRORS[error_index].identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone)]
@@ -1155,6 +1332,64 @@ enum Boundary {
 struct BoundaryList {
     data: Vec<Boundary>,
     shape: Vec<usize>,
+}
+
+#[derive(Clone)]
+struct TextList {
+    data: Vec<String>,
+    shape: Vec<usize>,
+}
+
+impl TextList {
+    fn from_value(value: &Value, fn_name: &str) -> BuiltinResult<Self> {
+        match value {
+            Value::String(text) => Ok(Self {
+                data: vec![text.clone()],
+                shape: vec![1, 1],
+            }),
+            Value::StringArray(array) => Ok(Self {
+                data: array.data.clone(),
+                shape: array.shape.clone(),
+            }),
+            Value::CharArray(array) => {
+                let data = if array.rows == 0 {
+                    vec![String::new()]
+                } else {
+                    (0..array.rows)
+                        .map(|row| char_row_to_string_slice(&array.data, array.cols, row))
+                        .collect()
+                };
+                Ok(Self {
+                    data,
+                    shape: if array.rows <= 1 {
+                        vec![1, 1]
+                    } else {
+                        vec![array.rows, 1]
+                    },
+                })
+            }
+            Value::Cell(cell) => Ok(Self {
+                data: cell
+                    .data
+                    .iter()
+                    .map(|value| scalar_text(value, fn_name))
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+                shape: cell.shape.clone(),
+            }),
+            other => Err(transform_error(
+                fn_name,
+                format!("{fn_name}: newText must be text, got {other:?}"),
+            )),
+        }
+    }
+
+    fn at(&self, idx: usize) -> &str {
+        if self.data.len() == 1 {
+            &self.data[0]
+        } else {
+            &self.data[idx]
+        }
+    }
 }
 
 impl BoundaryList {
@@ -1468,6 +1703,168 @@ fn map_text_with_boundaries(
         other => Err(transform_error(
             fn_name,
             format!("{fn_name}: expected text input, got {other:?}"),
+        )),
+    }
+}
+
+fn insert_one(
+    text: &str,
+    boundary: &Boundary,
+    replacement: &str,
+    after: bool,
+    fn_name: &str,
+) -> BuiltinResult<String> {
+    if let Boundary::Position(_) = boundary {
+        let (start, end) = locate_boundary(text, boundary)?;
+        let idx = if after { end } else { start };
+        return Ok(format!("{}{}{}", &text[..idx], replacement, &text[idx..]));
+    }
+
+    let spans: Vec<(usize, usize)> = match boundary {
+        Boundary::Text(needle) => text
+            .match_indices(needle)
+            .map(|(start, matched)| (start, start + matched.len()))
+            .collect(),
+        Boundary::Pattern(pattern) => Regex::new(pattern)
+            .map_err(|error| transform_error(fn_name, error.to_string()))?
+            .find_iter(text)
+            .map(|matched| (matched.start(), matched.end()))
+            .collect(),
+        Boundary::Position(_) => unreachable!(),
+    };
+    if spans.is_empty() {
+        return Err(transform_error(fn_name, "boundary not found"));
+    }
+    let mut result = String::with_capacity(text.len() + replacement.len() * spans.len());
+    let mut cursor = 0;
+    for (start, end) in spans {
+        result.push_str(&text[cursor..start]);
+        if after {
+            result.push_str(&text[start..end]);
+            result.push_str(replacement);
+        } else {
+            result.push_str(replacement);
+            result.push_str(&text[start..end]);
+        }
+        cursor = end;
+    }
+    result.push_str(&text[cursor..]);
+    Ok(result)
+}
+
+fn map_text_with_insertions(
+    value: Value,
+    boundaries: &BoundaryList,
+    replacements: &TextList,
+    fn_name: &str,
+    after: bool,
+) -> BuiltinResult<Value> {
+    match value {
+        Value::String(text) => {
+            if is_missing_string(&text) {
+                Ok(Value::String(text))
+            } else {
+                insert_one(&text, boundaries.at(0), replacements.at(0), after, fn_name)
+                    .map(Value::String)
+            }
+        }
+        Value::StringArray(array) => StringArray::new(
+            array
+                .data
+                .into_iter()
+                .enumerate()
+                .map(|(idx, text)| {
+                    if is_missing_string(&text) {
+                        Ok(text)
+                    } else {
+                        insert_one(
+                            &text,
+                            boundaries.at(idx),
+                            replacements.at(idx),
+                            after,
+                            fn_name,
+                        )
+                    }
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
+            array.shape,
+        )
+        .map(Value::StringArray)
+        .map_err(|error| transform_error(fn_name, error)),
+        Value::CharArray(array) => {
+            let rows = (0..array.rows)
+                .map(|row| {
+                    insert_one(
+                        &char_row_to_string_slice(&array.data, array.cols, row),
+                        boundaries.at(row),
+                        replacements.at(row),
+                        after,
+                        fn_name,
+                    )
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            char_rows(rows, fn_name)
+        }
+        Value::Cell(cell) => {
+            let values = cell
+                .data
+                .into_iter()
+                .enumerate()
+                .map(|(idx, value)| {
+                    map_text_cell_insertion(
+                        value,
+                        boundaries.at(idx),
+                        replacements.at(idx),
+                        fn_name,
+                        after,
+                    )
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            make_cell_with_shape(values, cell.shape)
+                .map_err(|error| transform_error(fn_name, error))
+        }
+        other => Err(transform_error(
+            fn_name,
+            format!("{fn_name}: expected text input, got {other:?}"),
+        )),
+    }
+}
+
+fn map_text_cell_insertion(
+    value: Value,
+    boundary: &Boundary,
+    replacement: &str,
+    fn_name: &str,
+    after: bool,
+) -> BuiltinResult<Value> {
+    match value {
+        Value::CharArray(array) if array.rows <= 1 => {
+            let text = if array.rows == 0 {
+                String::new()
+            } else {
+                char_row_to_string_slice(&array.data, array.cols, 0)
+            };
+            insert_one(&text, boundary, replacement, after, fn_name)
+                .map(|text| Value::CharArray(CharArray::new_row(&text)))
+        }
+        Value::String(text) => {
+            insert_one(&text, boundary, replacement, after, fn_name).map(Value::String)
+        }
+        Value::StringArray(array) if array.data.len() == 1 => {
+            insert_one(&array.data[0], boundary, replacement, after, fn_name).map(Value::String)
+        }
+        Value::Cell(cell) => {
+            let values = cell
+                .data
+                .into_iter()
+                .map(|value| map_text_cell_insertion(value, boundary, replacement, fn_name, after))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            make_cell_with_shape(values, cell.shape)
+                .map_err(|error| transform_error(fn_name, error))
+        }
+        other => Err(transform_error(
+            fn_name,
+            format!("{fn_name}: expected character vectors in cell input, got {other:?}"),
         )),
     }
 }
@@ -1997,6 +2394,180 @@ mod tests {
             vec![Value::Num(1.0e300), Value::String("mat".into())],
         ))
         .is_err());
+    }
+
+    #[test]
+    fn insert_before_and_after_accept_all_integer_position_classes() {
+        for position in [
+            IntValue::I8(2),
+            IntValue::I16(2),
+            IntValue::I32(2),
+            IntValue::I64(2),
+            IntValue::U8(2),
+            IntValue::U16(2),
+            IntValue::U32(2),
+            IntValue::U64(2),
+        ] {
+            assert_eq!(
+                block(insert_before_builtin(
+                    Value::String("abc".into()),
+                    vec![Value::Int(position.clone()), Value::String("X".into())],
+                ))
+                .unwrap(),
+                Value::String("aXbc".into())
+            );
+            assert_eq!(
+                block(insert_after_builtin(
+                    Value::String("abc".into()),
+                    vec![Value::Int(position), Value::String("X".into())],
+                ))
+                .unwrap(),
+                Value::String("abXc".into())
+            );
+        }
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            let position = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            assert_eq!(
+                block(insert_after_builtin(
+                    Value::String("abc".into()),
+                    vec![position, Value::String("X".into())],
+                ))
+                .unwrap(),
+                Value::String("abXc".into())
+            );
+        }
+        for position in [
+            Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
+        ] {
+            assert_eq!(
+                block(insert_before_builtin(
+                    Value::String("abc".into()),
+                    vec![position, Value::String("X".into())],
+                ))
+                .unwrap(),
+                Value::String("aXbc".into())
+            );
+        }
+        assert!(block(insert_after_builtin(
+            Value::String("abc".into()),
+            vec![Value::Bool(true), Value::String("X".into())],
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn insertion_broadcasts_scalar_or_same_size_positions_and_new_text() {
+        let source = Value::StringArray(
+            StringArray::new(vec!["abcd".into(), "wxyz".into()], vec![2, 1]).unwrap(),
+        );
+        let positions = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![2, 1]).unwrap(),
+        );
+        let replacements =
+            Value::StringArray(StringArray::new(vec!["A".into(), "B".into()], vec![2, 1]).unwrap());
+        assert_eq!(
+            block(insert_before_builtin(
+                source.clone(),
+                vec![positions, replacements]
+            ))
+            .unwrap(),
+            Value::StringArray(
+                StringArray::new(vec!["aAbcd".into(), "wxByz".into()], vec![2, 1]).unwrap()
+            )
+        );
+        assert_eq!(
+            block(insert_after_builtin(
+                source,
+                vec![Value::Num(1.0), Value::String("!".into())]
+            ))
+            .unwrap(),
+            Value::StringArray(
+                StringArray::new(vec!["a!bcd".into(), "w!xyz".into()], vec![2, 1]).unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn insertion_applies_text_boundaries_at_every_occurrence() {
+        assert_eq!(
+            block(insert_before_builtin(
+                Value::String("a-b-c".into()),
+                vec![Value::String("-".into()), Value::String("X".into())],
+            ))
+            .unwrap(),
+            Value::String("aX-bX-c".into())
+        );
+        assert_eq!(
+            block(insert_after_builtin(
+                Value::String("a-b-c".into()),
+                vec![Value::String("-".into()), Value::String("X".into())],
+            ))
+            .unwrap(),
+            Value::String("a-Xb-Xc".into())
+        );
+    }
+
+    #[test]
+    fn insertion_requires_exact_arity_and_matching_array_shapes() {
+        assert!(block(insert_before_builtin(
+            Value::String("abc".into()),
+            vec![
+                Value::Num(1.0),
+                Value::String("X".into()),
+                Value::String("ignored".into()),
+            ],
+        ))
+        .is_err());
+        let source =
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap());
+        let positions = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
+        assert!(block(insert_after_builtin(
+            source,
+            vec![positions, Value::String("X".into())]
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn insertion_compatibility_gates_precede_resident_gather() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = block(insert_after_builtin(
+            Value::String("abc".into()),
+            vec![resident, Value::String("X".into())],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            INSERT_AFTER_RESIDENT_POSITION_EXTENSION.error_identifier
+        );
+
+        let matrix = Value::CharArray(
+            CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"),
+        );
+        let error = block(insert_before_builtin(
+            matrix,
+            vec![Value::Num(1.0), Value::String("X".into())],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            INSERT_BEFORE_BROAD_TEXT_EXTENSION.error_identifier
+        );
     }
 
     #[test]

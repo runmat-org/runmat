@@ -70123,20 +70123,12 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "enabled = hold()",
+          "label": "hold()",
           "inputs": [],
-          "outputs": [
-            {
-              "name": "enabled",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "True when hold is enabled after command execution."
-            }
-          ]
+          "outputs": []
         },
         {
-          "label": "enabled = hold(mode)",
+          "label": "hold(mode)",
           "inputs": [
             {
               "name": "mode",
@@ -70146,15 +70138,7 @@
               "description": "Hold mode ('on'|'off'|'all') or numeric/logical scalar."
             }
           ],
-          "outputs": [
-            {
-              "name": "enabled",
-              "ty": "LogicalArray",
-              "arity": "Required",
-              "default": null,
-              "description": "True when hold is enabled after command execution."
-            }
-          ]
+          "outputs": []
         }
       ],
       "errors": [
@@ -70163,6 +70147,43 @@
           "identifier": "RunMat:hold:InvalidArgument",
           "when": "Hold mode argument is unsupported.",
           "message": "hold: invalid argument"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "hold-typed-integer-state",
+          "mode": "RunMatOnly",
+          "description": "hold accepts typed integer 0 and 1 only as a RunMat extension because the public numeric-state documentation does not enumerate integer storage classes",
+          "error_identifier": "RunMat:compatibility:HoldTypedIntegerStateExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "hold(integer_state)",
+          "inputs": [
+            {
+              "name": "state",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are inspected exactly and only values 0 and 1 are accepted behind the typed-state extension."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "[integer-audit-open] The state is read without floating conversion. hold has no public output and mutates plotting state only after validation. Documented axes-target and matlab.lang.OnOffSwitchState forms remain implementation gaps and are not claimed by this integer-role record."
         }
       ]
     },
@@ -70226,6 +70247,35 @@
           "when": "Input classes cannot be concatenated together.",
           "message": "horzcat: incompatible input classes for concatenation"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = horzcat(A1,...,An) with real integer data",
+          "inputs": [
+            {
+              "name": "A1,...,An",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Every real integer class participates in documented dimension-two concatenation. The leftmost integer input determines the output class when integers mix with unlike integer, floating, or logical operands."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Saturate",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "horzcat delegates to the settled cat(dim=2) engine, including exact wide-integer conversion, saturation, empty handling, owner validation, and typed gather/assemble/restore fallback."
+        }
       ]
     },
     {
@@ -70242,6 +70292,34 @@
               "arity": "Required",
               "default": null,
               "description": "Datetime input."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "X",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Numeric scalar/tensor result."
+            }
+          ]
+        },
+        {
+          "label": "X = hour(t, F)",
+          "inputs": [
+            {
+              "name": "t",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy serial date number or date text."
+            },
+            {
+              "name": "F",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Legacy datestr input format."
             }
           ],
           "outputs": [
@@ -70273,6 +70351,55 @@
           "identifier": "RunMat:datetime:Internal",
           "when": "Internal datetime state or indexing/evaluation failed unexpectedly.",
           "message": "datetime: internal operation failed"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "hour-typed-legacy-serial-input",
+          "mode": "RunMatOnly",
+          "description": "hour with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
+          "error_identifier": "RunMat:compatibility:HourTypedLegacySerialExtension"
+        },
+        {
+          "id": "datetime-logical-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Logical values in datetime numeric positions are a RunMat-only compatibility extension",
+          "error_identifier": "RunMat:compatibility:DatetimeLogicalInputExtension"
+        },
+        {
+          "id": "datetime-resident-numeric-input",
+          "mode": "RunMatOnly",
+          "description": "Gathering resident numeric input into a host datetime object is a RunMat-only extension",
+          "error_identifier": "RunMat:compatibility:DatetimeGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "hour(integer_serial, F)",
+          "inputs": [
+            {
+              "name": "legacy serial date number",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The merged legacy API documents serial date numbers but does not enumerate typed integer storage. RunMat accepts all eight classes only behind the typed-legacy extension and validates exact storage before conversion."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "[integer-audit-open] Typed integer serials are a clearly gated RunMat extension because current public evidence does not enumerate legacy serial storage classes; results are host double values with the input shape."
         }
       ]
     },
@@ -70387,7 +70514,25 @@
           "when": "Inputs are not a supported htmlTree or extractHTMLText form.",
           "message": "HTML Text Analytics helper received invalid input"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "htmltree-cell-object-array",
+          "mode": "RunMatOnly",
+          "description": "htmlTree nonscalar input currently returns a shape-preserving cell array of scalar htmlTree objects because RunMat does not yet have a native object-array container",
+          "error_identifier": "RunMat:compatibility:HtmlTreeCellObjectArrayExtension"
+        },
+        {
+          "id": "htmltree-broad-cell-input",
+          "mode": "RunMatOnly",
+          "description": "htmlTree accepts string-valued cells only as a RunMat extension; the public cell form is a cell array of character vectors",
+          "error_identifier": "RunMat:compatibility:HtmlTreeBroadCellExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "htmlTree accepts host string arrays, character vectors, and cell arrays of character vectors. All eight integer classes, logical and complex values, and resident numeric handles reject before parsing, conversion, gather, or provider access."
+      }
     },
     {
       "name": "hypot",
@@ -71087,6 +71232,65 @@
           "identifier": "RunMat:icdf:Internal",
           "when": "Internal tensor conversion or allocation fails.",
           "message": "icdf: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "icdf-integer-input",
+          "mode": "RunMatOnly",
+          "description": "icdf with typed-integer probability or parameter input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IcdfIntegerInputExtension"
+        },
+        {
+          "id": "icdf-logical-input",
+          "mode": "RunMatOnly",
+          "description": "icdf with logical probability or parameter input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IcdfLogicalInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = icdf(name_or_fitted_distribution, p, integer_parameters?)",
+          "inputs": [
+            {
+              "name": "p",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer probability input is gated before provider access and checked for exact representation at the floating inverse-CDF boundary."
+            },
+            {
+              "name": "distribution parameters",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer named-distribution parameters are gated independently from logical input and checked before floating evaluation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "RunMat-only integer/logical inputs enter the same checked floating boundary for named and fitted-distribution-object forms. The implemented named-family subset preserves documented single/double class selection and restores resident output to the exact owner only when that owner can physically preserve the required precision; this metadata does not claim unsupported distribution families are implemented."
         }
       ]
     },
@@ -73803,7 +74007,7 @@
     },
     {
       "name": "importdata",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
@@ -73889,6 +74093,55 @@
               "description": "Imported numeric matrix or import structure."
             }
           ]
+        },
+        {
+          "label": "[A, delimiterOut, headerlinesOut] = importdata(filename, delimiterIn, headerlinesIn)",
+          "inputs": [
+            {
+              "name": "filename",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "File to import."
+            },
+            {
+              "name": "delimiterIn",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Delimiter to use for text files."
+            },
+            {
+              "name": "headerlinesIn",
+              "ty": "IntegerScalar",
+              "arity": "Optional",
+              "default": null,
+              "description": "Number of header lines to skip."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "A",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Imported numeric matrix or import structure."
+            },
+            {
+              "name": "delimiterOut",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Detected or requested text delimiter."
+            },
+            {
+              "name": "headerlinesOut",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Number of imported header lines."
+            }
+          ]
         }
       ],
       "errors": [
@@ -73909,6 +74162,35 @@
           "identifier": "RunMat:importdata:Parse",
           "when": "Text content cannot be imported as supported numeric/header data.",
           "message": "importdata: unable to parse text data"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[A,delimiterOut,headerlinesOut] = importdata(filename,delimiterIn,integer_headerlinesIn)",
+          "inputs": [
+            {
+              "name": "headerlinesIn",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The documented nonnegative scalar header count accepts single, double, and all eight integer classes; logical is excluded and typed values are parsed exactly before file access."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Header count is structural and does not determine imported payload class. Text numeric data is double; helper-format payloads retain their own documented classes. This implementation remains a host text-import boundary."
         }
       ]
     },
@@ -74129,6 +74411,77 @@
           "identifier": "RunMat:impulse:Internal",
           "when": "Internal response assembly failed.",
           "message": "impulse: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "impulse-integer-numeric-role",
+          "mode": "RunMatOnly",
+          "description": "impulse with typed-integer model metadata or time input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ImpulseIntegerExtension"
+        },
+        {
+          "id": "impulse-logical-numeric-role",
+          "mode": "RunMatOnly",
+          "description": "impulse with logical model metadata or time input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ImpulseLogicalExtension"
+        },
+        {
+          "id": "impulse-single-numeric-role",
+          "mode": "RunMatOnly",
+          "description": "impulse with single-precision model metadata or time input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ImpulseSingleExtension"
+        },
+        {
+          "id": "impulse-resident-input",
+          "mode": "RunMatOnly",
+          "description": "impulse with resident model metadata or time input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ImpulseResidentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[y, t] = impulse(sys, integer_time?)",
+          "inputs": [
+            {
+              "name": "sys numeric metadata",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "[integer-audit-open] Typed-integer coefficients and timing metadata are gated before model parsing and must be exactly representable at the host floating simulation boundary."
+            },
+            {
+              "name": "t or tFinal",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "[integer-audit-open] The current public impulse reference states value and shape requirements but publishes no numeric class table for time controls."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "[integer-audit-open] Non-double and resident numeric roles are independent RunMat extensions. This bounded SISO tf implementation simulates on the host and returns host response/time arrays."
         }
       ]
     },
@@ -74991,7 +75344,7 @@
     },
     {
       "name": "ind2sub",
-      "output_mode": "Fixed",
+      "output_mode": "ByRequestedOutputCount",
       "completion_policy": "Public",
       "signatures": [
         {
@@ -75031,12 +75384,6 @@
           "message": "ind2sub: invalid input arguments"
         },
         {
-          "code": "RM.IND2SUB.INDEX_BOUNDS",
-          "identifier": "RunMat:ind2sub:IndexBounds",
-          "when": "At least one provided linear index exceeds array element bounds.",
-          "message": "ind2sub: index exceeds array bounds"
-        },
-        {
           "code": "RM.IND2SUB.PROVIDER",
           "identifier": "RunMat:ind2sub:ProviderError",
           "when": "Provider-side ind2sub execution fails or returns malformed outputs.",
@@ -75047,6 +75394,51 @@
           "identifier": "RunMat:ind2sub:InternalError",
           "when": "Internal tensor/materialization logic fails while building outputs.",
           "message": "ind2sub: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[I1,...,In] = ind2sub(integer_size, integer_indices)",
+          "inputs": [
+            {
+              "name": "size vector",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The size vector accepts single, double, and every integer class, must contain at least two positive integral elements, and is read exactly from authoritative storage."
+            },
+            {
+              "name": "linear indices",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Linear indices accept single, double, and every integer class; outputs are double and preserve the index array shape."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Requested output count controls trailing-dimension collapse; indices beyond prod(sz) expand the final effective dimension. Resident inputs always produce double output and return to the exact source owner only when that owner can physically preserve binary64."
         }
       ]
     },
@@ -75090,6 +75482,55 @@
           "identifier": "RunMat:ind2word:InvalidInput",
           "when": "Inputs do not match a supported ind2word form.",
           "message": "ind2word received invalid input"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ind2word-typed-integer-indices",
+          "mode": "RunMatOnly",
+          "description": "ind2word with a typed-integer index vector is an evidence-open RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ind2wordTypedIntegerExtension"
+        },
+        {
+          "id": "ind2word-nonvector-indices",
+          "mode": "RunMatOnly",
+          "description": "ind2word with matrix or multidimensional indices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ind2wordNonvectorExtension"
+        },
+        {
+          "id": "ind2word-resident-indices",
+          "mode": "RunMatOnly",
+          "description": "ind2word with resident indices is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:Ind2wordResidentExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "words = ind2word(enc, integer_M)",
+          "inputs": [
+            {
+              "name": "M",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "[integer-audit-open] The current public reference specifies positive integer values but does not publish a numeric class table; typed-integer vectors are therefore gated and read from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "[integer-audit-open] MATLAB documents a host positive-integer vector and string-vector output. RunMat gates typed-integer and resident forms independently, validates exact indices without an f64 mirror, and always returns host strings."
         }
       ]
     },
@@ -75486,7 +75927,25 @@
           "when": "Numeric fallback parser rejects the input expression.",
           "message": "input: invalid numeric expression"
         }
-      ]
+      ],
+      "extensions": [
+        {
+          "id": "input-no-prompt",
+          "mode": "RunMatOnly",
+          "description": "input() with RunMat's default prompt is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:InputNoPromptExtension"
+        },
+        {
+          "id": "input-swapped-arguments",
+          "mode": "RunMatOnly",
+          "description": "input('s', prompt) argument order is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:InputSwappedArgumentsExtension"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "input accepts only a text prompt and the text flag 's'. In expression mode the entered expression is evaluated normally, so any integer result retains the class and shape produced by that expression rather than serving as an integer input role of input itself."
+      }
     },
     {
       "name": "inputname",
@@ -75507,7 +75966,7 @@
           "outputs": [
             {
               "name": "name",
-              "ty": "StringScalar",
+              "ty": "Any",
               "arity": "Required",
               "default": null,
               "description": "Caller argument variable name, or empty text when unavailable."
@@ -75533,6 +75992,41 @@
           "identifier": "RunMat:InputnameArgumentInvalid",
           "when": "The argument index is not a positive integer scalar.",
           "message": "inputname: argument index must be a positive integer scalar"
+        },
+        {
+          "code": "RM.INPUTNAME.ARGUMENT_EXCEEDS_INPUTS",
+          "identifier": "RunMat:InputnameArgumentExceedsInputs",
+          "when": "The requested argument number exceeds the caller's input count or no function-input callsite exists.",
+          "message": "inputname: argument number exceeds number of function inputs"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "s = inputname(integer_argNumber)",
+          "inputs": [
+            {
+              "name": "argNumber",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes, single, and double are documented for the scalar real positive integer-valued caller-argument index; logical is not admitted."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "The index is read exactly before caller-frame lookup. The result is a character row vector for a named argument and an empty character array for an unnamed expression."
         }
       ]
     },
@@ -75542,7 +76036,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "s = insertAfter(text, boundary, newText)",
+          "label": "newStr = insertAfter(str, patOrPos, newText)",
           "inputs": [
             {
               "name": "text",
@@ -75570,7 +76064,94 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.INSERT.INVALID_INPUT",
+          "identifier": "RunMat:insert:InvalidInput",
+          "when": "The call does not contain exactly one text input, one text or numeric boundary, and one replacement-text input.",
+          "message": "text insertion: invalid input"
+        },
+        {
+          "code": "RM.INSERT.INVALID_BOUNDARY",
+          "identifier": "RunMat:insert:InvalidBoundary",
+          "when": "A numeric position is not a positive integer or a textual boundary is invalid or absent.",
+          "message": "text insertion: invalid boundary"
+        },
+        {
+          "code": "RM.INSERT.SIZE_MISMATCH",
+          "identifier": "RunMat:insert:SizeMismatch",
+          "when": "A nonscalar boundary or replacement-text array does not have the same shape as the input text array.",
+          "message": "text insertion: array size must match input text"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "insertafter-resident-position",
+          "mode": "RunMatOnly",
+          "description": "insertAfter with an interactive resident numeric position is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:InsertAfterResidentPositionExtension"
+        },
+        {
+          "id": "insertafter-broad-text-containers",
+          "mode": "RunMatOnly",
+          "description": "insertAfter row-wise character matrices and non-cellstr text cells are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:InsertAfterBroadTextExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = insertAfter(str, integer_pos, newText)",
+          "inputs": [
+            {
+              "name": "pos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The numeric position is a one-based structural control and accepts scalar or same-size arrays from every built-in integer class, single, or double; logical is not numeric."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "Positions are read exactly and output preserves the source text container class and shape."
+        },
+        {
+          "form": "newStr = insertAfter(integer_str, boundary, integer_newText)",
+          "inputs": [
+            {
+              "name": "str",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The source is text; integer data is rejected before provider access."
+            },
+            {
+              "name": "newText",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The inserted value is text; integer data is rejected before provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer source and replacement inputs are outside the public text domain and reject without numeric-to-text conversion."
+        }
+      ]
     },
     {
       "name": "insertBefore",
@@ -75578,7 +76159,7 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "s = insertBefore(text, boundary, newText)",
+          "label": "newStr = insertBefore(str, patOrPos, newText)",
           "inputs": [
             {
               "name": "text",
@@ -75606,7 +76187,94 @@
           ]
         }
       ],
-      "errors": []
+      "errors": [
+        {
+          "code": "RM.INSERT.INVALID_INPUT",
+          "identifier": "RunMat:insert:InvalidInput",
+          "when": "The call does not contain exactly one text input, one text or numeric boundary, and one replacement-text input.",
+          "message": "text insertion: invalid input"
+        },
+        {
+          "code": "RM.INSERT.INVALID_BOUNDARY",
+          "identifier": "RunMat:insert:InvalidBoundary",
+          "when": "A numeric position is not a positive integer or a textual boundary is invalid or absent.",
+          "message": "text insertion: invalid boundary"
+        },
+        {
+          "code": "RM.INSERT.SIZE_MISMATCH",
+          "identifier": "RunMat:insert:SizeMismatch",
+          "when": "A nonscalar boundary or replacement-text array does not have the same shape as the input text array.",
+          "message": "text insertion: array size must match input text"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "insertbefore-resident-position",
+          "mode": "RunMatOnly",
+          "description": "insertBefore with an interactive resident numeric position is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:InsertBeforeResidentPositionExtension"
+        },
+        {
+          "id": "insertbefore-broad-text-containers",
+          "mode": "RunMatOnly",
+          "description": "insertBefore row-wise character matrices and non-cellstr text cells are RunMat extensions",
+          "error_identifier": "RunMat:compatibility:InsertBeforeBroadTextExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "newStr = insertBefore(str, integer_pos, newText)",
+          "inputs": [
+            {
+              "name": "pos",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The numeric position is a one-based structural control and accepts scalar or same-size arrays from every built-in integer class, single, or double; logical is not numeric."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "SameSizeOrScalar",
+          "notes": "Positions are read exactly and output preserves the source text container class and shape."
+        },
+        {
+          "form": "newStr = insertBefore(integer_str, boundary, integer_newText)",
+          "inputs": [
+            {
+              "name": "str",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The source is text; integer data is rejected before provider access."
+            },
+            {
+              "name": "newText",
+              "classes": [],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The inserted value is text; integer data is rejected before provider access."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Integer source and replacement inputs are outside the public text domain and reject without numeric-to-text conversion."
+        }
+      ]
     },
     {
       "name": "int",

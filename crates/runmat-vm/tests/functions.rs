@@ -1906,15 +1906,15 @@ fn inputname_reports_direct_caller_argument_names() {
         end
     "#;
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_probe.m");
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "alpha")));
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "beta")));
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "alpha")
+    }));
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "beta")
+    }));
     let empty_strings = vars
         .iter()
-        .filter(|v| matches!(v, runmat_builtins::Value::String(s) if s.is_empty()))
+        .filter(|v| matches!(v, runmat_builtins::Value::CharArray(chars) if chars.data.is_empty()))
         .count();
     assert!(
         empty_strings >= 2,
@@ -1933,12 +1933,12 @@ fn inputname_reports_feval_caller_argument_names() {
         end
     "#;
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_feval_probe.m");
+    assert!(vars.iter().any(|v| {
+        matches!(v, runmat_builtins::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "beta")
+    }));
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "beta")));
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s.is_empty())));
+        .any(|v| matches!(v, runmat_builtins::Value::CharArray(chars) if chars.data.is_empty())));
 }
 
 #[test]

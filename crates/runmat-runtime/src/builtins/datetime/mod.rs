@@ -64,6 +64,13 @@ const DATETIME_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensio
         "Gathering resident numeric input into a host datetime object is a RunMat-only extension",
     error_identifier: Some("RunMat:compatibility:DatetimeGpuInputExtension"),
 };
+const HOUR_TYPED_LEGACY_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "hour-typed-legacy-serial-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "hour with single-precision or typed-integer legacy serial-date input is a RunMat extension because the public legacy documentation does not enumerate those storage classes",
+        error_identifier: Some("RunMat:compatibility:HourTypedLegacySerialExtension"),
+    };
 pub const DATETIME_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
     DATETIME_RAW_DATENUM_EXTENSION,
     DATETIME_LEGACY_COMPONENT_ARITY_EXTENSION,
@@ -71,6 +78,11 @@ pub const DATETIME_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
     DATETIME_GPU_INPUT_EXTENSION,
 ];
 pub const DAY_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DATETIME_LOGICAL_INPUT_EXTENSION,
+    DATETIME_GPU_INPUT_EXTENSION,
+];
+pub const HOUR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    HOUR_TYPED_LEGACY_NUMERIC_EXTENSION,
     DATETIME_LOGICAL_INPUT_EXTENSION,
     DATETIME_GPU_INPUT_EXTENSION,
 ];
@@ -445,11 +457,33 @@ const DATETIME_DAY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &OUT_ANY,
     },
 ];
-const DATETIME_HOUR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = hour(t)",
-    inputs: &DATETIME_SINGLE_INPUT,
-    outputs: &OUT_NUMERIC,
-}];
+const DATETIME_HOUR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "X = hour(t)",
+        inputs: &DATETIME_SINGLE_INPUT,
+        outputs: &OUT_NUMERIC,
+    },
+    BuiltinSignatureDescriptor {
+        label: "X = hour(t, F)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "t",
+                ty: BuiltinParamType::Any,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Legacy serial date number or date text.",
+            },
+            BuiltinParamDescriptor {
+                name: "F",
+                ty: BuiltinParamType::StringScalar,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Legacy datestr input format.",
+            },
+        ],
+        outputs: &OUT_NUMERIC,
+    },
+];
 const DATETIME_MINUTE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "X = minute(t)",
     inputs: &DATETIME_SINGLE_INPUT,
@@ -503,6 +537,16 @@ const DAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerIn
 }];
 pub const DAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "day(integer_serial, dayType)", inputs: &DAY_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "All integer classes enter through authoritative storage; numeric outputs are MATLAB-compatible double arrays. Name modes return cell arrays of character vectors." }];
+
+const HOUR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "legacy serial date number",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "The merged legacy API documents serial date numbers but does not enumerate typed integer storage. RunMat accepts all eight classes only behind the typed-legacy extension and validates exact storage before conversion.",
+}];
+pub const HOUR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor { form: "hour(integer_serial, F)", inputs: &HOUR_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "[integer-audit-open] Typed integer serials are a clearly gated RunMat extension because current public evidence does not enumerate legacy serial storage classes; results are host double values with the input shape." }];
 
 const DATESHIFT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -953,6 +997,8 @@ fn parse_datetime_text(text: &str) -> Option<(NaiveDateTime, bool)> {
 
     for (pattern, has_time) in [
         ("%Y-%m-%d %H:%M:%S", true),
+        ("%Y/%m/%d %H:%M:%S%.f", true),
+        ("%Y/%m/%d %H:%M:%S", true),
         ("%Y-%m-%d", false),
         ("%d-%b-%Y %H:%M:%S", true),
         ("%d-%b-%Y", false),
@@ -1089,15 +1135,66 @@ fn relative_datetime(text: &str) -> Option<NaiveDateTime> {
 fn legacy_date_format_to_strftime(format: &str) -> String {
     let mut out = format.to_string();
     for (source, target) in [
+        (".fff", "%.3f"),
         ("yyyy", "%Y"),
         ("mmmm", "%B"),
         ("mmm", "%b"),
+        ("HH", "%H"),
+        ("hh", "%H"),
+        ("MM", "%M"),
+        ("ss", "%S"),
         ("mm", "%m"),
         ("dd", "%d"),
     ] {
         out = out.replace(source, target);
     }
     out
+}
+
+fn parse_legacy_hour_text(
+    value: Value,
+    input_format: Option<&str>,
+) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
+    let (texts, shape) = match value {
+        Value::String(text) => (vec![text], vec![1, 1]),
+        Value::StringArray(array) => {
+            let shape = tensor::default_shape_for(&array.shape, array.data.len());
+            (array.data, shape)
+        }
+        Value::CharArray(array) => {
+            let texts = (0..array.rows)
+                .map(|row| {
+                    array.data[row * array.cols..(row + 1) * array.cols]
+                        .iter()
+                        .collect::<String>()
+                        .trim_end()
+                        .to_string()
+                })
+                .collect();
+            (texts, vec![array.rows, 1])
+        }
+        _ => return Err(datetime_error("hour: expected legacy date text")),
+    };
+    let legacy_format = input_format.map(legacy_date_format_to_strftime);
+    let mut serials = Vec::with_capacity(texts.len());
+    for text in texts {
+        let parsed = if let Some(format) = legacy_format.as_deref() {
+            NaiveDateTime::parse_from_str(text.trim(), format)
+                .ok()
+                .or_else(|| {
+                    NaiveDate::parse_from_str(text.trim(), format)
+                        .ok()
+                        .map(|date| date.and_hms_opt(0, 0, 0).unwrap())
+                })
+        } else {
+            parse_datetime_text(text.trim()).map(|(value, _)| value)
+        }
+        .ok_or_else(|| {
+            datetime_error(format!("hour: unable to parse legacy date text '{text}'"))
+        })?;
+        serials.push(datenum_from_naive(parsed));
+    }
+    Ok((serials, shape))
 }
 
 fn parse_legacy_day_text(
@@ -1803,6 +1900,25 @@ fn component_tensor_from_datetime(
             Tensor::new(out, shape).map_err(|err| datetime_error(format!("{label}: {err}")))?;
         Ok(Value::Tensor(tensor))
     }
+}
+
+fn component_tensor_from_serials(
+    serials: &Tensor,
+    label: &str,
+    extractor: impl Fn(&NaiveDateTime) -> f64,
+) -> BuiltinResult<Value> {
+    let values = tensor::tensor_values_f64_cow(serials);
+    let mut out = Vec::with_capacity(values.len());
+    for serial in values.iter().copied() {
+        out.push(if serial.is_finite() {
+            extractor(&naive_from_datenum(serial)?)
+        } else {
+            f64::NAN
+        });
+    }
+    let shape = tensor::default_shape_for(&serials.shape, values.len());
+    tensor_or_scalar(out, shape)
+        .map_err(|err| datetime_error(format!("{label}: {}", err.message())))
 }
 
 fn tensor_or_scalar(data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
@@ -2533,13 +2649,69 @@ fn weekday_name(weekday: Weekday, short: bool) -> &'static str {
 #[runmat_macros::runtime_builtin(
     name = "hour",
     descriptor(crate::builtins::datetime::DATETIME_HOUR_DESCRIPTOR),
+    extensions(crate::builtins::datetime::HOUR_EXTENSIONS),
+    integer_capabilities(crate::builtins::datetime::HOUR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract hour components from datetime values.",
     keywords = "hour,datetime,time component"
 )]
-async fn hour_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    component_tensor_from_datetime(&value, "hour", |naive| naive.hour() as f64)
+async fn hour_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(datetime_error(
+            "hour: expected at most one legacy date format",
+        ));
+    }
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DATETIME_GPU_INPUT_EXTENSION,
+            "hour",
+        )?;
+    }
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DATETIME_LOGICAL_INPUT_EXTENSION,
+            "hour",
+        )?;
+    }
+    if matches!(value, Value::Int(_))
+        || matches!(&value, Value::Tensor(tensor) if tensor.integer_storage().is_some() || tensor.as_f32_slice().is_some())
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HOUR_TYPED_LEGACY_NUMERIC_EXTENSION,
+            "hour",
+        )?;
+    }
+    if rest
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        return Err(datetime_error("hour: legacy date format must be host text"));
+    }
+
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| datetime_error(format!("hour: {}", err.message())))?;
+    let format = rest
+        .first()
+        .map(|value| scalar_text(value, "hour legacy date format"))
+        .transpose()?;
+    if is_datetime_object(&value) {
+        if format.is_some() {
+            return Err(datetime_error(
+                "hour: legacy date format is not supported for datetime input",
+            ));
+        }
+        return component_tensor_from_datetime(&value, "hour", |naive| naive.hour() as f64);
+    }
+    let serials = match value {
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
+            let (serials, shape) = parse_legacy_hour_text(value, format.as_deref())?;
+            Tensor::new(serials, shape).map_err(|err| datetime_error(format!("hour: {err}")))?
+        }
+        value => serial_tensor_from_value(value, "hour legacy serial input")?,
+    };
+    component_tensor_from_serials(&serials, "hour", |naive| naive.hour() as f64)
 }
 
 #[runmat_macros::runtime_builtin(
@@ -4501,6 +4673,10 @@ mod tests {
         assert!(labels.contains(&"t = datetime(serialDateNumbers, \"ConvertFrom\", \"datenum\")"));
 
         assert_eq!(DATETIME_YEAR_DESCRIPTOR.signatures[0].label, "X = year(t)");
+        assert!(DATETIME_HOUR_DESCRIPTOR
+            .signatures
+            .iter()
+            .any(|signature| signature.label == "X = hour(t, F)"));
         assert_eq!(
             DATETIME_SUBSREF_DESCRIPTOR.signatures[0].label,
             "out = datetime.subsref(obj, kind, payload)"
@@ -4508,6 +4684,81 @@ mod tests {
         assert_eq!(
             DATETIME_BINARY_DESCRIPTOR.signatures[0].label,
             "out = datetime.op(lhs, rhs)"
+        );
+    }
+
+    #[test]
+    fn hour_supports_datetime_legacy_serial_and_formatted_text_shapes() {
+        let datetime = run_datetime(vec![Value::from("2024-03-14 09:26:53")]);
+        assert_eq!(
+            futures::executor::block_on(hour_builtin(datetime, Vec::new())).unwrap(),
+            Value::Num(9.0)
+        );
+
+        let serials = Tensor::new(
+            vec![
+                serial_for_date(2024, 3, 14) + 3.0 / 24.0,
+                serial_for_date(2024, 3, 14) + 17.0 / 24.0,
+            ],
+            vec![1, 2],
+        )
+        .unwrap();
+        let result =
+            futures::executor::block_on(hour_builtin(Value::Tensor(serials), Vec::new())).unwrap();
+        let Value::Tensor(result) = result else {
+            panic!("expected shaped hour result");
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.materialize_f64(), vec![3.0, 17.0]);
+
+        let formatted = futures::executor::block_on(hour_builtin(
+            Value::from("14/03/2024 21:05:00"),
+            vec![Value::from("dd/MM/yyyy HH:mm:ss")],
+        ))
+        .unwrap();
+        assert_eq!(formatted, Value::Num(21.0));
+
+        let documented = futures::executor::block_on(hour_builtin(
+            Value::from("2024/14/03 09:26:53.125"),
+            vec![Value::from("yyyy/dd/mm hh:MM:ss.fff")],
+        ))
+        .expect("documented datestr format language");
+        assert_eq!(documented, Value::Num(9.0));
+
+        let default_fractional = futures::executor::block_on(hour_builtin(
+            Value::from("2024/03/14 17:26:53.125"),
+            Vec::new(),
+        ))
+        .expect("year-first fractional legacy text");
+        assert_eq!(default_fractional, Value::Num(17.0));
+    }
+
+    #[test]
+    fn hour_gates_uncertain_typed_and_resident_legacy_extensions_before_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let typed = futures::executor::block_on(hour_builtin(
+            integer_tensor(
+                runmat_builtins::IntegerStorage::U32(vec![739_000]),
+                vec![1, 1],
+            ),
+            Vec::new(),
+        ))
+        .expect_err("typed legacy serial must be gated");
+        assert_eq!(
+            typed.identifier(),
+            Some("RunMat:compatibility:HourTypedLegacySerialExtension")
+        );
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_419_002,
+        });
+        let resident = futures::executor::block_on(hour_builtin(resident, Vec::new()))
+            .expect_err("resident legacy input must gate before provider access");
+        assert_eq!(
+            resident.identifier(),
+            Some("RunMat:compatibility:DatetimeGpuInputExtension")
         );
     }
 

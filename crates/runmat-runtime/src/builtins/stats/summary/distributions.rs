@@ -1826,6 +1826,49 @@ pub mod wblinv {
 pub mod icdf {
     use super::*;
 
+    const INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "icdf-integer-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "icdf with typed-integer probability or parameter input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IcdfIntegerInputExtension"),
+    };
+    const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "icdf-logical-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "icdf with logical probability or parameter input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:IcdfLogicalInputExtension"),
+    };
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+        [INTEGER_INPUT_EXTENSION, LOGICAL_INPUT_EXTENSION];
+
+    const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+        BuiltinIntegerInputCapability {
+            name: "p",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer probability input is gated before provider access and checked for exact representation at the floating inverse-CDF boundary.",
+        },
+        BuiltinIntegerInputCapability {
+            name: "distribution parameters",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer named-distribution parameters are gated independently from logical input and checked before floating evaluation.",
+        },
+    ];
+    pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+        [BuiltinIntegerCapabilityDescriptor {
+            form: "x = icdf(name_or_fitted_distribution, p, integer_parameters?)",
+            inputs: &INTEGER_INPUTS,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+            notes: "RunMat-only integer/logical inputs enter the same checked floating boundary for named and fitted-distribution-object forms. The implemented named-family subset preserves documented single/double class selection and restores resident output to the exact owner only when that owner can physically preserve the required precision; this metadata does not claim unsupported distribution families are implemented.",
+        }];
+
     const ERRORS: [BuiltinErrorDescriptor; 2] = [
         BuiltinErrorDescriptor {
             code: "RM.icdf.INVALID_ARGUMENT",
@@ -1867,10 +1910,12 @@ pub mod icdf {
     #[runtime_builtin(
         name = "icdf",
         category = "stats/summary",
-        summary = "Evaluate inverse cumulative distribution functions by distribution name.",
+        summary = "Evaluate inverse cumulative distribution functions for supported named families.",
         keywords = "icdf,inverse,cdf,normal,student t,weibull,binomial,chi-square,gamma,exponential,poisson,uniform,lognormal,beta,f,statistics",
         type_resolver(super::icdf_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::distributions::icdf"
     )]
     pub(crate) async fn icdf_builtin(
@@ -1885,27 +1930,209 @@ pub mod icdf {
                     "icdf: fitted distribution object form accepts exactly two inputs",
                 ));
             }
-            return crate::builtins::stats::summary::fitdist::icdf_probability_distribution(
-                name, p,
-            )
-            .await;
+            let admission = IcdfAdmission::new(&p, &[])?;
+            let p = gather_input(p).await?;
+            ensure_exact_integer_boundary(&p, "p")?;
+            let output =
+                crate::builtins::stats::summary::fitdist::icdf_probability_distribution(name, p)
+                    .await?;
+            return admission.finish(output);
         }
 
         let distribution = parse_distribution_name(&name)?;
-        match distribution {
-            IcdfDistribution::Normal => normal_icdf(p, rest).await,
-            IcdfDistribution::StudentT => student_t_icdf(p, rest).await,
-            IcdfDistribution::Weibull => weibull_icdf(p, rest).await,
-            IcdfDistribution::ChiSquare => chi_square_icdf(p, rest).await,
-            IcdfDistribution::Binomial => binomial_icdf(p, rest).await,
-            IcdfDistribution::Gamma => gamma_icdf(p, rest).await,
-            IcdfDistribution::Exponential => exponential_icdf(p, rest).await,
-            IcdfDistribution::Poisson => poisson_icdf(p, rest).await,
-            IcdfDistribution::Uniform => uniform_icdf(p, rest).await,
-            IcdfDistribution::Lognormal => lognormal_icdf(p, rest).await,
-            IcdfDistribution::Beta => beta_icdf(p, rest).await,
-            IcdfDistribution::F => f_icdf(p, rest).await,
+        let admission = IcdfAdmission::new(&p, &rest)?;
+        let p = gather_input(p).await?;
+        let mut gathered_rest = Vec::with_capacity(rest.len());
+        for value in rest {
+            gathered_rest.push(gather_input(value).await?);
         }
+        for (label, value) in
+            std::iter::once(("p", &p)).chain(gathered_rest.iter().map(|value| ("parameter", value)))
+        {
+            ensure_exact_integer_boundary(value, label)?;
+        }
+        let output = match distribution {
+            IcdfDistribution::Normal => normal_icdf(p, gathered_rest).await,
+            IcdfDistribution::StudentT => student_t_icdf(p, gathered_rest).await,
+            IcdfDistribution::Weibull => weibull_icdf(p, gathered_rest).await,
+            IcdfDistribution::ChiSquare => chi_square_icdf(p, gathered_rest).await,
+            IcdfDistribution::Binomial => binomial_icdf(p, gathered_rest).await,
+            IcdfDistribution::Gamma => gamma_icdf(p, gathered_rest).await,
+            IcdfDistribution::Exponential => exponential_icdf(p, gathered_rest).await,
+            IcdfDistribution::Poisson => poisson_icdf(p, gathered_rest).await,
+            IcdfDistribution::Uniform => uniform_icdf(p, gathered_rest).await,
+            IcdfDistribution::Lognormal => lognormal_icdf(p, gathered_rest).await,
+            IcdfDistribution::Beta => beta_icdf(p, gathered_rest).await,
+            IcdfDistribution::F => f_icdf(p, gathered_rest).await,
+        }?;
+        admission.finish(output)
+    }
+
+    #[derive(Clone, Copy)]
+    enum OutputPrecision {
+        Double,
+        Single,
+    }
+
+    struct IcdfAdmission {
+        precision: OutputPrecision,
+        gpu_source: Option<GpuTensorHandle>,
+    }
+
+    impl IcdfAdmission {
+        fn new(p: &Value, rest: &[Value]) -> BuiltinResult<Self> {
+            let values = std::iter::once(p).chain(rest.iter());
+            if values.clone().any(is_typed_integer_value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &INTEGER_INPUT_EXTENSION,
+                    "icdf",
+                )?;
+            }
+            if values.clone().any(is_logical_value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &LOGICAL_INPUT_EXTENSION,
+                    "icdf",
+                )?;
+            }
+            let precision = if values.clone().any(is_single_value) {
+                OutputPrecision::Single
+            } else {
+                OutputPrecision::Double
+            };
+            let mut gpu_source: Option<GpuTensorHandle> = None;
+            let mut owner: Option<&'static dyn runmat_accelerate_api::AccelProvider> = None;
+            for handle in values.filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle),
+                _ => None,
+            }) {
+                let current = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+                    super::normal_error("icdf", "icdf: resident input owner is unavailable")
+                })?;
+                if owner.is_some_and(|owner| !std::ptr::eq(owner, current)) {
+                    return Err(super::normal_error(
+                        "icdf",
+                        "icdf: resident inputs must share one exact provider",
+                    ));
+                }
+                owner = Some(current);
+                gpu_source.get_or_insert_with(|| handle.clone());
+            }
+            Ok(Self {
+                precision,
+                gpu_source,
+            })
+        }
+
+        fn finish(self, output: Value) -> BuiltinResult<Value> {
+            if self.gpu_source.is_none() && matches!(self.precision, OutputPrecision::Double) {
+                return Ok(output);
+            }
+            let tensor = match output {
+                Value::Num(value) => Tensor::new(vec![value], vec![1, 1]),
+                Value::Tensor(tensor) => Ok(tensor),
+                other => {
+                    return Err(super::normal_error(
+                        "icdf",
+                        format!("icdf: unexpected numeric output {other:?}"),
+                    ))
+                }
+            }
+            .map_err(|error| super::normal_error("icdf", format!("icdf: {error}")))?;
+            let tensor = match self.precision {
+                OutputPrecision::Double => tensor,
+                OutputPrecision::Single => Tensor::from_f32(
+                    tensor
+                        .materialize_f64()
+                        .into_iter()
+                        .map(|value| value as f32)
+                        .collect(),
+                    tensor.shape,
+                )
+                .map_err(|error| super::normal_error("icdf", format!("icdf: {error}")))?,
+            };
+            let Some(source) = self.gpu_source else {
+                return Ok(Value::Tensor(tensor));
+            };
+            gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(tensor), "icdf")
+                .map_err(|error| super::normal_error("icdf", format!("icdf: {error}")))
+        }
+    }
+
+    fn is_typed_integer_value(value: &Value) -> bool {
+        matches!(value, Value::Int(_))
+            || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+            || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    }
+
+    fn is_logical_value(value: &Value) -> bool {
+        matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+            || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    }
+
+    fn is_single_value(value: &Value) -> bool {
+        matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            || matches!(value, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(handle)
+                    && runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F32))
+    }
+
+    async fn gather_input(value: Value) -> BuiltinResult<Value> {
+        let Value::GpuTensor(handle) = &value else {
+            return Ok(value);
+        };
+        let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+            super::normal_error("icdf", "icdf: resident input owner is unavailable")
+        })?;
+        gpu_helpers::download_value_preserving_residency_async(owner, handle)
+            .await
+            .map_err(|error| super::normal_error("icdf", format!("icdf: {error}")))
+    }
+
+    fn ensure_exact_integer_boundary(value: &Value, label: &str) -> BuiltinResult<()> {
+        let tensor = match value {
+            Value::Int(integer) => {
+                let exact = match integer {
+                    runmat_builtins::IntValue::I8(value) => i128::from(*value),
+                    runmat_builtins::IntValue::I16(value) => i128::from(*value),
+                    runmat_builtins::IntValue::I32(value) => i128::from(*value),
+                    runmat_builtins::IntValue::I64(value) => i128::from(*value),
+                    runmat_builtins::IntValue::U8(value) => i128::from(*value),
+                    runmat_builtins::IntValue::U16(value) => i128::from(*value),
+                    runmat_builtins::IntValue::U32(value) => i128::from(*value),
+                    runmat_builtins::IntValue::U64(value) => i128::from(*value),
+                };
+                return ensure_exact_i128(exact, label);
+            }
+            Value::Tensor(tensor) if tensor.integer_storage().is_some() => tensor,
+            _ => return Ok(()),
+        };
+        for index in 0..tensor.len() {
+            let exact = match tensor.numeric_value_at(index) {
+                Some(NumericScalar::I8(value)) => i128::from(value),
+                Some(NumericScalar::I16(value)) => i128::from(value),
+                Some(NumericScalar::I32(value)) => i128::from(value),
+                Some(NumericScalar::I64(value)) => i128::from(value),
+                Some(NumericScalar::U8(value)) => i128::from(value),
+                Some(NumericScalar::U16(value)) => i128::from(value),
+                Some(NumericScalar::U32(value)) => i128::from(value),
+                Some(NumericScalar::U64(value)) => i128::from(value),
+                _ => continue,
+            };
+            ensure_exact_i128(exact, label)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_exact_i128(exact: i128, label: &str) -> BuiltinResult<()> {
+        const MAX_EXACT: i128 = 1_i128 << 53;
+        if !(-MAX_EXACT..=MAX_EXACT).contains(&exact) {
+            return Err(super::normal_error(
+                "icdf",
+                format!("icdf: integer {label} values must be exactly representable as double"),
+            ));
+        }
+        Ok(())
     }
 
     fn parse_distribution_name(value: &Value) -> BuiltinResult<IcdfDistribution> {
@@ -2109,6 +2336,7 @@ pub mod icdf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::IntegerStorage;
 
@@ -3040,7 +3268,7 @@ mod tests {
     fn binocdf_gpu_fallback_preserves_residency_precision_and_integer_guard_order() {
         use crate::builtins::common::test_support;
 
-        test_support::with_test_provider(|provider| {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
             let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single input");
             let handle = gpu_helpers::upload_tensor(provider, &single).expect("single upload");
             runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
@@ -3117,5 +3345,110 @@ mod tests {
             }
             other => panic!("expected scalar wblinv, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn icdf_gates_nonfloating_extensions_and_preserves_single() {
+        assert_eq!(icdf::INTEGER_CAPABILITIES[0].inputs.len(), 2);
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let integer = block_on(icdf::icdf_builtin(
+                Value::from("Normal"),
+                Value::Int(runmat_builtins::IntValue::U16(1)),
+                Vec::new(),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                integer.identifier(),
+                Some("RunMat:compatibility:IcdfIntegerInputExtension")
+            );
+            let logical = block_on(icdf::icdf_builtin(
+                Value::from("Normal"),
+                Value::Bool(true),
+                Vec::new(),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                logical.identifier(),
+                Some("RunMat:compatibility:IcdfLogicalInputExtension")
+            );
+        }
+
+        let single = block_on(icdf::icdf_builtin(
+            Value::from("Normal"),
+            Value::Tensor(Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap()),
+            Vec::new(),
+        ))
+        .expect("single icdf");
+        let Value::Tensor(single) = single else {
+            panic!("expected single tensor output");
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = block_on(icdf::icdf_builtin(
+            Value::from("Normal"),
+            Value::Int(runmat_builtins::IntValue::U64((1_u64 << 53) + 1)),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert!(wide.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn icdf_fitted_object_form_uses_the_same_integer_admission_boundary() {
+        let pd = block_on(crate::builtins::stats::summary::fitdist::fitdist_builtin(
+            Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap().into(),
+            Value::from("Normal"),
+            Vec::new(),
+        ))
+        .expect("fitted distribution");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(icdf::icdf_builtin(
+                pd.clone(),
+                Value::Int(runmat_builtins::IntValue::U16(1)),
+                Vec::new(),
+            ))
+            .expect_err("fitted-object typed p must gate");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:IcdfIntegerInputExtension")
+            );
+        }
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(icdf::icdf_builtin(
+            pd,
+            Value::Int(runmat_builtins::IntValue::U64((1_u64 << 53) + 1)),
+            Vec::new(),
+        ))
+        .expect_err("fitted-object wide p must reject exactly");
+        assert!(error.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn icdf_resident_floating_input_returns_to_exact_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.5], vec![1, 1]).unwrap();
+            let source = gpu_helpers::upload_tensor(provider, &input).expect("resident p");
+            runmat_accelerate::fusion_residency::mark(&source);
+            let output = block_on(icdf::icdf_builtin(
+                Value::from("Normal"),
+                Value::GpuTensor(source.clone()),
+                Vec::new(),
+            ))
+            .expect("resident icdf");
+            let Value::GpuTensor(output_handle) = &output else {
+                panic!("expected resident output");
+            };
+            assert_eq!(output_handle.device_id, source.device_id);
+            assert!(gpu_helpers::exact_provider_for_handle(output_handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(runmat_accelerate::fusion_residency::is_resident(&source));
+            let gathered =
+                crate::builtins::common::test_support::gather(output).expect("gather output");
+            assert!(gathered.materialize_f64()[0].abs() < 1.0e-12);
+            let _ = provider.free(&source);
+        });
     }
 }

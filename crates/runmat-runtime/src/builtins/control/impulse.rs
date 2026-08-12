@@ -2,9 +2,13 @@
 
 use nalgebra::DMatrix;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +25,65 @@ const TF_CLASS: &str = "tf";
 const EPS: f64 = 1.0e-12;
 const DEFAULT_POINTS: usize = 100;
 const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
+
+const IMPULSE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "impulse-integer-numeric-role",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "impulse with typed-integer model metadata or time input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ImpulseIntegerExtension"),
+};
+const IMPULSE_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "impulse-logical-numeric-role",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "impulse with logical model metadata or time input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ImpulseLogicalExtension"),
+};
+const IMPULSE_SINGLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "impulse-single-numeric-role",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "impulse with single-precision model metadata or time input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ImpulseSingleExtension"),
+};
+const IMPULSE_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "impulse-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "impulse with resident model metadata or time input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ImpulseResidentExtension"),
+};
+pub const IMPULSE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    IMPULSE_INTEGER_EXTENSION,
+    IMPULSE_LOGICAL_EXTENSION,
+    IMPULSE_SINGLE_EXTENSION,
+    IMPULSE_RESIDENT_EXTENSION,
+];
+
+const IMPULSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "sys numeric metadata",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "[integer-audit-open] Typed-integer coefficients and timing metadata are gated before model parsing and must be exactly representable at the host floating simulation boundary.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "t or tFinal",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "[integer-audit-open] The current public impulse reference states value and shape requirements but publishes no numeric class table for time controls.",
+    },
+];
+pub const IMPULSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[y, t] = impulse(sys, integer_time?)",
+        inputs: &IMPULSE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "[integer-audit-open] Non-double and resident numeric roles are independent RunMat extensions. This bounded SISO tf implementation simulates on the host and returns host response/time arrays.",
+    }];
 
 const IMPULSE_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "y",
@@ -203,9 +266,12 @@ fn impulse_error_with_message(
     keywords = "impulse,control system,transfer function,response,tf",
     type_resolver(impulse_type),
     descriptor(crate::builtins::control::impulse::IMPULSE_DESCRIPTOR),
+    extensions(crate::builtins::control::impulse::IMPULSE_EXTENSIONS),
+    integer_capabilities(crate::builtins::control::impulse::IMPULSE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::impulse"
 )]
 async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_impulse_extensions(&system, &rest)?;
     let system = TfSystem::parse(system).await?;
     let time = TimeSpec::parse(&system, &rest).await?;
     let response = evaluate_impulse(&system, time)?;
@@ -230,6 +296,72 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
     }
 
     response.y_value()
+}
+
+fn ensure_impulse_extensions(system: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    let mut values = std::iter::once(system).chain(rest.iter());
+    let integer = values.clone().any(value_contains_typed_integer);
+    let logical = values.clone().any(value_contains_logical);
+    let single = values.clone().any(value_contains_single);
+    let resident = values.any(crate::dispatcher::value_contains_gpu);
+    if integer {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMPULSE_INTEGER_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if logical {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMPULSE_LOGICAL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if single {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMPULSE_SINGLE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if resident {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMPULSE_RESIDENT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn value_contains_typed_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        Value::Object(object) => object.properties.values().any(value_contains_typed_integer),
+        _ => false,
+    }
+}
+
+fn value_contains_logical(value: &Value) -> bool {
+    match value {
+        Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
+        Value::Object(object) => object.properties.values().any(value_contains_logical),
+        _ => false,
+    }
+}
+
+fn value_contains_single(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor.numeric_dtype() == NumericDType::F32,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_precision(handle)
+                    == Some(runmat_accelerate_api::ProviderPrecision::F32)
+        }
+        Value::Object(object) => object.properties.values().any(value_contains_single),
+        _ => false,
+    }
 }
 
 async fn emit_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<()> {
@@ -361,10 +493,11 @@ fn real_coefficients(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector(label, &tensor.shape)?;
+            ensure_exact_integer_tensor(tensor, label)?;
             finite_values(label, tensor::tensor_values_f64(tensor))
         }
         Value::Num(n) => finite_values(label, vec![*n]),
-        Value::Int(i) => finite_values(label, vec![i.to_f64()]),
+        Value::Int(i) => finite_values(label, vec![exact_integer_as_f64(i, label)?]),
         Value::Bool(b) => finite_values(label, vec![if *b { 1.0 } else { 0.0 }]),
         Value::LogicalArray(logical) => {
             ensure_vector(label, &logical.shape)?;
@@ -413,9 +546,10 @@ fn ensure_vector(label: &str, shape: &[usize]) -> BuiltinResult<()> {
 fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
-        Value::Int(i) => Ok(i.to_f64()),
+        Value::Int(i) => exact_integer_as_f64(i, label),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            ensure_exact_integer_tensor(tensor, label)?;
             Ok(tensor::tensor_value_f64(tensor, 0))
         }
         other => Err(impulse_error_with_detail(
@@ -423,6 +557,48 @@ fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
             format!("{label} must be a real scalar, got {other:?}"),
         )),
     }
+}
+
+fn exact_integer_as_f64(value: &IntValue, label: &str) -> BuiltinResult<f64> {
+    const MAX_EXACT: i128 = 1_i128 << 53;
+    let exact = match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    };
+    if !(-MAX_EXACT..=MAX_EXACT).contains(&exact) {
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_ARGUMENT,
+            format!("{label} integer values must be exactly representable as double"),
+        ));
+    }
+    Ok(exact as f64)
+}
+
+fn ensure_exact_integer_tensor(tensor: &Tensor, label: &str) -> BuiltinResult<()> {
+    if tensor.integer_storage().is_none() {
+        return Ok(());
+    }
+    for index in 0..tensor.len() {
+        let value = match tensor.numeric_value_at(index) {
+            Some(NumericScalar::I8(value)) => IntValue::I8(value),
+            Some(NumericScalar::I16(value)) => IntValue::I16(value),
+            Some(NumericScalar::I32(value)) => IntValue::I32(value),
+            Some(NumericScalar::I64(value)) => IntValue::I64(value),
+            Some(NumericScalar::U8(value)) => IntValue::U8(value),
+            Some(NumericScalar::U16(value)) => IntValue::U16(value),
+            Some(NumericScalar::U32(value)) => IntValue::U32(value),
+            Some(NumericScalar::U64(value)) => IntValue::U64(value),
+            _ => continue,
+        };
+        exact_integer_as_f64(&value, label)?;
+    }
+    Ok(())
 }
 
 fn trim_leading_zeros(values: Vec<f64>) -> Vec<f64> {
@@ -464,9 +640,10 @@ impl TimeSpec {
 fn scalar_time_from_value(value: &Value) -> BuiltinResult<Option<f64>> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
-        Value::Int(i) => Ok(Some(i.to_f64())),
+        Value::Int(i) => Ok(Some(exact_integer_as_f64(i, "time")?)),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            ensure_exact_integer_tensor(tensor, "time")?;
             Ok(Some(tensor::tensor_value_f64(tensor, 0)))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
@@ -559,6 +736,7 @@ fn time_vector_from_value(value: Value) -> BuiltinResult<Vec<f64>> {
         )
     })?;
     ensure_vector("time", &tensor.shape)?;
+    ensure_exact_integer_tensor(&tensor, "time")?;
     let values = tensor::tensor_into_values_f64(tensor);
     if values.is_empty() {
         return Err(impulse_error_with_detail(
@@ -972,6 +1150,7 @@ mod tests {
 
     #[test]
     fn impulse_typed_integer_coefficients_and_time_cross_double_boundary_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let mut object = ObjectInstance::new("tf".to_string());
         object.properties.insert(
             "Numerator".to_string(),
@@ -1026,6 +1205,7 @@ mod tests {
 
     #[test]
     fn impulse_scalar_final_time_reads_typed_integer_storage_length_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let mut object = ObjectInstance::new("tf".to_string());
         object.properties.insert(
             "Numerator".to_string(),
@@ -1111,5 +1291,71 @@ mod tests {
         )
         .expect_err("negative output delay should fail");
         assert!(err.message().contains("OutputDelay must be"));
+    }
+
+    #[test]
+    fn impulse_evidence_open_numeric_roles_are_gated_and_exact() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let integer = run_impulse(
+                tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
+                vec![Value::Int(IntValue::U16(2))],
+            )
+            .unwrap_err();
+            assert_eq!(
+                integer.identifier(),
+                Some("RunMat:compatibility:ImpulseIntegerExtension")
+            );
+            let single = run_impulse(
+                tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
+                vec![Value::Tensor(
+                    Tensor::from_f32(vec![0.0, 1.0], vec![1, 2]).unwrap(),
+                )],
+            )
+            .unwrap_err();
+            assert_eq!(
+                single.identifier(),
+                Some("RunMat:compatibility:ImpulseSingleExtension")
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = run_impulse(
+            tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
+            vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+        )
+        .unwrap_err();
+        assert!(wide.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn impulse_resident_time_is_an_explicit_host_output_extension() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("resident time");
+            runmat_accelerate::fusion_residency::mark(&handle);
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = run_impulse(
+                    tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
+                    vec![Value::GpuTensor(handle.clone())],
+                )
+                .unwrap_err();
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:ImpulseResidentExtension")
+                );
+            }
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let output = run_impulse(
+                tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
+                vec![Value::GpuTensor(handle.clone())],
+            )
+            .expect("resident host fallback");
+            assert!(matches!(output, Value::Tensor(_)));
+            assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+            let _ = provider.free(&handle);
+        });
     }
 }
