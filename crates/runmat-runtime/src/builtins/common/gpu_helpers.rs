@@ -9,6 +9,143 @@ use runmat_builtins::{
 use crate::build_runtime_error;
 use crate::builtins::common::tensor;
 
+/// Resolve the provider that actually owns `handle`.
+///
+/// `provider_for_handle` retains a legacy active-provider fallback for older
+/// callers. Handle operations must additionally prove that the provider's
+/// device namespace matches the durable handle identity before touching it.
+pub fn exact_provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
+    runmat_accelerate_api::provider_for_handle(handle)
+        .filter(|provider| provider.device_id() == handle.device_id)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GpuHandleMetadataSnapshot {
+    storage: GpuTensorStorage,
+    precision: Option<ProviderPrecision>,
+    integer: Option<IntegerElementType>,
+    logical: bool,
+    transpose: Option<runmat_accelerate_api::TransposeInfo>,
+    class_name: Option<String>,
+    provenance: Option<runmat_accelerate_api::GpuHandleProvenance>,
+}
+
+pub fn snapshot_handle_metadata(handle: &GpuTensorHandle) -> GpuHandleMetadataSnapshot {
+    GpuHandleMetadataSnapshot {
+        storage: runmat_accelerate_api::handle_storage(handle),
+        precision: runmat_accelerate_api::handle_precision(handle),
+        integer: runmat_accelerate_api::handle_integer_type(handle),
+        logical: runmat_accelerate_api::handle_is_logical(handle),
+        transpose: runmat_accelerate_api::handle_transpose_info(handle),
+        class_name: runmat_accelerate_api::handle_class_name(handle),
+        provenance: runmat_accelerate_api::handle_provenance(handle),
+    }
+}
+
+pub fn restore_handle_metadata(handle: &GpuTensorHandle, snapshot: &GpuHandleMetadataSnapshot) {
+    runmat_accelerate_api::set_handle_storage(handle, snapshot.storage);
+    match snapshot.precision {
+        Some(precision) => runmat_accelerate_api::set_handle_precision(handle, precision),
+        None => runmat_accelerate_api::clear_handle_precision(handle),
+    }
+    match snapshot.integer {
+        Some(integer) => runmat_accelerate_api::set_handle_integer_type(handle, integer),
+        None => runmat_accelerate_api::clear_handle_integer_type(handle),
+    }
+    runmat_accelerate_api::set_handle_logical(handle, snapshot.logical);
+    match snapshot.transpose {
+        Some(info) => {
+            runmat_accelerate_api::record_handle_transpose(handle, info.base_rows, info.base_cols)
+        }
+        None => runmat_accelerate_api::clear_handle_transpose(handle),
+    }
+    match snapshot.class_name.as_deref() {
+        Some(class_name) => runmat_accelerate_api::set_handle_class_name(handle, class_name),
+        None => runmat_accelerate_api::clear_handle_class_name(handle),
+    }
+    match snapshot.provenance {
+        Some(provenance) => runmat_accelerate_api::set_handle_provenance(handle, provenance),
+        None => runmat_accelerate_api::clear_handle_provenance(handle),
+    }
+    runmat_accelerate_api::mark_residency(handle);
+}
+
+struct HandleMetadataRestoreGuard<'a> {
+    handle: &'a GpuTensorHandle,
+    snapshot: GpuHandleMetadataSnapshot,
+}
+
+impl<'a> HandleMetadataRestoreGuard<'a> {
+    fn new(handle: &'a GpuTensorHandle) -> Self {
+        Self {
+            handle,
+            snapshot: snapshot_handle_metadata(handle),
+        }
+    }
+}
+
+impl Drop for HandleMetadataRestoreGuard<'_> {
+    fn drop(&mut self) {
+        restore_handle_metadata(self.handle, &self.snapshot);
+    }
+}
+
+pub fn expected_gpu_class_name(
+    precision: Option<ProviderPrecision>,
+    integer: Option<IntegerElementType>,
+    logical: bool,
+) -> Option<&'static str> {
+    if logical {
+        return Some("logical");
+    }
+    if let Some(integer) = integer {
+        return Some(match integer {
+            IntegerElementType::I8 => "int8",
+            IntegerElementType::I16 => "int16",
+            IntegerElementType::I32 => "int32",
+            IntegerElementType::I64 => "int64",
+            IntegerElementType::U8 => "uint8",
+            IntegerElementType::U16 => "uint16",
+            IntegerElementType::U32 => "uint32",
+            IntegerElementType::U64 => "uint64",
+        });
+    }
+    precision.map(|precision| match precision {
+        ProviderPrecision::F32 => "single",
+        ProviderPrecision::F64 => "double",
+    })
+}
+
+pub fn gpu_class_metadata_matches(
+    handle: &GpuTensorHandle,
+    precision: Option<ProviderPrecision>,
+    integer: Option<IntegerElementType>,
+    logical: bool,
+) -> bool {
+    let expected = expected_gpu_class_name(precision, integer, logical);
+    runmat_accelerate_api::handle_class_name(handle)
+        .as_deref()
+        .is_none_or(|actual| expected == Some(actual))
+}
+
+pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
+    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+}
+
+pub fn free_unprotected_exact_owner(handle: &GpuTensorHandle, protected: &[&GpuTensorHandle]) {
+    if protected
+        .iter()
+        .any(|protected| same_gpu_handle(handle, protected))
+    {
+        return;
+    }
+    if let Some(owner) = exact_provider_for_handle(handle) {
+        if owner.free(handle).is_ok() {
+            runmat_accelerate_api::clear_handle_metadata(handle);
+        }
+    }
+}
+
 /// Download a GPU tensor handle to host memory, returning a dense `Tensor`.
 ///
 /// This helper routes through the dispatcher so residency hooks and provider
@@ -59,7 +196,34 @@ pub async fn download_value_preserving_residency_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> crate::BuiltinResult<Value> {
-    if let Some(expected_type) = runmat_accelerate_api::handle_integer_type(handle) {
+    if provider.device_id() != handle.device_id {
+        return Err(
+            build_runtime_error("gpu download: provider does not own the input handle")
+                .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build(),
+        );
+    }
+    let precision = runmat_accelerate_api::handle_precision(handle);
+    let integer = runmat_accelerate_api::handle_integer_type(handle);
+    let logical = runmat_accelerate_api::handle_is_logical(handle);
+    if !gpu_class_metadata_matches(handle, precision, integer, logical) {
+        return Err(build_runtime_error(
+            "gpu download: class metadata contradicts the physical payload metadata",
+        )
+        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    if integer.is_none() && precision != Some(provider.precision()) {
+        return Err(build_runtime_error(
+            "gpu download: floating precision metadata contradicts the owning provider",
+        )
+        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    if let Some(expected_type) = integer {
         let host = provider.download_integer(handle).await.map_err(|error| {
             build_runtime_error(format!("gpu download: {error}"))
                 .with_identifier("RunMat:gpu:DownloadFailed")
@@ -257,19 +421,14 @@ pub fn restore_class_preserving_value(
     value: Value,
     builtin: &str,
 ) -> crate::BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(source).ok_or_else(|| {
+    let provider = exact_provider_for_handle(source).ok_or_else(|| {
         build_runtime_error(format!(
             "{builtin}: no acceleration provider owns the input handle"
         ))
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
     })?;
-    let source_metadata = (
-        runmat_accelerate_api::handle_storage(source),
-        runmat_accelerate_api::handle_precision(source),
-        runmat_accelerate_api::handle_integer_type(source),
-        runmat_accelerate_api::handle_is_logical(source),
-    );
+    let source_guard = HandleMetadataRestoreGuard::new(source);
 
     let (output, expected_shape, expected_storage, expected_precision, expected_integer, logical) =
         match &value {
@@ -362,19 +521,8 @@ pub fn restore_class_preserving_value(
             _ => return Ok(value),
         };
 
-    let aliases_source =
-        output.device_id == source.device_id && output.buffer_id == source.buffer_id;
+    let aliases_source = same_gpu_handle(&output, source);
     if aliases_source {
-        runmat_accelerate_api::set_handle_storage(source, source_metadata.0);
-        match source_metadata.1 {
-            Some(precision) => runmat_accelerate_api::set_handle_precision(source, precision),
-            None => runmat_accelerate_api::clear_handle_precision(source),
-        }
-        match source_metadata.2 {
-            Some(integer) => runmat_accelerate_api::set_handle_integer_type(source, integer),
-            None => runmat_accelerate_api::clear_handle_integer_type(source),
-        }
-        runmat_accelerate_api::set_handle_logical(source, source_metadata.3);
         return Err(build_runtime_error(format!(
             "{builtin}: provider aliased the protected input while restoring the result"
         ))
@@ -384,26 +532,30 @@ pub fn restore_class_preserving_value(
 
     let valid = output.shape == expected_shape
         && output.device_id == provider.device_id()
-        && runmat_accelerate_api::provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && exact_provider_for_handle(&output).is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(&output) == expected_storage
         && expected_precision.is_none_or(|precision| {
             runmat_accelerate_api::handle_precision(&output) == Some(precision)
         })
         && runmat_accelerate_api::handle_integer_type(&output) == expected_integer
-        && runmat_accelerate_api::handle_is_logical(&output) == logical;
+        && runmat_accelerate_api::handle_is_logical(&output) == logical
+        && gpu_class_metadata_matches(&output, expected_precision, expected_integer, logical);
     if !valid {
-        if let Some(owner) = runmat_accelerate_api::provider_for_handle(&output) {
-            if owner.free(&output).is_ok() {
-                runmat_accelerate_api::clear_residency(&output);
-            }
-        }
+        free_unprotected_exact_owner(&output, &[source]);
         return Err(build_runtime_error(format!(
             "{builtin}: provider returned an invalid restored result"
         ))
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build());
     }
+    runmat_accelerate_api::set_handle_provenance(
+        &output,
+        source_guard
+            .snapshot
+            .provenance
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+    );
+    runmat_accelerate_api::mark_residency(&output);
     Ok(Value::GpuTensor(output))
 }
 
@@ -520,6 +672,21 @@ mod preserving_download_tests {
             let source = Tensor::new_integer(IntegerStorage::U64(vec![3, 4]), vec![1, 2])
                 .expect("integer source");
             let handle = upload_tensor(provider, &source).expect("upload integer source");
+            runmat_accelerate::ensure_residency_hooks();
+            runmat_accelerate_api::mark_residency(&handle);
+            runmat_accelerate_api::record_handle_transpose(&handle, 2, 1);
+            let snapshot = snapshot_handle_metadata(&handle);
+            runmat_accelerate_api::clear_residency(&handle);
+            runmat_accelerate_api::clear_handle_transpose(&handle);
+            restore_handle_metadata(&handle, &snapshot);
+            assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+            assert_eq!(
+                runmat_accelerate_api::handle_transpose_info(&handle),
+                Some(runmat_accelerate_api::TransposeInfo {
+                    base_rows: 2,
+                    base_cols: 1,
+                })
+            );
             let metadata = (
                 runmat_accelerate_api::handle_storage(&handle),
                 runmat_accelerate_api::handle_precision(&handle),
@@ -575,6 +742,32 @@ mod preserving_download_tests {
             Some("RunMat:gpu:ProviderPayloadMismatch")
         );
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    }
+
+    #[test]
+    fn preserving_download_rejects_missing_or_contradictory_floating_precision() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let handle = upload_tensor(provider, &tensor).expect("upload");
+            runmat_accelerate_api::clear_handle_precision(&handle);
+            let missing = block_on(download_value_preserving_residency_async(provider, &handle))
+                .expect_err("missing physical precision must reject");
+            assert_eq!(
+                missing.identifier(),
+                Some("RunMat:gpu:ProviderPayloadMismatch")
+            );
+            let contradictory = match provider.precision() {
+                ProviderPrecision::F32 => ProviderPrecision::F64,
+                ProviderPrecision::F64 => ProviderPrecision::F32,
+            };
+            runmat_accelerate_api::set_handle_precision(&handle, contradictory);
+            let mismatch = block_on(download_value_preserving_residency_async(provider, &handle))
+                .expect_err("contradictory physical precision must reject");
+            assert_eq!(
+                mismatch.identifier(),
+                Some("RunMat:gpu:ProviderPayloadMismatch")
+            );
+        });
     }
 }
 

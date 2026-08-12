@@ -2,12 +2,17 @@
 //! convolution with configurable padding strategies.
 
 use runmat_accelerate_api::{
-    GpuTensorHandle, HostTensorView, ImfilterMode, ImfilterOptions, ImfilterPadding, ImfilterShape,
+    GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, HostTensorView, ImfilterMode,
+    ImfilterOptions, ImfilterPadding, ImfilterShape, IntegerElementType, ProviderPrecision,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, LogicalArray, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -17,6 +22,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::image::filters::type_resolvers::imfilter_type;
+use crate::builtins::math::fft::common::{gpu_metadata_snapshot, restore_gpu_metadata};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
@@ -145,6 +151,45 @@ pub const IMFILTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &IMFILTER_ERRORS,
 };
 
+const IMFILTER_VALID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "imfilter-valid-output-shape",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "imfilter(..., 'valid') is a RunMat-only output-shape extension",
+    error_identifier: Some("RunMat:compatibility:ImfilterValidExtension"),
+};
+
+const IMFILTER_FILL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "imfilter-fill-keyword",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "imfilter(..., 'fill', padval) is a RunMat-only spelling; MATLAB accepts padval directly",
+    error_identifier: Some("RunMat:compatibility:ImfilterFillExtension"),
+};
+
+pub const IMFILTER_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [IMFILTER_VALID_EXTENSION, IMFILTER_FILL_EXTENSION];
+
+const IMFILTER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Documented int8, int16, int32, uint8, uint16, and uint32 host images are accumulated in binary64 and finalized into the original native class.",
+    }];
+
+pub const IMFILTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = imfilter(integer_A, double_h, options...)" ,
+        inputs: &IMFILTER_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The host filter sum is evaluated in double precision. Fractional integer results are rounded and out-of-range results saturate before authoritative same-class storage is constructed; resident integer input uses an owner-aware host fallback and preserves explicit residency. [integer-audit-open] Documented GPU accumulation uses double for uint32 and single for the other integer and logical classes; RunMat's current resident-integer fallback uses binary64, so that backend precision delta remains open.",
+    }];
+
 fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
@@ -190,6 +235,8 @@ fn imfilter_map_error(
     accel = "custom-imfilter",
     type_resolver(imfilter_type),
     descriptor(crate::builtins::image::filters::imfilter::IMFILTER_DESCRIPTOR),
+    extensions(crate::builtins::image::filters::imfilter::IMFILTER_EXTENSIONS),
+    integer_capabilities(crate::builtins::image::filters::imfilter::IMFILTER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::filters::imfilter"
 )]
 async fn imfilter_builtin(
@@ -206,17 +253,242 @@ async fn imfilter_builtin(
             imfilter_gpu(image_handle, filter_value, options).await
         }
         (image_value, Value::GpuTensor(filter_handle)) => {
-            let filter_tensor = gpu_helpers::gather_tensor_async(&filter_handle)
-                .await
-                .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
+            let filter_tensor = download_kernel_tensor(&filter_handle).await?;
             imfilter_host_value(image_value, filter_tensor, options)
         }
         (image_value, filter_value) => {
-            let filter_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, filter_value)
-                .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
+            let filter_tensor = host_kernel_tensor(filter_value)?;
             imfilter_host_value(image_value, filter_tensor, options)
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ImageOutputClass {
+    Double,
+    Single,
+    Integer(NumericDType),
+    Logical,
+}
+
+#[derive(Clone)]
+struct ProtectedGpuMetadata {
+    numeric: crate::builtins::math::fft::common::GpuMetadataSnapshot,
+    class_name: Option<String>,
+    transpose: Option<runmat_accelerate_api::TransposeInfo>,
+    provenance: Option<GpuHandleProvenance>,
+}
+
+fn protected_gpu_metadata(handle: &GpuTensorHandle) -> ProtectedGpuMetadata {
+    ProtectedGpuMetadata {
+        numeric: gpu_metadata_snapshot(handle),
+        class_name: runmat_accelerate_api::handle_class_name(handle),
+        transpose: runmat_accelerate_api::handle_transpose_info(handle),
+        provenance: runmat_accelerate_api::handle_provenance(handle),
+    }
+}
+
+fn restore_protected_gpu_metadata(handle: &GpuTensorHandle, metadata: ProtectedGpuMetadata) {
+    restore_gpu_metadata(handle, metadata.numeric);
+    match metadata.class_name {
+        Some(class_name) => runmat_accelerate_api::set_handle_class_name(handle, class_name),
+        None => runmat_accelerate_api::clear_handle_class_name(handle),
+    }
+    match metadata.transpose {
+        Some(transpose) => runmat_accelerate_api::record_handle_transpose(
+            handle,
+            transpose.base_rows,
+            transpose.base_cols,
+        ),
+        None => runmat_accelerate_api::clear_handle_transpose(handle),
+    }
+    match metadata.provenance {
+        Some(provenance) => runmat_accelerate_api::set_handle_provenance(handle, provenance),
+        None => runmat_accelerate_api::clear_handle_provenance(handle),
+    }
+    runmat_accelerate_api::mark_residency(handle);
+}
+
+impl ImageOutputClass {
+    fn from_host_value(value: &Value) -> BuiltinResult<Self> {
+        let class = match value {
+            Value::Num(_) => Self::Double,
+            Value::Int(value) => Self::from_integer_value(value)?,
+            Value::Bool(_) | Value::LogicalArray(_) => Self::Logical,
+            Value::Tensor(tensor) => Self::from_dtype(tensor.numeric_dtype())?,
+            other => {
+                return Err(imfilter_error_with_detail(
+                    &IMFILTER_ERROR_INVALID_INPUT,
+                    format!("A must be a real numeric or logical array, got {other:?}"),
+                ))
+            }
+        };
+        Ok(class)
+    }
+
+    fn from_integer_value(value: &IntValue) -> BuiltinResult<Self> {
+        Self::from_dtype(match value {
+            IntValue::I8(_) => NumericDType::I8,
+            IntValue::I16(_) => NumericDType::I16,
+            IntValue::I32(_) => NumericDType::I32,
+            IntValue::I64(_) => NumericDType::I64,
+            IntValue::U8(_) => NumericDType::U8,
+            IntValue::U16(_) => NumericDType::U16,
+            IntValue::U32(_) => NumericDType::U32,
+            IntValue::U64(_) => NumericDType::U64,
+        })
+    }
+
+    fn from_dtype(dtype: NumericDType) -> BuiltinResult<Self> {
+        match dtype {
+            NumericDType::F64 => Ok(Self::Double),
+            NumericDType::F32 => Ok(Self::Single),
+            NumericDType::I8
+            | NumericDType::I16
+            | NumericDType::I32
+            | NumericDType::U8
+            | NumericDType::U16
+            | NumericDType::U32 => Ok(Self::Integer(dtype)),
+            NumericDType::I64 | NumericDType::U64 => Err(imfilter_error_with_detail(
+                &IMFILTER_ERROR_INVALID_INPUT,
+                format!(
+                    "A class {} is not supported; expected single, double, int8, int16, int32, uint8, uint16, uint32, or logical",
+                    dtype.class_name()
+                ),
+            )),
+        }
+    }
+
+    fn from_gpu_handle(handle: &GpuTensorHandle) -> BuiltinResult<Self> {
+        if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real {
+            return Err(imfilter_error_with_detail(
+                &IMFILTER_ERROR_INVALID_INPUT,
+                "A must be real",
+            ));
+        }
+        let class = if runmat_accelerate_api::handle_is_logical(handle) {
+            Self::Logical
+        } else if let Some(integer) = runmat_accelerate_api::handle_integer_type(handle) {
+            Self::from_dtype(match integer {
+                IntegerElementType::I8 => NumericDType::I8,
+                IntegerElementType::I16 => NumericDType::I16,
+                IntegerElementType::I32 => NumericDType::I32,
+                IntegerElementType::I64 => NumericDType::I64,
+                IntegerElementType::U8 => NumericDType::U8,
+                IntegerElementType::U16 => NumericDType::U16,
+                IntegerElementType::U32 => NumericDType::U32,
+                IntegerElementType::U64 => NumericDType::U64,
+            })?
+        } else {
+            match runmat_accelerate_api::handle_precision(handle) {
+                Some(ProviderPrecision::F32) => Self::Single,
+                Some(ProviderPrecision::F64) => Self::Double,
+                None => {
+                    return Err(imfilter_error_with_detail(
+                        &IMFILTER_ERROR_INVALID_INPUT,
+                        "A GPU class metadata is unavailable",
+                    ))
+                }
+            }
+        };
+        if !gpu_helpers::gpu_class_metadata_matches(
+            handle,
+            class.provider_precision(),
+            runmat_accelerate_api::handle_integer_type(handle),
+            class == Self::Logical,
+        ) {
+            return Err(imfilter_error_with_detail(
+                &IMFILTER_ERROR_INVALID_INPUT,
+                "A GPU class metadata contradicts its physical storage",
+            ));
+        }
+        Ok(class)
+    }
+
+    fn provider_precision(self) -> Option<ProviderPrecision> {
+        match self {
+            Self::Double => Some(ProviderPrecision::F64),
+            Self::Single => Some(ProviderPrecision::F32),
+            Self::Integer(_) | Self::Logical => None,
+        }
+    }
+}
+
+fn host_kernel_tensor(value: Value) -> BuiltinResult<Tensor> {
+    let tensor = match value {
+        Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
+            .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?,
+        Value::Tensor(tensor) => tensor,
+        other => {
+            return Err(imfilter_error_with_detail(
+                &IMFILTER_ERROR_INVALID_INPUT,
+                format!("H must be a double array, got {other:?}"),
+            ))
+        }
+    };
+    if tensor.numeric_dtype() != NumericDType::F64 {
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            format!(
+                "H must be double, got {}",
+                tensor.numeric_dtype().class_name()
+            ),
+        ));
+    }
+    validate_public_kernel_tensor(&tensor)?;
+    Ok(tensor)
+}
+
+fn validate_public_kernel_tensor(tensor: &Tensor) -> BuiltinResult<()> {
+    if tensor.is_empty() || tensor.shape.contains(&0) {
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            "H must be non-empty",
+        ));
+    }
+    if tensor.shape.len() > 2 {
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            "H must be a double vector or matrix",
+        ));
+    }
+    Ok(())
+}
+
+async fn download_kernel_tensor(handle: &GpuTensorHandle) -> BuiltinResult<Tensor> {
+    if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_is_logical(handle)
+        || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_precision(handle) != Some(ProviderPrecision::F64)
+    {
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            "H must be a real double array",
+        ));
+    }
+    if !gpu_helpers::gpu_class_metadata_matches(handle, Some(ProviderPrecision::F64), None, false) {
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            "H GPU class metadata contradicts double storage",
+        ));
+    }
+    let provider = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+        imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            "no acceleration provider owns H",
+        )
+    })?;
+    if provider.precision() != ProviderPrecision::F64 {
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            "H is labelled double but its owner cannot physically represent double storage",
+        ));
+    }
+    let metadata = gpu_helpers::snapshot_handle_metadata(handle);
+    let result = gpu_helpers::download_value_preserving_residency_async(provider, handle).await;
+    gpu_helpers::restore_handle_metadata(handle, &metadata);
+    let value = result.map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
+    host_kernel_tensor(value)
 }
 
 fn imfilter_host_value(
@@ -224,11 +496,18 @@ fn imfilter_host_value(
     kernel_tensor: Tensor,
     options: ImfilterOptions,
 ) -> BuiltinResult<Value> {
+    let output_class = ImageOutputClass::from_host_value(&image_value)?;
     let image_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, image_value)
         .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
-    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)
-        .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-    Ok(tensor::tensor_into_value(result))
+    let result = apply_imfilter_host(
+        &image_tensor,
+        &kernel_tensor,
+        &options,
+        output_class,
+        IMFILTER_BUILTIN,
+    )
+    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
+    Ok(result)
 }
 
 async fn imfilter_gpu(
@@ -245,98 +524,279 @@ async fn imfilter_gpu(
             );
         }
     }
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => {
-            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
-                .await
-                .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-            return match kernel_value {
-                Value::GpuTensor(handle) => {
-                    let kernel_tensor = gpu_helpers::gather_tensor_async(&handle)
-                        .await
-                        .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-                    let result = apply_imfilter_tensor(
-                        &image_tensor,
-                        &kernel_tensor,
-                        &options,
-                        IMFILTER_BUILTIN,
-                    )
-                    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-                    Ok(tensor::tensor_into_value(result))
-                }
-                other => {
-                    let kernel_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, other)
-                        .map_err(|err| {
-                            imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err)
-                        })?;
-                    let result = apply_imfilter_tensor(
-                        &image_tensor,
-                        &kernel_tensor,
-                        &options,
-                        IMFILTER_BUILTIN,
-                    )
-                    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-                    Ok(tensor::tensor_into_value(result))
-                }
-            };
-        }
-    };
-
-    let (kernel_handle, uploaded_handle, kernel_tensor_for_fallback) = match kernel_value {
-        Value::GpuTensor(handle) => (handle.clone(), None, None),
-        other => {
-            let tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, other)
-                .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
-            let tensor_values = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: &tensor_values,
-                shape: &tensor.shape,
-            };
-            match provider.upload(&view) {
-                Ok(uploaded) => (uploaded.clone(), Some(uploaded), Some(tensor)),
-                Err(_) => {
-                    let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
-                        .await
-                        .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-                    let result =
-                        apply_imfilter_tensor(&image_tensor, &tensor, &options, IMFILTER_BUILTIN)
-                            .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-                    return Ok(tensor::tensor_into_value(result));
-                }
-            }
-        }
-    };
-
-    match provider
-        .imfilter(&image_handle, &kernel_handle, &options)
-        .await
+    let output_class = ImageOutputClass::from_gpu_handle(&image_handle)?;
+    let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
+        imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")
+    })?;
+    if output_class
+        .provider_precision()
+        .is_some_and(|precision| precision != provider.precision())
     {
-        Ok(output) => {
-            if let Some(uploaded) = uploaded_handle {
-                let _ = provider.free(&uploaded);
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            "A GPU precision metadata contradicts its owning provider",
+        ));
+    }
+
+    let (kernel_tensor, resident_kernel) = match kernel_value {
+        Value::GpuTensor(handle) => (download_kernel_tensor(&handle).await?, Some(handle)),
+        other => (host_kernel_tensor(other)?, None),
+    };
+    let expected_shape = build_imfilter_plan(
+        &image_handle.shape,
+        &kernel_tensor,
+        &options,
+        IMFILTER_BUILTIN,
+    )?
+    .final_shape;
+
+    // Native providers currently expose floating imfilter kernels. Integer and
+    // logical images take an exact owner-aware host path, then explicit inputs
+    // are restored to their owner with their original class metadata.
+    let Some(expected_precision) = output_class.provider_precision() else {
+        return imfilter_gpu_host_fallback(provider, &image_handle, &kernel_tensor, &options).await;
+    };
+    let mut uploaded_kernel = None;
+    let kernel_handle = if let Some(handle) = resident_kernel {
+        let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider));
+        if same_owner {
+            handle
+        } else {
+            let uploaded =
+                match upload_kernel(provider, &kernel_tensor, &image_handle, Some(&handle)) {
+                    Ok(uploaded) => uploaded,
+                    Err(_) => {
+                        return imfilter_gpu_host_fallback(
+                            provider,
+                            &image_handle,
+                            &kernel_tensor,
+                            &options,
+                        )
+                        .await
+                    }
+                };
+            uploaded_kernel = Some(uploaded.clone());
+            uploaded
+        }
+    } else {
+        let uploaded = match upload_kernel(provider, &kernel_tensor, &image_handle, None) {
+            Ok(uploaded) => uploaded,
+            Err(_) => {
+                return imfilter_gpu_host_fallback(
+                    provider,
+                    &image_handle,
+                    &kernel_tensor,
+                    &options,
+                )
+                .await
             }
+        };
+        uploaded_kernel = Some(uploaded.clone());
+        uploaded
+    };
+
+    let image_metadata = protected_gpu_metadata(&image_handle);
+    let kernel_metadata = protected_gpu_metadata(&kernel_handle);
+    let provider_result = provider
+        .imfilter(&image_handle, &kernel_handle, &options)
+        .await;
+    restore_protected_gpu_metadata(&image_handle, image_metadata);
+    restore_protected_gpu_metadata(&kernel_handle, kernel_metadata);
+    if let Some(uploaded) = uploaded_kernel.as_ref() {
+        free_temporary_handle(provider, uploaded);
+    }
+
+    match provider_result {
+        Ok(output) => {
+            if !valid_provider_output(
+                &output,
+                &image_handle,
+                &kernel_handle,
+                &expected_shape,
+                expected_precision,
+                provider,
+            ) {
+                free_rejected_provider_output(provider, &output, &image_handle, &kernel_handle);
+                return Err(imfilter_error_with_detail(
+                    &IMFILTER_ERROR_INTERNAL,
+                    "provider returned an invalid imfilter result",
+                ));
+            }
+            runmat_accelerate_api::set_handle_provenance(
+                &output,
+                runmat_accelerate_api::handle_provenance(&image_handle)
+                    .unwrap_or(GpuHandleProvenance::Automatic),
+            );
+            runmat_accelerate_api::mark_residency(&output);
             Ok(Value::GpuTensor(output))
         }
-        Err(_) => {
-            if let Some(uploaded) = uploaded_handle {
-                let _ = provider.free(&uploaded);
-            }
-            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
-                .await
-                .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-            let kernel_tensor = if let Some(tensor) = kernel_tensor_for_fallback {
-                tensor
-            } else {
-                gpu_helpers::gather_tensor_async(&kernel_handle)
-                    .await
-                    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?
-            };
-            let result =
-                apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)
-                    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
-            Ok(tensor::tensor_into_value(result))
+        Err(error) => {
+            log::trace!("imfilter: provider path unavailable, using host fallback: {error}");
+            imfilter_gpu_host_fallback(provider, &image_handle, &kernel_tensor, &options).await
         }
+    }
+}
+
+fn upload_kernel(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    tensor: &Tensor,
+    image: &GpuTensorHandle,
+    resident_kernel: Option<&GpuTensorHandle>,
+) -> BuiltinResult<GpuTensorHandle> {
+    let values = tensor.as_f64_slice().ok_or_else(|| {
+        imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, "H must be double")
+    })?;
+    let image_metadata = protected_gpu_metadata(image);
+    let resident_kernel_metadata = resident_kernel.map(protected_gpu_metadata);
+    let upload_result = provider.upload(&HostTensorView {
+        data: values,
+        shape: &tensor.shape,
+    });
+    restore_protected_gpu_metadata(image, image_metadata);
+    if let (Some(kernel), Some(metadata)) = (resident_kernel, resident_kernel_metadata) {
+        restore_protected_gpu_metadata(kernel, metadata);
+    }
+    let output = upload_result.map_err(|error| {
+        imfilter_error_with_detail(
+            &IMFILTER_ERROR_INTERNAL,
+            format!("failed to upload H to A's provider: {error}"),
+        )
+    })?;
+    let aliases_image = same_handle(&output, image);
+    let aliases_resident_kernel =
+        resident_kernel.is_some_and(|kernel| same_handle(&output, kernel));
+    let valid = output.shape == tensor.shape
+        && output.device_id == provider.device_id()
+        && !aliases_image
+        && !aliases_resident_kernel
+        && runmat_accelerate_api::provider_for_handle(&output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&output) == Some(provider.precision())
+        && runmat_accelerate_api::handle_integer_type(&output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&output)
+        && gpu_helpers::gpu_class_metadata_matches(
+            &output,
+            Some(provider.precision()),
+            None,
+            false,
+        );
+    if !valid {
+        if !aliases_image && !aliases_resident_kernel {
+            free_actual_owner(&output, "invalid uploaded kernel");
+        }
+        return Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INTERNAL,
+            "provider returned an invalid uploaded H handle",
+        ));
+    }
+    Ok(output)
+}
+
+fn same_handle(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+async fn imfilter_gpu_host_fallback(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    image_handle: &GpuTensorHandle,
+    kernel: &Tensor,
+    options: &ImfilterOptions,
+) -> BuiltinResult<Value> {
+    let metadata = gpu_helpers::snapshot_handle_metadata(image_handle);
+    let download =
+        gpu_helpers::download_value_preserving_residency_async(provider, image_handle).await;
+    gpu_helpers::restore_handle_metadata(image_handle, &metadata);
+    let image = download.map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
+    let result = imfilter_host_value(image, kernel.clone(), options.clone())?;
+    if !runmat_accelerate_api::handle_is_explicit(image_handle) {
+        return Ok(result);
+    }
+    let restored =
+        gpu_helpers::restore_class_preserving_value(image_handle, result, IMFILTER_BUILTIN)?;
+    if matches!(restored, Value::GpuTensor(_)) {
+        Ok(restored)
+    } else {
+        Err(imfilter_error_with_detail(
+            &IMFILTER_ERROR_INTERNAL,
+            "explicit gpuArray result could not be restored to its owning provider",
+        ))
+    }
+}
+
+fn valid_provider_output(
+    output: &GpuTensorHandle,
+    image: &GpuTensorHandle,
+    kernel: &GpuTensorHandle,
+    expected_shape: &[usize],
+    expected_precision: ProviderPrecision,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == expected_shape
+        && output.device_id == image.device_id
+        && !(output.device_id == image.device_id && output.buffer_id == image.buffer_id)
+        && !(output.device_id == kernel.device_id && output.buffer_id == kernel.buffer_id)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && gpu_helpers::gpu_class_metadata_matches(output, Some(expected_precision), None, false)
+}
+
+fn free_temporary_handle(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    handle: &GpuTensorHandle,
+) {
+    let Some(owner) = gpu_helpers::exact_provider_for_handle(handle) else {
+        log::trace!("imfilter: temporary kernel has no registered owner");
+        return;
+    };
+    if !std::ptr::eq(owner, provider) {
+        log::trace!("imfilter: temporary kernel owner changed before cleanup");
+        return;
+    }
+    if let Err(error) = owner.free(handle) {
+        log::trace!("imfilter: failed to free temporary kernel: {error}");
+    } else {
+        runmat_accelerate_api::clear_handle_metadata(handle);
+    }
+}
+
+fn free_actual_owner(handle: &GpuTensorHandle, context: &str) {
+    let Some(owner) = gpu_helpers::exact_provider_for_handle(handle) else {
+        log::trace!("imfilter: {context} has no registered owner");
+        return;
+    };
+    if let Err(error) = owner.free(handle) {
+        log::trace!("imfilter: failed to free {context}: {error}");
+    } else {
+        runmat_accelerate_api::clear_handle_metadata(handle);
+    }
+}
+
+fn free_rejected_provider_output(
+    _invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output: &GpuTensorHandle,
+    image: &GpuTensorHandle,
+    kernel: &GpuTensorHandle,
+) {
+    let aliases_protected = (output.device_id == image.device_id
+        && output.buffer_id == image.buffer_id)
+        || (output.device_id == kernel.device_id && output.buffer_id == kernel.buffer_id);
+    if aliases_protected {
+        return;
+    }
+    let Some(owner) = gpu_helpers::exact_provider_for_handle(output) else {
+        log::trace!("imfilter: rejected provider result has no registered owner");
+        return;
+    };
+    if let Err(error) = owner.free(output) {
+        log::trace!("imfilter: failed to free rejected provider result: {error}");
+    } else {
+        runmat_accelerate_api::clear_handle_metadata(output);
     }
 }
 
@@ -357,6 +817,10 @@ fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
                 "symmetric" => options.padding = ImfilterPadding::Symmetric,
                 "circular" => options.padding = ImfilterPadding::Circular,
                 "fill" => {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &IMFILTER_FILL_EXTENSION,
+                        IMFILTER_BUILTIN,
+                    )?;
                     options.padding = ImfilterPadding::Constant;
                     if let Some(next) = args.get(idx + 1) {
                         if matches_numeric_scalar(next) {
@@ -378,7 +842,13 @@ fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
                 }
                 "same" => options.shape = ImfilterShape::Same,
                 "full" => options.shape = ImfilterShape::Full,
-                "valid" => options.shape = ImfilterShape::Valid,
+                "valid" => {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &IMFILTER_VALID_EXTENSION,
+                        IMFILTER_BUILTIN,
+                    )?;
+                    options.shape = ImfilterShape::Valid;
+                }
                 "conv" => options.mode = ImfilterMode::Convolution,
                 "corr" => options.mode = ImfilterMode::Correlation,
                 other => {
@@ -508,7 +978,13 @@ pub fn build_imfilter_plan(
 
     validate_kernel_shape(&image_shape_norm, &kernel_ext, builtin)?;
 
-    let origin: Vec<usize> = kernel_ext.iter().map(|&dim| dim / 2).collect();
+    // MATLAB defines the one-based center as floor((size(h) + 1) / 2).
+    // In zero-based coordinates that is (size(h) - 1) / 2, which matters for
+    // every even-sized kernel.
+    let origin: Vec<usize> = kernel_ext
+        .iter()
+        .map(|&dim| dim.saturating_sub(1) / 2)
+        .collect();
     let full_shape: Vec<usize> = image_ext
         .iter()
         .zip(kernel_ext.iter())
@@ -569,6 +1045,85 @@ pub fn apply_imfilter_tensor(
     let data = plan.evaluate(&image_values, options);
     Tensor::new(data, plan.final_shape.clone())
         .map_err(|e| filter_error(builtin, format!("{builtin}: {e}")))
+}
+
+fn apply_imfilter_host(
+    image: &Tensor,
+    kernel: &Tensor,
+    options: &ImfilterOptions,
+    output_class: ImageOutputClass,
+    builtin: &str,
+) -> BuiltinResult<Value> {
+    let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
+    let image_values = tensor::tensor_values_f64_cow(image);
+    let data = plan.evaluate(&image_values, options);
+    let shape = plan.final_shape;
+
+    let storage = match output_class {
+        ImageOutputClass::Double => NumericStorage::F64(data),
+        ImageOutputClass::Single => {
+            NumericStorage::F32(data.into_iter().map(|value| value as f32).collect())
+        }
+        ImageOutputClass::Integer(dtype) => integer_filter_storage(data, dtype),
+        ImageOutputClass::Logical => {
+            let bits = data
+                .into_iter()
+                .map(|value| u8::from(round_and_clamp(value, 0.0, 1.0) != 0.0))
+                .collect();
+            let logical = LogicalArray::new(bits, shape)
+                .map_err(|error| filter_error(builtin, format!("{builtin}: {error}")))?;
+            return Ok(if logical.data.len() == 1 {
+                Value::Bool(logical.data[0] != 0)
+            } else {
+                Value::LogicalArray(logical)
+            });
+        }
+    };
+    let tensor = Tensor::from_numeric_storage(storage, shape)
+        .map_err(|error| filter_error(builtin, format!("{builtin}: {error}")))?;
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn integer_filter_storage(data: Vec<f64>, dtype: NumericDType) -> NumericStorage {
+    macro_rules! signed {
+        ($variant:ident, $ty:ty) => {
+            NumericStorage::$variant(
+                data.into_iter()
+                    .map(|value| {
+                        round_and_clamp(value, <$ty>::MIN as f64, <$ty>::MAX as f64) as $ty
+                    })
+                    .collect(),
+            )
+        };
+    }
+    macro_rules! unsigned {
+        ($variant:ident, $ty:ty) => {
+            NumericStorage::$variant(
+                data.into_iter()
+                    .map(|value| round_and_clamp(value, 0.0, <$ty>::MAX as f64) as $ty)
+                    .collect(),
+            )
+        };
+    }
+    match dtype {
+        NumericDType::I8 => signed!(I8, i8),
+        NumericDType::I16 => signed!(I16, i16),
+        NumericDType::I32 => signed!(I32, i32),
+        NumericDType::U8 => unsigned!(U8, u8),
+        NumericDType::U16 => unsigned!(U16, u16),
+        NumericDType::U32 => unsigned!(U32, u32),
+        NumericDType::I64 | NumericDType::U64 | NumericDType::F32 | NumericDType::F64 => {
+            unreachable!("unsupported imfilter output class rejected before finalization")
+        }
+    }
+}
+
+fn round_and_clamp(value: f64, minimum: f64, maximum: f64) -> f64 {
+    if value.is_nan() {
+        0.0_f64.clamp(minimum, maximum)
+    } else {
+        value.round().clamp(minimum, maximum)
+    }
 }
 
 fn normalize_shape(shape: &[usize]) -> Vec<usize> {
@@ -788,13 +1343,15 @@ fn reflect_index(coord: isize, len: isize) -> usize {
     if len == 1 {
         return 0;
     }
-    let period = 2 * len - 2;
+    // MATLAB's symmetric boundary repeats the border sample. For [a b c],
+    // the conceptual extension is ... c b a a b c c b a ... .
+    let period = 2 * len;
     let mut value = coord % period;
     if value < 0 {
         value += period;
     }
     if value >= len {
-        value = period - value;
+        value = period - 1 - value;
     }
     value as usize
 }
@@ -804,7 +1361,59 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{AccelDownloadFuture, AccelProvider, AccelProviderFuture};
     use runmat_builtins::{IntegerStorage, Tensor, Value};
+
+    struct MutatingAliasingImfilterProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+    }
+
+    impl MutatingAliasingImfilterProvider {
+        fn new() -> Self {
+            Self {
+                inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            }
+        }
+    }
+
+    impl AccelProvider for MutatingAliasingImfilterProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+
+        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            self.inner.free(handle)
+        }
+
+        fn device_info(&self) -> String {
+            "mutating-aliasing-imfilter-test-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+
+        fn imfilter<'a>(
+            &'a self,
+            image: &'a GpuTensorHandle,
+            kernel: &'a GpuTensorHandle,
+            _options: &'a ImfilterOptions,
+        ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+            runmat_accelerate_api::set_handle_precision(image, ProviderPrecision::F32);
+            runmat_accelerate_api::set_handle_storage(image, GpuTensorStorage::ComplexInterleaved);
+            runmat_accelerate_api::set_handle_integer_type(image, IntegerElementType::U8);
+            runmat_accelerate_api::set_handle_logical(image, true);
+            runmat_accelerate_api::set_handle_class_name(image, "single");
+            runmat_accelerate_api::clear_handle_transpose(image);
+            runmat_accelerate_api::mark_handle_automatic(image);
+            runmat_accelerate_api::set_handle_precision(kernel, ProviderPrecision::F32);
+            Box::pin(async move { Ok(image.clone()) })
+        }
+    }
 
     fn simple_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
@@ -915,9 +1524,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn imfilter_reads_typed_integer_image_and_kernel_storage_exactly() {
+    fn raw_filter_plan_reads_typed_integer_image_storage_exactly() {
         let image = typed_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]);
-        let kernel = typed_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]);
+        let kernel = simple_tensor(&[2.0], 1, 1);
 
         let result = apply_imfilter_tensor(
             &image,
@@ -972,7 +1581,9 @@ pub(crate) mod tests {
             .expect("imfilter");
             let gathered = test_support::gather(value).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            let expected = [1.0, 5.0, 3.0, 12.0];
+            // A 2-by-2 kernel has its documented origin at the first element,
+            // so same-size correlation samples forward from each output site.
+            let expected = [12.0, 9.0, 7.0, 5.0];
             for (got, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < 1e-12);
             }
@@ -981,7 +1592,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn gpu_image_host_typed_integer_kernel_uploads_exact_storage() {
+    fn public_gpu_form_rejects_non_double_kernel_before_upload() {
         test_support::with_test_provider(|provider| {
             let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0], 2, 2);
             let image_view = HostTensorView {
@@ -991,17 +1602,158 @@ pub(crate) mod tests {
             let image_handle = provider.upload(&image_view).expect("upload image");
             let kernel = typed_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]);
 
-            let value = block_on(imfilter_builtin(
+            let error = block_on(imfilter_builtin(
                 Value::GpuTensor(image_handle),
                 Value::Tensor(kernel),
                 Vec::new(),
             ))
-            .expect("imfilter");
-            let gathered = test_support::gather(value).expect("gather");
-
-            assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.materialize_f64(), vec![2.0, 8.0, 4.0, 10.0]);
+            .expect_err("typed H must reject");
+            assert_eq!(error.identifier(), IMFILTER_ERROR_INVALID_INPUT.identifier);
+            assert!(error.message().contains("H must be double"));
         });
+    }
+
+    #[test]
+    fn adversarial_provider_cannot_mutate_or_return_the_image_handle() {
+        let _guard = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(MutatingAliasingImfilterProvider::new()));
+        unsafe {
+            runmat_accelerate_api::register_provider(provider);
+        }
+        let image = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[2, 2],
+            })
+            .expect("image upload");
+        runmat_accelerate_api::set_handle_precision(&image, ProviderPrecision::F64);
+        runmat_accelerate_api::set_handle_storage(&image, GpuTensorStorage::Real);
+        runmat_accelerate_api::set_handle_class_name(&image, "double");
+        runmat_accelerate_api::record_handle_transpose(&image, 2, 2);
+        runmat_accelerate_api::mark_handle_explicit(&image);
+
+        let error = block_on(imfilter_builtin(
+            Value::GpuTensor(image.clone()),
+            Value::Tensor(simple_tensor(&[1.0], 1, 1)),
+            Vec::new(),
+        ))
+        .expect_err("aliased provider output must reject");
+
+        assert_eq!(error.identifier(), IMFILTER_ERROR_INTERNAL.identifier);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&image),
+            Some(ProviderPrecision::F64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&image),
+            GpuTensorStorage::Real
+        );
+        assert_eq!(runmat_accelerate_api::handle_integer_type(&image), None);
+        assert!(!runmat_accelerate_api::handle_is_logical(&image));
+        assert_eq!(
+            runmat_accelerate_api::handle_class_name(&image).as_deref(),
+            Some("double")
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_transpose_info(&image)
+                .map(|info| { (info.base_rows, info.base_cols) }),
+            Some((2, 2))
+        );
+        assert!(runmat_accelerate_api::handle_is_explicit(&image));
+        assert_eq!(
+            block_on(provider.download(&image))
+                .expect("protected input remains allocated")
+                .data,
+            vec![1.0, 2.0, 3.0, 4.0]
+        );
+        provider.free(&image).expect("free image");
+    }
+
+    #[test]
+    fn public_integer_images_preserve_every_documented_class() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![-2, 63]),
+                IntegerStorage::I8(vec![-4, 126]),
+            ),
+            (
+                IntegerStorage::I16(vec![-2, 16_000]),
+                IntegerStorage::I16(vec![-4, 32_000]),
+            ),
+            (
+                IntegerStorage::I32(vec![-2, 1_000_000]),
+                IntegerStorage::I32(vec![-4, 2_000_000]),
+            ),
+            (
+                IntegerStorage::U8(vec![2, 127]),
+                IntegerStorage::U8(vec![4, 254]),
+            ),
+            (
+                IntegerStorage::U16(vec![2, 32_000]),
+                IntegerStorage::U16(vec![4, 64_000]),
+            ),
+            (
+                IntegerStorage::U32(vec![2, 1_000_000]),
+                IntegerStorage::U32(vec![4, 2_000_000]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let image = typed_tensor(input, vec![1, 2]);
+            let result = block_on(imfilter_builtin(
+                Value::Tensor(image),
+                Value::Tensor(simple_tensor(&[2.0], 1, 1)),
+                Vec::new(),
+            ))
+            .expect("integer imfilter");
+            let Value::Tensor(output) = result else {
+                panic!("expected integer tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn public_kernel_must_be_nonempty_double_vector_or_matrix() {
+        let image = simple_tensor(&[1.0], 1, 1);
+        let rank_three = Tensor::new(vec![1.0], vec![1, 1, 1]).unwrap();
+        let error = block_on(imfilter_builtin(
+            Value::Tensor(image.clone()),
+            Value::Tensor(rank_three),
+            Vec::new(),
+        ))
+        .expect_err("rank-three H must reject");
+        assert_eq!(error.identifier(), IMFILTER_ERROR_INVALID_INPUT.identifier);
+
+        let empty = Tensor::new(Vec::new(), vec![0, 1]).unwrap();
+        let error = block_on(imfilter_builtin(
+            Value::Tensor(image),
+            Value::Tensor(empty),
+            Vec::new(),
+        ))
+        .expect_err("empty H must reject");
+        assert_eq!(error.identifier(), IMFILTER_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn even_kernel_origin_and_symmetric_padding_match_public_rules() {
+        let kernel = Tensor::new(vec![1.0, 0.0, 0.0, 0.0], vec![1, 4]).unwrap();
+        let plan = build_imfilter_plan(
+            &[1, 4],
+            &kernel,
+            &ImfilterOptions::default(),
+            IMFILTER_BUILTIN,
+        )
+        .unwrap();
+        let offsets: Vec<isize> = plan
+            .kernel_points
+            .iter()
+            .map(|point| point.offsets[1])
+            .collect();
+        assert_eq!(offsets, vec![-1, 0, 1, 2]);
+        assert_eq!(reflect_index(-1, 3), 0);
+        assert_eq!(reflect_index(-2, 3), 1);
+        assert_eq!(reflect_index(3, 3), 2);
+        assert_eq!(reflect_index(4, 3), 1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1034,9 +1786,11 @@ pub(crate) mod tests {
         let result =
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![3, 2]);
-        let expected = [1.0, 5.0, 9.0, 6.0, 25.0, 35.0];
+        // The documented even-kernel origin is the first element for a 2-by-2
+        // kernel. Convolution rotates H while retaining that origin.
+        let expected = [25.0, 35.0, 30.0, 26.0, 32.0, 24.0];
         for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
-            assert!((got - exp).abs() < 1e-12);
+            assert!((got - exp).abs() < 1e-12, "got {got}, expected {exp}");
         }
     }
 
@@ -1103,6 +1857,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_requires_scalar_value() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 4], 2, 2);
         let pad = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -1118,6 +1873,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn valid_with_larger_kernel_returns_empty_tensor() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 25], 5, 5);
         let result = block_on(imfilter_builtin(
@@ -1138,6 +1894,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fill_without_value_defaults_to_zero_padding() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let image = simple_tensor(&[1.0, 3.0, 2.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0, 1.0, 1.0, 1.0], 2, 2);
         let default = block_on(imfilter_builtin(
@@ -1159,10 +1916,11 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn imfilter_wgpu_matches_cpu_same_padding() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
+        ) else {
+            return;
+        };
 
         let image = simple_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel = simple_tensor(&[1.0; 9], 3, 3);
@@ -1178,23 +1936,18 @@ pub(crate) mod tests {
             data: &image.materialize_f64(),
             shape: &image.shape,
         };
-        let kernel_view = HostTensorView {
-            data: &kernel.materialize_f64(),
-            shape: &kernel.shape,
-        };
         let image_handle = provider.upload(&image_view).expect("upload image");
-        let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
 
         let gpu_value = block_on(imfilter_builtin(
             Value::GpuTensor(image_handle),
-            Value::GpuTensor(kernel_handle),
+            Value::Tensor(kernel),
             Vec::new(),
         ))
         .expect("imfilter");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         assert_eq!(cpu.shape, gathered.shape);
-        let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+        let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
@@ -1216,6 +1969,33 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"B = imfilter(A, H)"));
         assert!(labels.contains(&"B = imfilter(A, H, options...)"));
+    }
+
+    #[test]
+    fn imfilter_extensions_are_gated_and_capability_covers_shape_changing_forms() {
+        assert_eq!(IMFILTER_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            IMFILTER_INTEGER_CAPABILITIES[0].overload,
+            BuiltinIntegerOverloadKind::Multiple
+        );
+        assert!(IMFILTER_INTEGER_CAPABILITIES[0]
+            .notes
+            .contains("[integer-audit-open]"));
+
+        let image = Value::Tensor(simple_tensor(&[1.0], 1, 1));
+        let kernel = Value::Tensor(simple_tensor(&[1.0], 1, 1));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for option in ["valid", "fill"] {
+            let error = block_on(imfilter_builtin(
+                image.clone(),
+                kernel.clone(),
+                vec![Value::from(option)],
+            ))
+            .expect_err("extension must reject in MATLAB-compatible mode");
+            assert!(error
+                .identifier()
+                .is_some_and(|identifier| identifier.starts_with("RunMat:compatibility:")));
+        }
     }
 
     #[test]

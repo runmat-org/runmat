@@ -1,15 +1,18 @@
 //! MATLAB-compatible `rgb2gray` conversion.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, NumericScalar, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, NumericDType, NumericScalar, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::type_resolvers::rgb2gray_type;
@@ -73,6 +76,45 @@ pub const RGB2GRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RGB2GRAY_ERRORS,
 };
 
+const RGB2GRAY_DOCUMENTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "RGB",
+        classes: &common::DOCUMENTED_IMAGE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "uint8 and uint16 truecolor images are documented and produce grayscale output in the same native integer class.",
+    }];
+const RGB2GRAY_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "RGB",
+        classes: &common::REJECTED_IMAGE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Signed integer and uint32/uint64 RGB images are outside the documented surface and reject before resident download.",
+    }];
+pub const RGB2GRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "I = rgb2gray(integer_RGB)",
+        inputs: &RGB2GRAY_DOCUMENTED_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "The luminance computation reads authoritative integer samples, rounds into the same class, and restores documented GPU output through the input owner. [integer-audit-open] Public documentation gives the coefficients and same-class result but does not state the exact integer tie-rounding rule.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "rgb2gray(unsupported_integer_RGB)",
+        inputs: &RGB2GRAY_REJECTED_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Unsupported integer classes reject consistently on host and from resident dtype metadata.",
+    },
+];
+
 fn rgb2gray_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rgb2gray_error_with_message(error.message, error)
 }
@@ -103,16 +145,16 @@ fn rgb2gray_map_error(
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("rgb2gray"),
-    supported_precisions: &[],
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Host implementation preserves integer image dtype semantics; a float GPU provider can be added independently.",
+    notes: "Owner-aware host fallback preserves image dtype semantics and restores documented GPU results to the source provider.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::color::rgb2gray")]
@@ -134,18 +176,58 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(rgb2gray_type),
     descriptor(crate::builtins::image::color::rgb2gray::RGB2GRAY_DESCRIPTOR),
+    integer_capabilities(crate::builtins::image::color::rgb2gray::RGB2GRAY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::color::rgb2gray"
 )]
 async fn rgb2gray_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(rgb2gray_error(&RGB2GRAY_ERROR_TOO_MANY_INPUTS));
     }
+    let resident_sources = match &rgb {
+        Value::GpuTensor(handle) => {
+            validate_resident_rgb(handle)?;
+            vec![handle.clone()]
+        }
+        _ => Vec::new(),
+    };
+    let resident_guard = common::protect_resident_inputs(&resident_sources);
     let tensor = common::gather_tensor(NAME, rgb)
         .await
         .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INVALID_INPUT))?;
+    resident_guard.restore();
     let out = rgb2gray_tensor(&tensor)
         .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INTERNAL))?;
-    Ok(common::image_value_from_tensor(out))
+    common::restore_resident_numeric_result_for_sources(
+        &resident_sources,
+        common::image_value_from_tensor(out),
+        NAME,
+    )
+}
+
+fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<()> {
+    let dtype = common::resident_numeric_dtype(handle, NAME)
+        .map_err(|err| rgb2gray_map_error(err, &RGB2GRAY_ERROR_INVALID_INPUT))?;
+    let supported = if handle.shape.len() == 3 && handle.shape.get(2) == Some(&3) {
+        matches!(
+            dtype,
+            NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+        )
+    } else if handle.shape.len() == 2 && handle.shape.get(1) == Some(&3) {
+        dtype == NumericDType::F64
+    } else {
+        false
+    };
+    if !supported {
+        return Err(rgb2gray_error_with_message(
+            format!(
+                "rgb2gray: unsupported resident class {} or shape {:?}",
+                dtype.class_name(),
+                handle.shape
+            ),
+            &RGB2GRAY_ERROR_INVALID_INPUT,
+        ));
+    }
+    Ok(())
 }
 
 fn rgb2gray_tensor(rgb: &Tensor) -> BuiltinResult<Tensor> {
@@ -263,6 +345,7 @@ fn grayscale_storage(values: Vec<f64>, dtype: NumericDType) -> NumericStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_builtins::IntegerStorage;
 
@@ -384,6 +467,76 @@ mod tests {
             .map(|signature| signature.label)
             .collect();
         assert_eq!(labels, vec!["I = rgb2gray(RGB)"]);
+    }
+
+    #[test]
+    fn rgb2gray_integer_capabilities_record_supported_and_rejected_classes() {
+        assert_eq!(RGB2GRAY_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(
+            RGB2GRAY_INTEGER_CAPABILITIES[0].inputs[0].classes,
+            &common::DOCUMENTED_IMAGE_INTEGER_CLASSES
+        );
+        assert_eq!(
+            RGB2GRAY_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Rejected
+        );
+        assert!(RGB2GRAY_INTEGER_CAPABILITIES[0]
+            .notes
+            .contains("[integer-audit-open]"));
+    }
+
+    #[test]
+    fn rgb2gray_gpu_fallback_restores_exact_integer_class_and_preserves_source() {
+        test_support::with_test_provider(|provider| {
+            let rgb =
+                Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]).unwrap();
+            let source = gpu_helpers::upload_tensor(provider, &rgb).expect("upload rgb");
+            runmat_accelerate_api::mark_handle_explicit(&source);
+            let result = block_on(rgb2gray_builtin(
+                Value::GpuTensor(source.clone()),
+                Vec::new(),
+            ))
+            .expect("rgb2gray");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected restored gpu output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U8)
+            );
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(output))
+                    .unwrap()
+                    .integer_storage(),
+                Some(&IntegerStorage::U8(vec![76]))
+            );
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(source))
+                    .unwrap()
+                    .integer_storage(),
+                Some(&IntegerStorage::U8(vec![255, 0, 0]))
+            );
+        });
+    }
+
+    #[test]
+    fn rgb2gray_rejects_unsupported_resident_class_before_download() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1, 3],
+            device_id: u32::MAX - 11,
+            buffer_id: 1,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::I16,
+        );
+        let err = block_on(rgb2gray_builtin(
+            Value::GpuTensor(handle.clone()),
+            Vec::new(),
+        ))
+        .expect_err("unsupported resident integer");
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+        assert_eq!(err.identifier(), RGB2GRAY_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]

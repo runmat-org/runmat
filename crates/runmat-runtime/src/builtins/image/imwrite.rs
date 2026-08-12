@@ -6,9 +6,13 @@ use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::{AnimationDecoder, Delay, DynamicImage, Frame, ImageFormat, ImageOutputFormat};
 use image::{ImageBuffer, Luma, Rgb, Rgba, RgbaImage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, LogicalArray, NumericDType, NumericScalar, Tensor, Value,
+    IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -18,7 +22,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::image::type_resolvers::imwrite_type;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "imwrite";
 
@@ -184,6 +188,33 @@ pub const IMWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &IMWRITE_ERRORS,
 };
 
+const IMWRITE_SINGLE_GIF_TIFF_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "imwrite-single-gif-tiff",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "imwrite accepts direct single image data for GIF and TIFF as a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ImwriteSingleGifTiffExtension"),
+};
+pub const IMWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [IMWRITE_SINGLE_GIF_TIFF_EXTENSION];
+
+const IMWRITE_DOCUMENTED_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
+    [BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16];
+const IMWRITE_REJECTED_INTEGER_CLASSES: [BuiltinIntegerClass; 6] = [
+    BuiltinIntegerClass::Int8,
+    BuiltinIntegerClass::Int16,
+    BuiltinIntegerClass::Int32,
+    BuiltinIntegerClass::Int64,
+    BuiltinIntegerClass::Uint32,
+    BuiltinIntegerClass::Uint64,
+];
+const IMWRITE_DOCUMENTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "A_or_X", classes: &IMWRITE_DOCUMENTED_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Uint8 and uint16 direct or indexed images retain their native sample/index interpretation through the host encoder sink." }];
+const IMWRITE_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability { name: "A_or_X", classes: &IMWRITE_REJECTED_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Rejected, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Signed integer, uint32, and uint64 image arrays are outside the documented imwrite image-data surface and reject before file effects." }];
+pub const IMWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor { form: "imwrite(integer_A_or_X, ...)", inputs: &IMWRITE_DOCUMENTED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::EvidenceOpen, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "[integer-audit-open] The function is a documented host/file sink. Resident image input is gathered non-destructively through its owner, and all validation/encoding completes before the write begins. Uint16 JPEG, TIFF CMYK, and format-specific integer Alpha/control forms remain explicit implementation or public-evidence gaps." },
+    BuiltinIntegerCapabilityDescriptor { form: "imwrite(unsupported_integer_A_or_X, ...)", inputs: &IMWRITE_REJECTED_INTEGER_INPUT, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Unsupported image classes reject from authoritative host or resident metadata without a floating compatibility conversion or file effect." },
+];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::imwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "imwrite",
@@ -220,6 +251,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(imwrite_type),
     descriptor(crate::builtins::image::imwrite::IMWRITE_DESCRIPTOR),
+    extensions(crate::builtins::image::imwrite::IMWRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::image::imwrite::IMWRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::imwrite"
 )]
 async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -232,12 +265,21 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
     }
 
+    preflight_resident_argument_roles(&args)?;
     let mut host_args = Vec::with_capacity(args.len());
     for arg in &args {
-        host_args.push(gather_if_needed_async(arg).await?);
+        host_args.push(gather_imwrite_argument(arg).await?);
     }
 
     let invocation = parse_invocation(&host_args)?;
+    if matches!(invocation.format, ImageFormat::Gif | ImageFormat::Tiff)
+        && value_numeric_dtype(&invocation.image) == Some(NumericDType::F32)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &IMWRITE_SINGLE_GIF_TIFF_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let image = materialize_image(
         &invocation.image,
         invocation.map.as_ref(),
@@ -254,6 +296,117 @@ async fn imwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         })?;
 
     Ok(Value::OutputList(Vec::new()))
+}
+
+fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult<()> {
+    for value in args {
+        if let Value::GpuTensor(handle) = value {
+            validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
+        }
+    }
+    let Some(image) = args.first() else {
+        return Ok(());
+    };
+    preflight_resident_image_class(image)?;
+    if args.get(1).is_some_and(|value| !is_string_like(value)) {
+        if let Some(Value::GpuTensor(map)) = args.get(1) {
+            let owner = validate_resident_numeric_metadata(map, &IMWRITE_ERROR_INVALID_COLORMAP)?;
+            if runmat_accelerate_api::handle_integer_type(map).is_some()
+                || runmat_accelerate_api::handle_is_logical(map)
+                || runmat_accelerate_api::handle_precision(map)
+                    != Some(runmat_accelerate_api::ProviderPrecision::F64)
+                || owner.precision() != runmat_accelerate_api::ProviderPrecision::F64
+            {
+                return Err(imwrite_error_with_detail(
+                    &IMWRITE_ERROR_INVALID_COLORMAP,
+                    "map must be a double Nx3 colormap",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_resident_numeric_metadata(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<&'static dyn runmat_accelerate_api::AccelProvider> {
+    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| {
+            imwrite_error_with_detail(error, "no acceleration provider owns the gpuArray handle")
+        })?;
+    if runmat_accelerate_api::handle_storage(handle)
+        != runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        return Err(imwrite_error_with_detail(
+            error,
+            "gpuArray arguments must use real numeric storage",
+        ));
+    }
+    let precision = runmat_accelerate_api::handle_precision(handle);
+    let integer = runmat_accelerate_api::handle_integer_type(handle);
+    let logical = runmat_accelerate_api::handle_is_logical(handle);
+    if !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+        handle, precision, integer, logical,
+    ) {
+        return Err(imwrite_error_with_detail(
+            error,
+            "gpuArray class metadata contradicts its physical storage",
+        ));
+    }
+    if integer.is_none() && precision != Some(owner.precision()) {
+        return Err(imwrite_error_with_detail(
+            error,
+            "gpuArray precision metadata contradicts its owning provider",
+        ));
+    }
+    Ok(owner)
+}
+
+async fn gather_imwrite_argument(value: &Value) -> BuiltinResult<Value> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(value.clone());
+    };
+    let owner = validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
+    let metadata = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(handle);
+    let result = crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+        owner, handle,
+    )
+    .await;
+    crate::builtins::common::gpu_helpers::restore_handle_metadata(handle, &metadata);
+    result.map_err(|err| imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_ARGUMENT, err.message()))
+}
+
+fn preflight_resident_image_class(value: &Value) -> BuiltinResult<()> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(());
+    };
+    validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_IMAGE)?;
+    if matches!(
+        runmat_accelerate_api::handle_integer_type(handle),
+        Some(
+            runmat_accelerate_api::IntegerElementType::I8
+                | runmat_accelerate_api::IntegerElementType::I16
+                | runmat_accelerate_api::IntegerElementType::I32
+                | runmat_accelerate_api::IntegerElementType::I64
+                | runmat_accelerate_api::IntegerElementType::U32
+                | runmat_accelerate_api::IntegerElementType::U64
+        )
+    ) {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            "supported integer image classes are uint8 and uint16",
+        ));
+    }
+    Ok(())
+}
+
+fn value_numeric_dtype(value: &Value) -> Option<NumericDType> {
+    match value {
+        Value::Num(_) => Some(NumericDType::F64),
+        Value::Tensor(tensor) => Some(tensor.numeric_dtype()),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,6 +450,8 @@ struct MaterializedImage {
     cols: usize,
     channels: usize,
     data: PixelData,
+    alpha_applied: bool,
+    indexed_source: bool,
 }
 
 #[derive(Clone)]
@@ -584,6 +739,10 @@ fn materialize_image(
     map: Option<&Value>,
     alpha: Option<&Tensor>,
 ) -> BuiltinResult<MaterializedImage> {
+    ensure_documented_image_class(image, map.is_some(), "image")?;
+    if let Some(map) = map {
+        ensure_double_colormap(map)?;
+    }
     let tensor = tensor_from_numeric_like(image, "image")?;
     let mut out = if let Some(map_value) = map {
         materialize_indexed_image(&tensor, &tensor_from_numeric_like(map_value, "map")?)?
@@ -595,6 +754,41 @@ fn materialize_image(
         apply_alpha(&mut out, alpha)?;
     }
     Ok(out)
+}
+
+fn ensure_documented_image_class(value: &Value, indexed: bool, label: &str) -> BuiltinResult<()> {
+    let supported = match value {
+        Value::Num(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Int(IntValue::U8(_) | IntValue::U16(_)) => true,
+        Value::Tensor(tensor) => matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+        ),
+        _ => false,
+    };
+    if !supported {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            format!(
+                "{label} class is unsupported; expected double, single, uint8, uint16, or logical{}",
+                if indexed { " indexed data" } else { "" }
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_double_colormap(value: &Value) -> BuiltinResult<()> {
+    let valid = matches!(value, Value::Num(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64);
+    if valid {
+        Ok(())
+    } else {
+        Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_COLORMAP,
+            "map must be a double Nx3 colormap",
+        ))
+    }
 }
 
 fn image_dimensions(tensor: &Tensor) -> BuiltinResult<(usize, usize, usize)> {
@@ -647,6 +841,8 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
         cols,
         channels,
         data,
+        alpha_applied: false,
+        indexed_source: false,
     })
 }
 
@@ -662,6 +858,16 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_COLORMAP,
             "map must be an Nx3 colormap",
+        ));
+    }
+    let map_values = tensor::tensor_values_f64_cow(map);
+    if !map_values
+        .iter()
+        .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+    {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_COLORMAP,
+            "map values must be finite and in the range [0, 1]",
         ));
     }
 
@@ -697,6 +903,8 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
         cols,
         channels: 3,
         data: PixelData::U8(data),
+        alpha_applied: false,
+        indexed_source: true,
     })
 }
 
@@ -938,6 +1146,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
         }
     };
     image.channels = 4;
+    image.alpha_applied = true;
     Ok(())
 }
 
@@ -945,6 +1154,17 @@ async fn encode_image(
     image: &MaterializedImage,
     invocation: &Invocation,
 ) -> BuiltinResult<Vec<u8>> {
+    if image.channels == 4 && !image.alpha_applied {
+        let detail = if invocation.format == ImageFormat::Tiff {
+            "CMYK TIFF encoding is not supported by this RunMat encoder"
+        } else {
+            "direct four-channel input is documented only as TIFF CMYK"
+        };
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            detail,
+        ));
+    }
     if invocation.options.write_mode == WriteMode::Append && invocation.format != ImageFormat::Gif {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
@@ -953,12 +1173,28 @@ async fn encode_image(
     }
 
     match invocation.format {
-        ImageFormat::Gif => encode_gif(image, invocation).await,
+        ImageFormat::Gif => {
+            if (image.channels == 3 && !image.indexed_source)
+                || matches!(&image.data, PixelData::U16(_))
+            {
+                return Err(imwrite_error_with_detail(
+                    &IMWRITE_ERROR_INVALID_IMAGE,
+                    "GIF direct input must be grayscale/indexed 8-bit data",
+                ));
+            }
+            encode_gif(image, invocation).await
+        }
         ImageFormat::Jpeg => {
             if image.channels == 4 {
                 return Err(imwrite_error_with_detail(
                     &IMWRITE_ERROR_INVALID_OPTION,
                     "JPEG does not support alpha channels",
+                ));
+            }
+            if matches!(&image.data, PixelData::U16(_)) {
+                return Err(imwrite_error_with_detail(
+                    &IMWRITE_ERROR_INVALID_IMAGE,
+                    "16-bit JPEG encoding is not supported by this RunMat encoder",
                 ));
             }
             write_dynamic_image(
@@ -973,6 +1209,12 @@ async fn encode_image(
                     "BMP alpha output is not supported",
                 ));
             }
+            if matches!(&image.data, PixelData::U16(_)) {
+                return Err(imwrite_error_with_detail(
+                    &IMWRITE_ERROR_INVALID_IMAGE,
+                    "BMP does not support this 16-bit image input",
+                ));
+            }
             write_dynamic_image(
                 image_to_dynamic(&image_as_8bit(image), false)?,
                 ImageOutputFormat::Bmp,
@@ -982,6 +1224,12 @@ async fn encode_image(
             write_dynamic_image(image_to_dynamic(image, true)?, ImageOutputFormat::Png)
         }
         ImageFormat::Tiff => {
+            if image.channels == 4 {
+                return Err(imwrite_error_with_detail(
+                    &IMWRITE_ERROR_INVALID_IMAGE,
+                    "CMYK TIFF encoding is not supported by this RunMat encoder",
+                ));
+            }
             write_dynamic_image(image_to_dynamic(image, true)?, ImageOutputFormat::Tiff)
         }
         _ => Err(imwrite_error_with_detail(
@@ -1266,6 +1514,8 @@ fn image_as_8bit(image: &MaterializedImage) -> MaterializedImage {
         cols: image.cols,
         channels: image.channels,
         data: PixelData::U8(image_data_as_u8(image)),
+        alpha_applied: image.alpha_applied,
+        indexed_source: image.indexed_source,
     }
 }
 
@@ -1524,14 +1774,71 @@ mod tests {
     }
 
     #[test]
+    fn resident_image_metadata_is_validated_and_preserved_before_file_effect() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            runmat_accelerate::ensure_residency_hooks();
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("resident.png");
+            let image = typed_tensor(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]);
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &image)
+                .expect("upload image");
+            runmat_accelerate_api::mark_handle_explicit(&handle);
+            runmat_accelerate_api::mark_residency(&handle);
+            runmat_accelerate_api::record_handle_transpose(&handle, 1, 3);
+            call(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::from(path.to_string_lossy().as_ref()),
+            ])
+            .expect("resident write");
+            assert!(path.exists());
+            assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+            assert_eq!(
+                runmat_accelerate_api::handle_transpose_info(&handle),
+                Some(runmat_accelerate_api::TransposeInfo {
+                    base_rows: 1,
+                    base_cols: 3,
+                })
+            );
+
+            let bad_path = dir.path().join("bad.png");
+            runmat_accelerate_api::set_handle_class_name(&handle, "uint16");
+            let err = call(vec![
+                Value::GpuTensor(handle),
+                Value::from(bad_path.to_string_lossy().as_ref()),
+            ])
+            .expect_err("contradictory class must reject");
+            assert!(err.message().contains("class metadata contradicts"));
+            assert!(!bad_path.exists());
+        });
+    }
+
+    #[test]
+    fn single_gif_extension_rejects_before_file_effect_in_matlab_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("single.gif");
+        let image = tensor(vec![0.5], vec![1, 1], NumericDType::F32);
+        let err = call(vec![
+            Value::Tensor(image),
+            Value::from(path.to_string_lossy().as_ref()),
+        ])
+        .expect_err("single GIF extension must be gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:ImwriteSingleGifTiffExtension")
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
     fn writes_indexed_gif_with_zero_based_uint8_indices() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("indexed.gif");
         let x = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
         let map = tensor(
-            vec![255.0, 0.0, 0.0, 0.0, 0.0, 255.0],
+            vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
             vec![2, 3],
-            NumericDType::U8,
+            NumericDType::F64,
         );
 
         call(vec![
@@ -1556,7 +1863,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("typed-indexed.gif");
         let x = typed_tensor(IntegerStorage::U8(vec![0, 1]), vec![1, 2]);
-        let map = typed_tensor(IntegerStorage::U8(vec![255, 0, 0, 0, 0, 255]), vec![2, 3]);
+        let map = tensor(
+            vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            vec![2, 3],
+            NumericDType::F64,
+        );
 
         call(vec![
             Value::Tensor(x),
@@ -1579,11 +1890,17 @@ mod tests {
     fn appends_gif_frame() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("animated.gif");
-        let first = tensor(vec![1.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::F64);
-        let second = tensor(vec![0.0, 1.0, 0.0], vec![1, 1, 3], NumericDType::F64);
+        let first = typed_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]);
+        let second = typed_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]);
+        let map = tensor(
+            vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            vec![2, 3],
+            NumericDType::F64,
+        );
 
         call(vec![
             Value::Tensor(first),
+            Value::Tensor(map.clone()),
             Value::from(path.to_string_lossy().as_ref()),
             Value::from("LoopCount"),
             Value::Num(f64::INFINITY),
@@ -1593,6 +1910,7 @@ mod tests {
         .unwrap();
         call(vec![
             Value::Tensor(second),
+            Value::Tensor(map),
             Value::from(path.to_string_lossy().as_ref()),
             Value::from("WriteMode"),
             Value::from("append"),

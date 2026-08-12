@@ -465,6 +465,8 @@ A nontrivial decision should record enough information to reproduce and validate
 
 Compatibility gates apply to each broader input form independently. For example, row-wise character-matrix processing and recursive or non-cellstr text-cell processing are separate RunMat-only extensions for `eraseURLs` and `erasePunctuation`; enabling one form must not silently enable the other, and MATLAB-compatible mode rejects both with stable extension identifiers.
 
+Current public `imag`, `imfilter`, `imhist`, `imwrite`, `ind2rgb`, `rgb2gray`, `rgb2hsv`, and `rgb2lab` contracts are applied by role rather than by a generic numeric conversion. Exact integer image and index storage remains authoritative until the documented color, histogram, filtering, encoding, or floating-output boundary; unsupported classes and RunMat-only resident forms are gated before provider access or file effects. Internal automatic residency may use owner-aware host fallback, while explicit GPU inputs either retain device semantics through a deliberate gather-and-restore path or follow a documented host-output form such as GPU `imhist` without outputs; provider ownership, physical precision, class, shape, provenance, and source residency are validated and preserved across these boundaries.
+
 ## Related documentation
 
 - [Language Compatibility](/docs/runtime/getting-started/compatability)

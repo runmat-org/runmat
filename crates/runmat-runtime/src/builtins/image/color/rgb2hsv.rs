@@ -1,15 +1,18 @@
 //! MATLAB-compatible `rgb2hsv` conversion.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::type_resolvers::same_shape_type;
@@ -73,6 +76,47 @@ pub const RGB2HSV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &RGB2HSV_ERRORS,
 };
 
+const RGB2HSV_DOCUMENTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
+        name: "RGB",
+        classes: &common::DOCUMENTED_IMAGE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "uint8 and uint16 MxNx3 truecolor images are documented and scale to double HSV output.",
+    },
+];
+const RGB2HSV_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "RGB",
+        classes: &common::REJECTED_IMAGE_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Signed integer and uint32/uint64 RGB values are outside the documented surface and reject before resident download.",
+    }];
+pub const RGB2HSV_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "HSV = rgb2hsv(integer_RGB)",
+        inputs: &RGB2HSV_DOCUMENTED_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Authoritative uint8/uint16 samples are normalized before color conversion; documented GPU input is downloaded non-destructively and restored through its owner.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "rgb2hsv(unsupported_integer_RGB)",
+        inputs: &RGB2HSV_REJECTED_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Unsupported integer classes reject consistently on host and from resident dtype metadata.",
+    },
+];
+
 fn rgb2hsv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rgb2hsv_error_with_message(error.message, error)
 }
@@ -100,16 +144,16 @@ fn rgb2hsv_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
     op_kind: GpuOpKind::Custom("rgb2hsv"),
-    supported_precisions: &[],
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Host implementation; float RGB/HSV GPU providers are tracked separately.",
+    notes: "Owner-aware host fallback restores documented GPU results to the source provider.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::color::rgb2hsv")]
@@ -131,22 +175,36 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(same_shape_type),
     descriptor(crate::builtins::image::color::rgb2hsv::RGB2HSV_DESCRIPTOR),
+    integer_capabilities(crate::builtins::image::color::rgb2hsv::RGB2HSV_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::color::rgb2hsv"
 )]
 async fn rgb2hsv_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(rgb2hsv_error(&RGB2HSV_ERROR_TOO_MANY_INPUTS));
     }
+    let resident_sources = match &rgb {
+        Value::GpuTensor(handle) => {
+            validate_resident_rgb(handle)?;
+            vec![handle.clone()]
+        }
+        _ => Vec::new(),
+    };
+    let resident_guard = common::protect_resident_inputs(&resident_sources);
     let tensor = common::gather_tensor(NAME, rgb)
         .await
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INVALID_INPUT))?;
+    resident_guard.restore();
     let layout = common::color_layout(&tensor, NAME)
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INVALID_INPUT))?;
     let input_dtype = tensor.numeric_dtype();
-    if !matches!(
-        input_dtype,
-        NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
-    ) {
+    let supported = match layout {
+        common::ColorLayout::Truecolor { .. } => matches!(
+            input_dtype,
+            NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+        ),
+        common::ColorLayout::Colormap { .. } => input_dtype == NumericDType::F64,
+    };
+    if !supported {
         return Err(rgb2hsv_error_with_message(
             format!(
                 "rgb2hsv: {} input is not supported; expected single, double, uint8, or uint16",
@@ -178,7 +236,37 @@ async fn rgb2hsv_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INTERNAL))?;
-    Ok(common::image_value_from_tensor(out))
+    common::restore_resident_numeric_result_for_sources(
+        &resident_sources,
+        common::image_value_from_tensor(out),
+        NAME,
+    )
+}
+
+fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<()> {
+    let dtype = common::resident_numeric_dtype(handle, NAME)
+        .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INVALID_INPUT))?;
+    let supported = if handle.shape.len() == 3 && handle.shape.get(2) == Some(&3) {
+        matches!(
+            dtype,
+            NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+        )
+    } else if handle.shape.len() == 2 && handle.shape.get(1) == Some(&3) {
+        dtype == NumericDType::F64
+    } else {
+        false
+    };
+    if !supported {
+        return Err(rgb2hsv_error_with_message(
+            format!(
+                "rgb2hsv: unsupported resident class {} or shape {:?}",
+                dtype.class_name(),
+                handle.shape
+            ),
+            &RGB2HSV_ERROR_INVALID_INPUT,
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn rgb_to_hsv_unit(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
@@ -209,6 +297,7 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_builtins::{IntegerStorage, Tensor};
 
@@ -344,6 +433,74 @@ mod tests {
             .map(|signature| signature.label)
             .collect();
         assert_eq!(labels, vec!["HSV = rgb2hsv(RGB)"]);
+    }
+
+    #[test]
+    fn rgb2hsv_integer_capabilities_record_supported_and_rejected_classes() {
+        assert_eq!(RGB2HSV_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(
+            RGB2HSV_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            RGB2HSV_INTEGER_CAPABILITIES[1].inputs[0].classes,
+            &common::REJECTED_IMAGE_INTEGER_CLASSES
+        );
+    }
+
+    #[test]
+    fn rgb2hsv_gpu_fallback_restores_double_output_and_preserves_source() {
+        test_support::with_test_provider(|provider| {
+            let rgb =
+                Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]).unwrap();
+            let source = gpu_helpers::upload_tensor(provider, &rgb).expect("upload rgb");
+            runmat_accelerate_api::mark_handle_explicit(&source);
+            let result = block_on(rgb2hsv_builtin(
+                Value::GpuTensor(source.clone()),
+                Vec::new(),
+            ))
+            .expect("rgb2hsv");
+            let Value::GpuTensor(output) = result else {
+                panic!("expected restored gpu output");
+            };
+            assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(output))
+                    .unwrap()
+                    .materialize_f64(),
+                vec![0.0, 1.0, 1.0]
+            );
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(source))
+                    .unwrap()
+                    .integer_storage(),
+                Some(&IntegerStorage::U8(vec![255, 0, 0]))
+            );
+        });
+    }
+
+    #[test]
+    fn rgb2hsv_rejects_unsupported_resident_class_before_download() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1, 3],
+            device_id: u32::MAX - 12,
+            buffer_id: 1,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::U32,
+        );
+        let err = block_on(rgb2hsv_builtin(
+            Value::GpuTensor(handle.clone()),
+            Vec::new(),
+        ))
+        .expect_err("unsupported resident integer");
+        runmat_accelerate_api::clear_handle_metadata(&handle);
+        assert_eq!(err.identifier(), RGB2HSV_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]

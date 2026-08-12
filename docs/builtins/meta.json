@@ -72897,6 +72897,35 @@
           "when": "Internal tensor conversion/allocation/provider interaction failed.",
           "message": "imag: internal error"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = imag(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat accepts every native real or componentwise-complex integer class; current public imag documentation does not enumerate its exact class matrix, so endpoint compatibility remains evidence-open."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "EvidenceOpen",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "[integer-audit-open] Real integer input currently produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage. Provider paths preserve class, shape, owner, and explicit residency; the public page documents full gpuArray support but does not explicitly enumerate integer input or result classes, so the endpoint class contract remains provisional."
+        }
       ]
     },
     {
@@ -73383,6 +73412,47 @@
           "when": "Internal filtering operation fails.",
           "message": "imfilter: internal operation failed"
         }
+      ],
+      "extensions": [
+        {
+          "id": "imfilter-valid-output-shape",
+          "mode": "RunMatOnly",
+          "description": "imfilter(..., 'valid') is a RunMat-only output-shape extension",
+          "error_identifier": "RunMat:compatibility:ImfilterValidExtension"
+        },
+        {
+          "id": "imfilter-fill-keyword",
+          "mode": "RunMatOnly",
+          "description": "imfilter(..., 'fill', padval) is a RunMat-only spelling; MATLAB accepts padval directly",
+          "error_identifier": "RunMat:compatibility:ImfilterFillExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "B = imfilter(integer_A, double_h, options...)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented int8, int16, int32, uint8, uint16, and uint32 host images are accumulated in binary64 and finalized into the original native class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveInput",
+          "overflow": "Saturate",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "The host filter sum is evaluated in double precision. Fractional integer results are rounded and out-of-range results saturate before authoritative same-class storage is constructed; resident integer input uses an owner-aware host fallback and preserves explicit residency. [integer-audit-open] Documented GPU accumulation uses double for uint32 and single for the other integer and logical classes; RunMat's current resident-integer fallback uses binary64, so that backend precision delta remains open."
+        }
       ]
     },
     {
@@ -73632,6 +73702,102 @@
           "identifier": "RunMat:imhist:Internal",
           "when": "Internal histogram assembly fails.",
           "message": "imhist: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[counts, binLocations] = imhist(integer_I, n?)",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Documented grayscale integer image classes use their full class interval. RunMat currently returns double counts and bin locations; the exact public output classes remain evidence-open below."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "EvidenceOpen",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Exact native values are assigned to the documented class-wide half-open bins. [integer-audit-open] The public page does not state the output classes or programmatic gpuArray output residency, so double resident result publication remains provisional."
+        },
+        {
+          "form": "[counts, binLocations] = imhist(integer_X, map)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Uint8 and uint16 indexed images use zero-based colormap indices; indexed gpuArray input is not supported."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "EvidenceOpen",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "Host uint8/uint16 indices are counted exactly and the documented gpuArray surface excludes indexed images. [integer-audit-open] The public page calls the outputs numeric arrays without specifying their exact classes."
+        },
+        {
+          "form": "[counts, binLocations] = imhist(I, integer_n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The public form requires a positive integer scalar but does not enumerate typed-integer storage classes; RunMat accepts every native integer scalar exactly after range validation."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "EvidenceOpen",
+          "backend": "GatherFallback",
+          "overload": "ScalarOnly",
+          "notes": "RunMat reads typed n from authoritative integer storage and rejects zero, negative, platform-unrepresentable, or implementation-limit values before allocation. [integer-audit-open] R2026a documents an integer-valued n but not its accepted typed classes or exact output classes."
+        },
+        {
+          "form": "imhist(int64_or_uint64_image, ...)",
+          "inputs": [
+            {
+              "name": "I_or_X",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Int64 and uint64 are outside both documented image-class surfaces and reject from host or resident metadata before evaluation."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Unsupported wide image classes reject without a lossy floating conversion or provider access."
         }
       ]
     },
@@ -74623,6 +74789,62 @@
           "when": "Image file cannot be read for append or written.",
           "message": "imwrite: file I/O error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "imwrite-single-gif-tiff",
+          "mode": "RunMatOnly",
+          "description": "imwrite accepts direct single image data for GIF and TIFF as a RunMat extension",
+          "error_identifier": "RunMat:compatibility:ImwriteSingleGifTiffExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "imwrite(integer_A_or_X, ...)",
+          "inputs": [
+            {
+              "name": "A_or_X",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Uint8 and uint16 direct or indexed images retain their native sample/index interpretation through the host encoder sink."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "NotApplicable",
+          "overflow": "EvidenceOpen",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "[integer-audit-open] The function is a documented host/file sink. Resident image input is gathered non-destructively through its owner, and all validation/encoding completes before the write begins. Uint16 JPEG, TIFF CMYK, and format-specific integer Alpha/control forms remain explicit implementation or public-evidence gaps."
+        },
+        {
+          "form": "imwrite(unsupported_integer_A_or_X, ...)",
+          "inputs": [
+            {
+              "name": "A_or_X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Signed integer, uint32, and uint64 image arrays are outside the documented imwrite image-data surface and reject before file effects."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "Multiple",
+          "notes": "Unsupported image classes reject from authoritative host or resident metadata without a floating compatibility conversion or file effect."
+        }
       ]
     },
     {
@@ -74681,20 +74903,89 @@
         {
           "code": "RM.IND2RGB.INVALID_INDEX",
           "identifier": "RunMat:ind2rgb:InvalidIndex",
-          "when": "At least one index value is not finite.",
-          "message": "ind2rgb: index values must be finite"
-        },
-        {
-          "code": "RM.IND2RGB.INDEX_OUT_OF_RANGE",
-          "identifier": "RunMat:ind2rgb:IndexOutOfRange",
-          "when": "At least one index value falls outside the colormap bounds.",
-          "message": "ind2rgb: index is outside the colormap"
+          "when": "At least one floating index value is not finite or integral.",
+          "message": "ind2rgb: floating index values must be finite integers"
         },
         {
           "code": "RM.IND2RGB.INTERNAL",
           "identifier": "RunMat:ind2rgb:Internal",
           "when": "RGB output tensor construction fails internally.",
           "message": "ind2rgb: internal conversion failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "RGB = ind2rgb(integer_X, map)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "uint8 and uint16 indexed images use documented zero-based indices and are clipped to the colormap extent before lookup."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "Authoritative uint8/uint16 indices are zero-based and clipped exactly; documented GPU input is downloaded non-destructively and the double RGB result is restored through its owning provider."
+        },
+        {
+          "form": "ind2rgb(unsupported_integer_X, map)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Other native integer classes are outside the documented indexed-image surface and reject before a resident value is downloaded."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "Unsupported indexed-image classes reject consistently on host and from resident dtype metadata."
+        },
+        {
+          "form": "ind2rgb(X, integer_map)",
+          "inputs": [
+            {
+              "name": "map",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented colormap is double; typed-integer colormaps reject before lookup or resident download."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "FunctionSpecific",
+          "notes": "All typed-integer colormaps reject because the documented map class is double."
         }
       ]
     },
@@ -119135,7 +119426,7 @@
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "RGB truecolor image."
+              "description": "RGB truecolor image or double colormap."
             }
           ],
           "outputs": [
@@ -119159,7 +119450,7 @@
         {
           "code": "RM.RGB2GRAY.INVALID_INPUT",
           "identifier": "RunMat:rgb2gray:InvalidInput",
-          "when": "Input cannot be interpreted as an MxNx3 RGB image.",
+          "when": "Input cannot be interpreted as an MxNx3 RGB image or an Nx3 double colormap.",
           "message": "rgb2gray: invalid input"
         },
         {
@@ -119167,6 +119458,54 @@
           "identifier": "RunMat:rgb2gray:Internal",
           "when": "Grayscale output tensor construction fails internally.",
           "message": "rgb2gray: internal conversion failure"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "I = rgb2gray(integer_RGB)",
+          "inputs": [
+            {
+              "name": "RGB",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "uint8 and uint16 truecolor images are documented and produce grayscale output in the same native integer class."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The luminance computation reads authoritative integer samples, rounds into the same class, and restores documented GPU output through the input owner. [integer-audit-open] Public documentation gives the coefficients and same-class result but does not state the exact integer tie-rounding rule."
+        },
+        {
+          "form": "rgb2gray(unsupported_integer_RGB)",
+          "inputs": [
+            {
+              "name": "RGB",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Signed integer and uint32/uint64 RGB images are outside the documented surface and reject before resident download."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Unsupported integer classes reject consistently on host and from resident dtype metadata."
         }
       ]
     },
@@ -119216,6 +119555,54 @@
           "when": "HSV output tensor construction fails internally.",
           "message": "rgb2hsv: internal conversion failure"
         }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "HSV = rgb2hsv(integer_RGB)",
+          "inputs": [
+            {
+              "name": "RGB",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "uint8 and uint16 MxNx3 truecolor images are documented and scale to double HSV output."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative uint8/uint16 samples are normalized before color conversion; documented GPU input is downloaded non-destructively and restored through its owner."
+        },
+        {
+          "form": "rgb2hsv(unsupported_integer_RGB)",
+          "inputs": [
+            {
+              "name": "RGB",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Signed integer and uint32/uint64 RGB values are outside the documented surface and reject before resident download."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Unsupported integer classes reject consistently on host and from resident dtype metadata."
+        }
       ]
     },
     {
@@ -119224,14 +119611,21 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "LAB = rgb2lab(RGB)",
+          "label": "LAB = rgb2lab(RGB, Name=Value)",
           "inputs": [
             {
               "name": "RGB",
               "ty": "Any",
               "arity": "Required",
               "default": null,
-              "description": "RGB image or Nx3 RGB colormap values."
+              "description": "RGB image, image stack, or c-by-3 colormap values."
+            },
+            {
+              "name": "NameValue",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "ColorSpace or WhitePoint name-value options."
             }
           ],
           "outputs": [
@@ -119249,7 +119643,7 @@
         {
           "code": "RM.RGB2LAB.TOO_MANY_INPUTS",
           "identifier": "RunMat:rgb2lab:TooManyInputs",
-          "when": "More than one input argument is supplied.",
+          "when": "More than the two supported name-value pairs are supplied.",
           "message": "rgb2lab: too many input arguments"
         },
         {
@@ -119263,6 +119657,68 @@
           "identifier": "RunMat:rgb2lab:Internal",
           "when": "L*a*b* output tensor construction fails internally.",
           "message": "rgb2lab: internal conversion failure"
+        },
+        {
+          "code": "RM.RGB2LAB.INVALID_OPTION",
+          "identifier": "RunMat:rgb2lab:InvalidOption",
+          "when": "A ColorSpace or WhitePoint name-value argument is malformed or unsupported.",
+          "message": "rgb2lab: invalid name-value option"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "rgb2lab-explicit-gpu",
+          "mode": "RunMatOnly",
+          "description": "rgb2lab with an explicitly requested gpuArray input is a RunMat extension because R2026a documents no interactive GPU Arrays capability",
+          "error_identifier": "RunMat:compatibility:Rgb2labExplicitGpuExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "LAB = rgb2lab(integer_RGB)",
+          "inputs": [
+            {
+              "name": "RGB",
+              "classes": [
+                "Uint8",
+                "Uint16"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "uint8 and uint16 RGB images, MxNx3xP stacks, and c-by-3 colormaps are documented and scale to double L*a*b* output."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Authoritative uint8/uint16 samples are normalized before color-space conversion; automatic residency may gather to the documented host implementation. [integer-audit-open] Public documentation specifies normalization and double output but does not state intermediate precision or rounding details."
+        },
+        {
+          "form": "rgb2lab(unsupported_integer_RGB)",
+          "inputs": [
+            {
+              "name": "RGB",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Rejected",
+              "scalar_double": "NotApplicable",
+              "notes": "Signed integer and uint32/uint64 RGB values are outside the documented surface and reject before resident download."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostAndGpu",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Unsupported integer classes reject consistently on host and from resident dtype metadata."
         }
       ]
     },

@@ -2,9 +2,13 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -95,6 +99,27 @@ pub const IMAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &IMAG_ERRORS,
 };
 
+const IMAG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat accepts every native real or componentwise-complex integer class; current public imag documentation does not enumerate its exact class matrix, so endpoint compatibility remains evidence-open.",
+    }];
+
+pub const IMAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = imag(integer_X)",
+        inputs: &IMAG_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::EvidenceOpen,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "[integer-audit-open] Real integer input currently produces exact same-class zeros and paired complex-integer input projects its exact imaginary storage. Provider paths preserve class, shape, owner, and explicit residency; the public page documents full gpuArray support but does not explicitly enumerate integer input or result classes, so the endpoint class contract remains provisional.",
+    }];
+
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -115,6 +140,7 @@ fn builtin_error_with_detail(
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::elementwise::imag::IMAG_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::elementwise::imag::IMAG_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::elementwise::imag"
 )]
 async fn imag_builtin(value: Value) -> BuiltinResult<Value> {
@@ -143,20 +169,94 @@ async fn imag_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn imag_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.unary_imag(&handle).await {
-            return Ok(Value::GpuTensor(out));
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        builtin_error_with_detail(&IMAG_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
+    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
+        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+    let exact_host_path = runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle);
+    if !gpu_helpers::gpu_class_metadata_matches(
+        &handle,
+        runmat_accelerate_api::handle_precision(&handle),
+        runmat_accelerate_api::handle_integer_type(&handle),
+        runmat_accelerate_api::handle_is_logical(&handle),
+    ) {
+        return Err(builtin_error_with_detail(
+            &IMAG_ERROR_INTERNAL,
+            "GPU input class metadata contradicts its physical storage",
+        ));
+    }
+    if !exact_host_path
+        && runmat_accelerate_api::handle_precision(&handle) != Some(provider.precision())
+    {
+        return Err(builtin_error_with_detail(
+            &IMAG_ERROR_INTERNAL,
+            "GPU input precision metadata contradicts its owning provider",
+        ));
+    }
+    if !exact_host_path {
+        let result = provider.unary_imag(&handle).await;
+        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        match result {
+            Ok(out) if valid_imag_gpu_output(&out, &handle, provider) => {
+                runmat_accelerate_api::set_handle_provenance(&out, input_provenance);
+                return Ok(gpu_helpers::resident_gpu_value(out));
+            }
+            Ok(out) => {
+                gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
+                return Err(builtin_error_with_detail(
+                    &IMAG_ERROR_INTERNAL,
+                    "provider unary_imag returned malformed output",
+                ));
+            }
+            Err(err) if err.to_string().contains("unary_imag not supported") => {}
+            Err(err) => {
+                return Err(builtin_error_with_detail(
+                    &IMAG_ERROR_INTERNAL,
+                    format!("provider unary_imag failed: {err}"),
+                ));
+            }
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-        .await
+    let gathered_result =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
+    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    let gathered = gathered_result
         .map_err(|err| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, err.to_string()))?;
-    match gathered {
+    let host = match gathered {
         Value::Complex(_, im) => Ok(Value::Num(im)),
         Value::ComplexTensor(ct) => imag_complex_tensor(ct),
         Value::Tensor(tensor) => Ok(tensor::tensor_into_value(imag_tensor(tensor)?)),
         other => imag_real(other),
-    }
+    }?;
+    gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
+        .map_err(|err| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, err.to_string()))
+}
+
+fn valid_imag_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !(output.device_id == input.device_id && output.buffer_id == input.buffer_id)
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && gpu_helpers::gpu_class_metadata_matches(
+            output,
+            runmat_accelerate_api::handle_precision(input),
+            None,
+            false,
+        )
 }
 
 fn imag_real(value: Value) -> BuiltinResult<Value> {
@@ -461,6 +561,18 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn imag_rejects_contradictory_resident_class_before_provider_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            runmat_accelerate_api::set_handle_class_name(&handle, "single");
+            let err =
+                block_on(imag_gpu(handle)).expect_err("contradictory class metadata must reject");
+            assert!(err.message().contains("class metadata contradicts"));
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_complex_gpu_provider_stays_resident() {
@@ -485,19 +597,18 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn imag_wgpu_matches_cpu_zero() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let tensor = Tensor::new(vec![0.0, 1.0, -2.5, 4.0], vec![4, 1]).unwrap();
         let cpu = imag_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let h = runmat_accelerate_api::AccelProvider::upload(provider, &view).unwrap();
         let gpu = block_on(imag_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         let cpu_tensor = match cpu {
@@ -522,10 +633,11 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     #[test]
     fn imag_wgpu_complex_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().unwrap();
+        ) else {
+            return;
+        };
         let complex = ComplexTensor::new(vec![(1.0, 2.0), (-3.0, 4.5)], vec![2, 1]).unwrap();
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
         let gpu = block_on(imag_gpu(handle)).unwrap();

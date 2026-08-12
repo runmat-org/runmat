@@ -1,5 +1,5 @@
 use runmat_builtins::shape_rules::element_count_if_known;
-use runmat_builtins::{ResolveContext, Type};
+use runmat_builtins::{LiteralValue, ResolveContext, Type};
 
 pub fn filter2_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() != 2 {
@@ -12,9 +12,23 @@ pub fn fspecial_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
-pub fn imfilter_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.len() != 2 {
+pub fn imfilter_type(args: &[Type], context: &ResolveContext) -> Type {
+    if args.len() < 2 {
         return Type::tensor();
+    }
+    if args.len() > 2 {
+        let options = context.literal_args.get(2..).unwrap_or(&[]);
+        if options.len() != args.len() - 2
+            || options.iter().any(|option| match option {
+                LiteralValue::String(value) => {
+                    matches!(value.trim().to_ascii_lowercase().as_str(), "full" | "valid")
+                }
+                LiteralValue::Number(_) | LiteralValue::Bool(_) => false,
+                LiteralValue::Vector(_) | LiteralValue::Unknown => true,
+            })
+        {
+            return Type::tensor();
+        }
     }
     image_shape_output(&args[0]).unwrap_or_else(Type::tensor)
 }
@@ -89,5 +103,37 @@ mod tests {
                 shape: Some(vec![Some(2), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn imfilter_type_preserves_only_provably_same_shape_option_forms() {
+        let args = [
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+            Type::tensor(),
+            Type::tensor(),
+        ];
+        let same = ResolveContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("replicate".to_string()),
+        ]);
+        assert_eq!(
+            imfilter_type(&args, &same),
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
+
+        for option in [
+            LiteralValue::String("full".to_string()),
+            LiteralValue::String("valid".to_string()),
+            LiteralValue::Unknown,
+        ] {
+            let context =
+                ResolveContext::new(vec![LiteralValue::Unknown, LiteralValue::Unknown, option]);
+            assert_eq!(imfilter_type(&args, &context), Type::tensor());
+        }
     }
 }
