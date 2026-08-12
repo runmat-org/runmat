@@ -115,7 +115,9 @@ pub enum Token {
     OrOr,
     #[token("==")]
     Equal,
+    // `~=` is MATLAB; `!=` is the Octave synonym.
     #[token("~=")]
+    #[token("!=")]
     NotEqual,
     #[token("<=")]
     LessEqual,
@@ -137,7 +139,9 @@ pub enum Token {
     And,
     #[token("|")]
     Or,
+    // `~` is MATLAB; `!` is the Octave synonym for logical NOT.
     #[token("~")]
+    #[token("!")]
     Tilde,
     #[token("@")]
     At,

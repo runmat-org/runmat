@@ -207,7 +207,7 @@ fn leading_dot_float_does_not_break_property_access() {
 
 #[test]
 fn unknown_character_mixed_with_idents() {
-    let src = "a!b";
+    let src = "a#b";
     let tokens = tokenize(src);
     assert_eq!(tokens, vec![Token::Ident, Token::Error, Token::Ident]);
 }

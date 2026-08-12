@@ -22,6 +22,15 @@ fn logical_and_elementwise_operators() {
 }
 
 #[test]
+fn bang_is_octave_synonym_for_tilde() {
+    let src = "!a != b";
+    assert_eq!(
+        tokenize(src),
+        vec![Token::Tilde, Token::Ident, Token::NotEqual, Token::Ident,]
+    );
+}
+
+#[test]
 fn dot_plus_and_dot_minus_split() {
     let src = "1 .+ 2 .- 3";
     assert_eq!(

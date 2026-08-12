@@ -583,6 +583,59 @@ fn invalid_token_produces_error() {
 }
 
 #[test]
+fn invalid_token_message_names_line_and_column_once() {
+    let err = parse("x = 1\ny = $").unwrap_err();
+    assert_eq!(err.message, "Invalid character '$' at line 2, column 5.");
+    // The character is quoted in the message, so the formatters must not append
+    // it a second time.
+    assert_eq!(err.found_token, None);
+}
+
+#[test]
+fn invalid_token_hints_python_comment() {
+    let err = parse("import numpy\n# a comment").unwrap_err();
+    assert_eq!(
+        err.message,
+        "Invalid character '#' at line 2, column 1. Use '%' for comments in MATLAB. This code looks like Python."
+    );
+}
+
+#[test]
+fn invalid_token_hints_curly_quote() {
+    let err = parse("name = \u{201C}hi\u{201D}").unwrap_err();
+    assert_eq!(
+        err.message,
+        "Invalid character '\u{201C}' at line 1, column 8. Replace the curly quote with a straight quote (\")."
+    );
+}
+
+#[test]
+fn invalid_token_hints_non_ascii_identifier_letter() {
+    let err = parse("caf\u{00E9} = 1").unwrap_err();
+    assert_eq!(
+        err.message,
+        "Invalid character '\u{00E9}' at line 1, column 4. '\u{00E9}' is not a valid character in an identifier."
+    );
+}
+
+#[test]
+fn bang_not_equal_parses() {
+    assert!(parse("x = 1 != 2").is_ok());
+}
+
+#[test]
+fn bang_logical_not_parses() {
+    assert!(parse("x = !true").is_ok());
+}
+
+#[test]
+fn bang_shell_escape_no_longer_hits_invalid_token() {
+    // `!` maps to logical NOT, so `!ls` parses instead of the dead-end
+    // invalid-token error users hit before.
+    assert!(parse("!ls").is_ok());
+}
+
+#[test]
 fn incomplete_expression_produces_error() {
     assert!(parse("1 +").is_err());
 }

@@ -39,12 +39,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
 
     for t in toks {
         if matches!(t.token, Token::Error) {
-            return Err(SyntaxError {
-                message: format!("Invalid token: '{}'", t.lexeme),
-                position: t.start,
-                found_token: Some(t.lexeme),
-                expected: None,
-            });
+            return Err(invalid_token_error(input, &t.lexeme, t.start));
         }
         // Skip layout-only tokens from lexing.
         if matches!(
@@ -78,6 +73,66 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
         current_classdef_name: None,
     };
     parser.parse_program()
+}
+
+/// Build the error for a character the lexer cannot tokenize.
+///
+/// The message names the line and column and quotes the character once, so it
+/// reads on its own without a source excerpt. A hint classifies the common
+/// paste mistakes: Python code, curly quotes, and non-ASCII identifier letters.
+fn invalid_token_error(input: &str, lexeme: &str, start: usize) -> SyntaxError {
+    let bad_char = lexeme.chars().next().unwrap_or('?');
+    let (line, column) = line_and_column(input, start);
+    let mut message = format!("Invalid character '{bad_char}' at line {line}, column {column}.");
+    if let Some(hint) = invalid_character_hint(input, bad_char) {
+        message.push(' ');
+        message.push_str(&hint);
+    }
+    SyntaxError {
+        message,
+        position: start,
+        found_token: None,
+        expected: None,
+    }
+}
+
+fn invalid_character_hint(input: &str, bad_char: char) -> Option<String> {
+    match bad_char {
+        '#' => {
+            let mut hint = String::from("Use '%' for comments in MATLAB.");
+            if input.contains("import ") || input.contains("def ") || input.contains("plt.") {
+                hint.push_str(" This code looks like Python.");
+            }
+            Some(hint)
+        }
+        '\u{2018}' | '\u{2019}' => {
+            Some("Replace the curly quote with a straight quote (').".to_string())
+        }
+        '\u{201C}' | '\u{201D}' => {
+            Some("Replace the curly quote with a straight quote (\").".to_string())
+        }
+        other if !other.is_ascii() && other.is_alphabetic() => Some(format!(
+            "'{other}' is not a valid character in an identifier."
+        )),
+        _ => None,
+    }
+}
+
+fn line_and_column(input: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1usize;
+    let mut column = 1usize;
+    for (index, character) in input.char_indices() {
+        if index >= offset {
+            break;
+        }
+        if character == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    (line, column)
 }
 
 impl Parser {
