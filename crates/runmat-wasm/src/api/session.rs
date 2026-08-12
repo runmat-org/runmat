@@ -1771,6 +1771,12 @@ fn data_array_preview_json(values: &DataArrayValues, limit: usize) -> Vec<JsonVa
             .copied()
             .map(JsonValue::from)
             .collect(),
+        DataArrayValues::F32(values) => values
+            .iter()
+            .take(limit)
+            .copied()
+            .map(JsonValue::from)
+            .collect(),
         DataArrayValues::I8(values) => integer_values!(values, I8),
         DataArrayValues::I16(values) => integer_values!(values, I16),
         DataArrayValues::I32(values) => integer_values!(values, I32),
@@ -1787,4 +1793,19 @@ fn json_value_text(value: &JsonValue) -> String {
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| value.to_string())
+}
+
+#[cfg(test)]
+mod data_array_preview_tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn single_preview_preserves_values_and_limit() {
+        let preview = data_array_preview_json(&DataArrayValues::F32(vec![1.25, -3.5, 9.0]), 2);
+        assert_eq!(
+            preview,
+            vec![JsonValue::from(1.25_f32), JsonValue::from(-3.5_f32)]
+        );
+    }
 }

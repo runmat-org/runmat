@@ -126,7 +126,7 @@ pub(crate) fn apply_plotting_overrides(opts: &InitOptions) {
 pub(crate) fn parse_language_compat(input: Option<&str>) -> CompatMode {
     input
         .and_then(parse_language_compat_from_str)
-        .unwrap_or(CompatMode::Matlab)
+        .unwrap_or(CompatMode::RunMat)
 }
 
 pub(crate) fn parse_telemetry_run_kind(value: Option<&str>) -> TelemetryRunKind {
@@ -141,8 +141,10 @@ pub(crate) fn parse_telemetry_run_kind(value: Option<&str>) -> TelemetryRunKind 
 pub(crate) fn parse_language_compat_from_str(value: &str) -> Option<CompatMode> {
     if value.eq_ignore_ascii_case("strict") {
         Some(CompatMode::Strict)
-    } else if value.eq_ignore_ascii_case("matlab") || value.eq_ignore_ascii_case("runmat") {
+    } else if value.eq_ignore_ascii_case("matlab") {
         Some(CompatMode::Matlab)
+    } else if value.eq_ignore_ascii_case("runmat") {
+        Some(CompatMode::RunMat)
     } else {
         None
     }
@@ -161,5 +163,24 @@ pub(crate) fn parse_power_preference(input: Option<&str>) -> AccelPowerPreferenc
         Some(ref value) if value.contains("low") => AccelPowerPreference::LowPower,
         Some(ref value) if value.contains("high") => AccelPowerPreference::HighPerformance,
         _ => AccelPowerPreference::Auto,
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn language_compat_defaults_to_runmat() {
+        assert_eq!(parse_language_compat(None), CompatMode::RunMat);
+    }
+
+    #[wasm_bindgen_test]
+    fn language_compat_modes_remain_distinct() {
+        assert_eq!(parse_language_compat(Some("runmat")), CompatMode::RunMat);
+        assert_eq!(parse_language_compat(Some("matlab")), CompatMode::Matlab);
+        assert_eq!(parse_language_compat(Some("strict")), CompatMode::Strict);
+        assert_eq!(parse_language_compat_from_str("unknown"), None);
     }
 }

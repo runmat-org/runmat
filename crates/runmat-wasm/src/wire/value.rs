@@ -132,7 +132,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "shape": t.shape,
                 "rows": t.rows,
                 "cols": t.cols,
-                "dtype": t.dtype.class_name(),
+                "dtype": t.numeric_dtype().class_name(),
                 "preview": preview,
                 "length": length,
                 "truncated": truncated,
@@ -507,6 +507,16 @@ mod tests {
         let json = value_to_json(&Value::Tensor(tensor), 0);
         assert_eq!(json["dtype"], "uint64");
         assert_eq!(json["preview"], json!([42, "18446744073709551615"]));
+        assert_eq!(json["length"], 2);
+    }
+
+    #[wasm_bindgen_test]
+    fn native_single_tensor_json_preserves_dtype_and_values() {
+        let tensor = Tensor::from_f32(vec![1.25, -3.5], vec![1, 2]).expect("single tensor");
+        let json = value_to_json(&Value::Tensor(tensor), 0);
+
+        assert_eq!(json["dtype"], "single");
+        assert_eq!(json["preview"], json!([1.25, -3.5]));
         assert_eq!(json["length"], 2);
     }
 

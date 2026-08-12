@@ -308,7 +308,7 @@ noise = 1.0;
 
 for t = 0:dT:T
     R = sqrt(X.^2 + Y.^2);
-    Z = sin(t*R) ./ R + rand(R) * noise;
+    Z = sin(t*R) ./ R + rand(size(R)) * noise;
     surf(X, Y, Z);
     pause(dT);
 end
