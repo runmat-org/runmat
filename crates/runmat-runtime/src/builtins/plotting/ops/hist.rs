@@ -10,7 +10,6 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
@@ -21,6 +20,7 @@ use runmat_plot::gpu::histogram::{
 };
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::BarChart;
+use runmat_value::{IntValue, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1867,7 +1867,7 @@ pub(crate) mod tests {
 
     fn int_tensor(data: Vec<i16>) -> Tensor {
         Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(data.clone()),
+            runmat_value::IntegerStorage::I16(data.clone()),
             vec![data.len()],
         )
         .expect("integer tensor")
@@ -1930,8 +1930,8 @@ pub(crate) mod tests {
     #[test]
     fn hist_bin_counts_read_typed_integer_tensors_exactly() {
         let exact = 9_007_199_254_740_993_u64;
-        let scalar_count = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![exact]),
+        let scalar_count = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed bin count");
@@ -1940,8 +1940,8 @@ pub(crate) mod tests {
             _ => panic!("expected count bin spec"),
         }
 
-        let num_bins = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![exact]),
+        let num_bins = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed NumBins");
@@ -1950,8 +1950,8 @@ pub(crate) mod tests {
             exact as usize
         );
 
-        let negative = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-1]),
+        let negative = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative bin count");
@@ -2022,7 +2022,7 @@ pub(crate) mod tests {
                 .expect("resident wide histogram input");
             let centers = Value::Tensor(
                 Tensor::new_integer(
-                    runmat_builtins::IntegerStorage::U64(vec![
+                    runmat_value::IntegerStorage::U64(vec![
                         9_007_199_254_740_993,
                         9_007_199_254_740_994,
                     ]),

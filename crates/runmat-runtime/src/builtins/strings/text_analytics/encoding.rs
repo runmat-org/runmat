@@ -4,12 +4,12 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, LogicalArray, ObjectInstance, PropertyDef, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    ClassDef, PropertyDef, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, CharArray, LogicalArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
@@ -899,16 +899,16 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn int_value_to_f64(value: &runmat_builtins::IntValue) -> f64 {
+fn int_value_to_f64(value: &runmat_value::IntValue) -> f64 {
     match value {
-        runmat_builtins::IntValue::I8(value) => *value as f64,
-        runmat_builtins::IntValue::I16(value) => *value as f64,
-        runmat_builtins::IntValue::I32(value) => *value as f64,
-        runmat_builtins::IntValue::I64(value) => *value as f64,
-        runmat_builtins::IntValue::U8(value) => *value as f64,
-        runmat_builtins::IntValue::U16(value) => *value as f64,
-        runmat_builtins::IntValue::U32(value) => *value as f64,
-        runmat_builtins::IntValue::U64(value) => *value as f64,
+        runmat_value::IntValue::I8(value) => *value as f64,
+        runmat_value::IntValue::I16(value) => *value as f64,
+        runmat_value::IntValue::I32(value) => *value as f64,
+        runmat_value::IntValue::I64(value) => *value as f64,
+        runmat_value::IntValue::U8(value) => *value as f64,
+        runmat_value::IntValue::U16(value) => *value as f64,
+        runmat_value::IntValue::U32(value) => *value as f64,
+        runmat_value::IntValue::U64(value) => *value as f64,
     }
 }
 
@@ -933,7 +933,7 @@ fn encoding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, IntegerStorage};
+    use runmat_value::{CellArray, IntegerStorage};
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");

@@ -22,6 +22,7 @@ occt-wasm-host = [
 ]
 
 [dependencies]
+runmat-value = { workspace = true }
 runmat-core = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }

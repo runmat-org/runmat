@@ -7,9 +7,10 @@ use runmat_builtins::{
     builtin_functions, lookup_method, BuiltinCompletionPolicy, BuiltinDescriptor,
     BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::fs::contains_wildcards;
 use crate::builtins::common::path_search::{
@@ -572,9 +573,10 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::{Access, ClassDef, IntValue, MethodDef, Value};
+    use runmat_builtins::{ClassDef, MethodDef};
     use runmat_filesystem as vfs;
     use runmat_thread_local::runmat_thread_local;
+    use runmat_value::{Access, IntValue, Value};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::env;

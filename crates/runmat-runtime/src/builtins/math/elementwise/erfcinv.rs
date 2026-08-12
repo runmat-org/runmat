@@ -12,9 +12,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, NumericScalar, NumericStorage, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, NumericScalar, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -390,7 +391,8 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, SparseTensor, Type};
+    use runmat_builtins::Type;
+    use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, SparseTensor};
 
     fn erfcinv_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::erfcinv_builtin(value))
@@ -564,7 +566,7 @@ mod tests {
     fn gpu_rejects_integer_and_logical_storage_before_provider_dispatch() {
         test_support::with_test_provider(|provider| {
             let integer =
-                Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0, 1]), vec![1, 2])
+                Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![0, 1]), vec![1, 2])
                     .unwrap();
             let integer_handle =
                 gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");

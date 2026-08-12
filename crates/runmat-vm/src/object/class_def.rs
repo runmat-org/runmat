@@ -1,6 +1,7 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{self, Access, ClassDef, MethodDef, PropertyDef, Value};
+use runmat_builtins::{self, ClassDef, MethodDef, PropertyDef};
 use runmat_runtime::RuntimeError;
+use runmat_value::{Access, Value};
 
 pub fn register_class(
     name: String,

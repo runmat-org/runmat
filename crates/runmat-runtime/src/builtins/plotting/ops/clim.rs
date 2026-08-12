@@ -4,9 +4,10 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::limits::{limit_value, parse_limit_command, LimitCommand};
 use super::state::{color_limits_snapshot, set_color_limits_runtime};
@@ -130,14 +131,14 @@ pub(super) fn clim_impl(builtin: &'static str, args: Vec<Value>) -> crate::Built
     if let Some(Value::Tensor(tensor)) = args.first() {
         if matches!(
             tensor.numeric_dtype(),
-            runmat_builtins::NumericDType::I8
-                | runmat_builtins::NumericDType::I16
-                | runmat_builtins::NumericDType::I32
-                | runmat_builtins::NumericDType::I64
-                | runmat_builtins::NumericDType::U8
-                | runmat_builtins::NumericDType::U16
-                | runmat_builtins::NumericDType::U32
-                | runmat_builtins::NumericDType::U64
+            runmat_value::NumericDType::I8
+                | runmat_value::NumericDType::I16
+                | runmat_value::NumericDType::I32
+                | runmat_value::NumericDType::I64
+                | runmat_value::NumericDType::U8
+                | runmat_value::NumericDType::U16
+                | runmat_value::NumericDType::U32
+                | runmat_value::NumericDType::U64
         ) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &CLIM_INTEGER_LIMITS_EXTENSION,
@@ -189,11 +190,11 @@ mod tests {
         let _ = clear_figure(None);
 
         let _ = clim_builtin(vec![Value::Tensor(
-            runmat_builtins::Tensor::new(vec![0.25, 0.75], vec![1, 2]).expect("color limits"),
+            runmat_value::Tensor::new(vec![0.25, 0.75], vec![1, 2]).expect("color limits"),
         )])
         .unwrap();
         let queried = clim_builtin(Vec::new()).unwrap();
-        let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
+        let tensor = runmat_value::Tensor::try_from(&queried).unwrap();
         assert_eq!(tensor.materialize_f64(), vec![0.25, 0.75]);
     }
 }

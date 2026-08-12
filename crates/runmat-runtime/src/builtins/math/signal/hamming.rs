@@ -273,11 +273,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::signal::hamming"
 )]
 async fn hamming_builtin(
-    n: runmat_builtins::Value,
-    varargin: Vec<runmat_builtins::Value>,
-) -> crate::BuiltinResult<runmat_builtins::Value> {
+    n: runmat_value::Value,
+    varargin: Vec<runmat_value::Value>,
+) -> crate::BuiltinResult<runmat_value::Value> {
     validate_hamming_options(&varargin)?;
-    if matches!(n, runmat_builtins::Value::Bool(_)) {
+    if matches!(n, runmat_value::Value::Bool(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &HAMMING_LOGICAL_LENGTH_EXTENSION,
             BUILTIN_NAME,
@@ -295,7 +295,7 @@ async fn hamming_builtin(
                     WindowOutputType::Single => runmat_accelerate_api::ProviderPrecision::F32,
                 };
                 if valid_provider_window(&handle, provider, options.len, precision) {
-                    return Ok(runmat_builtins::Value::GpuTensor(handle));
+                    return Ok(runmat_value::Value::GpuTensor(handle));
                 }
                 free_rejected_provider_window(&handle, provider);
             }
@@ -308,7 +308,7 @@ async fn hamming_builtin(
     .map_err(hamming_map_window_error)
 }
 
-fn validate_hamming_options(args: &[runmat_builtins::Value]) -> crate::BuiltinResult<()> {
+fn validate_hamming_options(args: &[runmat_value::Value]) -> crate::BuiltinResult<()> {
     if args.len() > 2 {
         return Err(hamming_error(&HAMMING_ERROR_ARG_COUNT));
     }
@@ -381,7 +381,8 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider as _;
-    use runmat_builtins::{builtin_function_by_name, IntValue, NumericDType, Value};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntValue, NumericDType, Value};
 
     #[test]
     fn hamming_returns_expected_values() {
@@ -455,7 +456,7 @@ mod tests {
         .expect("gather hamming rounded");
         assert_eq!(rounded.shape, vec![3, 1]);
         assert!(block_on(hamming_builtin(
-            Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             Vec::new()
         ))
         .is_err());
@@ -595,8 +596,8 @@ mod tests {
             assert!(block_on(hamming_builtin(Value::Complex(4.0, 0.0), Vec::new())).is_err());
         }
         test_support::with_test_provider(|provider| {
-            let length = runmat_builtins::Tensor::new_integer(
-                runmat_builtins::IntegerStorage::U16(vec![4]),
+            let length = runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U16(vec![4]),
                 vec![1, 1],
             )
             .expect("length");

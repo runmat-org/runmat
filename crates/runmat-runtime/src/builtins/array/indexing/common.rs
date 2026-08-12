@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, Value};
+use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::arg_tokens::ArgToken;
 use crate::builtins::common::gpu_helpers;
@@ -221,7 +221,7 @@ fn indexing_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
+    use runmat_value::{CellArray, IntegerStorage, Tensor};
 
     #[test]
     fn dims_from_tokens_accepts_scalar() {

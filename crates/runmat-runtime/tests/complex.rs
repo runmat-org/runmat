@@ -2,7 +2,7 @@
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 // Complex numbers end-to-end tests
 use futures::executor::block_on;
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -62,7 +62,7 @@ fn complex_scalar_with_real() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_array_elementwise_add() {
-    use runmat_builtins::ComplexTensor;
+    use runmat_value::ComplexTensor;
     let ct =
         ComplexTensor::new_2d(vec![(1.0, 0.0), (0.0, 1.0), (2.0, -3.0), (0.0, 0.0)], 2, 2).unwrap();
     let a = Value::ComplexTensor(ct);
@@ -81,7 +81,7 @@ fn complex_array_elementwise_add() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_matmul_and_transpose() {
-    use runmat_builtins::{ComplexTensor, Tensor};
+    use runmat_value::{ComplexTensor, Tensor};
     let a =
         ComplexTensor::new_2d(vec![(1.0, 1.0), (0.0, -1.0), (2.0, 0.0), (1.0, 0.5)], 2, 2).unwrap();
     let b = ComplexTensor::new_2d(vec![(-1.0, 0.0), (3.0, 0.5), (0.0, 2.0), (1.0, -1.0)], 2, 2)
@@ -136,7 +136,7 @@ fn complex_string_and_logical() {
     } else {
         panic!();
     }
-    use runmat_builtins::ComplexTensor;
+    use runmat_value::ComplexTensor;
     let ct = ComplexTensor::new_2d(vec![(0.0, 0.0), (1.0, 0.0)], 1, 2).unwrap();
     let mask = runmat_runtime::call_builtin("logical", &[Value::ComplexTensor(ct)]).unwrap();
     if let Value::LogicalArray(la) = mask {
@@ -170,13 +170,13 @@ fn complex_power_basic() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_matrix_power_integer() {
-    use runmat_builtins::ComplexTensor;
+    use runmat_value::ComplexTensor;
     // A = [1+i, 0-1i; 2+0i, 1+0.5i]
     let a =
         ComplexTensor::new_2d(vec![(1.0, 1.0), (2.0, 0.0), (0.0, -1.0), (1.0, 0.5)], 2, 2).unwrap();
     let v = runmat_runtime::power(
         &Value::ComplexTensor(a),
-        &Value::Int(runmat_builtins::IntValue::I32(2)),
+        &Value::Int(runmat_value::IntValue::I32(2)),
     )
     .unwrap();
     if let Value::ComplexTensor(m2) = v {
@@ -190,7 +190,7 @@ fn complex_matrix_power_integer() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_elementwise_power_tensor() {
-    use runmat_builtins::ComplexTensor;
+    use runmat_value::ComplexTensor;
     let ct = ComplexTensor::new_2d(vec![(1.0, 1.0), (0.0, 2.0)], 1, 2).unwrap();
     let out = runmat_runtime::elementwise_pow(&Value::ComplexTensor(ct), &Value::Num(2.0)).unwrap();
     if let Value::ComplexTensor(m) = out {

@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -372,7 +372,7 @@ fn restore_hypot_gpu_output(
         }
     };
     let expected_precision = match tensor.numeric_dtype() {
-        runmat_builtins::NumericDType::F32 => ProviderPrecision::F32,
+        runmat_value::NumericDType::F32 => ProviderPrecision::F32,
         _ => ProviderPrecision::F64,
     };
     if provider.precision() != expected_precision {
@@ -601,9 +601,10 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        ResolveContext, Tensor, Type, Value,
+        Tensor, Value,
     };
 
     fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -826,7 +827,7 @@ pub(crate) mod tests {
         else {
             panic!("expected integer/single result to use double");
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(
             output.materialize_f64(),
             vec![(9_007_199_254_740_992_f64).hypot(1.0), 5.0]

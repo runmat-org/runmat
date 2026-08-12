@@ -4,9 +4,9 @@ mod test_helpers;
 use test_helpers::compile_source;
 use test_helpers::execute_source;
 
-fn has_num(vars: &[runmat_builtins::Value], expected: f64) -> bool {
+fn has_num(vars: &[runmat_value::Value], expected: f64) -> bool {
     vars.iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - expected).abs() < 1e-9))
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - expected).abs() < 1e-9))
 }
 
 fn execute_semantic_error(source: &str) -> runmat_runtime::RuntimeError {
@@ -176,7 +176,7 @@ fn block_comment_is_ignored() {
     // Expect c = 3 somewhere
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-3.0).abs()<1e-9)));
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn apostrophe_is_transpose_when_adjacent() {
     // sum is invariant under transpose: sum 10
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-10.0).abs()<1e-9)));
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn apostrophe_starts_char_array_when_not_adjacent() {
     let has_text = vars.iter().any(|v| {
         matches!(
             v,
-            runmat_builtins::Value::CharArray(_) | runmat_builtins::Value::String(_)
+            runmat_value::Value::CharArray(_) | runmat_value::Value::String(_)
         )
     });
     assert!(has_text);
@@ -226,7 +226,7 @@ fn apostrophe_conjugates_complex() {
     )
     .unwrap();
     let mut nums = vars.iter().filter_map(|value| match value {
-        runmat_builtins::Value::Num(n) => Some(*n),
+        runmat_value::Value::Num(n) => Some(*n),
         _ => None,
     });
     let b21 = nums.find(|n| (*n + 1.0).abs() < 1e-9).unwrap_or(f64::NAN);

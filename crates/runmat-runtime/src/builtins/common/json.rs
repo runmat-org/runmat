@@ -1,4 +1,4 @@
-use runmat_builtins::IntValue;
+use runmat_value::IntValue;
 
 pub(crate) fn int_value_to_json(value: &IntValue) -> serde_json::Value {
     let number = match value {

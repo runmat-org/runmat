@@ -6,9 +6,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -292,7 +292,8 @@ fn format_spec_data_to_string_array(spec: FormatSpecData) -> BuiltinResult<Strin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::compose_builtin(format_spec, rest))
@@ -474,7 +475,7 @@ pub(crate) mod tests {
     fn compose_rejects_cell_data_before_nested_integer_or_resident_conversion() {
         let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("wide integer");
-        let cell = runmat_builtins::CellArray::new(vec![Value::Tensor(wide)], 1, 1).expect("cell");
+        let cell = runmat_value::CellArray::new(vec![Value::Tensor(wide)], 1, 1).expect("cell");
         let error = compose_builtin(Value::from("%d"), vec![Value::Cell(cell)])
             .expect_err("cell data is outside compose's public domain");
         assert_eq!(error.identifier(), COMPOSE_ERROR_INVALID_DATA.identifier);

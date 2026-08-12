@@ -8,9 +8,10 @@ use std::cmp::Ordering;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -533,7 +534,7 @@ pub(crate) mod tests {
     }
 
     use futures::executor::block_on;
-    use runmat_builtins::{Closure, IntValue, IntegerStorage, Tensor};
+    use runmat_value::{Closure, IntValue, IntegerStorage, Tensor};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -754,7 +755,7 @@ pub(crate) mod tests {
                 (name == "__timeit_helper_counter_default").then_some(88)
             })));
         let callable = prepare_callable(
-            Value::CharArray(runmat_builtins::CharArray::new_row(
+            Value::CharArray(runmat_value::CharArray::new_row(
                 "@__timeit_helper_counter_default",
             )),
             None,

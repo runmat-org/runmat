@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, StructValue, Tensor, Value,
 };
 use runmat_filesystem as fs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -772,20 +772,19 @@ mod tests {
     #[test]
     fn importdata_headerlines_reads_typed_integer_storage_exactly() {
         let header_lines =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2]), vec![1, 1])
+            Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2]), vec![1, 1])
                 .expect("header lines");
         assert_eq!(
             parse_header_lines(&Value::Tensor(header_lines)).expect("header lines"),
             2
         );
 
-        let negative =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
-                .expect("negative header lines");
+        let negative = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative header lines");
         assert!(parse_header_lines(&Value::Tensor(negative)).is_err());
 
         assert_eq!(
-            parse_header_lines(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))).ok(),
+            parse_header_lines(&Value::Int(runmat_value::IntValue::U64(u64::MAX))).ok(),
             usize::try_from(u64::MAX).ok()
         );
         assert!(parse_header_lines(&Value::Num(1.0e300)).is_err());
@@ -794,14 +793,14 @@ mod tests {
     #[test]
     fn importdata_headerlines_typed_integer_tensors_ignore_poisoned_f64_mirrors() {
         let classes = [
-            runmat_builtins::IntegerStorage::I8(vec![2]),
-            runmat_builtins::IntegerStorage::I16(vec![2]),
-            runmat_builtins::IntegerStorage::I32(vec![2]),
-            runmat_builtins::IntegerStorage::I64(vec![2]),
-            runmat_builtins::IntegerStorage::U8(vec![2]),
-            runmat_builtins::IntegerStorage::U16(vec![2]),
-            runmat_builtins::IntegerStorage::U32(vec![2]),
-            runmat_builtins::IntegerStorage::U64(vec![2]),
+            runmat_value::IntegerStorage::I8(vec![2]),
+            runmat_value::IntegerStorage::I16(vec![2]),
+            runmat_value::IntegerStorage::I32(vec![2]),
+            runmat_value::IntegerStorage::I64(vec![2]),
+            runmat_value::IntegerStorage::U8(vec![2]),
+            runmat_value::IntegerStorage::U16(vec![2]),
+            runmat_value::IntegerStorage::U32(vec![2]),
+            runmat_value::IntegerStorage::U64(vec![2]),
         ];
 
         for storage in classes {

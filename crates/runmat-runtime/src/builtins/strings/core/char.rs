@@ -7,10 +7,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CellArray, CharArray, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray,
     SymbolicArray, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -560,14 +562,13 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{
-        IntegerStorage, NumericStorage, ResolveContext, SymbolicArray, SymbolicExpr, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, NumericStorage, SymbolicArray, SymbolicExpr};
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::char_builtin(rest))
     }
-    use runmat_builtins::StringArray;
+    use runmat_value::StringArray;
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

@@ -1,11 +1,11 @@
 //! MATLAB-compatible `subplot` builtin for selecting axes within a figure.
 
-use runmat_builtins::Value;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::cmd_parsing::scalar_from_value;
 use super::state::{configure_subplot, current_axes_state, encode_axes_handle, FigureError};

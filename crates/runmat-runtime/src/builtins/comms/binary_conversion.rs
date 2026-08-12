@@ -1,10 +1,10 @@
 //! MATLAB-compatible binary and hexadecimal conversion helpers.
 
-use runmat_builtins::{
-    CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, NumericStorage, ResolveContext,
-    Tensor, Type, Value,
-};
+use runmat_builtins::{ResolveContext, Type};
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor, Value,
+};
 
 use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -1246,7 +1246,7 @@ fn is_empty_numeric(value: &Value) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::StringArray;
+    use runmat_value::StringArray;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).expect("tensor"))

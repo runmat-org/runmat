@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::tensor;
@@ -175,11 +175,11 @@ fn scalar_double_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Tensor(tensor)
-            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+            if tensor.numeric_dtype() == runmat_value::NumericDType::F64
                 && tensor::is_scalar_tensor(tensor) =>
         {
             tensor.numeric_value_at(0).and_then(|value| match value {
-                runmat_builtins::NumericScalar::F64(value) => Some(value),
+                runmat_value::NumericScalar::F64(value) => Some(value),
                 _ => None,
             })
         }

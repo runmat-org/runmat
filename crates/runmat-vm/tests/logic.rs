@@ -3,7 +3,7 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
-use runmat_builtins::{IntValue, IntegerStorage, NumericDType, Value};
+use runmat_value::{IntValue, IntegerStorage, NumericDType, Value};
 
 fn logical_truth(value: &Value) -> bool {
     match value {
@@ -1718,7 +1718,7 @@ fn mixed_concatenation_precedence_and_nd_shapes_flow_through_vm_dispatch() {
         &vars[2],
         Value::Cell(cell)
             if cell.shape == vec![1, 2]
-                && cell.data[0] == Value::CharArray(runmat_builtins::CharArray::new_row("head"))
+                && cell.data[0] == Value::CharArray(runmat_value::CharArray::new_row("head"))
                 && cell.data[1] == vars[0]
     ));
     assert!(matches!(
@@ -2542,13 +2542,13 @@ fn blackman_all_integer_length_classes_execute_through_compiled_dispatch() {
             &vars[1],
             Value::Tensor(tensor)
                 if tensor.shape == vec![5, 1]
-                    && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                    && tensor.numeric_dtype() == runmat_value::NumericDType::F64
         ));
         assert!(matches!(
             &vars[2],
             Value::Tensor(tensor)
                 if tensor.shape == vec![5, 1]
-                    && tensor.numeric_dtype() == runmat_builtins::NumericDType::F32
+                    && tensor.numeric_dtype() == runmat_value::NumericDType::F32
         ));
     }
 }
@@ -2583,9 +2583,9 @@ fn blkdiag_mixed_dense_inputs_use_first_integer_class_in_compiled_dispatch() {
     assert!(matches!(
         &vars[0],
         Value::Tensor(tensor)
-            if tensor.numeric_dtype() == runmat_builtins::NumericDType::I8
+            if tensor.numeric_dtype() == runmat_value::NumericDType::I8
                 && tensor.integer_storage()
-                    == Some(&runmat_builtins::IntegerStorage::I8(vec![
+                    == Some(&runmat_value::IntegerStorage::I8(vec![
                         127, 0, 0, 0, 0, 0, -128, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 127, 0, 0,
                         0, 0, 0, 1,
                     ]))
@@ -2593,9 +2593,9 @@ fn blkdiag_mixed_dense_inputs_use_first_integer_class_in_compiled_dispatch() {
     assert!(matches!(
         &vars[1],
         Value::Tensor(tensor)
-            if tensor.numeric_dtype() == runmat_builtins::NumericDType::U16
+            if tensor.numeric_dtype() == runmat_value::NumericDType::U16
                 && tensor.integer_storage()
-                    == Some(&runmat_builtins::IntegerStorage::U16(vec![5, 0, 0, 0]))
+                    == Some(&runmat_value::IntegerStorage::U16(vec![5, 0, 0, 0]))
     ));
 }
 

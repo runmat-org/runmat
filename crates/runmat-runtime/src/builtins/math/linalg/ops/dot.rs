@@ -12,9 +12,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -932,9 +932,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext, Type,
-    };
+    use runmat_builtins::{LiteralValue, ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }

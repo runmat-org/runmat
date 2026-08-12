@@ -9,9 +9,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::{random, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -594,16 +595,16 @@ fn numeric_labels(tensor: Tensor) -> BuiltinResult<PartitionInput> {
     })
 }
 
-fn integer_label_key(value: &runmat_builtins::IntValue) -> String {
+fn integer_label_key(value: &runmat_value::IntValue) -> String {
     match value {
-        runmat_builtins::IntValue::I8(value) => format!("i:{value}"),
-        runmat_builtins::IntValue::I16(value) => format!("i:{value}"),
-        runmat_builtins::IntValue::I32(value) => format!("i:{value}"),
-        runmat_builtins::IntValue::I64(value) => format!("i:{value}"),
-        runmat_builtins::IntValue::U8(value) => format!("u:{value}"),
-        runmat_builtins::IntValue::U16(value) => format!("u:{value}"),
-        runmat_builtins::IntValue::U32(value) => format!("u:{value}"),
-        runmat_builtins::IntValue::U64(value) => format!("u:{value}"),
+        runmat_value::IntValue::I8(value) => format!("i:{value}"),
+        runmat_value::IntValue::I16(value) => format!("i:{value}"),
+        runmat_value::IntValue::I32(value) => format!("i:{value}"),
+        runmat_value::IntValue::I64(value) => format!("i:{value}"),
+        runmat_value::IntValue::U8(value) => format!("u:{value}"),
+        runmat_value::IntValue::U16(value) => format!("u:{value}"),
+        runmat_value::IntValue::U32(value) => format!("u:{value}"),
+        runmat_value::IntValue::U64(value) => format!("u:{value}"),
     }
 }
 
@@ -653,7 +654,7 @@ fn string_array_labels(array: StringArray) -> BuiltinResult<PartitionInput> {
     })
 }
 
-fn char_row_labels(chars: runmat_builtins::CharArray) -> Vec<Option<String>> {
+fn char_row_labels(chars: runmat_value::CharArray) -> Vec<Option<String>> {
     let mut labels = Vec::with_capacity(chars.rows);
     for row in 0..chars.rows {
         let mut label = String::with_capacity(chars.cols);
@@ -999,7 +1000,7 @@ fn custom_integer_partition(tensor: Tensor) -> BuiltinResult<PartitionSpec> {
         ));
     }
     let is_vector = tensor.shape.iter().filter(|dim| **dim > 1).count() <= 1;
-    let logical_byte = |value: &runmat_builtins::IntValue| match value.try_to_usize() {
+    let logical_byte = |value: &runmat_value::IntValue| match value.try_to_usize() {
         Some(0) => Ok(0),
         Some(1) => Ok(1),
         _ => Err(invalid_argument(
@@ -1443,7 +1444,7 @@ fn canonical(text: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1778,8 +1779,7 @@ mod tests {
 
     #[test]
     fn typed_integer_partition_counts_and_indices_are_exact() {
-        let input =
-            PartitionInput::from_value(Value::Int(runmat_builtins::IntValue::U16(6))).unwrap();
+        let input = PartitionInput::from_value(Value::Int(runmat_value::IntValue::U16(6))).unwrap();
         assert_eq!(input.n, 6);
         let input = PartitionInput::from_value(cleared_int_tensor(
             IntegerStorage::U16(vec![6]),
@@ -1788,7 +1788,7 @@ mod tests {
         .unwrap();
         assert_eq!(input.n, 6);
         assert_eq!(
-            positive_integer(&Value::Int(runmat_builtins::IntValue::U8(3)), "KFold").unwrap(),
+            positive_integer(&Value::Int(runmat_value::IntValue::U8(3)), "KFold").unwrap(),
             3
         );
         assert_eq!(
@@ -1800,7 +1800,7 @@ mod tests {
             3
         );
         assert_eq!(
-            holdout_count(&Value::Int(runmat_builtins::IntValue::U8(2)), 6).unwrap(),
+            holdout_count(&Value::Int(runmat_value::IntValue::U8(2)), 6).unwrap(),
             2
         );
         assert_eq!(
@@ -1812,7 +1812,7 @@ mod tests {
             2
         );
         assert_eq!(
-            selected_indices(&Value::Int(runmat_builtins::IntValue::U8(3)), 3).unwrap(),
+            selected_indices(&Value::Int(runmat_value::IntValue::U8(3)), 3).unwrap(),
             vec![2]
         );
         assert_eq!(
@@ -1839,19 +1839,19 @@ mod tests {
         assert_eq!(selected.shape, vec![6, 1]);
 
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {
             assert!(positive_integer(&value, "KFold").is_err());
         }
-        assert!(selected_indices(&Value::Int(runmat_builtins::IntValue::I8(-1)), 3).is_err());
+        assert!(selected_indices(&Value::Int(runmat_value::IntValue::I8(-1)), 3).is_err());
     }
 
     #[test]
     fn cvpartition_extensions_are_independently_mode_gated() {
-        let integer_scalar = || Value::Int(runmat_builtins::IntValue::U16(6));
+        let integer_scalar = || Value::Int(runmat_value::IntValue::U16(6));
         let integer_labels =
             || cleared_int_tensor(IntegerStorage::U8(vec![1, 1, 2, 2]), vec![4, 1]);
         let cases = [
@@ -1864,7 +1864,7 @@ mod tests {
             (
                 Value::Num(6.0),
                 Value::from("KFold"),
-                vec![Value::Int(runmat_builtins::IntValue::U8(2))],
+                vec![Value::Int(runmat_value::IntValue::U8(2))],
                 CVPARTITION_INTEGER_CONTROL_EXTENSION.error_identifier,
             ),
             (

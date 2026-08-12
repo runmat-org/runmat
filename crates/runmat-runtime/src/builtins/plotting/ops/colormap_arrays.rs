@@ -6,10 +6,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::surface::ColorMap;
+use runmat_value::{IntValue, Tensor, Value};
 
 use super::state::current_colormap_length;
 use crate::builtins::common::tensor as tensor_utils;
@@ -360,7 +361,7 @@ pub(crate) fn parse_rgb_colormap_tensor(
     }
 
     let mut colors = Vec::with_capacity(tensor.rows);
-    let uint8_map = tensor.numeric_dtype() == runmat_builtins::NumericDType::U8;
+    let uint8_map = tensor.numeric_dtype() == runmat_value::NumericDType::U8;
     for row in 0..tensor.rows {
         let mut color = [
             tensor_utils::tensor_value_f64(tensor, row),
@@ -598,8 +599,8 @@ mod tests {
 
     #[test]
     fn length_argument_reads_typed_integer_tensor_exactly() {
-        let length = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64]),
+        let length = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64]),
             vec![1, 1],
         )
         .expect("typed length");
@@ -608,15 +609,15 @@ mod tests {
             MAX_COLORMAP_LENGTH
         );
 
-        let too_large = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64 + 1]),
+        let too_large = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![MAX_COLORMAP_LENGTH as u64 + 1]),
             vec![1, 1],
         )
         .expect("too large");
         assert!(colormap_length(&Value::Tensor(too_large), "parula").is_err());
 
-        let negative = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-1]),
+        let negative = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative");
@@ -626,14 +627,14 @@ mod tests {
     #[test]
     fn colorcube_accepts_all_integer_length_classes_and_returns_double() {
         let storages = [
-            runmat_builtins::IntegerStorage::I8(vec![6]),
-            runmat_builtins::IntegerStorage::I16(vec![6]),
-            runmat_builtins::IntegerStorage::I32(vec![6]),
-            runmat_builtins::IntegerStorage::I64(vec![6]),
-            runmat_builtins::IntegerStorage::U8(vec![6]),
-            runmat_builtins::IntegerStorage::U16(vec![6]),
-            runmat_builtins::IntegerStorage::U32(vec![6]),
-            runmat_builtins::IntegerStorage::U64(vec![6]),
+            runmat_value::IntegerStorage::I8(vec![6]),
+            runmat_value::IntegerStorage::I16(vec![6]),
+            runmat_value::IntegerStorage::I32(vec![6]),
+            runmat_value::IntegerStorage::I64(vec![6]),
+            runmat_value::IntegerStorage::U8(vec![6]),
+            runmat_value::IntegerStorage::U16(vec![6]),
+            runmat_value::IntegerStorage::U32(vec![6]),
+            runmat_value::IntegerStorage::U64(vec![6]),
         ];
 
         for storage in storages {
@@ -644,7 +645,7 @@ mod tests {
                 panic!("expected colormap tensor");
             };
             assert_eq!((cmap.rows, cmap.cols), (6, 3));
-            assert_eq!(cmap.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(cmap.numeric_dtype(), runmat_value::NumericDType::F64);
         }
     }
 
@@ -692,7 +693,7 @@ mod tests {
         assert!(matches!(map, ColorMap::Listed(_)));
 
         let typed = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U8(vec![0, 255, 0, 128, 255, 0]),
+            runmat_value::IntegerStorage::U8(vec![0, 255, 0, 128, 255, 0]),
             vec![2, 3],
         )
         .expect("typed RGB colormap");

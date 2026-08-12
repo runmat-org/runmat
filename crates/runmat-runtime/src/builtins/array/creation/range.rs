@@ -10,9 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
@@ -1070,7 +1071,7 @@ pub(crate) mod tests {
         block_on(super::range_builtin(value, rest))
     }
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

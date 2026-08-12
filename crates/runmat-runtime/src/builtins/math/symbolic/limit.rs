@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    SymbolicExpr, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{SymbolicExpr, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -580,7 +580,7 @@ fn limit_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::symbolic::SymbolicFunction;
+    use runmat_value::SymbolicFunction;
 
     #[test]
     fn computes_sinc_limit() {

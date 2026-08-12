@@ -187,7 +187,7 @@ async fn coverage_sites_are_source_stable_and_record_missed_statements() {
     let (_, fragment) = session
         .invoke_executable_with_coverage(
             &unit,
-            ProcedureInvocation::function("covered", vec![runmat_builtins::Value::Num(1.0)]),
+            ProcedureInvocation::function("covered", vec![runmat_value::Value::Num(1.0)]),
             &InvocationControl::default(),
         )
         .await
@@ -240,7 +240,7 @@ async fn jit_and_interpreter_hit_the_same_coverage_sites() {
     let (_, expected) = interpreter
         .invoke_executable_with_coverage(
             &interpreter_unit,
-            ProcedureInvocation::function("coveredJit", vec![runmat_builtins::Value::Num(1.0)]),
+            ProcedureInvocation::function("coveredJit", vec![runmat_value::Value::Num(1.0)]),
             &InvocationControl::default(),
         )
         .await
@@ -253,7 +253,7 @@ async fn jit_and_interpreter_hit_the_same_coverage_sites() {
         actual = Some(
             jit.invoke_executable_with_coverage(
                 &jit_unit,
-                ProcedureInvocation::function("coveredJit", vec![runmat_builtins::Value::Num(1.0)]),
+                ProcedureInvocation::function("coveredJit", vec![runmat_value::Value::Num(1.0)]),
                 &InvocationControl::default(),
             )
             .await

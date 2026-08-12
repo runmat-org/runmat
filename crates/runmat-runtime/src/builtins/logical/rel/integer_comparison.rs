@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
-use runmat_builtins::{
+use runmat_value::{
     ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value,
 };
 
@@ -440,7 +440,7 @@ enum RealSource<'a> {
     ScalarFloat(f64),
     Dense(&'a Tensor),
     Logical { data: &'a [u8] },
-    Char(&'a runmat_builtins::CharArray),
+    Char(&'a runmat_value::CharArray),
 }
 
 fn compare_complex_operands(
@@ -854,10 +854,10 @@ pub(crate) fn matches_optional_relation(
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::ComplexStorage;
+    use runmat_value::ComplexStorage;
 
     fn array(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(runmat_builtins::Tensor::new_integer(storage, shape).expect("integer tensor"))
+        Value::Tensor(runmat_value::Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     #[test]
@@ -923,7 +923,7 @@ mod tests {
             vec![2, 1],
         );
         let float = Value::Tensor(
-            runmat_builtins::Tensor::new(
+            runmat_value::Tensor::new(
                 vec![(1_u64 << 53) as f64, 0.0, (1_u64 << 53) as f64],
                 vec![1, 3],
             )
@@ -1011,7 +1011,7 @@ mod tests {
 
         for (storage, complex_data, expected_eq) in cases {
             let integer =
-                runmat_builtins::Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+                runmat_value::Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
             let complex = Value::ComplexTensor(
                 ComplexTensor::new(complex_data, vec![1, 2]).expect("complex tensor"),
             );
@@ -1088,7 +1088,7 @@ mod tests {
 
     #[test]
     fn complex_integer_ordering_preserves_wide_real_components_and_broadcasts() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
             IntegerStorage::U64(vec![u64::MAX, 0]),
         )
@@ -1172,8 +1172,7 @@ mod tests {
         );
 
         let chars = Value::CharArray(
-            runmat_builtins::CharArray::new(vec!['A', 'C', 'B', 'D'], 2, 2)
-                .expect("character array"),
+            runmat_value::CharArray::new(vec!['A', 'C', 'B', 'D'], 2, 2).expect("character array"),
         );
         assert_eq!(
             try_complex_ordering_comparison(

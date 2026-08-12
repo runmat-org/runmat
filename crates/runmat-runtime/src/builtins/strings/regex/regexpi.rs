@@ -1,11 +1,11 @@
 //! MATLAB-compatible `regexpi` builtin for RunMat.
 
-use runmat_builtins::Value;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -266,7 +266,8 @@ fn option_name(value: &Value) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, ResolveContext, StringArray, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, StringArray};
 
     #[test]
     fn regexpi_descriptor_signatures_cover_core_forms() {

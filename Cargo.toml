@@ -12,6 +12,7 @@ members = [
     "crates/runmat-plot",
     "crates/runmat-macros",
     "crates/runmat-builtins",
+    "crates/runmat-value",
     "crates/runmat-runtime",
     "crates/runmat-runtime-integration-tests",
     "crates/runmat-turbine",
@@ -113,6 +114,7 @@ runmat-core = { version = "=0.6.1", path = "crates/runmat-core", default-feature
 runmat-plot = { version = "=0.6.1", path = "crates/runmat-plot", default-features = false }
 runmat-macros = { version = "=0.6.1", path = "crates/runmat-macros" }
 runmat-builtins = { version = "=0.6.1", path = "crates/runmat-builtins" }
+runmat-value = { version = "=0.6.1", path = "crates/runmat-value" }
 runmat-runtime = { version = "=0.6.1", path = "crates/runmat-runtime", default-features = false }
 runmat-time = { path = "crates/runmat-time", version = "=0.6.1" }
 runmat-turbine = { version = "=0.6.1", path = "crates/runmat-turbine" }

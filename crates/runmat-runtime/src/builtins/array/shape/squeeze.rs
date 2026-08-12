@@ -10,9 +10,10 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::squeeze")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -240,13 +241,13 @@ fn squeeze_char_array(chars: CharArray) -> crate::BuiltinResult<CharArray> {
 }
 
 fn squeeze_cell_array(
-    cell: runmat_builtins::CellArray,
-) -> crate::BuiltinResult<runmat_builtins::CellArray> {
+    cell: runmat_value::CellArray,
+) -> crate::BuiltinResult<runmat_value::CellArray> {
     let shape = squeeze_shape(&cell.shape);
     if shape == cell.shape {
         return Ok(cell);
     }
-    runmat_builtins::CellArray::from_column_major(cell.to_column_major(), shape)
+    runmat_value::CellArray::from_column_major(cell.to_column_major(), shape)
         .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
@@ -300,7 +301,7 @@ pub(crate) mod tests {
         block_on(super::squeeze_builtin(value))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[test]
     fn squeeze_type_preserves_logical_shape() {

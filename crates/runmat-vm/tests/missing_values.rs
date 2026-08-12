@@ -1,4 +1,4 @@
-use runmat_builtins::{LogicalArray, StringArray, Value};
+use runmat_value::{LogicalArray, StringArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;

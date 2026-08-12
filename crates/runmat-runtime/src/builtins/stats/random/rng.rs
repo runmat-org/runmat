@@ -14,10 +14,10 @@ use log::debug;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
+use runmat_value::{IntValue, StructValue, Tensor, Value};
 
 use crate::builtins::stats::type_resolvers::rng_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -629,7 +629,8 @@ pub(crate) mod tests {
     use crate::builtins::common::{random, test_support};
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -2,9 +2,10 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -156,9 +157,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};
-    use runmat_builtins::{
-        CharArray, IntValue, IntegerStorage, ResolveContext, SymbolicExpr, Tensor, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, SymbolicExpr, Tensor};
 
     fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::uint16_builtin(value, rest))

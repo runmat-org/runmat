@@ -2,9 +2,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -263,7 +263,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn nextpow2_descriptor_signatures_cover_core_forms() {

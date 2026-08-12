@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -326,7 +327,7 @@ fn damp_error(identifier: &'static str, message: impl Into<String>) -> crate::Ru
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::ComplexTensor;
+    use runmat_value::ComplexTensor;
 
     fn tf(numerator: Value, denominator: Value, rest: &[Value]) -> Value {
         let mut args = vec![numerator, denominator];
@@ -482,14 +483,14 @@ mod tests {
             BuiltinIntegerInputAvailability::Rejected
         );
         for value in [
-            runmat_builtins::IntValue::I8(1),
-            runmat_builtins::IntValue::I16(1),
-            runmat_builtins::IntValue::I32(1),
-            runmat_builtins::IntValue::I64(1),
-            runmat_builtins::IntValue::U8(1),
-            runmat_builtins::IntValue::U16(1),
-            runmat_builtins::IntValue::U32(1),
-            runmat_builtins::IntValue::U64(1),
+            runmat_value::IntValue::I8(1),
+            runmat_value::IntValue::I16(1),
+            runmat_value::IntValue::I32(1),
+            runmat_value::IntValue::I64(1),
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U16(1),
+            runmat_value::IntValue::U32(1),
+            runmat_value::IntValue::U64(1),
         ] {
             let error = block_on(damp_builtin(Value::Int(value))).expect_err("object input only");
             assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));

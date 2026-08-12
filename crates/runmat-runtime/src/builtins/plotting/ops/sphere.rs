@@ -4,10 +4,11 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LiteralValue, ResolveContext, Tensor, Type, Value,
+    LiteralValue, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::SurfacePlot;
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -563,22 +564,22 @@ mod tests {
 
     #[test]
     fn sphere_n_reads_typed_integer_tensor_exactly() {
-        let n = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![42]),
+        let n = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![42]),
             vec![1, 1],
         )
         .expect("typed n");
         assert_eq!(block_on(parse_n_value(&Value::Tensor(n))).unwrap(), 42);
 
-        let negative = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-1]),
+        let negative = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative n");
         assert!(block_on(parse_n_value(&Value::Tensor(negative))).is_err());
 
-        let too_large = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+        let too_large = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("large n");

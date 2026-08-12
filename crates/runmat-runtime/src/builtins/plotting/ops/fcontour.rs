@@ -7,10 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1130,11 +1130,9 @@ mod tests {
 
     #[test]
     fn fcontour_numeric_vector_reads_typed_integer_storage_exactly() {
-        let domain = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-4, 4]),
-            vec![1, 2],
-        )
-        .expect("typed domain vector");
+        let domain =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-4, 4]), vec![1, 2])
+                .expect("typed domain vector");
 
         assert_eq!(
             numeric_vector(&Value::Tensor(domain)).expect("numeric vector"),
@@ -1154,13 +1152,11 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
             },
-            Value::Tensor(
-                runmat_builtins::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap(),
-            ),
+            Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(5.0),
             Value::String("LevelList".into()),
-            Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
             Value::String("LineWidth".into()),
             Value::Num(2.0),
             Value::String("DisplayName".into()),
@@ -1211,7 +1207,7 @@ mod tests {
                 function: 1,
             },
             Value::Tensor(
-                runmat_builtins::Tensor::new(vec![-1.0, 1.0, -1.0, 1.0], vec![1, 4]).unwrap(),
+                runmat_value::Tensor::new(vec![-1.0, 1.0, -1.0, 1.0], vec![1, 4]).unwrap(),
             ),
             Value::String("r--".into()),
             Value::String("MeshDensity".into()),
@@ -1281,13 +1277,12 @@ mod tests {
     #[test]
     fn fcontour_domain_requires_row_or_column_vector_shape() {
         let column =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I8(vec![-2, 2]), vec![2, 1])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::I8(vec![-2, 2]), vec![2, 1]).unwrap();
         let parsed = parse_domain(&Value::Tensor(column)).unwrap();
         assert_eq!((parsed.x_min, parsed.x_max), (-2.0, 2.0));
 
         let matrix = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I8(vec![-2, 2, -3, 3]),
+            runmat_value::IntegerStorage::I8(vec![-2, 2, -3, 3]),
             vec![2, 2],
         )
         .unwrap();
@@ -1300,11 +1295,9 @@ mod tests {
             ContourLevelSpec::Values(values) => assert_eq!(values, vec![7.0]),
             other => panic!("expected explicit values, got {other:?}"),
         }
-        let descending = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![3, 2, 1]),
-            vec![1, 3],
-        )
-        .unwrap();
+        let descending =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![3, 2, 1]), vec![1, 3])
+                .unwrap();
         match parse_fcontour_level_list(&Value::Tensor(descending)).unwrap() {
             ContourLevelSpec::Values(values) => assert_eq!(values, vec![3.0, 2.0, 1.0]),
             other => panic!("expected explicit values, got {other:?}"),
@@ -1314,7 +1307,7 @@ mod tests {
     #[test]
     fn fcontour_level_list_rejects_matrix_shape() {
         let matrix = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U8(vec![1, 2, 3, 4]),
+            runmat_value::IntegerStorage::U8(vec![1, 2, 3, 4]),
             vec![2, 2],
         )
         .unwrap();
@@ -1395,22 +1388,22 @@ mod tests {
 
     #[test]
     fn fcontour_mesh_density_reads_typed_integer_tensor_exactly() {
-        let exact = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![400]),
+        let exact = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![400]),
             vec![1, 1],
         )
         .expect("typed density");
         assert_eq!(parse_mesh_density(&Value::Tensor(exact)).unwrap(), 400);
 
-        let too_large = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![401]),
+        let too_large = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![401]),
             vec![1, 1],
         )
         .expect("large density");
         assert!(parse_mesh_density(&Value::Tensor(too_large)).is_err());
 
-        let negative = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-1]),
+        let negative = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative density");
@@ -1426,8 +1419,8 @@ mod tests {
 
     #[test]
     fn fcontour_function_scalar_reads_typed_integer_storage_exactly() {
-        let tensor = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![12]),
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I16(vec![12]),
             vec![1, 1],
         )
         .unwrap();

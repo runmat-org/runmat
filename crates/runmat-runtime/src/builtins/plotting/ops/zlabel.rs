@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::{map_figure_error, parse_text_command};
 use super::state::set_zlabel_for_axes;
@@ -161,7 +162,7 @@ mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
-    use runmat_builtins::{CellArray, StringArray};
+    use runmat_value::{CellArray, StringArray};
 
     #[test]
     fn zlabel_descriptor_signatures_cover_core_forms() {

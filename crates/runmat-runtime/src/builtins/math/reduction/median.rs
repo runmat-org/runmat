@@ -9,10 +9,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, IntegerStorage, LogicalArray, NumericDType,
-    NumericScalar, NumericStorage, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, NumericStorage, Tensor,
+    Value,
+};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -1230,7 +1233,7 @@ fn reduce_tensor_median_dim(
         .into_numeric_storage()
         .map_err(median_internal_error)?;
     match storage {
-        runmat_builtins::NumericStorage::F64(values) => reduce_floating_tensor_median_dim(
+        runmat_value::NumericStorage::F64(values) => reduce_floating_tensor_median_dim(
             values,
             input_shape,
             dim,
@@ -1240,9 +1243,9 @@ fn reduce_tensor_median_dim(
             f64::NAN,
             f64::is_nan,
             2.0,
-            runmat_builtins::NumericStorage::F64,
+            runmat_value::NumericStorage::F64,
         ),
-        runmat_builtins::NumericStorage::F32(values) => reduce_floating_tensor_median_dim(
+        runmat_value::NumericStorage::F32(values) => reduce_floating_tensor_median_dim(
             values,
             input_shape,
             dim,
@@ -1252,7 +1255,7 @@ fn reduce_tensor_median_dim(
             f32::NAN,
             f32::is_nan,
             2.0,
-            runmat_builtins::NumericStorage::F32,
+            runmat_value::NumericStorage::F32,
         ),
         _ => unreachable!("integer storage handled before floating median"),
     }
@@ -1269,7 +1272,7 @@ fn reduce_floating_tensor_median_dim<T>(
     nan: T,
     is_nan: fn(T) -> bool,
     two: T,
-    wrap: fn(Vec<T>) -> runmat_builtins::NumericStorage,
+    wrap: fn(Vec<T>) -> runmat_value::NumericStorage,
 ) -> BuiltinResult<Tensor>
 where
     T: Copy + PartialOrd + std::ops::Add<Output = T> + std::ops::Div<Output = T>,
@@ -1475,7 +1478,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage};
+    use runmat_value::{IntValue, IntegerStorage, NumericStorage};
 
     #[test]
     fn median_type_reduces_first_dim() {

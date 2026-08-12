@@ -7,7 +7,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostTensorOwned,
     IntegerElementType,
 };
-use runmat_builtins::{
+use runmat_value::{
     ComplexStorage, ComplexTensor, IntValue, NumericDType, NumericStorage, Tensor, Value,
 };
 use rustfft::FftPlanner;
@@ -190,7 +190,7 @@ pub fn is_wide_integer_value(value: &Value) -> bool {
         Value::Int(IntValue::I64(_) | IntValue::U64(_)) => true,
         Value::Tensor(tensor) => matches!(
             tensor.integer_storage(),
-            Some(runmat_builtins::IntegerStorage::I64(_) | runmat_builtins::IntegerStorage::U64(_))
+            Some(runmat_value::IntegerStorage::I64(_) | runmat_value::IntegerStorage::U64(_))
         ),
         Value::GpuTensor(handle) => matches!(
             runmat_accelerate_api::handle_integer_type(handle),
@@ -1400,7 +1400,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn fft_gpu_handle_identity_includes_device_and_buffer() {

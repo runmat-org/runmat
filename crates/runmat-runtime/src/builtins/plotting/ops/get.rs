@@ -4,9 +4,10 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::properties::{get_properties, resolve_plot_handle};
 use crate::builtins::plotting::type_resolvers::get_type;
@@ -206,8 +207,8 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::title::title_builtin;
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::Value;
     use runmat_plot::plots::{Figure, LinePlot};
+    use runmat_value::Value;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -240,14 +241,14 @@ mod tests {
         assert_eq!(GET_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
         for integer in [
-            runmat_builtins::IntValue::I8(1),
-            runmat_builtins::IntValue::I16(1),
-            runmat_builtins::IntValue::I32(1),
-            runmat_builtins::IntValue::I64(1),
-            runmat_builtins::IntValue::U8(1),
-            runmat_builtins::IntValue::U16(1),
-            runmat_builtins::IntValue::U32(1),
-            runmat_builtins::IntValue::U64(1),
+            runmat_value::IntValue::I8(1),
+            runmat_value::IntValue::I16(1),
+            runmat_value::IntValue::I32(1),
+            runmat_value::IntValue::I64(1),
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U16(1),
+            runmat_value::IntValue::U32(1),
+            runmat_value::IntValue::U64(1),
         ] {
             let error = get_builtin(vec![Value::Int(integer)]).unwrap_err();
             assert_eq!(
@@ -255,8 +256,8 @@ mod tests {
                 Some("RunMat:compatibility:GetIntegerHandleAliasExtension")
             );
         }
-        let tensor = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U32(vec![1]),
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U32(vec![1]),
             vec![1, 1],
         )
         .expect("alias");
@@ -270,14 +271,14 @@ mod tests {
     #[test]
     fn get_rejects_inexact_wide_integer_aliases_before_lookup() {
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(true);
-        let error = get_builtin(vec![Value::Int(runmat_builtins::IntValue::U64(
+        let error = get_builtin(vec![Value::Int(runmat_value::IntValue::U64(
             (1_u64 << 53) + 1,
         ))])
         .expect_err("wide scalar alias must not round");
         assert_eq!(error.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
 
-        let tensor = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
             vec![1, 1],
         )
         .unwrap();
@@ -322,7 +323,7 @@ mod tests {
         let _ = crate::builtins::plotting::set::set_builtin(vec![
             Value::Num(h),
             Value::String("String".into()),
-            Value::StringArray(runmat_builtins::StringArray {
+            Value::StringArray(runmat_value::StringArray {
                 data: vec!["Top".into(), "Bottom".into()],
                 shape: vec![1, 2],
                 rows: 1,
@@ -399,9 +400,7 @@ mod tests {
         crate::builtins::plotting::set::set_builtin(vec![
             Value::Num(ax),
             Value::String("XLim".into()),
-            Value::Tensor(
-                runmat_builtins::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("x limits"),
-            ),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("x limits")),
             Value::String("XScale".into()),
             Value::String("log".into()),
             Value::String("Grid".into()),
@@ -412,7 +411,7 @@ mod tests {
         let scale = get_builtin(vec![Value::Num(ax), Value::String("XScale".into())]).unwrap();
         let grid = get_builtin(vec![Value::Num(ax), Value::String("Grid".into())]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&xlim)
+            runmat_value::Tensor::try_from(&xlim)
                 .unwrap()
                 .materialize_f64(),
             vec![1.0, 5.0]
@@ -522,9 +521,7 @@ mod tests {
     fn stem_handle_exposes_runtime_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![
-            Value::Tensor(
-                runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
-            ),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values")),
             Value::String("DisplayName".into()),
             Value::String("Impulse".into()),
             Value::String("BaseValue".into()),

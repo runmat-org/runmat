@@ -1,4 +1,4 @@
-use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_value::{LogicalArray, Tensor, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -500,7 +500,7 @@ fn bootstrp_integer_extensions_preserve_exact_compiled_callback_output() {
             Value::Tensor(tensor)
                 if tensor.shape == vec![2, 1]
                     && tensor.integer_storage()
-                        == Some(&runmat_builtins::IntegerStorage::U64(vec![
+                        == Some(&runmat_value::IntegerStorage::U64(vec![
                             9_007_199_254_740_993,
                             9_007_199_254_740_993,
                         ]))

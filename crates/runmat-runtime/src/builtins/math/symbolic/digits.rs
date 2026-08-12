@@ -9,9 +9,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -253,7 +253,7 @@ fn digits_error_with_message(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor};
+    use runmat_value::{IntegerStorage, LogicalArray, Tensor};
     use std::sync::{Mutex, MutexGuard};
 
     static DIGITS_TEST_LOCK: Mutex<()> = Mutex::new(());

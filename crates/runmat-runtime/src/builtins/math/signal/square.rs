@@ -12,9 +12,10 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, NumericStorage, Tensor, Value,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -327,7 +328,8 @@ fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(square_builtin(t, Vec::new()))
@@ -537,7 +539,7 @@ mod tests {
         let input =
             Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0, 4.0]), vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::Tensor(input)).unwrap());
-        assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(
             result.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, -1.0])

@@ -128,8 +128,8 @@ impl LoweringCtx {
             runmat_builtins::lookup_property(class_name, property_name)
         {
             return property.is_static
-                && property.get_access == runmat_builtins::Access::Public
-                && property.set_access == runmat_builtins::Access::Public;
+                && property.get_access == runmat_value::Access::Public
+                && property.set_access == runmat_value::Access::Public;
         }
         false
     }
@@ -2717,7 +2717,7 @@ impl LoweringCtx {
                 }
                 if let AstExpr::Ident(class_name, _) = &**base {
                     if let Some((method, _)) = runmat_builtins::lookup_method(class_name, name) {
-                        if !method.is_static || method.access != runmat_builtins::Access::Public {
+                        if !method.is_static || method.access != runmat_value::Access::Public {
                             return Err(HirError::new(format!(
                                 "method {class_name}.{name} is not accessible as a public static method"
                             ))

@@ -18,8 +18,8 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use futures::task::noop_waker;
 use log::{debug, error, info, warn};
-use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_value::Value;
 use runmat_vm::{ArgSpec, Bytecode, FunctionRegistry, Instr, InterpreterOutcome};
 use std::cell::{Cell, RefCell};
 use std::env;
@@ -1293,7 +1293,7 @@ fn read_turbine_arg_specs(
 }
 
 fn turbine_expand_cell_indices(
-    cell: &runmat_builtins::CellArray,
+    cell: &runmat_value::CellArray,
     indices: &[Value],
 ) -> Result<Vec<Value>> {
     runmat_vm::expand_cell_indices_for_call(cell, indices).map_err(TurbineError::ExecutionError)
@@ -1794,16 +1794,16 @@ pub extern "C" fn runtime_builtin_f64_dispatch(
     };
 
     // Convert f64 args to Value args
-    let value_args: Vec<runmat_builtins::Value> = args_slice
+    let value_args: Vec<runmat_value::Value> = args_slice
         .iter()
-        .map(|&x| runmat_builtins::Value::Num(x))
+        .map(|&x| runmat_value::Value::Num(x))
         .collect();
 
     // Call the runtime dispatcher
     match runmat_runtime::call_builtin(name, &value_args) {
-        Ok(runmat_builtins::Value::Num(result)) => result,
-        Ok(runmat_builtins::Value::Int(result)) => result.to_f64(),
-        Ok(runmat_builtins::Value::Bool(result)) => {
+        Ok(runmat_value::Value::Num(result)) => result,
+        Ok(runmat_value::Value::Int(result)) => result.to_f64(),
+        Ok(runmat_value::Value::Bool(result)) => {
             if result {
                 1.0
             } else {
@@ -1824,8 +1824,8 @@ pub extern "C" fn runtime_builtin_f64_dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
     use runmat_hir::FunctionId;
+    use runmat_value::{CellArray, IntegerStorage, Tensor};
     use runmat_vm::FunctionBytecode;
     use std::collections::HashMap;
 

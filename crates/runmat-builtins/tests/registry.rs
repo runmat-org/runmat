@@ -2,9 +2,10 @@ use runmat_builtins::{
     builtin_function_by_name, builtin_functions, AccelTag, BuiltinCompletionPolicy,
     BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, Tensor, Value};
 
 const TEST_ERRORS: [BuiltinErrorDescriptor; 0] = [];
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -195,7 +196,7 @@ fn extension_metadata_is_registered_declaratively() {
 #[test]
 fn test_value_conversions() {
     // Test basic types
-    let int_val = Value::Int(runmat_builtins::IntValue::I32(42));
+    let int_val = Value::Int(runmat_value::IntValue::I32(42));
     let num_val = Value::Num(3.15);
     let bool_val = Value::Bool(true);
     let str_val = Value::String("hello".to_string());
@@ -245,7 +246,7 @@ fn test_cell_arrays() {
     let cell = Value::Cell(
         CellArray::new(
             vec![
-                Value::Int(runmat_builtins::IntValue::I32(1)),
+                Value::Int(runmat_value::IntValue::I32(1)),
                 Value::String("test".to_string()),
                 Value::Bool(false),
             ],
@@ -259,7 +260,7 @@ fn test_cell_arrays() {
         assert_eq!(contents.data.len(), 3);
         assert_eq!(
             &contents.data[0],
-            &Value::Int(runmat_builtins::IntValue::I32(1))
+            &Value::Int(runmat_value::IntValue::I32(1))
         );
         assert_eq!(&contents.data[1], &Value::String("test".to_string()));
         assert_eq!(&contents.data[2], &Value::Bool(false));

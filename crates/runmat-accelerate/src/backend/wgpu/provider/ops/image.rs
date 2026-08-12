@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ImfilterOptions, ImfilterPadding};
-use runmat_builtins::Tensor;
+use runmat_value::Tensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 

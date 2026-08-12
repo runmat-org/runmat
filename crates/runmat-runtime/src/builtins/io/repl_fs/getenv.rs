@@ -13,9 +13,10 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, StringArray, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -288,7 +289,7 @@ fn getenv_from_string_array(array: StringArray) -> BuiltinResult<Value> {
     Ok(Value::StringArray(result))
 }
 
-async fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> BuiltinResult<Value> {
+async fn getenv_from_cell_array(array: runmat_value::CellArray) -> BuiltinResult<Value> {
     for cell in &array.data {
         match cell {
             Value::CharArray(ca) if ca.rows == 1 => {}
@@ -380,7 +381,7 @@ fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
-    use runmat_builtins::{CharArray, IntValue, StringArray, Value};
+    use runmat_value::{CharArray, IntValue, StringArray, Value};
 
     fn getenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::getenv_builtin(args))

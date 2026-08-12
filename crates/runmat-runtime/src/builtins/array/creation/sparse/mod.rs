@@ -5,10 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, ResolveContext,
-    SparseTensor, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, SparseTensor, Tensor,
+    Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random;
@@ -1885,16 +1888,16 @@ fn sparse_from_dense_tensor(tensor: &Tensor) -> BuiltinResult<SparseTensor> {
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
 }
 
-fn sparse_from_integer_scalar(value: runmat_builtins::IntValue) -> BuiltinResult<SparseTensor> {
+fn sparse_from_integer_scalar(value: runmat_value::IntValue) -> BuiltinResult<SparseTensor> {
     let storage = match value {
-        runmat_builtins::IntValue::I8(value) => IntegerStorage::I8(vec![value]),
-        runmat_builtins::IntValue::I16(value) => IntegerStorage::I16(vec![value]),
-        runmat_builtins::IntValue::I32(value) => IntegerStorage::I32(vec![value]),
-        runmat_builtins::IntValue::I64(value) => IntegerStorage::I64(vec![value]),
-        runmat_builtins::IntValue::U8(value) => IntegerStorage::U8(vec![value]),
-        runmat_builtins::IntValue::U16(value) => IntegerStorage::U16(vec![value]),
-        runmat_builtins::IntValue::U32(value) => IntegerStorage::U32(vec![value]),
-        runmat_builtins::IntValue::U64(value) => IntegerStorage::U64(vec![value]),
+        runmat_value::IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        runmat_value::IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        runmat_value::IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        runmat_value::IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        runmat_value::IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        runmat_value::IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        runmat_value::IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        runmat_value::IntValue::U64(value) => IntegerStorage::U64(vec![value]),
     };
     sparse_from_integer_dense_tensor(1, 1, &storage)
 }
@@ -2127,14 +2130,14 @@ fn triplet_values(value: &Value) -> BuiltinResult<TripletValues> {
         )),
         Value::Int(value) => {
             let storage = match value {
-                runmat_builtins::IntValue::I8(value) => IntegerStorage::I8(vec![*value]),
-                runmat_builtins::IntValue::I16(value) => IntegerStorage::I16(vec![*value]),
-                runmat_builtins::IntValue::I32(value) => IntegerStorage::I32(vec![*value]),
-                runmat_builtins::IntValue::I64(value) => IntegerStorage::I64(vec![*value]),
-                runmat_builtins::IntValue::U8(value) => IntegerStorage::U8(vec![*value]),
-                runmat_builtins::IntValue::U16(value) => IntegerStorage::U16(vec![*value]),
-                runmat_builtins::IntValue::U32(value) => IntegerStorage::U32(vec![*value]),
-                runmat_builtins::IntValue::U64(value) => IntegerStorage::U64(vec![*value]),
+                runmat_value::IntValue::I8(value) => IntegerStorage::I8(vec![*value]),
+                runmat_value::IntValue::I16(value) => IntegerStorage::I16(vec![*value]),
+                runmat_value::IntValue::I32(value) => IntegerStorage::I32(vec![*value]),
+                runmat_value::IntValue::I64(value) => IntegerStorage::I64(vec![*value]),
+                runmat_value::IntValue::U8(value) => IntegerStorage::U8(vec![*value]),
+                runmat_value::IntValue::U16(value) => IntegerStorage::U16(vec![*value]),
+                runmat_value::IntValue::U32(value) => IntegerStorage::U32(vec![*value]),
+                runmat_value::IntValue::U64(value) => IntegerStorage::U64(vec![*value]),
             };
             Ok(TripletValues::Integer(storage))
         }
@@ -2280,7 +2283,7 @@ fn sparse_from_integer_triplets(
     coordinates: Vec<(usize, usize)>,
     storage: IntegerStorage,
 ) -> BuiltinResult<SparseTensor> {
-    let mut entries: BTreeMap<(usize, usize), runmat_builtins::IntValue> = BTreeMap::new();
+    let mut entries: BTreeMap<(usize, usize), runmat_value::IntValue> = BTreeMap::new();
     for (index, coordinate) in coordinates.into_iter().enumerate() {
         let value = storage.value_at(index).ok_or_else(|| {
             sparse_error(&SPARSE_ERROR_INTERNAL, "sparse: integer value is missing")
@@ -2426,7 +2429,7 @@ fn dense_typed_triplet_sparse(sparse: &SparseTensor, name: &str) -> BuiltinResul
         .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
 }
 
-fn parse_integer_subscript(value: &runmat_builtins::IntValue, name: &str) -> BuiltinResult<usize> {
+fn parse_integer_subscript(value: &runmat_value::IntValue, name: &str) -> BuiltinResult<usize> {
     match integer_to_usize(value) {
         Some(index) if index > 0 => Ok(index),
         _ => Err(sparse_error(
@@ -2436,16 +2439,16 @@ fn parse_integer_subscript(value: &runmat_builtins::IntValue, name: &str) -> Bui
     }
 }
 
-fn integer_to_usize(value: &runmat_builtins::IntValue) -> Option<usize> {
+fn integer_to_usize(value: &runmat_value::IntValue) -> Option<usize> {
     match value {
-        runmat_builtins::IntValue::I8(value) => usize::try_from(*value).ok(),
-        runmat_builtins::IntValue::I16(value) => usize::try_from(*value).ok(),
-        runmat_builtins::IntValue::I32(value) => usize::try_from(*value).ok(),
-        runmat_builtins::IntValue::I64(value) => usize::try_from(*value).ok(),
-        runmat_builtins::IntValue::U8(value) => Some(usize::from(*value)),
-        runmat_builtins::IntValue::U16(value) => Some(usize::from(*value)),
-        runmat_builtins::IntValue::U32(value) => usize::try_from(*value).ok(),
-        runmat_builtins::IntValue::U64(value) => usize::try_from(*value).ok(),
+        runmat_value::IntValue::I8(value) => usize::try_from(*value).ok(),
+        runmat_value::IntValue::I16(value) => usize::try_from(*value).ok(),
+        runmat_value::IntValue::I32(value) => usize::try_from(*value).ok(),
+        runmat_value::IntValue::I64(value) => usize::try_from(*value).ok(),
+        runmat_value::IntValue::U8(value) => Some(usize::from(*value)),
+        runmat_value::IntValue::U16(value) => Some(usize::from(*value)),
+        runmat_value::IntValue::U32(value) => usize::try_from(*value).ok(),
+        runmat_value::IntValue::U64(value) => usize::try_from(*value).ok(),
     }
 }
 
@@ -2687,7 +2690,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use nalgebra::DMatrix;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
-    use runmat_builtins::IntValue;
+    use runmat_value::IntValue;
 
     fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::sparse_builtin(args))
@@ -2943,11 +2946,11 @@ pub(crate) mod tests {
         assert_eq!(single.len(), 2);
         assert_eq!(
             single.numeric_value_at(0),
-            Some(runmat_builtins::NumericScalar::F32(-2.5))
+            Some(runmat_value::NumericScalar::F32(-2.5))
         );
         assert!(matches!(
             single.numeric_value_at(1),
-            Some(runmat_builtins::NumericScalar::F32(value)) if value.is_nan()
+            Some(runmat_value::NumericScalar::F32(value)) if value.is_nan()
         ));
     }
 

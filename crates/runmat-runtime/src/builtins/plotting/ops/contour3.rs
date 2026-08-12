@@ -2,13 +2,13 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use log::warn;
-#[cfg(test)]
-use runmat_builtins::Tensor;
-use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 #[cfg(test)]
 use runmat_plot::plots::PlotElement;
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
 use super::common::tensor_to_surface_grid_matlab_xy;
 #[cfg(not(target_arch = "wasm32"))]

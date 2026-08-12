@@ -14,10 +14,10 @@ use glob::Pattern;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 use sha2::{Digest, Sha256};
 
 use crate::builtins::common::fs::expand_user_path;

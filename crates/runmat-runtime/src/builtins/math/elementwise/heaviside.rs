@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -21,7 +21,7 @@ use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor
 use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::SymbolicFunction;
+use runmat_value::SymbolicFunction;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::heaviside")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -487,10 +487,8 @@ pub(crate) mod tests {
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle, HostTensorOwned,
         HostTensorView,
     };
-    use runmat_builtins::{
-        builtin_function_by_name, AccelTag, IntValue, LogicalArray, ResolveContext, SymbolicExpr,
-        Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, AccelTag, ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray, SymbolicExpr};
 
     fn heaviside_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::heaviside_builtin(value))

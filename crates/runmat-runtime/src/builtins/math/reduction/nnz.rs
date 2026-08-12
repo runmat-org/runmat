@@ -17,9 +17,10 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, SparseTensor, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, LogicalArray, SparseTensor, Tensor, Value};
 
 const NAME: &str = "nnz";
 
@@ -712,7 +713,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray};
 
     fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
         error.identifier()

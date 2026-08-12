@@ -1759,7 +1759,7 @@ fn data_array_preview_json(values: &DataArrayValues, limit: usize) -> Vec<JsonVa
             $values
                 .iter()
                 .take(limit)
-                .map(|value| integer_json_value(&runmat_builtins::IntValue::$variant(*value)))
+                .map(|value| integer_json_value(&runmat_value::IntValue::$variant(*value)))
                 .collect()
         };
     }

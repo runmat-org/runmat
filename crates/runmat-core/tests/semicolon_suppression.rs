@@ -3,9 +3,9 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
-use runmat_builtins::Value;
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
+use runmat_value::Value;
 
 /// Test basic semicolon suppression behavior
 #[test]

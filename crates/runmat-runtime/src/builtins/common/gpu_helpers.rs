@@ -2,7 +2,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
     HostIntegerTensorView, HostTensorView, IntegerElementType, ProviderPrecision,
 };
-use runmat_builtins::{
+use runmat_value::{
     ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
 
@@ -540,7 +540,7 @@ mod preserving_download_tests {
             };
             assert_eq!(
                 downloaded.into_numeric_storage().unwrap(),
-                runmat_builtins::NumericStorage::U64(vec![3, 4])
+                runmat_value::NumericStorage::U64(vec![3, 4])
             );
             assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
             assert_eq!(runmat_accelerate_api::handle_storage(&handle), metadata.0);

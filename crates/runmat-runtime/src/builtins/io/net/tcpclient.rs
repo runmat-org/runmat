@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, StructValue, Value};
 
 use super::accept::{configure_stream, insert_client, parse_timeout_value, CLIENT_HANDLE_FIELD};
 use super::tcpserver::{
@@ -563,7 +563,7 @@ fn build_tcpclient_struct(
 pub(crate) mod tests {
     use super::super::accept::remove_client_for_test;
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor, Value};
+    use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpListener;
     use std::thread;
     use std::time::Duration;

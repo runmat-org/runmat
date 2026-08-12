@@ -8,9 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, NumericScalar, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::{broadcast, gpu_helpers, tensor};
 use crate::builtins::math::elementwise::erfcinv::erfcinv_scalar;
@@ -2110,7 +2111,7 @@ pub mod icdf {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn assert_close(actual: f64, expected: f64, tol: f64) {
         assert!(
@@ -2721,7 +2722,7 @@ mod tests {
         {
             let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
             let x_error = block_on(chi2cdf::chi2cdf_builtin(
-                Value::Int(runmat_builtins::IntValue::I16(3)),
+                Value::Int(runmat_value::IntValue::I16(3)),
                 vec![Value::Num(5.0)],
             ))
             .unwrap_err();
@@ -2731,7 +2732,7 @@ mod tests {
             );
             let nu_error = block_on(chi2cdf::chi2cdf_builtin(
                 Value::Num(3.0),
-                vec![Value::Int(runmat_builtins::IntValue::U16(5))],
+                vec![Value::Int(runmat_value::IntValue::U16(5))],
             ))
             .unwrap_err();
             assert_eq!(
@@ -2742,7 +2743,7 @@ mod tests {
 
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let wide_error = block_on(chi2cdf::chi2cdf_builtin(
-            Value::Int(runmat_builtins::IntValue::U64((1_u64 << 53) + 1)),
+            Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
             vec![Value::Num(5.0)],
         ))
         .unwrap_err();
@@ -2755,7 +2756,7 @@ mod tests {
             .contains("exactly representable as double"));
 
         let signed_wide_error = block_on(chi2cdf::chi2cdf_builtin(
-            Value::Int(runmat_builtins::IntValue::I64(i64::MIN)),
+            Value::Int(runmat_value::IntValue::I64(i64::MIN)),
             vec![Value::Num(5.0)],
         ))
         .unwrap_err();
@@ -2783,9 +2784,9 @@ mod tests {
             );
         }
         let upper = block_on(chi2cdf::chi2cdf_builtin(
-            Value::Int(runmat_builtins::IntValue::U16(3)),
+            Value::Int(runmat_value::IntValue::U16(3)),
             vec![
-                Value::Int(runmat_builtins::IntValue::U16(5)),
+                Value::Int(runmat_value::IntValue::U16(5)),
                 Value::from("upper"),
             ],
         ))
@@ -2850,7 +2851,7 @@ mod tests {
         let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
         let result = block_on(chi2cdf::chi2cdf_builtin(
             Value::GpuTensor(handle),
-            vec![Value::Int(runmat_builtins::IntValue::U16(5))],
+            vec![Value::Int(runmat_value::IntValue::U16(5))],
         ))
         .expect("chi2cdf");
         assert!(matches!(result, Value::GpuTensor(_)));

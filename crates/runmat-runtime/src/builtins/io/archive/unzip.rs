@@ -8,11 +8,12 @@ use std::time::Duration;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem::File;
 use runmat_filesystem::{self as vfs};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 use url::Url;
 use zip::result::ZipError;
 use zip::ZipArchive;
@@ -972,7 +973,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CellArray;
+    use runmat_value::CellArray;
     use std::fs;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};

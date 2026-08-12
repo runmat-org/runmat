@@ -7,9 +7,9 @@ use encoding_rs::{Encoding, SHIFT_JIS};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1536,8 +1536,8 @@ fn is_numeric_scalar(value: &Value) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use runmat_filesystem::OpenOptions;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     use std::sync::{Arc, Mutex as StdMutex};
 
     use crate::builtins::io::filetext::registry::RegisteredFile;

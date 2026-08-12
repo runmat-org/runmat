@@ -4,9 +4,9 @@ use runmat_builtins::{
     symbolic::{parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration},
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    SymbolicExpr, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{SymbolicExpr, Value};
 
 use crate::{build_runtime_error, workspace, BuiltinResult, RuntimeError};
 

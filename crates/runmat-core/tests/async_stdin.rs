@@ -1,9 +1,9 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use anyhow::Result;
-use runmat_builtins::Value;
 use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunError, RunMatSession};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
+use runmat_value::Value;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
 

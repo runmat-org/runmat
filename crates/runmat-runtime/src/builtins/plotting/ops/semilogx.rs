@@ -1,9 +1,9 @@
-use runmat_builtins::Value;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::plot::plot_builtin;
 use super::state::{current_axes_state, set_log_modes_for_axes, FigureError};
@@ -177,7 +177,7 @@ mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor::new(data.to_vec(), vec![data.len()]).expect("semilogx test vector")

@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
     BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_value::Value;
 
 const STR2FUNC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "fh",
@@ -194,7 +195,7 @@ pub fn func2str_builtin_registered(value: Value) -> crate::BuiltinResult<Value> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn unowned_resident_value() -> Value {
         Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {

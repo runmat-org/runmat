@@ -15,11 +15,8 @@ macro_rules! define_integer_cast_builtin {
         $internal_code:literal
     ) => {
         pub(crate) mod $module {
-            use runmat_builtins::{
-                BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-                BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-                BuiltinSignatureDescriptor, Value,
-            };
+            use runmat_builtins::{BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor};
+            use runmat_value::{Value};
             use runmat_macros::runtime_builtin;
 
             use crate::builtins::common::spec::{
@@ -257,7 +254,7 @@ mod tests {
         AccelProvider, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
         HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]
     fn int8_and_int16_scalars_saturate_and_round() {
@@ -316,7 +313,7 @@ mod tests {
         ))
         .expect("int16 logical");
         let chars_output = block_on(super::int16::int16_builtin(
-            Value::CharArray(runmat_builtins::CharArray::new_row("Az")),
+            Value::CharArray(runmat_value::CharArray::new_row("Az")),
             Vec::new(),
         ))
         .expect("int16 chars");

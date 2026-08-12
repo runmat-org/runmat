@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -607,7 +607,7 @@ mod tests {
     }
 
     fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data), vec![rows, cols])
+        Tensor::new_integer(runmat_value::IntegerStorage::I16(data), vec![rows, cols])
             .expect("integer tensor")
     }
 
@@ -638,10 +638,10 @@ mod tests {
         let column = column_tensor(&int_tensor(vec![1, 2, 3, 4], 2, 2), 1);
 
         assert_eq!(column.materialize_f64(), vec![3.0, 4.0]);
-        assert_eq!(column.numeric_dtype(), runmat_builtins::NumericDType::I16);
+        assert_eq!(column.numeric_dtype(), runmat_value::NumericDType::I16);
         assert_eq!(
             column.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::I16(vec![3, 4]))
+            Some(&runmat_value::IntegerStorage::I16(vec![3, 4]))
         );
     }
 

@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -397,16 +398,16 @@ fn ensure_cumtrapz_extensions(parsed: &ParsedCumtrapzArgs) -> BuiltinResult<()> 
     Ok(())
 }
 
-fn integer_is_exact_f64(value: &runmat_builtins::IntValue) -> bool {
+fn integer_is_exact_f64(value: &runmat_value::IntValue) -> bool {
     let magnitude = match value {
-        runmat_builtins::IntValue::I8(value) => u64::from(value.unsigned_abs()),
-        runmat_builtins::IntValue::I16(value) => u64::from(value.unsigned_abs()),
-        runmat_builtins::IntValue::I32(value) => u64::from(value.unsigned_abs()),
-        runmat_builtins::IntValue::I64(value) => value.unsigned_abs(),
-        runmat_builtins::IntValue::U8(value) => u64::from(*value),
-        runmat_builtins::IntValue::U16(value) => u64::from(*value),
-        runmat_builtins::IntValue::U32(value) => u64::from(*value),
-        runmat_builtins::IntValue::U64(value) => *value,
+        runmat_value::IntValue::I8(value) => u64::from(value.unsigned_abs()),
+        runmat_value::IntValue::I16(value) => u64::from(value.unsigned_abs()),
+        runmat_value::IntValue::I32(value) => u64::from(value.unsigned_abs()),
+        runmat_value::IntValue::I64(value) => value.unsigned_abs(),
+        runmat_value::IntValue::U8(value) => u64::from(*value),
+        runmat_value::IntValue::U16(value) => u64::from(*value),
+        runmat_value::IntValue::U32(value) => u64::from(*value),
+        runmat_value::IntValue::U64(value) => *value,
     };
     if magnitude == 0 {
         return true;
@@ -862,7 +863,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Clone, Copy)]
@@ -1195,7 +1196,7 @@ pub(crate) mod tests {
             Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![1, 2]).unwrap())
         };
         let logical = || {
-            Value::LogicalArray(runmat_builtins::LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
         };
         let y = || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
         let tensor_x = || Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]).unwrap());

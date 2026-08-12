@@ -1,5 +1,5 @@
 use crate::NumericPreviewValue;
-use runmat_builtins::Value;
+use runmat_value::Value;
 use uuid::Uuid;
 
 use super::materialize::MATERIALIZE_DEFAULT_LIMIT;

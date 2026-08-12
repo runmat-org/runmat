@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
 
 pub(crate) const SAVEOBJ_METHOD: &str = "saveobj";
 pub(crate) const LOADOBJ_METHOD: &str = "loadobj";

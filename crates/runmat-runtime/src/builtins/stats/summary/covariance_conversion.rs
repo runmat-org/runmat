@@ -10,9 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -836,7 +837,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn assert_close(actual: f64, expected: f64) {
         assert!(
@@ -1147,7 +1148,7 @@ mod tests {
         }
 
         let logical = Value::LogicalArray(
-            runmat_builtins::LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical"),
+            runmat_value::LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical"),
         );
         let out = block_on(corrcov::corrcov_builtin(logical, Vec::new())).unwrap();
         match out {
@@ -1175,7 +1176,7 @@ mod tests {
         );
 
         let logical = Value::LogicalArray(
-            runmat_builtins::LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap(),
+            runmat_value::LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap(),
         );
         let err = block_on(corrcov::corrcov_builtin(logical.clone(), Vec::new())).unwrap_err();
         assert_eq!(

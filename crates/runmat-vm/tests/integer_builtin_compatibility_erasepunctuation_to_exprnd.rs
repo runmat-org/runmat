@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 use test_helpers::execute_source;
 
 const INTEGER_CONSTRUCTORS: [&str; 8] = [

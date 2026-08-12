@@ -2,7 +2,7 @@
 mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
-use runmat_builtins::{IntegerStorage, Value};
+use runmat_value::{IntegerStorage, Value};
 use runmat_vm::{EndExpr, Instr};
 use std::convert::TryInto;
 use std::path::Path;
@@ -335,13 +335,13 @@ fn compiled_butter_integer_extensions_preserve_double_filter_outputs() {
     assert!(vars.iter().any(|value| matches!(
         value,
         Value::Tensor(tensor)
-            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+            if tensor.numeric_dtype() == runmat_value::NumericDType::F64
                 && tensor.materialize_f64() == vec![0.0, 1.0]
     )));
     assert!(vars.iter().any(|value| matches!(
         value,
         Value::Tensor(tensor)
-            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+            if tensor.numeric_dtype() == runmat_value::NumericDType::F64
                 && tensor.materialize_f64() == vec![1.0, 1.0]
     )));
 }
@@ -1335,7 +1335,7 @@ fn logical_slice_assignment_executes_and_coerces_numeric_rhs() {
     let vars = execute_source(input);
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
 }
 
 #[test]

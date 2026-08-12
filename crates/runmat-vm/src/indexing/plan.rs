@@ -4,8 +4,8 @@ use crate::indexing::selectors::{
     numeric_tensor_indices, SliceSelector,
 };
 use crate::interpreter::errors::mex;
-use runmat_builtins::Value;
 use runmat_runtime::{builtins::common::shape::is_scalar_shape, RuntimeError};
+use runmat_value::Value;
 use std::future::Future;
 
 pub type VmResult<T> = Result<T, RuntimeError>;
@@ -799,7 +799,7 @@ mod tests {
     };
     use crate::bytecode::EndExpr;
     use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
-    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor, Value};
+    use runmat_value::{IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]
     fn sparse_assignment_plan_expands_numeric_dimensions_but_keeps_colon_at_old_extent() {

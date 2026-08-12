@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use runmat_builtins::Value;
 use runmat_execution::{
     CancellationReason, ExecutionScopeId, FutureHandle, FutureId, JobHandle, OutputContract,
     TaskHandle, TaskId,
@@ -10,6 +9,7 @@ use runmat_execution::{
 use runmat_runtime::execution::{
     AwaitAction, DeferredCall, DurableJobOptions, ExecutionServiceError, RuntimeExecutionServices,
 };
+use runmat_value::Value;
 
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::durable::DurableJobBridge;

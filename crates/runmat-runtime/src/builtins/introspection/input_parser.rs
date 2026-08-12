@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, HandleRef, ObjectInstance, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, HandleRef, ObjectInstance, StructValue, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 

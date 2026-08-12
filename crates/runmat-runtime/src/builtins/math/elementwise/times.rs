@@ -5,10 +5,12 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor,
     Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -1015,9 +1017,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext,
-        SparseTensor, Tensor, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, SparseTensor, Tensor,
     };
 
     const EPS: f64 = 1e-12;
@@ -1042,7 +1044,7 @@ pub(crate) mod tests {
             Some(9_007_199_254_740_993_u64 as f64)
         );
 
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I16(vec![8]),
             IntegerStorage::I16(vec![-3]),
         )

@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, Tensor, Value};
 
 use super::plotting_error;
 use super::properties::{resolve_plot_handle, PlotHandle};
@@ -448,7 +448,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use runmat_accelerate_api::GpuTensorHandle;
-    use runmat_builtins::{IntegerStorage, StringArray};
+    use runmat_value::{IntegerStorage, StringArray};
 
     fn setup_plot_tests() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -464,7 +464,7 @@ mod tests {
 
     fn integer_rgb_matrix(data: Vec<u8>, rows: usize) -> Value {
         let tensor =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(data), vec![rows, 3]).unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U8(data), vec![rows, 3]).unwrap();
         Value::Tensor(tensor)
     }
 
@@ -550,7 +550,7 @@ mod tests {
         let _guard = setup_plot_tests();
         let colors = rgb_matrix(vec![1.0, 0.0, 0.0], 1);
         let err = colororder_builtin(vec![
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             colors,
         ])
         .unwrap_err();

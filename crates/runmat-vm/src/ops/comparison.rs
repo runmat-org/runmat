@@ -2,9 +2,9 @@ use crate::interpreter::stack::pop2;
 use crate::ops::integer_comparison::{
     scalar_order, tensor_element_equals_scalar, tensor_elements_equal,
 };
-use runmat_builtins::{ComplexTensor, IntValue, IntegerComplexStorage, Tensor, Value};
 use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
+use runmat_value::{ComplexTensor, IntValue, IntegerComplexStorage, Tensor, Value};
 use std::future::Future;
 
 fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
@@ -509,11 +509,11 @@ where
                 return Ok(());
             }
             let logical =
-                runmat_builtins::LogicalArray::new(data, shape).map_err(|e| format!("eq: {e}"))?;
+                runmat_value::LogicalArray::new(data, shape).map_err(|e| format!("eq: {e}"))?;
             stack.push(Value::LogicalArray(logical));
             Ok(())
         };
-    let logical_eq_scalar = |array: &runmat_builtins::LogicalArray,
+    let logical_eq_scalar = |array: &runmat_value::LogicalArray,
                              scalar: f64,
                              stack: &mut Vec<Value>|
      -> Result<(), RuntimeError> {
@@ -524,7 +524,7 @@ where
         }
         push_logical(out, array.shape.clone(), stack)
     };
-    let logical_eq_int_scalar = |array: &runmat_builtins::LogicalArray,
+    let logical_eq_int_scalar = |array: &runmat_value::LogicalArray,
                                  scalar: &IntValue,
                                  stack: &mut Vec<Value>|
      -> Result<(), RuntimeError> {
@@ -538,8 +538,8 @@ where
         }
         push_logical(out, array.shape.clone(), stack)
     };
-    let logical_eq_tensor = |array: &runmat_builtins::LogicalArray,
-                             tensor: &runmat_builtins::Tensor,
+    let logical_eq_tensor = |array: &runmat_value::LogicalArray,
+                             tensor: &runmat_value::Tensor,
                              stack: &mut Vec<Value>|
      -> Result<(), RuntimeError> {
         if array.shape != tensor.shape {
@@ -640,8 +640,7 @@ where
                 });
             }
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, ta.shape.clone())
-                    .map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, ta.shape.clone()).map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
@@ -655,8 +654,7 @@ where
                 })
                 .collect();
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, t.shape.clone())
-                    .map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, t.shape.clone()).map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
@@ -670,8 +668,7 @@ where
                 })
                 .collect();
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, t.shape.clone())
-                    .map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, t.shape.clone()).map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::StringArray(sa), Value::StringArray(sb)) => {
@@ -686,8 +683,7 @@ where
                 out.push(if sa.data[i] == sb.data[i] { 1.0 } else { 0.0 });
             }
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, sa.shape.clone())
-                    .map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::StringArray(sa), Value::String(s)) => {
@@ -696,8 +692,7 @@ where
                 out.push(if sa.data[i] == *s { 1.0 } else { 0.0 });
             }
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, sa.shape.clone())
-                    .map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::String(s), Value::StringArray(sa)) => {
@@ -706,8 +701,7 @@ where
                 out.push(if *s == sa.data[i] { 1.0 } else { 0.0 });
             }
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, sa.shape.clone())
-                    .map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::String(a_s), Value::String(b_s)) => {
@@ -812,8 +806,7 @@ where
                 });
             }
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, ta.shape.clone())
-                    .map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, ta.shape.clone()).map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
@@ -827,8 +820,7 @@ where
                 })
                 .collect();
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, t.shape.clone())
-                    .map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, t.shape.clone()).map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
@@ -842,8 +834,7 @@ where
                 })
                 .collect();
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, t.shape.clone())
-                    .map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, t.shape.clone()).map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::StringArray(sa), Value::StringArray(sb)) => {
@@ -858,8 +849,7 @@ where
                 out.push(if sa.data[i] != sb.data[i] { 1.0 } else { 0.0 });
             }
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, sa.shape.clone())
-                    .map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::StringArray(sa), Value::String(s)) => {
@@ -868,8 +858,7 @@ where
                 out.push(if sa.data[i] != *s { 1.0 } else { 0.0 });
             }
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, sa.shape.clone())
-                    .map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::String(s), Value::StringArray(sa)) => {
@@ -878,8 +867,7 @@ where
                 out.push(if *s != sa.data[i] { 1.0 } else { 0.0 });
             }
             stack.push(Value::Tensor(
-                runmat_builtins::Tensor::new(out, sa.shape.clone())
-                    .map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::String(a_s), Value::String(b_s)) => {
@@ -903,7 +891,7 @@ where
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, LogicalArray};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     async fn unreachable_call_method(
         _receiver: Value,

@@ -1,4 +1,4 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 #[test]
 fn residency_broadcast_2d_chain() {

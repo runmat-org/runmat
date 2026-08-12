@@ -10,9 +10,10 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     superclass_chain, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::superclasses")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -206,10 +207,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        register_class, Access, CharArray, ClassDef, HandleRef, MethodDef, ObjectInstance,
-        StringArray, Tensor,
-    };
+    use runmat_builtins::{register_class, ClassDef, MethodDef};
+    use runmat_value::{Access, CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
     use std::collections::HashMap;
 
     fn method(name: &str) -> MethodDef {

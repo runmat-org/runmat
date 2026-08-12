@@ -4,7 +4,7 @@ This document closes the human-readable portion of I03C. The machine-readable co
 
 ## Authority and sequencing
 
-The current live authority is `runmat-builtins`; this is temporary physical ownership, not the target domain boundary. R03 atomically creates `runmat-value`, moves the complete live-value closure, migrates all consumers, deletes the old definitions, and updates the machine-readable manifest to the extracted stage. R04–R20 then consume only public typed contracts. Once R03 begins, later intermediate integer publications are audit-only. I04 after R20 preserves the terminal branch as true ancestry and ports every `f24908ddc..terminal` semantic change through the relocation manifest into the current layout.
+The live authority is now `runmat-value`. R03 created the crate, moved the complete live-value closure, migrated all consumers, deleted the old definitions, and advanced the machine-readable manifest to the extracted stage. R04–R20 consume only public typed contracts. Later intermediate integer publications are audit-only. I04 after R20 preserves the terminal branch as true ancestry and ports every `f24908ddc..terminal` semantic change through the relocation manifest into the current layout.
 
 The terminal merge may not restore an old path merely to make a textual merge easy. Every terminal-range path and semantic hunk must be classified as ported, already superseded equivalently, regenerated from its current authority, or intentionally inapplicable. An unclassified hunk, duplicate implementation, compatibility re-export, resurrected `runmat-builtins::Value`, or stale generated product fails I04.
 
@@ -44,8 +44,8 @@ The terminal merge may not restore an old path merely to make a textual merge ea
 
 ### Symbolic values and presentation
 
-- `SymbolicExpr` and `SymbolicFunction` are intrinsic value representation and move to `runmat-value`; `SymbolicDeclaration`, its parser/error, and tokenization are `syms` command behavior and move to runtime.
-- Session display format and mutable formatting preference do not move into `runmat-value`. Intrinsic value inspection stays dependency-light; runtime presentation owns user-configured formatting. R03 must migrate call sites coherently because Rust orphan rules preclude implementing `Display` for a foreign value from runtime.
+- `SymbolicExpr` and `SymbolicFunction` are intrinsic value representation and live in `runmat-value`. `SymbolicDeclaration`, its parser/error, and tokenization are shared declaration syntax used by both HIR lowering and runtime `syms` execution; R04 moves that vocabulary into dependency-neutral `runmat-types` rather than introducing a HIR-to-runtime dependency.
+- Session display format and mutable formatting preference ultimately belong to runtime presentation. R03 temporarily colocates the existing `Display` implementation and its format policy in `runmat-value`, because Rust orphan rules prohibit leaving that implementation in `runmat-builtins` or moving it onto a foreign type in runtime. This is an explicit behavior-preserving accommodation, not target ownership: R09 replaces it with runtime-owned presentation and dependency-light intrinsic inspection.
 - Static `Type`, literal/resolve context, builtin descriptors, function pointers, class declarations, and mutable class/static-value registries are not part of the live value. Their exact R04–R09 destinations are listed in the machine-readable manifest.
 
 ## Target crate and dependency boundary

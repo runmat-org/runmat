@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericScalar, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericScalar, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -619,7 +619,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn call(
         wp: Value,
@@ -870,7 +871,7 @@ mod tests {
 
         let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
         let frequency = call(
-            Value::Int(runmat_builtins::IntValue::I16(10)),
+            Value::Int(runmat_value::IntValue::I16(10)),
             Value::Num(20.0),
             Value::Num(1.0),
             Value::Num(40.0),
@@ -886,7 +887,7 @@ mod tests {
         let attenuation = call(
             Value::Num(10.0),
             Value::Num(20.0),
-            Value::Int(runmat_builtins::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
             Value::Num(40.0),
             &[Value::from("s")],
             Some(1),
@@ -902,8 +903,8 @@ mod tests {
     fn wide_integer_extension_rejects_before_lossy_double_computation() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = call(
-            Value::Int(runmat_builtins::IntValue::U64((1_u64 << 53) + 1)),
-            Value::Int(runmat_builtins::IntValue::U64((1_u64 << 53) + 2)),
+            Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
+            Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 2)),
             Value::Num(1.0),
             Value::Num(40.0),
             &[Value::from("s")],

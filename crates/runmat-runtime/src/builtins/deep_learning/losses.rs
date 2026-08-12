@@ -2,8 +2,8 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderCrossentropyMode,
     ProviderCrossentropyRequest,
 };
-use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::{builtins::common::tensor, BuiltinResult};
 

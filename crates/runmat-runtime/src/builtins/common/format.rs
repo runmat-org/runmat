@@ -4,7 +4,7 @@ use std::char;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -1202,7 +1202,7 @@ fn int_value_to_decimal(value: &IntValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{
+    use runmat_value::{
         get_display_format, set_display_format, FormatMode, IntegerComplexStorage, NumericStorage,
         Tensor,
     };
@@ -1237,7 +1237,7 @@ mod tests {
 
     #[test]
     fn typed_integer_tensors_keep_exact_values_through_formatting() {
-        let tensor = runmat_builtins::Tensor::new_integer(
+        let tensor = runmat_value::Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
             vec![1, 2],
         )
@@ -1278,7 +1278,7 @@ mod tests {
             IntegerStorage::U64(vec![7, 0]),
         )
         .expect("matching complex integer storage");
-        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2])
+        let tensor = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2])
             .expect("complex integer tensor");
         let flattened = futures::executor::block_on(flatten_arguments(
             &[Value::ComplexTensor(tensor)],

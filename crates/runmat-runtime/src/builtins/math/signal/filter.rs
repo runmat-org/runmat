@@ -10,9 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1501,9 +1502,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()

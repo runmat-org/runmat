@@ -5,9 +5,10 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, StructValue, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::{random, random_args::keyword_of, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -1154,7 +1155,7 @@ fn distance_output(result: &ReplicateResult, data: &PreparedData) -> BuiltinResu
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     use super::*;
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {

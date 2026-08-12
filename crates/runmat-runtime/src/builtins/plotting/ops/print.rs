@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-    Value,
 };
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -601,7 +601,7 @@ mod tests {
     use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -639,7 +639,7 @@ mod tests {
     #[test]
     fn print_figure_handle_arg_reads_typed_integer_storage_exactly() {
         let tensor =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![5]), vec![1, 1]).unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U32(vec![5]), vec![1, 1]).unwrap();
 
         assert_eq!(
             figure_handle_arg(&Value::Tensor(tensor)).unwrap(),

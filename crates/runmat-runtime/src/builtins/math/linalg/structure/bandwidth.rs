@@ -9,9 +9,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -488,7 +488,7 @@ fn compute_real_bandwidth(rows: usize, cols: usize, data: &[f64]) -> (usize, usi
 fn compute_integer_bandwidth(
     rows: usize,
     cols: usize,
-    storage: &runmat_builtins::IntegerStorage,
+    storage: &runmat_value::IntegerStorage,
 ) -> (usize, usize) {
     if rows == 0 || cols == 0 {
         return (0, 0);
@@ -576,9 +576,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

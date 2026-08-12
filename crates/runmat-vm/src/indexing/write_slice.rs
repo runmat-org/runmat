@@ -4,15 +4,15 @@ use crate::indexing::integer_assignment::{
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
 use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
-use runmat_builtins::{
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
-    NumericStorage, SparseTensor, StringArray, Tensor, Value,
-};
 use runmat_runtime::builtins::common::tensor::{
     self, complex_tensor_element_len, complex_tensor_values_complex64, is_scalar_tensor,
     tensor_element_len, tensor_value_f64,
 };
 use runmat_runtime::RuntimeError;
+use runmat_value::{
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
+    NumericStorage, SparseTensor, StringArray, Tensor, Value,
+};
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
     mex("ShapeMismatch", &format!("{context}: {err}"))
@@ -1482,7 +1482,7 @@ mod tests {
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
         NumericStorage, SparseTensor, StringArray, Tensor, Value,
     };
@@ -1756,7 +1756,7 @@ mod tests {
         assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 
         let logical = Value::LogicalArray(
-            runmat_builtins::LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical"),
+            runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical"),
         );
         let error = block_on(materialize_rhs_nd_real(&logical, &[2, 2]))
             .expect_err("logical singleton expansion must reject");
@@ -1772,7 +1772,7 @@ mod tests {
         assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 
         let strings = Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
+            runmat_value::StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
                 .expect("strings"),
         );
         let error = match build_string_rhs_view(&strings, &[2, 2]) {
@@ -2278,8 +2278,8 @@ mod tests {
     fn string_cell_rhs_uses_character_contents_not_display_layout() {
         let rhs = Value::Cell(CellArray {
             data: vec![
-                Value::CharArray(runmat_builtins::CharArray::new_row("AvgOrders")),
-                Value::CharArray(runmat_builtins::CharArray::new_row("AvgRevenue")),
+                Value::CharArray(runmat_value::CharArray::new_row("AvgOrders")),
+                Value::CharArray(runmat_value::CharArray::new_row("AvgRevenue")),
             ],
             shape: vec![1, 2],
             rows: 1,

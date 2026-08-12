@@ -1,4 +1,4 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 use super::op_common::axes_target::AxesTarget;
 use super::properties::{resolve_plot_handle, PlotHandle};

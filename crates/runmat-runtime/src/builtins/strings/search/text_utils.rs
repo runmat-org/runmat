@@ -2,7 +2,7 @@
 
 use std::convert::TryFrom;
 
-use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray, Value};
+use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string, is_missing_string};

@@ -6,9 +6,10 @@ use nalgebra::{DMatrix, SymmetricEigen};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::{random, random_args::keyword_of, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -1114,7 +1115,7 @@ fn is_empty_numeric(value: &Value) -> bool {
 mod tests {
     use super::*;
     use crate::builtins::common::random;
-    use runmat_builtins::{IntegerStorage, StructValue};
+    use runmat_value::{IntegerStorage, StructValue};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())

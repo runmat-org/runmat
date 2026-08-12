@@ -1,8 +1,8 @@
 #![cfg(target_arch = "wasm32")]
 
-use runmat_builtins::Value;
 use runmat_core::{ExecutableSource, InvocationControl, ProcedureInvocation, RunMatSession};
 use runmat_test::coverage::CoverageMetric;
+use runmat_value::Value;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 #[wasm_bindgen_test]

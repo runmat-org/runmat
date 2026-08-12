@@ -19,10 +19,13 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
-    NumericDType, NumericStorage, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
+    NumericDType, NumericStorage, StringArray, Tensor, Value,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::cat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -956,7 +959,7 @@ fn build_integer_cat_tensor(
         value_buffers.push(values);
     }
 
-    let data_refs: Vec<&[runmat_builtins::IntValue]> =
+    let data_refs: Vec<&[runmat_value::IntValue]> =
         value_buffers.iter().map(Vec::as_slice).collect();
     let (values, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
     Tensor::new_integer(target.storage(values), shape)
@@ -966,7 +969,7 @@ fn build_integer_cat_tensor(
 fn integer_concat_input(
     target: IntegerTarget,
     value: Value,
-) -> BuiltinResult<(Vec<usize>, Vec<runmat_builtins::IntValue>)> {
+) -> BuiltinResult<(Vec<usize>, Vec<runmat_value::IntValue>)> {
     match value {
         Value::Tensor(tensor) => {
             let shape = tensor.shape.clone();
@@ -1117,9 +1120,9 @@ fn cat_typed_complex_integer_arrays(
         imag_buffers.push(imag);
     }
 
-    let real_refs: Vec<&[runmat_builtins::IntValue]> =
+    let real_refs: Vec<&[runmat_value::IntValue]> =
         real_buffers.iter().map(Vec::as_slice).collect();
-    let imag_refs: Vec<&[runmat_builtins::IntValue]> =
+    let imag_refs: Vec<&[runmat_value::IntValue]> =
         imag_buffers.iter().map(Vec::as_slice).collect();
     let (real, shape) = concat_column_major(dim_zero, &shapes, &real_refs, "cat")?;
     let (imag, imag_shape) = concat_column_major(dim_zero, &shapes, &imag_refs, "cat")?;
@@ -1135,8 +1138,8 @@ fn typed_complex_integer_concat_input(
     value: Value,
 ) -> BuiltinResult<(
     Vec<usize>,
-    Vec<runmat_builtins::IntValue>,
-    Vec<runmat_builtins::IntValue>,
+    Vec<runmat_value::IntValue>,
+    Vec<runmat_value::IntValue>,
 )> {
     let zero = || target.cast_scalar(0.0);
     match value {
@@ -1175,7 +1178,7 @@ fn typed_complex_integer_concat_input(
         )),
         Value::Tensor(tensor) => {
             let shape = tensor.shape.clone();
-            let real: Vec<runmat_builtins::IntValue> = match tensor
+            let real: Vec<runmat_value::IntValue> = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
             {
@@ -1694,7 +1697,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn cat_type_prefers_cell() {

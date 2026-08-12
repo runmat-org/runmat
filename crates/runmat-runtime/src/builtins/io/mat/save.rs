@@ -9,11 +9,13 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, IntValue, IntegerStorage, NumericDType, NumericStorage, StructValue,
-    Value,
 };
 use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, IntValue, IntegerStorage, NumericDType, NumericStorage, StructValue,
+    Value,
+};
 
 use super::format::{
     MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_DOUBLE, MI_INT16,
@@ -1269,9 +1271,9 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use once_cell::sync::OnceCell;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage, NumericDType, StringArray, Tensor};
     use runmat_filesystem::File;
     use runmat_thread_local::runmat_thread_local;
+    use runmat_value::{IntValue, IntegerStorage, NumericDType, StringArray, Tensor};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::sync::Mutex;

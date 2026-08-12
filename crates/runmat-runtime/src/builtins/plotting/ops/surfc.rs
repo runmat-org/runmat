@@ -1,14 +1,15 @@
 //! MATLAB-compatible `surfc` builtin (surface with contour).
 
 use log::warn;
-#[cfg(test)]
-use runmat_builtins::Tensor;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
 use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::contour::{build_contour_plot, default_level_count, ContourLevelSpec, ContourLineColor};

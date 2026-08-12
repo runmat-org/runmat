@@ -4,10 +4,10 @@ use log::trace;
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
@@ -337,7 +337,7 @@ fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<Endpoint> 
     }
     if !matches!(
         tensor.numeric_dtype(),
-        runmat_builtins::NumericDType::F32 | runmat_builtins::NumericDType::F64
+        runmat_value::NumericDType::F32 | runmat_value::NumericDType::F64
     ) {
         return Err(builtin_error(format!(
             "{name}: endpoints must be single or double scalars"
@@ -602,7 +602,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     fn linspace_builtin(
         start: Value,

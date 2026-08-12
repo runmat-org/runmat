@@ -14,9 +14,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -253,7 +253,7 @@ fn cosd_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn cosd_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+    if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
         let data = tensor
             .as_f32_slice()
             .expect("single tensor storage")
@@ -354,7 +354,8 @@ fn upload_complex_gpu_output(
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -505,7 +506,7 @@ pub(crate) mod tests {
     #[test]
     fn cosd_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![0, 60, 180]),
+            runmat_value::IntegerStorage::I16(vec![0, 60, 180]),
             vec![3, 1],
         )
         .expect("integer tensor");

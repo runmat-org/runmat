@@ -10,9 +10,9 @@ use crate::builtins::structs::type_resolvers::struct_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StructValue, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -465,7 +465,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
     use runmat_accelerate_api::GpuTensorHandle;
-    use runmat_builtins::{CellArray, IntValue, StringArray, StructValue, Tensor};
+    use runmat_value::{CellArray, IntValue, StringArray, StructValue, Tensor};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -505,8 +505,7 @@ pub(crate) mod tests {
     #[test]
     fn struct_uses_typed_integer_storage_to_detect_empty_input() {
         let tensor =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(Vec::new()), vec![0, 0])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U64(Vec::new()), vec![0, 0]).unwrap();
 
         assert!(matches!(
             run_struct(vec![Value::Tensor(tensor)]).unwrap(),

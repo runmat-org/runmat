@@ -1,7 +1,7 @@
-use runmat_builtins::{ObjectInstance, Value};
 use runmat_test::context::TestCommand;
 use runmat_test::lifecycle::{ExecutionPhase, QualificationKind};
 use runmat_test::result::{Diagnostic, DiagnosticDetail, DiagnosticSeverity};
+use runmat_value::{ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 
@@ -306,7 +306,7 @@ fn qualification_identifier(qualification: QualificationKind) -> &'static str {
 }
 
 fn empty_value() -> BuiltinResult<Value> {
-    runmat_builtins::Tensor::new(Vec::new(), vec![0, 0])
+    runmat_value::Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
         .map_err(|error| build_runtime_error(error).build())
 }

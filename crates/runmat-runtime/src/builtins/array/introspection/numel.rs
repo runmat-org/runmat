@@ -10,9 +10,10 @@ use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::numel")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -256,7 +257,7 @@ pub(crate) mod tests {
     fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::numel_builtin(value, rest))
     }
-    use runmat_builtins::{CellArray, CharArray, IntegerStorage, Tensor};
+    use runmat_value::{CellArray, CharArray, IntegerStorage, Tensor};
 
     #[test]
     fn numel_type_returns_int() {

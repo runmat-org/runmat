@@ -13,10 +13,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, NumericScalar, NumericStorage, ResolveContext, Tensor,
-    Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerStorage, NumericScalar, NumericStorage, Tensor, Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::keyword_of;
@@ -2624,7 +2626,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericStorage};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, NumericStorage};
 
     fn call(name: &'static str, op: MovingOp, args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(moving_builtin(name, op, args))
@@ -2682,7 +2684,7 @@ mod tests {
                         .into_numeric_storage()
                         .expect("numeric output")
                         .numeric_dtype(),
-                    runmat_builtins::NumericDType::F64,
+                    runmat_value::NumericDType::F64,
                     "{name} with {dtype:?}"
                 );
             }

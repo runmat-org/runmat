@@ -1,7 +1,8 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 
-use runmat_builtins::{Access, ClassDef, MethodDef, PropertyDef, Value};
+use runmat_builtins::{ClassDef, MethodDef, PropertyDef};
+use runmat_value::{Access, Value};
 
 use super::objects::{
     FUNCTION_TEST_CASE_CLASS, TEST_CASE_CLASS, TEST_RESULT_CLASS, TEST_SUITE_CLASS,

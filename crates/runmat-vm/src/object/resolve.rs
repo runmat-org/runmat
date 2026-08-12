@@ -5,9 +5,9 @@ use crate::call::shared::{
     ObjectIndexOp,
 };
 use crate::interpreter::errors::mex;
-use runmat_builtins::{self, Closure, StructValue, Tensor, Value};
 use runmat_runtime::builtins::introspection::dynamicprops;
 use runmat_runtime::RuntimeError;
+use runmat_value::{Closure, StructValue, Tensor, Value};
 
 const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
 const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
@@ -108,15 +108,15 @@ fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<Strin
 
 fn access_permitted(
     owner: &str,
-    access: &runmat_builtins::Access,
+    access: &runmat_value::Access,
     caller_function_name: Option<&str>,
 ) -> bool {
     match access {
-        runmat_builtins::Access::Public => true,
-        runmat_builtins::Access::Private => {
+        runmat_value::Access::Public => true,
+        runmat_value::Access::Private => {
             caller_class_for_function(caller_function_name).as_deref() == Some(owner)
         }
-        runmat_builtins::Access::Protected => caller_class_for_function(caller_function_name)
+        runmat_value::Access::Protected => caller_class_for_function(caller_function_name)
             .is_some_and(|caller_class| {
                 runmat_builtins::is_class_or_subclass(&caller_class, owner)
             }),
@@ -293,7 +293,7 @@ pub async fn load_member(
                         .map(|s| Value::String(s.clone()))
                         .collect();
                     let rows = values.len();
-                    let cell = runmat_builtins::CellArray::new(values, rows, 1)
+                    let cell = runmat_value::CellArray::new(values, rows, 1)
                         .map_err(|e| format!("MException.stack: {e}"))?;
                     Value::Cell(cell)
                 }
@@ -354,7 +354,7 @@ pub fn load_static_member(
             captures: vec![],
         }))
     } else if runmat_builtins::class_has_enumeration_member(cls, field) {
-        let mut value = runmat_builtins::ObjectInstance::new(cls.to_string());
+        let mut value = runmat_value::ObjectInstance::new(cls.to_string());
         value.properties.insert(
             "__enum_member__".to_string(),
             Value::String(field.to_string()),
@@ -594,9 +594,9 @@ fn is_possible_graphics_handle_value(value: &Value) -> bool {
 mod tests {
     use super::{is_possible_graphics_handle_value, load_member, load_static_member, store_member};
     use runmat_builtins::{
-        get_static_property_value, register_class, Access, ClassDef, IntValue, MethodDef,
-        ObjectArray, ObjectInstance, PropertyDef, Value,
+        get_static_property_value, register_class, ClassDef, MethodDef, PropertyDef,
     };
+    use runmat_value::{Access, IntValue, ObjectArray, ObjectInstance, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 

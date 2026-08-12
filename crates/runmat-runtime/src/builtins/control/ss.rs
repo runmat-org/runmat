@@ -4,11 +4,12 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef, Tensor, Value,
+    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, CellArray, CharArray, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::{
     spec::{
@@ -535,7 +536,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn run_ss(a: Value, b: Value, c: Value, d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(ss_builtin(a, b, c, d, rest))

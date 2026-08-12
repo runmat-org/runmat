@@ -10,7 +10,6 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::{BoundingBox, Vertex};
@@ -18,6 +17,7 @@ use runmat_plot::gpu::contour_fill;
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::contour::{contour_bounds, contour_bounds_3d};
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 use super::common::{
     numeric_vector, tensor_to_surface_grid_matlab_xy, value_as_f64, SurfaceDataInput,
@@ -2977,8 +2977,8 @@ pub(crate) mod tests {
     fn scalar_level_count_reads_typed_integer_tensor_exactly() {
         setup_plot_tests();
         let exact = MAX_LEVEL_COUNT as u64;
-        let tensor = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![exact]),
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![exact]),
             vec![1, 1],
         )
         .expect("typed level count");
@@ -2988,8 +2988,8 @@ pub(crate) mod tests {
             other => panic!("expected exact level count, got {other:?}"),
         }
 
-        let negative = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-1]),
+        let negative = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative level count");

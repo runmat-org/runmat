@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -656,7 +656,8 @@ fn frequency_response(coeffs: &[f64], omega: f64) -> Complex<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn call(n: Value, wn: Value, rest: &[Value]) -> BuiltinResult<Value> {
         block_on(evaluate(n, wn, rest))

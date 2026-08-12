@@ -8,8 +8,9 @@ use crate::layout::VmAssemblyLayout;
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::FusionGroup;
-use runmat_builtins::{Type, Value};
+use runmat_builtins::Type;
 use runmat_hir::FunctionId;
+use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 

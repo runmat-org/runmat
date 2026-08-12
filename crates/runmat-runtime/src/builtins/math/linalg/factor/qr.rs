@@ -13,9 +13,10 @@ use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use super::lu::PivotMode;
 
@@ -1032,7 +1033,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor as Matrix, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, Tensor as Matrix};
 
     fn tensor_from_value(value: Value) -> Matrix {
         match value {

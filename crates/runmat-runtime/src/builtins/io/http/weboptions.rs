@@ -5,9 +5,9 @@ use std::collections::VecDeque;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -617,7 +617,7 @@ pub(crate) mod tests {
     use std::thread;
 
     use crate::call_builtin_async;
-    use runmat_builtins::CellArray;
+    use runmat_value::CellArray;
 
     fn spawn_server<F>(handler: F) -> String
     where
@@ -736,8 +736,8 @@ pub(crate) mod tests {
 
     #[test]
     fn weboptions_timeout_reads_typed_integer_tensor_storage_exactly() {
-        let timeout = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![2026]),
+        let timeout = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U16(vec![2026]),
             vec![1, 1],
         )
         .expect("typed timeout");

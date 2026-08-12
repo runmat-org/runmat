@@ -8,10 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, IntValue, NumericScalar, ResolveContext, StringArray,
-    Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, IntValue, NumericScalar, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
@@ -1722,9 +1722,8 @@ fn justify(text: &str, side: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{
-        BuiltinIntegerAuditKind, CellArray, IntValue, IntegerStorage, StructValue, Tensor,
-    };
+    use runmat_builtins::BuiltinIntegerAuditKind;
+    use runmat_value::{CellArray, IntValue, IntegerStorage, StructValue, Tensor};
 
     fn block(
         value: impl std::future::Future<Output = BuiltinResult<Value>>,
@@ -2392,7 +2391,7 @@ mod tests {
             assert!(block(deblank_builtin(Value::Int(value))).is_err());
         }
         assert!(block(deblank_builtin(Value::Tensor(
-            runmat_builtins::Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            runmat_value::Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                 .unwrap()
         )))
         .is_err());

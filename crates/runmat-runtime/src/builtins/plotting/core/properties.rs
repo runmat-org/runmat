@@ -1,9 +1,7 @@
-use runmat_builtins::{
-    CellArray, CharArray, NumericScalar, StringArray, StructValue, Tensor, Value,
-};
 use runmat_plot::plots::{
     ColorMap, LegendStyle, PatchData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
 };
+use runmat_value::{CellArray, CharArray, NumericScalar, StringArray, StructValue, Tensor, Value};
 use std::borrow::Cow;
 
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
@@ -1598,7 +1596,7 @@ fn apply_axes_property(
             apply_axes_text_alias(handle, axes_index, PlotObjectKind::ZLabel, value, builtin)
         }
         "view" => {
-            let tensor = runmat_builtins::Tensor::try_from(value)
+            let tensor = runmat_value::Tensor::try_from(value)
                 .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
             let data = tensor::tensor_values_f64(&tensor);
             if data.len() != 2 || !data[0].is_finite() || !data[1].is_finite() {
@@ -6679,7 +6677,7 @@ enum TickMode {
 }
 
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
-    let tensor = runmat_builtins::Tensor::try_from(value)
+    let tensor = runmat_value::Tensor::try_from(value)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
     let ticks = tensor::tensor_values_f64(&tensor);
     if ticks.iter().any(|value| !value.is_finite()) {
@@ -7754,12 +7752,12 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn label_strings_preserve_exact_uint64_text() {
         let labels = label_strings_from_value(
-            &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            &Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             "legend",
             "labels",
         )

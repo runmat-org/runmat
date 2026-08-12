@@ -4,9 +4,8 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId,
     PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
-use runmat_builtins::{
-    builtin_functions, shape_rules::element_count_if_known, AccelTag, Type, Value,
-};
+use runmat_builtins::{builtin_functions, shape_rules::element_count_if_known, AccelTag, Type};
+use runmat_value::Value;
 
 use crate::instr::Instr;
 
@@ -189,7 +188,7 @@ impl<'a> GraphBuilder<'a> {
                             data_cm[idx_col_major] = elems[idx_row_major];
                         }
                     }
-                    runmat_builtins::Tensor::new(data_cm, vec![rows, cols]).ok()
+                    runmat_value::Tensor::new(data_cm, vec![rows, cols]).ok()
                 } else {
                     None
                 };
@@ -322,7 +321,7 @@ impl<'a> GraphBuilder<'a> {
                             }
                         }
                     }
-                    runmat_builtins::Tensor::new(data_cm, vec![num_rows, cols]).ok()
+                    runmat_value::Tensor::new(data_cm, vec![num_rows, cols]).ok()
                 } else {
                     None
                 };
@@ -1059,7 +1058,7 @@ impl<'a> GraphBuilder<'a> {
 
 /// Read a tensor element used as structural metadata without consulting the
 /// compatibility f64 mirror for typed integer tensors.
-fn tensor_dimension_at(tensor: &runmat_builtins::Tensor, index: usize) -> Option<usize> {
+fn tensor_dimension_at(tensor: &runmat_value::Tensor, index: usize) -> Option<usize> {
     let scalar = tensor.numeric_value_at(index)?;
     if let Some(value) = scalar.into_int_value() {
         return value.try_to_usize();
@@ -1127,7 +1126,7 @@ fn primitive_tags(op: PrimitiveOp) -> Vec<AccelGraphTag> {
 mod tests {
     use super::*;
     use crate::instr::Instr;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn structural_tensor_dimensions_read_all_integer_classes_exactly() {

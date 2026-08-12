@@ -6,10 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor,
-    Type, Value,
+    BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};

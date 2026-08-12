@@ -4,12 +4,13 @@ use glam::Vec4;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, IntValue, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{
     bar::Orientation, BarChart, LinePlot, LineStyle, MarkerStyle, ScatterPlot,
 };
+use runmat_value::{CellArray, IntValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
@@ -1403,8 +1404,8 @@ mod tests {
     use crate::builtins::plotting::state::{current_figure_handle, decode_axes_handle};
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clone_figure, reset_hold_state_for_run};
-    use runmat_builtins::{CellArray, IntegerStorage, StringArray};
     use runmat_plot::plots::PlotElement;
+    use runmat_value::{CellArray, IntegerStorage, StringArray};
 
     fn vec_tensor(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())

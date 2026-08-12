@@ -4,9 +4,9 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -519,7 +519,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::IntegerElementType;
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -697,7 +698,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn complex_tensor_product() {
-        let ct = runmat_builtins::ComplexTensor::new(
+        let ct = runmat_value::ComplexTensor::new(
             vec![(1.0, 2.0), (3.0, -4.0), (5.0, 6.0), (7.0, -8.0)],
             vec![2, 2],
         )

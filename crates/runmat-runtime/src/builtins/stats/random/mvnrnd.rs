@@ -4,9 +4,10 @@ use nalgebra::{DMatrix, SymmetricEigen};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::random;
 use crate::builtins::common::tensor;
@@ -418,7 +419,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn reset_rng() -> impl Drop {
         let guard = random::test_guard();
@@ -592,11 +593,11 @@ mod tests {
     #[test]
     fn mvnrnd_typed_count_is_exact_and_lossy_f64_is_rejected() {
         assert_eq!(
-            block_on(parse_n(&Value::Int(runmat_builtins::IntValue::U16(3)))).unwrap(),
+            block_on(parse_n(&Value::Int(runmat_value::IntValue::U16(3)))).unwrap(),
             3
         );
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {

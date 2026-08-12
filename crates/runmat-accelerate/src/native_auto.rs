@@ -21,12 +21,13 @@ use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
     ProviderPrecision,
 };
-use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
+use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_runtime::builtins::common::{
     spec::{builtin_residency_policy, ResidencyPolicy},
     tensor::tensor_element_len,
 };
 use runmat_runtime::gather_if_needed_async;
+use runmat_value::{Tensor, Value};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -833,14 +834,14 @@ impl NativeAutoOffload {
     fn tensor_to_gpu(&self, tensor: &Tensor) -> Result<Value> {
         if let Some(storage) = tensor.integer_storage() {
             let data = match storage {
-                runmat_builtins::IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-                runmat_builtins::IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-                runmat_builtins::IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-                runmat_builtins::IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-                runmat_builtins::IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-                runmat_builtins::IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-                runmat_builtins::IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-                runmat_builtins::IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+                runmat_value::IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+                runmat_value::IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+                runmat_value::IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+                runmat_value::IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+                runmat_value::IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+                runmat_value::IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+                runmat_value::IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+                runmat_value::IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
             };
             let handle = self
                 .provider
@@ -1422,7 +1423,7 @@ mod tests {
         crate::simple_provider::register_inprocess_provider();
         let provider = runmat_accelerate_api::provider().expect("in-process provider");
         let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
-        let expected = runmat_builtins::IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]);
+        let expected = runmat_value::IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]);
         let tensor = Tensor::new_integer(expected.clone(), vec![1, 2]).expect("integer tensor");
 
         let promoted = auto
@@ -1447,7 +1448,7 @@ mod tests {
     #[test]
     fn native_auto_uses_integer_storage_for_lengths_and_empty_placeholders() {
         let wide = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 7]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 7]),
             vec![1, 2],
         )
         .expect("wide integer tensor");
@@ -1455,16 +1456,15 @@ mod tests {
         assert!(!is_empty_placeholder_value(&Value::Tensor(wide)));
 
         let signed = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -1, i64::MAX]),
+            runmat_value::IntegerStorage::I64(vec![i64::MIN, -1, i64::MAX]),
             vec![1, 3],
         )
         .expect("signed integer tensor");
         assert_eq!(value_len(&Value::Tensor(signed.clone())), Some(3));
         assert!(!is_empty_placeholder_value(&Value::Tensor(signed)));
 
-        let empty =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(Vec::new()), vec![0, 0])
-                .expect("empty integer placeholder");
+        let empty = Tensor::new_integer(runmat_value::IntegerStorage::U64(Vec::new()), vec![0, 0])
+            .expect("empty integer placeholder");
         assert_eq!(value_len(&Value::Tensor(empty.clone())), Some(0));
         assert!(is_empty_placeholder_value(&Value::Tensor(empty)));
     }

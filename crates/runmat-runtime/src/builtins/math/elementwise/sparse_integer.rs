@@ -4,7 +4,7 @@
 //! integer buffers when converting an integer tensor to sparse storage. Those
 //! buffers must never flow through the legacy f64 sparse arithmetic helpers.
 
-use runmat_builtins::{IntValue, IntegerStorage, SparseTensor, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::math::elementwise::integer_arithmetic::{

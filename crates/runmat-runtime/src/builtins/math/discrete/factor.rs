@@ -6,10 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, NumericDType, NumericScalar, NumericStorage, Tensor,
-    Type, Value,
+    BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, NumericScalar, NumericStorage, Tensor, Value};
 
 use super::integer_number_theory::prime_factors;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -215,7 +215,7 @@ fn error(descriptor: &'static BuiltinErrorDescriptor, detail: impl Into<String>)
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(factor_builtin(value, Vec::new()))

@@ -3,9 +3,11 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -444,7 +446,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     #[test]
     fn integer_limits_support_common_classes() {

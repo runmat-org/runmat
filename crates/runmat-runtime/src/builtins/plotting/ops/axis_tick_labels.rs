@@ -1,4 +1,4 @@
-use runmat_builtins::{CellArray, CharArray, Value};
+use runmat_value::{CellArray, CharArray, Value};
 
 use super::axis_ticks::TickAxis;
 use super::op_common::axes_target::AxesTarget;
@@ -374,13 +374,13 @@ pub(crate) fn label_cell_texts(value: &Value) -> Vec<String> {
 #[cfg(test)]
 pub(crate) fn tensor(data: Vec<f64>) -> Value {
     let len = data.len();
-    Value::Tensor(runmat_builtins::Tensor::new(data, vec![1, len]).expect("tick label test row"))
+    Value::Tensor(runmat_value::Tensor::new(data, vec![1, len]).expect("tick label test row"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn tick_label_parser_accepts_empty_typed_integer_tensor_without_mirror() {

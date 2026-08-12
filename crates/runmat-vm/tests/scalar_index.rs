@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_value::Value;
 use runmat_vm::indexing::selectors::{
     indices_from_value_linear, selector_from_value_dim, SliceSelector,
 };

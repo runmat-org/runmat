@@ -10,9 +10,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -183,7 +183,8 @@ fn tand_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     fn tand_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::tand_builtin(value))
@@ -309,11 +310,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tand_reads_typed_integer_tensor_storage_exactly() {
-        let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![0, 45]),
-            vec![1, 2],
-        )
-        .expect("integer tensor");
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![0, 45]), vec![1, 2])
+                .expect("integer tensor");
 
         match tand_builtin(Value::Tensor(tensor)).expect("tand") {
             Value::Tensor(out) => {

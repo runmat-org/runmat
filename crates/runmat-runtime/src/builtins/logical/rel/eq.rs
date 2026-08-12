@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::spec::{
@@ -738,7 +739,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, HandleRef, IntegerComplexStorage, IntegerStorage, Listener, SymbolicArray,
         SymbolicExpr,
     };
@@ -1150,7 +1151,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
             let result = run_eq(
                 Value::GpuTensor(handle.clone()),
-                Value::Int(runmat_builtins::IntValue::U64((1_u64 << 53) + 1)),
+                Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
             )
             .expect("exact fallback");
             assert_eq!(

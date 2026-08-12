@@ -21,10 +21,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray,
-    NumericStorage, ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericStorage, StringArray,
+    Tensor, Value,
+};
 use std::collections::HashSet;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::circshift")]
@@ -1040,7 +1043,7 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
 
     #[test]
     fn circshift_typed_argument_parsers_preserve_signed_values_and_ranges() {

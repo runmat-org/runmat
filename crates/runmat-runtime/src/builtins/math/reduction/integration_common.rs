@@ -1,7 +1,7 @@
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderTrapezoidSpacing,
 };
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -457,7 +457,7 @@ fn shapes_equal_with_trailing_ones(lhs: &[usize], rhs: &[usize]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
+    use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[test]
     fn optional_dim_parses_typed_integer_tensor_exactly() {

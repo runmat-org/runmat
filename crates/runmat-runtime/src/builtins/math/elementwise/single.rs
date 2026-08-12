@@ -5,10 +5,12 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexTensor, LogicalArray, NumericStorage, SparseTensor, SymbolicArray, Tensor,
     Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
     gpu_helpers,
@@ -490,9 +492,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        IntegerComplexStorage, IntegerStorage, ResolveContext, SymbolicArray, SymbolicExpr, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, SymbolicArray, SymbolicExpr};
 
     fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::single_builtin(value, rest))
@@ -658,7 +659,7 @@ pub(crate) mod tests {
         assert_eq!(output.shape(), vec![3, 2]);
         assert_eq!(
             output.numeric_dtype(),
-            Some(runmat_builtins::NumericDType::F32)
+            Some(runmat_value::NumericDType::F32)
         );
         assert_eq!(
             output.as_f32_slice(),

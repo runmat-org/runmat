@@ -1,10 +1,11 @@
 //! Deep Learning Toolbox compatibility builtins.
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    ClassDef, MethodDef, ResolveContext, Type,
 };
+use runmat_value::{Access, ObjectInstance, StringArray, Tensor, Value};
 use std::cell::Cell;
 use std::collections::HashMap;
 

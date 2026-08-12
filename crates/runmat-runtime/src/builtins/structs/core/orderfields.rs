@@ -10,9 +10,9 @@ use crate::builtins::structs::type_resolvers::orderfields_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, NumericScalar, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, NumericScalar, StructValue, Tensor, Value};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
@@ -723,7 +723,7 @@ fn missing_field(name: &str) -> RuntimeError {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, CharArray, StringArray, Tensor};
+    use runmat_value::{CellArray, CharArray, StringArray, Tensor};
 
     fn run_orderfields(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::orderfields_builtin(value, rest))
@@ -882,8 +882,7 @@ pub(crate) mod tests {
         st.fields.insert("first".to_string(), Value::Num(1.0));
         st.fields.insert("second".to_string(), Value::Num(2.0));
         let permutation =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![2, 1]), vec![1, 2])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![2, 1]), vec![1, 2]).unwrap();
 
         let Value::Struct(reordered) =
             run_orderfields(Value::Struct(st), vec![Value::Tensor(permutation)]).unwrap()

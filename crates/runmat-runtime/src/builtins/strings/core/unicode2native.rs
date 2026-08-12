@@ -4,9 +4,9 @@ use encoding_rs::{EncoderResult, Encoding, UTF_16BE, UTF_16LE, UTF_8};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntegerStorage, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, IntegerStorage, StringArray, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -469,7 +469,8 @@ fn bytes_to_uint8_row(bytes: Vec<u8>) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{NumericDType, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::NumericDType;
 
     fn unicode2native_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::unicode2native_builtin(value, rest))

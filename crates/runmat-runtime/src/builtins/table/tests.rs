@@ -3,12 +3,12 @@ use crate::RuntimeError;
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
 use futures::executor::block_on;
-use runmat_builtins::IntegerStorage;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags, SandboxFsProvider,
 };
 use runmat_time::unix_timestamp_ms;
+use runmat_value::IntegerStorage;
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io;
@@ -758,7 +758,7 @@ fn detect_import_options_integer_num_header_lines_is_gated_before_file_access() 
     let missing = Value::from("definitely-missing.csv");
     let args = vec![
         Value::from("NumHeaderLines"),
-        Value::Int(runmat_builtins::IntValue::U8(1)),
+        Value::Int(runmat_value::IntValue::U8(1)),
     ];
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(detect_import_options_builtin(missing, args))
@@ -776,7 +776,7 @@ fn detect_import_options_rejects_nested_resident_input_before_provider_access() 
         device_id: u32::MAX,
         buffer_id: u64::MAX,
     });
-    let mut options = runmat_builtins::StructValue::new();
+    let mut options = runmat_value::StructValue::new();
     options.fields.insert("Range".to_string(), resident);
     let error = block_on(detect_import_options_builtin(
         Value::from("definitely-missing.csv"),
@@ -1568,7 +1568,7 @@ fn groupsummary_missing_controls_default_true_and_require_zero_or_one() {
         vec![
             Value::from("X"),
             Value::from("IncludeMissingGroups"),
-            Value::Int(runmat_builtins::IntValue::U8(2)),
+            Value::Int(runmat_value::IntValue::U8(2)),
         ],
     )
     .expect_err("nonbinary control must reject");
@@ -2609,7 +2609,7 @@ fn head_preserves_exact_integer_rows_and_requires_positive_count() {
     );
     let selected = block_on(head_builtin(
         source,
-        vec![Value::Int(runmat_builtins::IntValue::U8(1))],
+        vec![Value::Int(runmat_value::IntValue::U8(1))],
     ))
     .unwrap();
     let Value::Tensor(selected) = selected else {
@@ -2618,7 +2618,7 @@ fn head_preserves_exact_integer_rows_and_requires_positive_count() {
     assert_eq!(selected.shape, vec![1, 2]);
     assert_eq!(
         selected.into_numeric_storage().unwrap(),
-        runmat_builtins::NumericStorage::U64(vec![9_007_199_254_740_993, 7])
+        runmat_value::NumericStorage::U64(vec![9_007_199_254_740_993, 7])
     );
 
     for controls in [
@@ -2680,7 +2680,7 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
         panic!("expected single tensor");
     };
     assert_eq!(real.shape, vec![1, 2, 3]);
-    assert_eq!(real.numeric_dtype(), runmat_builtins::NumericDType::F32);
+    assert_eq!(real.numeric_dtype(), runmat_value::NumericDType::F32);
     assert_eq!(real.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0]);
 
     let complex = ComplexTensor::from_f32(
@@ -2698,7 +2698,7 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
         panic!("expected complex tensor");
     };
     assert_eq!(complex.shape, vec![1, 2, 3]);
-    assert_eq!(complex.numeric_dtype(), runmat_builtins::NumericDType::F32);
+    assert_eq!(complex.numeric_dtype(), runmat_value::NumericDType::F32);
     assert_eq!(
         complex.materialize_f64(),
         vec![
@@ -2728,7 +2728,7 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     assert_eq!(complex_f64.shape, vec![1, 2, 3]);
 
     let integer_complex = ComplexTensor::new_integer(
-        runmat_builtins::IntegerComplexStorage::new(
+        runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I64((1..=12).collect()),
             IntegerStorage::I64((-12..=-1).collect()),
         )
@@ -2945,7 +2945,7 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(dictionary_builtin(vec![
             Value::GpuTensor(handle),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
         ]))
         .expect_err("resident dictionary input must be gated before gather");
         assert_eq!(
@@ -2963,7 +2963,7 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(dictionary_builtin(vec![
         nested,
-        Value::Int(runmat_builtins::IntValue::U8(1)),
+        Value::Int(runmat_value::IntValue::U8(1)),
     ]))
     .expect_err("nested resident dictionary input must be gated before gather");
     assert_eq!(
@@ -3601,44 +3601,44 @@ fn categorical_integer_constructor_surface_is_exact_for_every_class() {
 fn categorical_integer_flags_accept_only_exact_zero_or_one() {
     let flags = [
         (
-            runmat_builtins::IntValue::I8(0),
-            runmat_builtins::IntValue::I8(1),
-            runmat_builtins::IntValue::I8(2),
+            runmat_value::IntValue::I8(0),
+            runmat_value::IntValue::I8(1),
+            runmat_value::IntValue::I8(2),
         ),
         (
-            runmat_builtins::IntValue::I16(0),
-            runmat_builtins::IntValue::I16(1),
-            runmat_builtins::IntValue::I16(2),
+            runmat_value::IntValue::I16(0),
+            runmat_value::IntValue::I16(1),
+            runmat_value::IntValue::I16(2),
         ),
         (
-            runmat_builtins::IntValue::I32(0),
-            runmat_builtins::IntValue::I32(1),
-            runmat_builtins::IntValue::I32(2),
+            runmat_value::IntValue::I32(0),
+            runmat_value::IntValue::I32(1),
+            runmat_value::IntValue::I32(2),
         ),
         (
-            runmat_builtins::IntValue::I64(0),
-            runmat_builtins::IntValue::I64(1),
-            runmat_builtins::IntValue::I64(2),
+            runmat_value::IntValue::I64(0),
+            runmat_value::IntValue::I64(1),
+            runmat_value::IntValue::I64(2),
         ),
         (
-            runmat_builtins::IntValue::U8(0),
-            runmat_builtins::IntValue::U8(1),
-            runmat_builtins::IntValue::U8(2),
+            runmat_value::IntValue::U8(0),
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U8(2),
         ),
         (
-            runmat_builtins::IntValue::U16(0),
-            runmat_builtins::IntValue::U16(1),
-            runmat_builtins::IntValue::U16(2),
+            runmat_value::IntValue::U16(0),
+            runmat_value::IntValue::U16(1),
+            runmat_value::IntValue::U16(2),
         ),
         (
-            runmat_builtins::IntValue::U32(0),
-            runmat_builtins::IntValue::U32(1),
-            runmat_builtins::IntValue::U32(2),
+            runmat_value::IntValue::U32(0),
+            runmat_value::IntValue::U32(1),
+            runmat_value::IntValue::U32(2),
         ),
         (
-            runmat_builtins::IntValue::U64(0),
-            runmat_builtins::IntValue::U64(1),
-            runmat_builtins::IntValue::U64(2),
+            runmat_value::IntValue::U64(0),
+            runmat_value::IntValue::U64(1),
+            runmat_value::IntValue::U64(2),
         ),
     ];
     for (zero, one, two) in flags {

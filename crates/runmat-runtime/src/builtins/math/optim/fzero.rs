@@ -17,8 +17,8 @@ use runmat_builtins::{
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -458,7 +458,7 @@ async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinRe
     )
     .await
     .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
-    let initial_single = matches!(&x, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32);
+    let initial_single = matches!(&x, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32);
     let bracket = initial_bracket(&function, x, &opts, initial_single)
         .await
         .map_err(|err| fzero_map_error(err, &FZERO_ERROR_INVALID_INPUT))?;
@@ -750,7 +750,7 @@ fn finalize(result: BrentZeroResult, options: &FzeroOptions, single: bool) -> Bu
 
     let scalar = |value: f64| -> BuiltinResult<Value> {
         if single {
-            Tensor::new_with_dtype(vec![value], vec![1, 1], runmat_builtins::NumericDType::F32)
+            Tensor::new_with_dtype(vec![value], vec![1, 1], runmat_value::NumericDType::F32)
                 .map(Value::Tensor)
                 .map_err(|error| fzero_error_with_detail(&FZERO_ERROR_INVALID_INPUT, error))
         } else {
@@ -868,7 +868,7 @@ mod tests {
     use super::*;
     use crate::builtins::math::optim::brent::interpolation_step_accepted;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
     use std::sync::Arc;
 
     #[test]
@@ -888,12 +888,9 @@ mod tests {
 
     #[test]
     fn fzero_single_interval_returns_single_numerical_outputs() {
-        let bracket = Tensor::new_with_dtype(
-            vec![3.0, 4.0],
-            vec![1, 2],
-            runmat_builtins::NumericDType::F32,
-        )
-        .unwrap();
+        let bracket =
+            Tensor::new_with_dtype(vec![3.0, 4.0], vec![1, 2], runmat_value::NumericDType::F32)
+                .unwrap();
         let _outputs = crate::output_count::push_output_count(Some(3));
         let result = block_on(fzero_builtin(
             Value::FunctionHandle("sin".into()),
@@ -907,7 +904,7 @@ mod tests {
         assert_eq!(outputs.len(), 3);
         for output in outputs {
             assert!(
-                matches!(output, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32)
+                matches!(output, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
             );
         }
     }
@@ -922,26 +919,23 @@ mod tests {
                 let Value::Tensor(argument) = &args[0] else {
                     panic!("expected a single-precision scalar tensor")
                 };
-                assert_eq!(argument.numeric_dtype(), runmat_builtins::NumericDType::F32);
+                assert_eq!(argument.numeric_dtype(), runmat_value::NumericDType::F32);
                 let residual = argument.materialize_f64()[0] - std::f64::consts::PI;
                 Box::pin(async move {
                     Ok(Value::Tensor(
                         Tensor::new_with_dtype(
                             vec![residual],
                             vec![1, 1],
-                            runmat_builtins::NumericDType::F32,
+                            runmat_value::NumericDType::F32,
                         )
                         .unwrap(),
                     ))
                 })
             },
         )));
-        let bracket = Tensor::new_with_dtype(
-            vec![3.0, 4.0],
-            vec![1, 2],
-            runmat_builtins::NumericDType::F32,
-        )
-        .unwrap();
+        let bracket =
+            Tensor::new_with_dtype(vec![3.0, 4.0], vec![1, 2], runmat_value::NumericDType::F32)
+                .unwrap();
         let root = block_on(fzero_builtin(
             Value::BoundFunctionHandle {
                 name: "single_root".to_string(),
@@ -952,7 +946,7 @@ mod tests {
         ))
         .unwrap();
         assert!(
-            matches!(root, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32)
+            matches!(root, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
         );
         assert!(calls.load(std::sync::atomic::Ordering::Relaxed) > 2);
     }
@@ -971,7 +965,7 @@ mod tests {
                         Tensor::new_with_dtype(
                             vec![x - 1.0],
                             vec![1, 1],
-                            runmat_builtins::NumericDType::F32,
+                            runmat_value::NumericDType::F32,
                         )
                         .unwrap(),
                     ))

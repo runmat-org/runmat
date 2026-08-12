@@ -7,9 +7,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;

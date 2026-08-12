@@ -5,10 +5,10 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ResolveContext, StringArray, StructValue, Tensor, Type,
-    Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::stats::summary::distribution_math;
@@ -1079,7 +1079,7 @@ fn invert_matrix(a: Vec<f64>, n: usize) -> BuiltinResult<Vec<f64>> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())

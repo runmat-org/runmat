@@ -16,9 +16,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, ComplexTensor, ResolveContext, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, ComplexTensor, Value};
 
 const UD_DIM: [usize; 1] = [1];
 const BUILTIN_NAME: &str = "flipud";
@@ -290,9 +291,10 @@ pub(crate) mod tests {
     };
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
+    use runmat_builtins::Type;
+    use runmat_value::{
         CellArray, CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
-        StructValue, Tensor, Type, Value,
+        StructValue, Tensor, Value,
     };
 
     #[test]

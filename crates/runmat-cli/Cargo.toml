@@ -16,6 +16,7 @@ name = "runmat"
 path = "src/main.rs"
 
 [dependencies]
+runmat-value = { workspace = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal"] }
 futures = "0.3"
 clap = { workspace = true }

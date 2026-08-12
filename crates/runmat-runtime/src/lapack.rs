@@ -2,7 +2,7 @@
 //!
 //! Advanced linear algebra operations including decompositions and linear system solvers.
 
-use runmat_builtins::Tensor as Matrix;
+use runmat_value::Tensor as Matrix;
 
 use crate::builtins::common::tensor;
 

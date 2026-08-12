@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
-use runmat_builtins::{
-    IntValue, IntegerStorage, NumericScalar, NumericStorage, ObjectInstance, Tensor, Value,
-};
 use runmat_filesystem as fs;
 use runmat_filesystem::data_contract::{
     DataChunkDescriptor, DataChunkUploadRequest, DataChunkUploadTarget,
+};
+use runmat_value::{
+    IntValue, IntegerStorage, NumericScalar, NumericStorage, ObjectInstance, Tensor, Value,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1839,7 +1839,7 @@ mod tests {
         let Value::Tensor(tensor) = decoded.into_value().expect("single tensor value") else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(
             tensor.materialize_f64(),
             vec![f64::from(f32::MIN), f64::from(0.1_f32), f64::from(f32::MAX)]
@@ -1890,12 +1890,12 @@ mod tests {
 
     #[test]
     fn payload_rejects_typed_complex_integers_without_float_coercion() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
             IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
         )
         .expect("matching typed complex components");
-        let complex = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2])
+        let complex = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2])
             .expect("typed complex tensor");
 
         let error =

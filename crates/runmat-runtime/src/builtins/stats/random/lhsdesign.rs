@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
@@ -424,7 +425,7 @@ fn sum_squared_column_correlations(data: &[f64], n: usize, p: usize) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn tensor(value: Value) -> Tensor {
         match value {
@@ -580,10 +581,10 @@ mod tests {
     #[test]
     fn typed_integer_counts_are_exact_and_lossy_f64_is_rejected() {
         assert_eq!(
-            positive_usize(&Value::Int(runmat_builtins::IntValue::U16(3)), "n").unwrap(),
+            positive_usize(&Value::Int(runmat_value::IntValue::U16(3)), "n").unwrap(),
             3
         );
-        assert!(positive_usize(&Value::Int(runmat_builtins::IntValue::I8(-1)), "n").is_err());
+        assert!(positive_usize(&Value::Int(runmat_value::IntValue::I8(-1)), "n").is_err());
         assert!(positive_usize(&Value::Num(1.5), "n").is_err());
         assert!(positive_usize(&Value::Num(usize::MAX as f64 + 1.0), "n").is_err());
     }

@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -595,9 +596,8 @@ fn natural_frequency(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        builtin_function_by_name, IntValue, IntegerStorage, NumericDType, Tensor,
-    };
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntValue, IntegerStorage, NumericDType, Tensor};
 
     fn call(
         wp: Value,

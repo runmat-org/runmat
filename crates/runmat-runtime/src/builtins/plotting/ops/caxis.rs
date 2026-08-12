@@ -1,9 +1,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::clim::clim_impl;
 use crate::builtins::plotting::type_resolvers::get_type;
@@ -103,7 +104,7 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn caxis_descriptor_signatures_cover_core_forms() {
@@ -183,7 +184,7 @@ mod tests {
                 let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
                 let result = caxis_builtin(vec![limits]).unwrap();
                 let tensor = Tensor::try_from(&result).unwrap();
-                assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F64);
+                assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
             }
         }
     }

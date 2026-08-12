@@ -9,10 +9,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, IntValue, LogicalArray, ObjectInstance, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, IntValue, LogicalArray, ObjectInstance, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -1413,7 +1415,7 @@ fn linear_for_coords(coords: &[usize], strides: &[usize]) -> usize {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1545,14 +1547,14 @@ mod tests {
     fn dummyvar_supports_all_integer_classes_in_extension_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let storages = [
-            runmat_builtins::IntegerStorage::I8(vec![1, 2, 1]),
-            runmat_builtins::IntegerStorage::I16(vec![1, 2, 1]),
-            runmat_builtins::IntegerStorage::I32(vec![1, 2, 1]),
-            runmat_builtins::IntegerStorage::I64(vec![1, 2, 1]),
-            runmat_builtins::IntegerStorage::U8(vec![1, 2, 1]),
-            runmat_builtins::IntegerStorage::U16(vec![1, 2, 1]),
-            runmat_builtins::IntegerStorage::U32(vec![1, 2, 1]),
-            runmat_builtins::IntegerStorage::U64(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::I8(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::I16(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::I32(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::I64(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::U8(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::U16(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::U32(vec![1, 2, 1]),
+            runmat_value::IntegerStorage::U64(vec![1, 2, 1]),
         ];
         for storage in storages {
             let Value::Tensor(output) = block_on(dummyvar_builtin(int_tensor(storage, vec![3, 1])))
@@ -1591,7 +1593,7 @@ mod tests {
     fn dummyvar_integer_extension_rejects_before_computation_in_strict_mode() {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(dummyvar_builtin(int_tensor(
-            runmat_builtins::IntegerStorage::U8(vec![1, 2]),
+            runmat_value::IntegerStorage::U8(vec![1, 2]),
             vec![2, 1],
         )))
         .expect_err("integer extension gate");

@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, ResolveContext, StructValue, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::stats::summary::distribution_math::{
@@ -1160,7 +1161,7 @@ fn interval_shape(out_shape: &[usize], dim: usize) -> Vec<usize> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn output_list(value: Value) -> Vec<Value> {
         match value {

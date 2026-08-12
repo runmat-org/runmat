@@ -1,7 +1,7 @@
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{IntValue, IntegerStorage};
 use runmat_runtime::RuntimeError;
+use runmat_value::{IntValue, IntegerStorage};
 
 #[derive(Clone)]
 pub(crate) enum IntegerAssignmentValue {

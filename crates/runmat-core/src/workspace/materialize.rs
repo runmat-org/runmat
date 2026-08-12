@@ -1,6 +1,6 @@
 use anyhow::Result;
 use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
-use runmat_builtins::{NumericStorage, Tensor, Value};
+use runmat_value::{NumericStorage, Tensor, Value};
 
 use super::{WorkspaceMaterializeOptions, WorkspaceSliceOptions};
 
@@ -184,7 +184,7 @@ pub(crate) async fn gather_gpu_preview_values(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn preview_slice_preserves_exact_uint64_storage() {

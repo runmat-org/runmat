@@ -9,17 +9,20 @@ use std::sync::{
 };
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerClass, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ClassDef, HandleRef, IntValue, IntegerStorage,
-    LogicalArray, MethodDef, NumericDType, ObjectInstance, PropertyDef, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_gc::{GcHandle, GcRoot, RootId, Trace, Tracer};
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, CharArray, HandleRef, IntValue, IntegerStorage, LogicalArray, NumericDType,
+    ObjectInstance, StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
@@ -2183,7 +2186,7 @@ fn tensor_elements_to_values(tensor: &Tensor) -> Vec<Value> {
         NumericDType::F32 => (0..tensor.len())
             .map(|index| {
                 let value = match tensor.numeric_value_at(index) {
-                    Some(runmat_builtins::NumericScalar::F32(value)) => value,
+                    Some(runmat_value::NumericScalar::F32(value)) => value,
                     _ => unreachable!("single tensor has native single storage"),
                 };
                 Value::Tensor(
@@ -2863,7 +2866,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::IntegerStorage;
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message.clone()
@@ -3378,7 +3382,7 @@ pub(crate) mod tests {
             assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
             assert_eq!(
                 tensor.numeric_value_at(0),
-                Some(runmat_builtins::NumericScalar::F32(expected))
+                Some(runmat_value::NumericScalar::F32(expected))
             );
         }
 

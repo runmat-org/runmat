@@ -6,10 +6,9 @@ pub(crate) mod sym;
 pub(crate) mod syms;
 pub(crate) mod vpa;
 
-use runmat_builtins::{
-    symbolic::{is_valid_symbolic_identifier, SymbolicFunction},
-    SymbolicArray, SymbolicExpr, Tensor, Value,
-};
+use runmat_builtins::symbolic::is_valid_symbolic_identifier;
+use runmat_value::SymbolicFunction;
+use runmat_value::{SymbolicArray, SymbolicExpr, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::shape::is_scalar_shape;
@@ -221,7 +220,7 @@ pub(crate) fn is_valid_identifier(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn symbolic_scalar_reads_typed_integer_tensor_storage_exactly() {

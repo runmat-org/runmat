@@ -23,9 +23,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::fft2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -524,9 +524,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
@@ -764,7 +763,7 @@ pub(crate) mod tests {
         assert_eq!(builtin.extensions.len(), 4);
 
         let logical = fft2_builtin(
-            Value::Int(runmat_builtins::IntValue::U8(3)),
+            Value::Int(runmat_value::IntValue::U8(3)),
             vec![Value::Bool(true), Value::Bool(true)],
         )
         .expect("logical M and N are documented");
@@ -773,7 +772,7 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let size_form = fft2_builtin(
             Value::Num(1.0),
-            vec![Value::Int(runmat_builtins::IntValue::U16(2))],
+            vec![Value::Int(runmat_value::IntValue::U16(2))],
         )
         .expect_err("single SIZE form must gate");
         assert_eq!(

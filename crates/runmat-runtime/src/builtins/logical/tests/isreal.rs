@@ -7,9 +7,10 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -181,10 +182,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntegerComplexStorage,
-        IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, ResolveContext,
-        StructValue, SymbolicExpr, Tensor, Type,
+        IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, StructValue,
+        SymbolicExpr, Tensor,
     };
 
     fn run_isreal(value: Value) -> BuiltinResult<Value> {
@@ -251,7 +253,7 @@ pub(crate) mod tests {
         let chars = CharArray::new_row("RunMat");
         let string_flag = run_isreal(Value::from("RunMat")).expect("isreal");
         let string_array =
-            runmat_builtins::StringArray::new(vec!["a".into(), "b".into()], vec![2]).unwrap();
+            runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![2]).unwrap();
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
         let mut fields = StructValue::new();
         fields.fields.insert("name".into(), Value::from("Ada"));

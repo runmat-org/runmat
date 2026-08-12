@@ -8,9 +8,9 @@ use base64::Engine;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StructValue, Tensor, Value};
 use url::Url;
 
 use super::transport::{
@@ -1169,7 +1169,7 @@ pub(crate) mod tests {
 
     #[test]
     fn body_and_query_text_preserve_exact_uint64() {
-        let value = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+        let value = Value::Int(runmat_value::IntValue::U64(u64::MAX));
         assert_eq!(
             scalar_to_string(&value).expect("body text"),
             "18446744073709551615"
@@ -1183,7 +1183,7 @@ pub(crate) mod tests {
     #[test]
     fn body_query_and_numeric_scalar_read_typed_integer_storage_exactly() {
         let text = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("typed text tensor");
@@ -1198,7 +1198,7 @@ pub(crate) mod tests {
         );
 
         let timeout =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2026]), vec![1, 1])
+            Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2026]), vec![1, 1])
                 .expect("typed timeout tensor");
         assert_eq!(
             numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
@@ -1481,7 +1481,7 @@ pub(crate) mod tests {
     #[test]
     fn webwrite_binary_payload_respected() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U8(vec![1, 2, 3, 255]),
+            runmat_value::IntegerStorage::U8(vec![1, 2, 3, 255]),
             vec![4, 1],
         )
         .unwrap();

@@ -9,9 +9,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use super::colormap_arrays::{colormap_tensor, parse_rgb_colormap_tensor};
 use super::op_common::cmd_parsing::{as_lower_str, parse_on_off};
@@ -1163,7 +1163,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -1198,7 +1198,7 @@ mod tests {
         let _guard = setup();
         let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
         let limits = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![0, 10, -2, 2, 4, 5]),
+            runmat_value::IntegerStorage::I16(vec![0, 10, -2, 2, 4, 5]),
             vec![1, 6],
         )
         .expect("typed limits");
@@ -1241,7 +1241,7 @@ mod tests {
                 panic!("expected limit tensor");
             };
             assert_eq!(actual.materialize_f64(), vec![0.0, 10.0, 1.0, 2.0]);
-            assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(actual.numeric_dtype(), runmat_value::NumericDType::F64);
         }
     }
 
@@ -1585,7 +1585,7 @@ mod tests {
     fn colormap_rejects_typed_integer_targets_without_f64_aliasing() {
         let _guard = setup();
         let err = colormap_builtin(vec![
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             Value::String("parula".into()),
         ])
         .unwrap_err();

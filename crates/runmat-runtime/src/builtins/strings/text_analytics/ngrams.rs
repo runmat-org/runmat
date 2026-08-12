@@ -4,15 +4,17 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ClassDef, IntegerStorage, NumericScalar, ObjectInstance,
-    PropertyDef, ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ClassDef, PropertyDef, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, CharArray, IntegerStorage, NumericScalar, ObjectInstance, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::is_missing_string;
@@ -765,7 +767,7 @@ fn vocabulary_array(ngrams: &[Vec<String>]) -> BuiltinResult<StringArray> {
 mod tests {
     use super::*;
     use crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_CLASS;
-    use runmat_builtins::{CellArray, IntegerStorage, NumericStorage};
+    use runmat_value::{CellArray, IntegerStorage, NumericStorage};
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(bag_of_ngrams_builtin(args))
@@ -858,13 +860,13 @@ mod tests {
             let actual_counts = tensor_property(&bag, "Counts");
             assert_eq!(
                 actual_counts.numeric_dtype(),
-                runmat_builtins::NumericDType::F64
+                runmat_value::NumericDType::F64
             );
             assert_eq!(actual_counts.materialize_f64(), vec![2.0, 3.0]);
             let actual_lengths = tensor_property(&bag, "NgramLengths");
             assert_eq!(
                 actual_lengths.numeric_dtype(),
-                runmat_builtins::NumericDType::F64
+                runmat_value::NumericDType::F64
             );
             assert_eq!(actual_lengths.materialize_f64(), vec![2.0]);
         }
@@ -879,7 +881,7 @@ mod tests {
         let bag =
             object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
         let actual = tensor_property(&bag, "Counts");
-        assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(actual.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(actual.materialize_f64(), vec![wide as f64]);
     }
 

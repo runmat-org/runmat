@@ -21,12 +21,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
+use runmat_value::{ComplexTensor, Value};
 
-#[cfg(test)]
-use runmat_builtins::Tensor;
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::Tensor;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::fftn")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -538,10 +538,10 @@ mod tests {
         assert_eq!(builtin.integer_capabilities.len(), 4);
         assert_eq!(builtin.extensions.len(), 3);
 
-        let logical_sizes = runmat_builtins::LogicalArray::new(vec![1, 1], vec![1, 2])
-            .expect("logical size vector");
+        let logical_sizes =
+            runmat_value::LogicalArray::new(vec![1, 1], vec![1, 2]).expect("logical size vector");
         block_on(fftn_builtin(
-            Value::Int(runmat_builtins::IntValue::I16(4)),
+            Value::Int(runmat_value::IntValue::I16(4)),
             vec![Value::LogicalArray(logical_sizes)],
         ))
         .expect("documented logical SIZE vector");
@@ -562,7 +562,7 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let short = block_on(fftn_builtin(
             Value::Num(1.0),
-            vec![Value::Int(runmat_builtins::IntValue::U16(2))],
+            vec![Value::Int(runmat_value::IntValue::U16(2))],
         ))
         .expect_err("short SIZE must gate");
         assert_eq!(
@@ -571,7 +571,7 @@ mod tests {
         );
 
         let wide =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I64(vec![1]), vec![1, 1]).unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::I64(vec![1]), vec![1, 1]).unwrap();
         let error = block_on(fftn_builtin(Value::Tensor(wide), Vec::new()))
             .expect_err("wide data must gate");
         assert_eq!(

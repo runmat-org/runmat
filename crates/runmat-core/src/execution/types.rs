@@ -1,6 +1,6 @@
-use runmat_builtins::Value;
 use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 use crate::fusion::FusionPlanSnapshot;
 use crate::workspace::WorkspaceSnapshot;

@@ -1,5 +1,5 @@
-use runmat_builtins::Value;
 use runmat_hir::FunctionId;
+use runmat_value::Value;
 use runmat_vm::{Bytecode, Instr};
 
 use super::ExecutableUnit;

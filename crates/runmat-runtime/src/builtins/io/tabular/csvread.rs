@@ -14,10 +14,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -1121,7 +1121,7 @@ pub(crate) mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use runmat_builtins::{CharArray, IntValue, IntegerStorage, Tensor as BuiltinTensor};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor as BuiltinTensor};
 
     fn csvread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _provider_lock = runmat_filesystem::provider_override_lock();

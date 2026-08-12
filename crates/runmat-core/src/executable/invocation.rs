@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcedureTarget {

@@ -1,7 +1,6 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
-};
+use runmat_builtins::BuiltinExtensionDescriptor;
+use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -126,7 +125,7 @@ pub(crate) fn upload_value_protected(
             tensor.integer_storage().map(integer_storage_type),
             if tensor.integer_storage().is_some() {
                 None
-            } else if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+            } else if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
                 Some(runmat_accelerate_api::ProviderPrecision::F32)
             } else {
                 Some(runmat_accelerate_api::ProviderPrecision::F64)
@@ -143,7 +142,7 @@ pub(crate) fn upload_value_protected(
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
             None,
             Some(
-                if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+                if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
                     runmat_accelerate_api::ProviderPrecision::F32
                 } else {
                     runmat_accelerate_api::ProviderPrecision::F64
@@ -273,10 +272,10 @@ fn upload_complex_without_precision_override(
 }
 
 fn integer_storage_type(
-    storage: &runmat_builtins::IntegerStorage,
+    storage: &runmat_value::IntegerStorage,
 ) -> runmat_accelerate_api::IntegerElementType {
     use runmat_accelerate_api::IntegerElementType;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
     match storage {
         IntegerStorage::I8(_) => IntegerElementType::I8,
         IntegerStorage::I16(_) => IntegerElementType::I16,
@@ -321,14 +320,14 @@ pub(crate) fn align_floating_value_precision(
         return Ok(value);
     }
     let dtype = match runmat_accelerate_api::handle_precision(prototype) {
-        Some(runmat_accelerate_api::ProviderPrecision::F32) => runmat_builtins::NumericDType::F32,
-        _ => runmat_builtins::NumericDType::F64,
+        Some(runmat_accelerate_api::ProviderPrecision::F32) => runmat_value::NumericDType::F32,
+        _ => runmat_value::NumericDType::F64,
     };
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_none() => {
             let shape = tensor.shape.clone();
             let values = tensor.materialize_f64();
-            let tensor = if dtype == runmat_builtins::NumericDType::F32 {
+            let tensor = if dtype == runmat_value::NumericDType::F32 {
                 Tensor::from_f32(
                     values.into_iter().map(|value| value as f32).collect(),
                     shape,
@@ -344,7 +343,7 @@ pub(crate) fn align_floating_value_precision(
             Ok(Value::Tensor(tensor))
         }
         Value::ComplexTensor(tensor) => {
-            let tensor = runmat_builtins::ComplexTensor::from_f64_values_with_dtype(
+            let tensor = runmat_value::ComplexTensor::from_f64_values_with_dtype(
                 tensor.materialize_f64(),
                 tensor.shape.clone(),
                 dtype,
@@ -356,7 +355,7 @@ pub(crate) fn align_floating_value_precision(
             })?;
             Ok(Value::ComplexTensor(tensor))
         }
-        Value::Num(value) if dtype == runmat_builtins::NumericDType::F32 => {
+        Value::Num(value) if dtype == runmat_value::NumericDType::F32 => {
             Tensor::from_f32(vec![value as f32], vec![1, 1])
                 .map(Value::Tensor)
                 .map_err(|error| {
@@ -365,8 +364,8 @@ pub(crate) fn align_floating_value_precision(
                         .build()
                 })
         }
-        Value::Complex(re, im) if dtype == runmat_builtins::NumericDType::F32 => {
-            runmat_builtins::ComplexTensor::from_f32(vec![(re as f32, im as f32)], vec![1, 1])
+        Value::Complex(re, im) if dtype == runmat_value::NumericDType::F32 => {
+            runmat_value::ComplexTensor::from_f32(vec![(re as f32, im as f32)], vec![1, 1])
                 .map(Value::ComplexTensor)
                 .map_err(|error| {
                     build_runtime_error(format!("{builtin}: {error}"))
@@ -565,7 +564,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, NumericDType};
+    use runmat_value::{IntegerStorage, NumericDType};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct F32OnlyProvider {

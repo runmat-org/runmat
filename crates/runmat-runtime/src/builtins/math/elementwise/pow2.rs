@@ -4,9 +4,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -582,11 +582,9 @@ impl NumericArray {
 
     fn uses_single(&self) -> bool {
         match self {
-            NumericArray::Real(tensor) => {
-                tensor.numeric_dtype() == runmat_builtins::NumericDType::F32
-            }
+            NumericArray::Real(tensor) => tensor.numeric_dtype() == runmat_value::NumericDType::F32,
             NumericArray::Complex(tensor) => {
-                tensor.numeric_dtype() == runmat_builtins::NumericDType::F32
+                tensor.numeric_dtype() == runmat_value::NumericDType::F32
             }
         }
     }
@@ -597,9 +595,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::pow2_builtin(first, rest))

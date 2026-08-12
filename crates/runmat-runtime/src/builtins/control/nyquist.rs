@@ -2,8 +2,8 @@
 
 use nalgebra::DMatrix;
 use num_complex::Complex64;
-use runmat_builtins::{ObjectInstance, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -521,7 +521,7 @@ fn zero_small(value: f64) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ComplexTensor, IntegerStorage};
+    use runmat_value::{CharArray, ComplexTensor, IntegerStorage};
 
     fn tf_object(num: Vec<f64>, den: Vec<f64>, ts: f64) -> Value {
         let mut object = ObjectInstance::new("tf".to_string());

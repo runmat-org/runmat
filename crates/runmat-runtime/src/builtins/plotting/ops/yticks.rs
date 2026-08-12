@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::axis_ticks::{axis_ticks_builtin, TickAxis};
 use crate::builtins::plotting::type_resolvers::get_type;
@@ -129,7 +130,7 @@ mod tests {
 
     fn tensor(data: Vec<f64>) -> Value {
         let len = data.len();
-        Value::Tensor(runmat_builtins::Tensor::new(data, vec![1, len]).expect("y tick row"))
+        Value::Tensor(runmat_value::Tensor::new(data, vec![1, len]).expect("y tick row"))
     }
 
     #[test]
@@ -148,7 +149,7 @@ mod tests {
         .unwrap();
         let queried = yticks_builtin(Vec::new()).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&queried)
+            runmat_value::Tensor::try_from(&queried)
                 .unwrap()
                 .materialize_f64(),
             vec![1.0, 3.0, 9.0]

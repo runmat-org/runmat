@@ -8,9 +8,10 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::array::introspection::isscalar"
@@ -113,7 +114,8 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{CellArray, CharArray, ResolveContext, StructValue, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, CharArray, StructValue, Tensor};
 
     #[test]
     fn isscalar_type_returns_bool() {
@@ -158,8 +160,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isscalar_string_scalar_true_but_empty_array_false() {
-        let scalar = runmat_builtins::StringArray::new(vec!["RunMat".into()], vec![1, 1]).unwrap();
-        let empty = runmat_builtins::StringArray::new(Vec::new(), vec![0, 1]).unwrap();
+        let scalar = runmat_value::StringArray::new(vec!["RunMat".into()], vec![1, 1]).unwrap();
+        let empty = runmat_value::StringArray::new(Vec::new(), vec![0, 1]).unwrap();
         let scalar_result =
             isscalar_builtin(Value::StringArray(scalar)).expect("isscalar string scalar");
         let empty_result =

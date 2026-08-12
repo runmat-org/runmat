@@ -56,7 +56,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                         );
                     }
                     ComplexTensor::new_integer(
-                        runmat_builtins::IntegerComplexStorage::new(
+                        runmat_value::IntegerComplexStorage::new(
                             storage
                                 .real
                                 .from_exact_values_like(real)
@@ -133,7 +133,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, NumericStorage};
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     #[test]
     fn split_value_columns_preserves_native_single_storage() {
@@ -189,7 +189,7 @@ mod tests {
         let large = 9_007_199_254_740_993_i64;
         let columns = split_value_columns(Value::ComplexTensor(
             ComplexTensor::new_integer(
-                runmat_builtins::IntegerComplexStorage::new(
+                runmat_value::IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![large, i64::MIN, 7, 0]),
                     IntegerStorage::I64(vec![0, 5, i64::MIN, large]),
                 )
@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(
             first.integer_storage().cloned(),
             Some(
-                runmat_builtins::IntegerComplexStorage::new(
+                runmat_value::IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![large, i64::MIN]),
                     IntegerStorage::I64(vec![0, 5]),
                 )
@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(
             second.integer_storage().cloned(),
             Some(
-                runmat_builtins::IntegerComplexStorage::new(
+                runmat_value::IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![7, 0]),
                     IntegerStorage::I64(vec![i64::MIN, large]),
                 )

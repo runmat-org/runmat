@@ -10,10 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, NumericDType, NumericStorage,
-    ResolveContext, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -937,7 +937,7 @@ fn reduction_min_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MinEv
     }
 }
 
-fn native_integer_input(value: &Value) -> Option<(&runmat_builtins::IntegerStorage, Vec<usize>)> {
+fn native_integer_input(value: &Value) -> Option<(&runmat_value::IntegerStorage, Vec<usize>)> {
     match value {
         Value::Tensor(tensor) => tensor
             .integer_storage()
@@ -947,7 +947,7 @@ fn native_integer_input(value: &Value) -> Option<(&runmat_builtins::IntegerStora
 }
 
 fn reduce_integer_min(
-    storage: &runmat_builtins::IntegerStorage,
+    storage: &runmat_value::IntegerStorage,
     shape: Vec<usize>,
     args: &ReductionArgs,
 ) -> BuiltinResult<MinEvaluation> {
@@ -2287,7 +2287,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
     };
 
@@ -2368,7 +2368,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.into_numeric_storage().expect("single storage"),
-            runmat_builtins::NumericStorage::F32(vec![1.0, 2.0])
+            runmat_value::NumericStorage::F32(vec![1.0, 2.0])
         );
     }
 
@@ -2376,7 +2376,7 @@ pub(crate) mod tests {
     #[test]
     fn min_native_integer_reduction_preserves_uint64_values_and_indices() {
         let input = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 3, 2]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX, 3, 2]),
             vec![2, 2],
         )
         .expect("input");
@@ -2387,7 +2387,7 @@ pub(crate) mod tests {
             values,
             Value::Tensor(
                 Tensor::new_integer(
-                    runmat_builtins::IntegerStorage::U64(vec![u64::MAX - 1, 2]),
+                    runmat_value::IntegerStorage::U64(vec![u64::MAX - 1, 2]),
                     vec![1, 2],
                 )
                 .expect("values"),
@@ -2403,7 +2403,7 @@ pub(crate) mod tests {
     #[test]
     fn min_native_integer_abs_all_uses_exact_int64_minimum() {
         let input = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -3, 3]),
+            runmat_value::IntegerStorage::I64(vec![i64::MIN, -3, 3]),
             vec![3, 1],
         )
         .expect("input");
@@ -2423,16 +2423,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_native_integer_empty_array_retains_its_class() {
-        let input =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(Vec::new()), vec![0, 0])
-                .expect("input");
+        let input = Tensor::new_integer(runmat_value::IntegerStorage::U32(Vec::new()), vec![0, 0])
+            .expect("input");
         let (values, indices) = evaluate(Value::Tensor(input), &[])
             .expect("min")
             .into_pair();
         assert_eq!(
             values,
             Value::Tensor(
-                Tensor::new_integer(runmat_builtins::IntegerStorage::U32(Vec::new()), vec![0, 0])
+                Tensor::new_integer(runmat_value::IntegerStorage::U32(Vec::new()), vec![0, 0])
                     .expect("values"),
             )
         );
@@ -2445,16 +2444,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_native_integer_empty_all_reduction_remains_empty() {
-        let input =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(Vec::new()), vec![0, 0])
-                .expect("input");
+        let input = Tensor::new_integer(runmat_value::IntegerStorage::I16(Vec::new()), vec![0, 0])
+            .expect("input");
         let values = evaluate(Value::Tensor(input), &[placeholder(), Value::from("all")])
             .expect("min")
             .into_value();
         assert_eq!(
             values,
             Value::Tensor(
-                Tensor::new_integer(runmat_builtins::IntegerStorage::I16(Vec::new()), vec![0, 0])
+                Tensor::new_integer(runmat_value::IntegerStorage::I16(Vec::new()), vec![0, 0])
                     .expect("values"),
             )
         );

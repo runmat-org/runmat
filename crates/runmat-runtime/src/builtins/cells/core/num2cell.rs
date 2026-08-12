@@ -8,10 +8,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, IntValue,
-    IntegerComplexStorage, LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
+    NumericScalar, NumericStorage, StringArray, Tensor, Value,
+};
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -548,7 +551,7 @@ fn error(desc: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> R
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn converts_numeric_matrix_to_scalar_cells() {

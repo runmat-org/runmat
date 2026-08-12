@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 use super::axis_ticks::TickAxis;
 use super::properties::{resolve_plot_handle, PlotHandle};

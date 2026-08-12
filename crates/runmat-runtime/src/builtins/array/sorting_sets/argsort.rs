@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::sort;
 use super::type_resolvers::index_output_type;
@@ -287,9 +288,8 @@ pub(crate) mod tests {
         block_on(super::argsort_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{
-        ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{ComplexTensor, IntValue, IntegerStorage, Tensor, Value};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -7,10 +7,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, IntValue, LogicalArray, NumericStorage, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, IntValue, LogicalArray, NumericStorage, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
@@ -1063,11 +1065,9 @@ fn sample_value_axis(
             sample_tensor_axis(tensor, &[1, 1], axis, indices, name)
         }
         Value::Int(value) => {
-            let tensor = Tensor::new_integer(
-                runmat_builtins::IntegerStorage::from_scalar(value),
-                vec![1, 1],
-            )
-            .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
+            let tensor =
+                Tensor::new_integer(runmat_value::IntegerStorage::from_scalar(value), vec![1, 1])
+                    .map_err(|err| sampling_error(name, format!("{name}: {err}")))?;
             sample_tensor_axis(tensor, &[1, 1], axis, indices, name)
         }
         Value::Bool(value) => {
@@ -2036,7 +2036,7 @@ async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
         )),
         Value::Num(v) => Ok(BootstatRow::Numeric(NumericStorage::F64(vec![v]))),
         Value::Int(v) => Ok(BootstatRow::Numeric(
-            runmat_builtins::IntegerStorage::from_scalar(v).into(),
+            runmat_value::IntegerStorage::from_scalar(v).into(),
         )),
         Value::Bool(v) => Ok(BootstatRow::Logical(vec![u8::from(v)])),
         Value::Tensor(t) => t
@@ -2245,7 +2245,8 @@ pub mod bootstrp {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntegerStorage, NumericStorage};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
@@ -3141,24 +3142,24 @@ mod tests {
     #[test]
     fn sampling_count_parsers_preserve_typed_integers_and_reject_lossy_f64() {
         assert_eq!(
-            parse_positive_usize("test", &Value::Int(runmat_builtins::IntValue::U16(3)), "k",)
+            parse_positive_usize("test", &Value::Int(runmat_value::IntValue::U16(3)), "k",)
                 .unwrap(),
             3
         );
         assert_eq!(
-            parse_nonnegative_usize("test", Value::Int(runmat_builtins::IntValue::U16(0)), "Q",)
+            parse_nonnegative_usize("test", Value::Int(runmat_value::IntValue::U16(0)), "Q",)
                 .unwrap(),
             0
         );
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {
             assert!(parse_positive_usize("test", &value, "k").is_err());
         }
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
             Value::Num(-0.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {

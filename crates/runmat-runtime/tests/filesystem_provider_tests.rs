@@ -1,13 +1,13 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use pollster::block_on;
-use runmat_builtins::{CellArray, Tensor, Value};
 use runmat_filesystem::{self as vfs, SandboxFsProvider};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{RemoteFsConfig, RemoteFsProvider};
 use runmat_runtime::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_runtime::call_builtin;
 use runmat_runtime::call_builtin_async_with_outputs;
+use runmat_value::{CellArray, Tensor, Value};
 use std::convert::TryFrom;
 use std::io::{Cursor, Write};
 use std::sync::Arc;

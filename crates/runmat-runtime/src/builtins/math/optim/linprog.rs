@@ -4,9 +4,9 @@ use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1078,7 +1078,7 @@ fn build_output_struct(outcome: &LinprogOutcome) -> StructValue {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Value as V};
+    use runmat_value::{IntegerStorage, Value as V};
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> V {
         V::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())

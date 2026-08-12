@@ -18,10 +18,10 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Value};
 
 const BUILTIN_NAME: &str = "rot90";
 
@@ -676,9 +676,8 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor, Type,
-    };
+    use runmat_builtins::Type;
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor};
 
     #[test]
     fn rot90_rotation_parser_reduces_full_uint64_range_exactly() {

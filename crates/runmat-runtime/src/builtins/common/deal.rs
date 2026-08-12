@@ -4,8 +4,9 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_value::Value;
 
 pub const DEAL_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "deal-resident-input",
@@ -107,7 +108,7 @@ pub async fn deal_builtin_registered(rest: Vec<Value>) -> crate::BuiltinResult<V
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn call(inputs: Vec<Value>, outputs: usize) -> crate::BuiltinResult<Value> {
         let _outputs = crate::output_count::push_output_count(Some(outputs));
@@ -142,11 +143,7 @@ mod tests {
         }
         assert_eq!(call(Vec::new(), 0).unwrap(), Value::OutputList(Vec::new()));
         assert_eq!(
-            call(
-                vec![Value::Int(runmat_builtins::IntValue::U64(u64::MAX))],
-                0
-            )
-            .unwrap(),
+            call(vec![Value::Int(runmat_value::IntValue::U64(u64::MAX))], 0).unwrap(),
             Value::OutputList(Vec::new())
         );
     }

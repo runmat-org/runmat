@@ -2,9 +2,10 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 const GETMETHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "fh",
@@ -95,9 +96,9 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         };
         let caller_class = crate::class_access_context();
         let access_allowed = match method.access {
-            runmat_builtins::Access::Public => true,
-            runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
-            runmat_builtins::Access::Protected => caller_class
+            runmat_value::Access::Public => true,
+            runmat_value::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
+            runmat_value::Access::Protected => caller_class
                 .as_deref()
                 .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
         };
@@ -127,7 +128,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
             if let Some((resolved, _owner)) =
                 runmat_builtins::lookup_method(&o.class_name, method_name)
             {
-                return Ok(Value::Closure(runmat_builtins::Closure {
+                return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
                     bound_function: crate::user_functions::resolve_semantic_function_by_name(
                         &resolved.function_name,
@@ -135,7 +136,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                     captures: vec![Value::Object(o)],
                 }));
             }
-            Ok(Value::Closure(runmat_builtins::Closure {
+            Ok(Value::Closure(runmat_value::Closure {
                 function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
                 bound_function: None,
                 captures: vec![
@@ -150,7 +151,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
             if let Some((resolved, _owner)) =
                 runmat_builtins::lookup_method(&h.class_name, method_name)
             {
-                return Ok(Value::Closure(runmat_builtins::Closure {
+                return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
                     bound_function: crate::user_functions::resolve_semantic_function_by_name(
                         &resolved.function_name,
@@ -158,7 +159,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                     captures: vec![Value::HandleObject(h)],
                 }));
             }
-            Ok(Value::Closure(runmat_builtins::Closure {
+            Ok(Value::Closure(runmat_value::Closure {
                 function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
                 bound_function: None,
                 captures: vec![
@@ -234,14 +235,14 @@ mod tests {
         );
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(1)),
-            Value::Int(runmat_builtins::IntValue::I16(1)),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::Int(runmat_builtins::IntValue::I64(1)),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
-            Value::Int(runmat_builtins::IntValue::U16(1)),
-            Value::Int(runmat_builtins::IntValue::U32(1)),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
         ] {
             let error = futures::executor::block_on(getmethod_builtin(
                 value,
@@ -270,7 +271,7 @@ mod tests {
 
         let name_error = futures::executor::block_on(getmethod_builtin(
             Value::ClassRef("Example".into()),
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
         ))
         .expect_err("integer method name rejects without text conversion");
         assert_eq!(

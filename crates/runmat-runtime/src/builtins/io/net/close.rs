@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
 };
+use runmat_value::{StructValue, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -345,7 +345,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{accept_builtin, client_handle};
     use crate::builtins::io::net::tcpclient::tcpclient_builtin;
     use crate::builtins::io::net::tcpserver::{server_handle, tcpserver_builtin};
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, CharArray, IntValue, IntegerStorage, StringArray, StructValue, Tensor, Value,
     };
     use std::net::{TcpListener, TcpStream};

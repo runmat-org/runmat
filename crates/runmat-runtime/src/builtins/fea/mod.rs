@@ -8,17 +8,19 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ClassDef, IntValue, IntegerStorage, MethodDef, NumericScalar,
-    ObjectInstance, Tensor, Value,
+    BuiltinSignatureDescriptor, ClassDef, MethodDef,
 };
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, IntValue, IntegerStorage, NumericScalar, ObjectInstance, Tensor, Value,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -4624,8 +4626,7 @@ fn ordinary_double_scalar(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Tensor(tensor)
-            if tensor.len() == 1
-                && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 =>
+            if tensor.len() == 1 && tensor.numeric_dtype() == runmat_value::NumericDType::F64 =>
         {
             Some(tensor_utils::tensor_value_f64(tensor, 0))
         }
@@ -4675,7 +4676,7 @@ fn usize_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<V
                     .map(|value| usize_from_value(builtin, &Value::Int(value)))
                     .collect();
             }
-            if tensor.numeric_dtype() != runmat_builtins::NumericDType::F64 {
+            if tensor.numeric_dtype() != runmat_value::NumericDType::F64 {
                 return Err(builtin_error(
                     builtin,
                     &ERROR_INPUT,
@@ -5566,7 +5567,7 @@ fn sanitize_id(id: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, StructValue};
+    use runmat_value::{CellArray, StructValue};
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -5619,7 +5620,7 @@ mod tests {
 
     #[test]
     fn fea_usize_parsers_preserve_typed_bounds_and_reject_invalid_values() {
-        use runmat_builtins::{IntValue, IntegerStorage};
+        use runmat_value::{IntValue, IntegerStorage};
 
         assert_eq!(
             usize_from_value(INTERFACE_NAME, &Value::Int(IntValue::U16(7))).unwrap(),
@@ -5836,7 +5837,7 @@ mod tests {
         .unwrap());
 
         let scalar_single =
-            Tensor::new_with_dtype(vec![4.0], vec![1, 1], runmat_builtins::NumericDType::F32)
+            Tensor::new_with_dtype(vec![4.0], vec![1, 1], runmat_value::NumericDType::F32)
                 .expect("single scalar tensor");
         assert!(usize_from_value(RUN_OPTIONS_NAME, &Value::Tensor(scalar_single)).is_err());
     }
@@ -5869,12 +5870,9 @@ mod tests {
         assert!(exact_bool_from_value(RESULTS_NAME, &Value::Int(IntValue::U64(1))).unwrap());
         assert!(exact_bool_from_value(RESULTS_NAME, &Value::Int(IntValue::I16(2))).is_err());
 
-        let single_selectors = Tensor::new_with_dtype(
-            vec![1.0, 2.0],
-            vec![1, 2],
-            runmat_builtins::NumericDType::F32,
-        )
-        .expect("single selectors");
+        let single_selectors =
+            Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], runmat_value::NumericDType::F32)
+                .expect("single selectors");
         assert!(
             one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(single_selectors)).is_err()
         );
@@ -5915,7 +5913,7 @@ mod tests {
 
     #[test]
     fn fea_json_preserves_native_integer_scalars_and_tensors() {
-        let maximum = runmat_builtins::IntValue::U64(u64::MAX);
+        let maximum = runmat_value::IntValue::U64(u64::MAX);
         assert_eq!(
             value_to_json(INTERFACE_NAME, &Value::Int(maximum.clone()))
                 .expect("scalar json")
@@ -5924,7 +5922,7 @@ mod tests {
         );
 
         let scalar = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("scalar tensor");
@@ -5936,7 +5934,7 @@ mod tests {
         );
 
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![42, u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![42, u64::MAX]),
             vec![1, 2],
         )
         .expect("tensor");
@@ -6066,7 +6064,7 @@ mod tests {
         let Value::Tensor(shape) = object.properties.get("shape").expect("shape") else {
             panic!("expected integer shape tensor");
         };
-        assert_eq!(shape.numeric_dtype(), runmat_builtins::NumericDType::U64);
+        assert_eq!(shape.numeric_dtype(), runmat_value::NumericDType::U64);
         assert_eq!(
             shape.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::from(u32::MAX), 0]))
@@ -6535,8 +6533,7 @@ run:
     #[test]
     fn fea_boundary_condition_rejects_nonscalar_numeric_fields() {
         let values =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1, 2]), vec![1, 2])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1, 2]), vec![1, 2]).unwrap();
         let err = block_on(fea_boundary_condition_builtin(boundary_args(
             "thermalHeatFlux",
             vec![("heatFluxWPerM2", Value::Tensor(values))],
@@ -6756,15 +6753,15 @@ run:
         );
         assert_eq!(
             field_object.properties.get("entity_count"),
-            Some(&Value::Int(runmat_builtins::IntValue::U64(1)))
+            Some(&Value::Int(runmat_value::IntValue::U64(1)))
         );
         assert_eq!(
             field_object.properties.get("value_count"),
-            Some(&Value::Int(runmat_builtins::IntValue::U64(1)))
+            Some(&Value::Int(runmat_value::IntValue::U64(1)))
         );
         assert_eq!(
             field_object.properties.get("element_count"),
-            Some(&Value::Int(runmat_builtins::IntValue::U64(1)))
+            Some(&Value::Int(runmat_value::IntValue::U64(1)))
         );
         let Some(Value::Tensor(values)) = field_object.properties.get("values") else {
             panic!("expected values tensor");
@@ -6912,9 +6909,8 @@ run:
         } else {
             u32::MAX as u64
         };
-        let typed =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![wide]), vec![1, 1])
-                .expect("typed integer");
+        let typed = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![wide]), vec![1, 1])
+            .expect("typed integer");
 
         assert_eq!(
             usize_from_value(STUDY_NAME, &Value::Tensor(typed)).expect("typed integer"),

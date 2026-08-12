@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -559,7 +559,7 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
         Ok(n as usize)
     }
 
-    fn checked_int_to_usize(value: &runmat_builtins::IntValue) -> BuiltinResult<usize> {
+    fn checked_int_to_usize(value: &runmat_value::IntValue) -> BuiltinResult<usize> {
         if let Some(value) = value.try_to_usize() {
             return Ok(value);
         }
@@ -639,8 +639,8 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use runmat_time::system_time_now;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
 

@@ -8,9 +8,9 @@ use image::{ImageBuffer, Luma, Rgb, Rgba, RgbaImage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, LogicalArray, NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1285,7 +1285,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use image::io::Reader as ImageReader;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
     use std::fs;
     use tempfile::tempdir;
 
@@ -1401,7 +1401,7 @@ mod tests {
     #[test]
     fn imwrite_numeric_scalar_reads_typed_integer_tensor_exactly() {
         let scalar = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("scalar");
@@ -1410,20 +1410,19 @@ mod tests {
             u64::MAX as f64
         );
 
-        let vector =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![1, 2]), vec![1, 2])
-                .expect("vector");
+        let vector = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![1, 2]), vec![1, 2])
+            .expect("vector");
         assert!(numeric_scalar(&Value::Tensor(vector), "LoopCount").is_err());
 
         for storage in [
-            runmat_builtins::IntegerStorage::I8(vec![1]),
-            runmat_builtins::IntegerStorage::I16(vec![1]),
-            runmat_builtins::IntegerStorage::I32(vec![1]),
-            runmat_builtins::IntegerStorage::I64(vec![1]),
-            runmat_builtins::IntegerStorage::U8(vec![1]),
-            runmat_builtins::IntegerStorage::U16(vec![1]),
-            runmat_builtins::IntegerStorage::U32(vec![1]),
-            runmat_builtins::IntegerStorage::U64(vec![1]),
+            runmat_value::IntegerStorage::I8(vec![1]),
+            runmat_value::IntegerStorage::I16(vec![1]),
+            runmat_value::IntegerStorage::I32(vec![1]),
+            runmat_value::IntegerStorage::I64(vec![1]),
+            runmat_value::IntegerStorage::U8(vec![1]),
+            runmat_value::IntegerStorage::U16(vec![1]),
+            runmat_value::IntegerStorage::U32(vec![1]),
+            runmat_value::IntegerStorage::U64(vec![1]),
         ] {
             let scalar = Tensor::new_integer(storage, vec![1, 1]).expect("scalar");
             assert_eq!(

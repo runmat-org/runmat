@@ -1,4 +1,4 @@
-use runmat_builtins::{CellArray, IntegerStorage, Value};
+use runmat_value::{CellArray, IntegerStorage, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -173,17 +173,17 @@ fn dictionary_compiled_surface_preserves_wide_integer_keys_and_scalar_expansion(
     .expect("compiled exact integer dictionary construction and mutation");
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Int(runmat_builtins::IntValue::I16(7)))));
+        .any(|value| matches!(value, Value::Int(runmat_value::IntValue::I16(7)))));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Int(runmat_builtins::IntValue::I16(9)))));
+        .any(|value| matches!(value, Value::Int(runmat_value::IntValue::I16(9)))));
     assert!(vars.iter().any(|value| {
         matches!(
             value,
             Value::Tensor(tensor)
                 if tensor.shape == [2, 1]
                     && tensor.integer_storage()
-                        == Some(&runmat_builtins::IntegerStorage::I16(vec![7, 7]))
+                        == Some(&runmat_value::IntegerStorage::I16(vec![7, 7]))
         )
     }));
     let dictionary = vars
@@ -199,7 +199,7 @@ fn dictionary_compiled_surface_preserves_wide_integer_keys_and_scalar_expansion(
     assert_eq!(keys.data.len(), 1);
     assert_eq!(
         keys.data[0],
-        Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993))
+        Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993))
     );
 }
 

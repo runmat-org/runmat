@@ -3,10 +3,10 @@
 use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -860,7 +860,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView, ProviderPrecision};
-    use runmat_builtins::{CharArray, IntValue, IntegerStorage};
+    use runmat_value::{CharArray, IntValue, IntegerStorage};
 
     fn call(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(pagemtimes_builtin(first, rest))

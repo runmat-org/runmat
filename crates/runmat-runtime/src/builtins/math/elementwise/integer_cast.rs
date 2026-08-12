@@ -1,6 +1,6 @@
 //! Shared exact host-side conversion support for MATLAB integer cast builtins.
 
-use runmat_builtins::{
+use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, SymbolicArray,
     Tensor, Value,
 };
@@ -313,7 +313,7 @@ fn cast_symbolic_array(target: IntegerTarget, array: SymbolicArray) -> Result<Va
 
 pub(crate) fn cast_sparse_value(
     target: IntegerTarget,
-    sparse: runmat_builtins::SparseTensor,
+    sparse: runmat_value::SparseTensor,
 ) -> Result<Value, CastError> {
     let values = match sparse.integer_storage() {
         Some(storage) => storage
@@ -328,7 +328,7 @@ pub(crate) fn cast_sparse_value(
             .collect(),
     };
     let storage = target.storage(values);
-    runmat_builtins::SparseTensor::new_integer(
+    runmat_value::SparseTensor::new_integer(
         sparse.rows,
         sparse.cols,
         sparse.col_ptrs,
@@ -441,7 +441,7 @@ pub(crate) fn integer_values(storage: IntegerStorage) -> Vec<IntValue> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::SymbolicExpr;
+    use runmat_value::SymbolicExpr;
 
     #[test]
     fn uint64_to_int64_array_saturates_without_f64_rounding() {
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn sparse_casts_preserve_structure_and_convert_every_integer_class() {
         let sparse =
-            runmat_builtins::SparseTensor::new(3, 2, vec![0, 1, 2], vec![0, 2], vec![1.5, -2.5])
+            runmat_value::SparseTensor::new(3, 2, vec![0, 1, 2], vec![0, 2], vec![1.5, -2.5])
                 .expect("sparse input");
         let cases = [
             (IntegerTarget::I8, "int8", vec![2.0, -3.0]),
@@ -553,7 +553,7 @@ mod tests {
             );
         }
 
-        let exact = runmat_builtins::SparseTensor::new_integer(
+        let exact = runmat_value::SparseTensor::new_integer(
             1,
             1,
             vec![0, 1],
@@ -575,7 +575,7 @@ mod tests {
     #[test]
     fn every_integer_cast_builtin_dispatches_sparse_inputs() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let sparse = runmat_builtins::SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![1.5])
+        let sparse = runmat_value::SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![1.5])
             .expect("sparse input");
         for (builtin, class) in [
             ("int8", "int8"),

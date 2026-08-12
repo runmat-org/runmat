@@ -9,9 +9,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use super::log::{detect_gpu_requires_complex, log_complex_parts, log_complex_parts_f32};
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -338,9 +338,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        IntegerStorage, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, LogicalArray, StringArray, Tensor, Value};
 
     fn log2_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::log2_builtin(value))

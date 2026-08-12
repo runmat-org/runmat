@@ -2,7 +2,7 @@
 mod test_helpers;
 
 use futures::executor::block_on;
-use runmat_builtins::{IntegerStorage, Tensor, Value};
+use runmat_value::{IntegerStorage, Tensor, Value};
 use test_helpers::execute_source;
 
 fn unique_path(name: &str) -> std::path::PathBuf {

@@ -20,9 +20,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -926,8 +926,8 @@ mod tests {
     use super::*;
     use crate::builtins::math::optim::brent::brent_min_tolerance;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
-    use runmat_builtins::Value as V;
+    use runmat_value::IntegerStorage;
+    use runmat_value::Value as V;
 
     const FMINBND_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
         name: "fx",

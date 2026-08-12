@@ -2,8 +2,8 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use super::op_common::current_axes_target;
 use super::state::{set_view_for_axes, FigureError};
@@ -288,7 +288,7 @@ mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn view_sets_axes_local_angles() {

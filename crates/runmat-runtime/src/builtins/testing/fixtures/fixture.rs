@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use runmat_builtins::{HandleRef, Value};
+use runmat_value::{HandleRef, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 

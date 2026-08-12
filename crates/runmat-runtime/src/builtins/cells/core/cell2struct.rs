@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, StringArray, StructValue, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, StructValue, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -344,7 +345,7 @@ fn error(desc: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> R
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_value::{IntValue, Tensor};
 
     fn cell2struct_builtin(cells: Value, fields: Value, dim: Value) -> BuiltinResult<Value> {
         super::cell2struct_builtin(cells, fields, vec![dim])
@@ -498,7 +499,7 @@ mod tests {
         let out = cell2struct_builtin(
             Value::Cell(cells.clone()),
             Value::Cell(fields.clone()),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
         )
         .unwrap();
         assert!(matches!(out, Value::Struct(_)));
@@ -506,7 +507,7 @@ mod tests {
         let err = cell2struct_builtin(
             Value::Cell(cells),
             Value::Cell(fields),
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
         )
         .unwrap_err()
         .to_string();
@@ -520,8 +521,8 @@ mod tests {
     fn typed_tensor_dimensions_are_exactly_validated() {
         let cells = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
         let fields = CellArray::new(vec![Value::from("id")], 1, 1).unwrap();
-        let dim = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1]),
+        let dim = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U16(vec![1]),
             vec![1, 1],
         )
         .expect("typed dim");

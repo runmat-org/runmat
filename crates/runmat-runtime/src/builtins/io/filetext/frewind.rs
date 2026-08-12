@@ -12,9 +12,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -394,9 +394,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
     use crate::RuntimeError;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;

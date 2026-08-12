@@ -1,6 +1,6 @@
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{AccelProvider, ProviderPrecision};
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_value::{NumericDType, Tensor, Value};
 use std::env;
 
 /// Return the logical numeric dtype associated with the provided value, if any.

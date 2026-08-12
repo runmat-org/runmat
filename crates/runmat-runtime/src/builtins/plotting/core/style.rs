@@ -1,9 +1,9 @@
 use glam::Vec4;
-use runmat_builtins::{CellArray, Tensor, Value};
 use runmat_plot::plots::{
     ColorMap, LineMarkerAppearance, LineStyle, MarkerStyle as PlotMarkerStyle, ShadingMode,
     SurfacePlot,
 };
+use runmat_value::{CellArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
@@ -1395,7 +1395,7 @@ fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> crate::RuntimeError {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

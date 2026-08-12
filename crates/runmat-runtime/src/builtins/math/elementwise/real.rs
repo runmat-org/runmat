@@ -3,9 +3,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -200,7 +200,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     fn real_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::real_builtin(value))
@@ -313,9 +314,9 @@ pub(crate) mod tests {
     #[test]
     fn real_integer_complex_tensor_preserves_uint64_values() {
         let complex = ComplexTensor::new_integer(
-            runmat_builtins::IntegerComplexStorage::new(
-                runmat_builtins::IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
-                runmat_builtins::IntegerStorage::U64(vec![2, 3]),
+            runmat_value::IntegerComplexStorage::new(
+                runmat_value::IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+                runmat_value::IntegerStorage::U64(vec![2, 3]),
             )
             .unwrap(),
             vec![1, 2],
@@ -327,7 +328,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             tensor.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
+            Some(&runmat_value::IntegerStorage::U64(vec![
                 9_223_372_036_854_775_809,
                 u64::MAX,
             ]))
@@ -337,9 +338,9 @@ pub(crate) mod tests {
     #[test]
     fn real_integer_complex_tensor_reads_storage_without_mirror() {
         let complex = ComplexTensor::new_integer(
-            runmat_builtins::IntegerComplexStorage::new(
-                runmat_builtins::IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
-                runmat_builtins::IntegerStorage::I64(vec![7, -8]),
+            runmat_value::IntegerComplexStorage::new(
+                runmat_value::IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                runmat_value::IntegerStorage::I64(vec![7, -8]),
             )
             .unwrap(),
             vec![2, 1],
@@ -353,10 +354,9 @@ pub(crate) mod tests {
         assert_eq!(tensor.shape, vec![2, 1]);
         assert_eq!(
             tensor.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::I64(vec![
-                i64::MIN,
-                i64::MAX,
-            ]))
+            Some(&runmat_value::IntegerStorage::I64(
+                vec![i64::MIN, i64::MAX,]
+            ))
         );
     }
 

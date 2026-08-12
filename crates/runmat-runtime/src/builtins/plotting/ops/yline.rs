@@ -1,9 +1,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ReferenceLineOrientation;
+use runmat_value::Value;
 
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
@@ -155,7 +156,7 @@ mod tests {
     use crate::builtins::plotting::state::PlotTestLockGuard;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();

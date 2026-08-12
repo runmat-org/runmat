@@ -1,14 +1,14 @@
 //! MATLAB-compatible Communications Toolbox `scatterplot` builtin.
 
 use runmat_accelerate_api::GpuTensorHandle;
-#[cfg(test)]
-use runmat_builtins::ComplexTensor;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::ComplexTensor;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -624,8 +624,8 @@ mod tests {
         reset_hold_state_for_run,
     };
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, NumericStorage};
     use runmat_plot::plots::{scatter::MarkerStyle, PlotElement};
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

@@ -1,4 +1,4 @@
-use runmat_builtins::{CellArray, StructValue, Tensor, Value};
+use runmat_value::{CellArray, StructValue, Tensor, Value};
 
 pub(super) fn from_json(value: &serde_json::Value) -> Result<Value, String> {
     match value {

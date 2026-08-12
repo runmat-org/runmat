@@ -1,8 +1,8 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::EmitLabel;
 use crate::ops::stack as stack_ops;
-use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 use std::collections::HashMap;
 
 pub async fn emit_stack_top(

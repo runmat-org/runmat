@@ -2,15 +2,15 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef,
-    StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ClassDef, MethodDef, PropertyDef,
 };
+use runmat_value::{Access, CharArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{
@@ -929,11 +929,10 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => tensor,
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
-        Value::Int(value) => Tensor::new_integer(
-            runmat_builtins::IntegerStorage::from_scalar(value),
-            vec![1, 1],
-        )
-        .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
+        Value::Int(value) => {
+            Tensor::new_integer(runmat_value::IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(|err| duration_error(format!("duration.subsref: {err}")))?
+        }
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
             .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
         other => {
@@ -1267,7 +1266,7 @@ mod tests {
         futures::executor::block_on(duration_builtin(args)).expect("duration")
     }
 
-    fn integer_tensor(storage: runmat_builtins::IntegerStorage, shape: Vec<usize>) -> Value {
+    fn integer_tensor(storage: runmat_value::IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
@@ -1336,15 +1335,9 @@ mod tests {
 
     #[test]
     fn duration_typed_integer_components_cross_double_boundary_exactly() {
-        let hours = integer_tensor(runmat_builtins::IntegerStorage::U8(vec![1, 2]), vec![1, 2]);
-        let minutes = integer_tensor(
-            runmat_builtins::IntegerStorage::U16(vec![15, 45]),
-            vec![1, 2],
-        );
-        let seconds = integer_tensor(
-            runmat_builtins::IntegerStorage::I16(vec![0, 30]),
-            vec![1, 2],
-        );
+        let hours = integer_tensor(runmat_value::IntegerStorage::U8(vec![1, 2]), vec![1, 2]);
+        let minutes = integer_tensor(runmat_value::IntegerStorage::U16(vec![15, 45]), vec![1, 2]);
+        let seconds = integer_tensor(runmat_value::IntegerStorage::I16(vec![0, 30]), vec![1, 2]);
         let value = run_duration(vec![hours, minutes, seconds]);
         let rendered = duration_display_text(&value)
             .expect("display")
@@ -1356,14 +1349,14 @@ mod tests {
     #[test]
     fn duration_integer_matrix_form_supports_all_classes_and_returns_column() {
         let storages = [
-            runmat_builtins::IntegerStorage::I8(vec![1, 2, 15, 45, 0, 30]),
-            runmat_builtins::IntegerStorage::I16(vec![1, 2, 15, 45, 0, 30]),
-            runmat_builtins::IntegerStorage::I32(vec![1, 2, 15, 45, 0, 30]),
-            runmat_builtins::IntegerStorage::I64(vec![1, 2, 15, 45, 0, 30]),
-            runmat_builtins::IntegerStorage::U8(vec![1, 2, 15, 45, 0, 30]),
-            runmat_builtins::IntegerStorage::U16(vec![1, 2, 15, 45, 0, 30]),
-            runmat_builtins::IntegerStorage::U32(vec![1, 2, 15, 45, 0, 30]),
-            runmat_builtins::IntegerStorage::U64(vec![1, 2, 15, 45, 0, 30]),
+            runmat_value::IntegerStorage::I8(vec![1, 2, 15, 45, 0, 30]),
+            runmat_value::IntegerStorage::I16(vec![1, 2, 15, 45, 0, 30]),
+            runmat_value::IntegerStorage::I32(vec![1, 2, 15, 45, 0, 30]),
+            runmat_value::IntegerStorage::I64(vec![1, 2, 15, 45, 0, 30]),
+            runmat_value::IntegerStorage::U8(vec![1, 2, 15, 45, 0, 30]),
+            runmat_value::IntegerStorage::U16(vec![1, 2, 15, 45, 0, 30]),
+            runmat_value::IntegerStorage::U32(vec![1, 2, 15, 45, 0, 30]),
+            runmat_value::IntegerStorage::U64(vec![1, 2, 15, 45, 0, 30]),
         ];
         for storage in storages {
             let value = run_duration(vec![integer_tensor(storage, vec![2, 3])]);
@@ -1383,7 +1376,7 @@ mod tests {
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(0.0),
             Value::Num(1.0),
-            Value::Int(runmat_builtins::IntValue::U16(250)),
+            Value::Int(runmat_value::IntValue::U16(250)),
         ]);
         let days = duration_tensor_from_duration_value(&value).expect("duration days");
         assert_eq!(days.shape, vec![1, 2]);
@@ -1443,10 +1436,7 @@ mod tests {
             error.identifier(),
             DURATION_SHORT_COMPONENT_EXTENSION.error_identifier
         );
-        let matrix = integer_tensor(
-            runmat_builtins::IntegerStorage::U8(vec![1, 30, 0]),
-            vec![1, 3],
-        );
+        let matrix = integer_tensor(runmat_value::IntegerStorage::U8(vec![1, 30, 0]), vec![1, 3]);
         futures::executor::block_on(duration_builtin(vec![matrix]))
             .expect("documented matrix form remains public");
         drop(strict);
@@ -1531,9 +1521,8 @@ mod tests {
 
     #[test]
     fn duration_unit_helpers_read_typed_integer_days_exactly() {
-        let days =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![1, 2]), vec![1, 2])
-                .expect("integer tensor");
+        let days = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![1, 2]), vec![1, 2])
+            .expect("integer tensor");
         let value = duration_object_from_days_tensor(days, DEFAULT_DURATION_FORMAT)
             .expect("duration object");
 
@@ -1575,7 +1564,7 @@ mod tests {
             Value::Num(0.0),
         ]);
         let payload =
-            Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap());
+            Value::Cell(runmat_value::CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap());
         let indexed =
             futures::executor::block_on(duration_subsref(array, "()".to_string(), payload))
                 .expect("subsref");
@@ -1588,14 +1577,14 @@ mod tests {
     #[test]
     fn duration_typed_integer_index_selectors_are_exact() {
         let array = run_duration(vec![
-            integer_tensor(runmat_builtins::IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
+            integer_tensor(runmat_value::IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
             Value::Num(0.0),
             Value::Num(0.0),
         ]);
         let payload = Value::Cell(
-            runmat_builtins::CellArray::new(
+            runmat_value::CellArray::new(
                 vec![integer_tensor(
-                    runmat_builtins::IntegerStorage::U64(vec![2]),
+                    runmat_value::IntegerStorage::U64(vec![2]),
                     vec![1, 1],
                 )],
                 1,

@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::path_search::{find_file_with_extensions, GENERAL_FILE_EXTENSIONS};
 use crate::builtins::common::spec::{
@@ -381,7 +381,7 @@ fn opentoline_flow_error(context: &str, err: RuntimeError) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_value::IntValue;
     use tempfile::tempdir;
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn opentoline_tensor_positions_read_integer_storage_exactly() {
         let line =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![9]), vec![1, 1]).unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![9]), vec![1, 1]).unwrap();
 
         assert_eq!(
             block_on(positive_integer_arg(&Value::Tensor(line), "line")).unwrap(),
@@ -450,7 +450,7 @@ mod tests {
         );
 
         let zero =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
         assert!(block_on(positive_integer_arg(&Value::Tensor(zero), "line")).is_err());
     }
 

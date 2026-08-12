@@ -11,9 +11,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, NumericScalar, StringArray, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, NumericScalar, StringArray, Value};
 
 use crate::builtins::common::fs::{contains_wildcards, expand_user_path, path_to_string};
 use crate::builtins::common::spec::{
@@ -774,7 +775,7 @@ fn push_nonempty_target(text: &str, targets: &mut Vec<String>) -> BuiltinResult<
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::{CharArray, IntegerStorage, StringArray, Tensor, Value};
+    use runmat_value::{CharArray, IntegerStorage, StringArray, Tensor, Value};
     use std::fs::File;
     use tempfile::tempdir;
 
@@ -815,8 +816,8 @@ pub(crate) mod tests {
             let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
             assert!(exact_zero_one(&value).unwrap());
         }
-        assert!(!exact_zero_one(&Value::Int(runmat_builtins::IntValue::U64(0))).unwrap());
-        assert!(exact_zero_one(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))).is_err());
+        assert!(!exact_zero_one(&Value::Int(runmat_value::IntValue::U64(0))).unwrap());
+        assert!(exact_zero_one(&Value::Int(runmat_value::IntValue::U64(u64::MAX))).is_err());
         let nonscalar = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
         assert!(exact_zero_one(&Value::Tensor(nonscalar)).is_err());
     }
@@ -847,7 +848,7 @@ pub(crate) mod tests {
         delete_builtin(vec![
             Value::from(link.to_string_lossy().to_string()),
             Value::from("ResolveSymbolicLinks"),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
         ])
         .unwrap();
         assert!(!target.exists());

@@ -7,9 +7,9 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 use rustfft::FftPlanner;
 
 use crate::builtins::common::spec::{
@@ -1047,7 +1047,8 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::IntegerStorage;
 
     fn empty() -> Value {
         Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())
@@ -1201,7 +1202,7 @@ mod tests {
     #[test]
     fn spectrogram_complex_defaults_to_twosided_and_rejects_onesided() {
         let data = (0..16).map(|idx| (idx as f64, 0.5)).collect();
-        let x = runmat_builtins::ComplexTensor::new(data, vec![1, 16]).unwrap();
+        let x = runmat_value::ComplexTensor::new(data, vec![1, 16]).unwrap();
         let out = call(
             Value::ComplexTensor(x.clone()),
             &[Value::Num(8.0), Value::Num(4.0), Value::Num(8.0)],

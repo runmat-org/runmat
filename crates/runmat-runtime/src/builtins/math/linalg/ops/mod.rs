@@ -25,27 +25,27 @@ pub(super) fn is_vector_or_matrix_shape(shape: &[usize]) -> bool {
 }
 
 pub(super) fn transpose_real_sparse_tensor(
-    sparse: runmat_builtins::SparseTensor,
-) -> Result<runmat_builtins::SparseTensor, String> {
+    sparse: runmat_value::SparseTensor,
+) -> Result<runmat_value::SparseTensor, String> {
     if sparse.is_logical() {
         let values = vec![(); sparse.nnz()];
         let (rows, cols, col_ptrs, row_indices, _) = transpose_sparse_values(&sparse, &values)?;
-        return runmat_builtins::SparseTensor::new_logical(rows, cols, col_ptrs, row_indices);
+        return runmat_value::SparseTensor::new_logical(rows, cols, col_ptrs, row_indices);
     }
     if let Some(storage) = sparse.integer_storage() {
         return transpose_integer_sparse_tensor(&sparse, storage);
     }
     if let Some(values) = sparse.as_f32_slice() {
         let (rows, cols, col_ptrs, row_indices, values) = transpose_sparse_values(&sparse, values)?;
-        return runmat_builtins::SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values);
+        return runmat_value::SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values);
     }
     let values = sparse.as_f64_slice().expect("double sparse storage");
     let (rows, cols, col_ptrs, row_indices, values) = transpose_sparse_values(&sparse, values)?;
-    runmat_builtins::SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+    runmat_value::SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
 }
 
 fn transpose_sparse_values<T: Clone>(
-    sparse: &runmat_builtins::SparseTensor,
+    sparse: &runmat_value::SparseTensor,
     values: &[T],
 ) -> Result<TransposedSparseValues<T>, String> {
     if values.len() != sparse.nnz() {
@@ -78,9 +78,9 @@ fn transpose_sparse_values<T: Clone>(
 }
 
 fn transpose_integer_sparse_tensor(
-    sparse: &runmat_builtins::SparseTensor,
-    storage: &runmat_builtins::IntegerStorage,
-) -> Result<runmat_builtins::SparseTensor, String> {
+    sparse: &runmat_value::SparseTensor,
+    storage: &runmat_value::IntegerStorage,
+) -> Result<runmat_value::SparseTensor, String> {
     let mut triplets = Vec::with_capacity(sparse.nnz());
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
@@ -108,13 +108,13 @@ fn transpose_integer_sparse_tensor(
         col_ptrs.push(values.len());
     }
     let values = storage.from_same_class_values(values)?;
-    runmat_builtins::SparseTensor::new_integer(rows, cols, col_ptrs, row_indices, values)
+    runmat_value::SparseTensor::new_integer(rows, cols, col_ptrs, row_indices, values)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::SparseTensor;
+    use runmat_value::SparseTensor;
 
     #[test]
     fn transpose_real_sparse_tensor_rebuilds_csc_storage() {
@@ -138,7 +138,7 @@ mod tests {
         let transposed = transpose_real_sparse_tensor(sparse).expect("transpose");
         assert_eq!(
             transposed.numeric_dtype(),
-            Some(runmat_builtins::NumericDType::F32)
+            Some(runmat_value::NumericDType::F32)
         );
         assert_eq!(transposed.shape(), vec![2, 3]);
         assert_eq!(transposed.as_f32_slice(), Some(&[1.25, 2.0, 3.5][..]));
@@ -162,7 +162,7 @@ mod tests {
             2,
             vec![0, 2, 3],
             vec![0, 2, 1],
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 7, 9]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 7, 9]),
         )
         .expect("typed sparse");
 
@@ -172,7 +172,7 @@ mod tests {
         assert_eq!(transposed.cols, 3);
         assert_eq!(
             transposed.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 9, 7]))
+            Some(&runmat_value::IntegerStorage::U64(vec![u64::MAX, 9, 7]))
         );
     }
 }

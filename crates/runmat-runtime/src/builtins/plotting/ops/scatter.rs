@@ -3,11 +3,9 @@
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-#[cfg(test)]
-use runmat_builtins::Tensor;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
@@ -19,6 +17,9 @@ use runmat_plot::plots::scatter::{MarkerStyle, ScatterGpuStyle};
 use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::ScatterPlot;
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1184,9 +1185,9 @@ pub(crate) mod tests {
     };
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::Value;
     use runmat_builtins::{ResolveContext, Type};
     use runmat_plot::plots::PlotElement;
+    use runmat_value::Value;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

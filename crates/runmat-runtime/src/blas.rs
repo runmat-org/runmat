@@ -1,7 +1,7 @@
 //! BLAS-accelerated matrix operations
 //!
 //! High-performance linear algebra using BLAS (Basic Linear Algebra Subprograms).
-use runmat_builtins::Tensor as Matrix;
+use runmat_value::Tensor as Matrix;
 
 use crate::builtins::common::tensor;
 

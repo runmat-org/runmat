@@ -1,10 +1,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ReferenceLine, ReferenceLineOrientation};
+use runmat_value::{Tensor, Value};
 
 use super::plotting_error;
 use super::state::{append_active_plot, register_reference_line_handle, PlotRenderOptions};
@@ -418,7 +418,7 @@ mod tests {
 
     fn integer_tensor(data: &[i16]) -> Tensor {
         Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(data.to_vec()),
+            runmat_value::IntegerStorage::I16(data.to_vec()),
             vec![1, data.len()],
         )
         .unwrap()

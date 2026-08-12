@@ -2,8 +2,8 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderAdamUpdateRequest,
     ProviderAdamUpdateResult,
 };
-use runmat_builtins::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
 
 use crate::BuiltinResult;
 
@@ -1309,7 +1309,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn assert_close(actual: f64, expected: f64) {
         assert!(
@@ -1357,7 +1357,7 @@ mod tests {
         };
         assert_eq!(
             output.into_numeric_storage().expect("single storage"),
-            runmat_builtins::NumericStorage::F32(vec![0.25, 0.5])
+            runmat_value::NumericStorage::F32(vec![0.25, 0.5])
         );
     }
 

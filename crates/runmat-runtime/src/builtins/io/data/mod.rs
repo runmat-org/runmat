@@ -11,11 +11,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, NumericScalar, ObjectInstance, StructValue, Tensor,
-    Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericScalar, ObjectInstance, StructValue, Tensor, Value};
 
 use crate::builtins::common::json::int_value_to_json;
 use crate::builtins::common::spec::{
@@ -3546,7 +3546,7 @@ fn json_to_value(value: &serde_json::Value) -> Value {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use runmat_builtins::IntValue;
+    use runmat_value::IntValue;
 
     fn tensor_values(tensor: &Tensor) -> Vec<f64> {
         tensor.materialize_f64()
@@ -3573,14 +3573,14 @@ mod tests {
     #[test]
     fn data_shape_and_slice_parsers_read_typed_integer_storage_exactly() {
         let cases = [
-            runmat_builtins::IntegerStorage::I8(vec![2, 3]),
-            runmat_builtins::IntegerStorage::I16(vec![2, 3]),
-            runmat_builtins::IntegerStorage::I32(vec![2, 3]),
-            runmat_builtins::IntegerStorage::I64(vec![2, 3]),
-            runmat_builtins::IntegerStorage::U8(vec![2, 3]),
-            runmat_builtins::IntegerStorage::U16(vec![2, 3]),
-            runmat_builtins::IntegerStorage::U32(vec![2, 3]),
-            runmat_builtins::IntegerStorage::U64(vec![2, 3]),
+            runmat_value::IntegerStorage::I8(vec![2, 3]),
+            runmat_value::IntegerStorage::I16(vec![2, 3]),
+            runmat_value::IntegerStorage::I32(vec![2, 3]),
+            runmat_value::IntegerStorage::I64(vec![2, 3]),
+            runmat_value::IntegerStorage::U8(vec![2, 3]),
+            runmat_value::IntegerStorage::U16(vec![2, 3]),
+            runmat_value::IntegerStorage::U32(vec![2, 3]),
+            runmat_value::IntegerStorage::U64(vec![2, 3]),
         ];
         for storage in cases {
             let shape = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("shape");
@@ -3595,13 +3595,12 @@ mod tests {
             assert_eq!(parsed.end, 3);
         }
 
-        let negative =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
-                .expect("shape");
+        let negative = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("shape");
         assert!(parse_shape_from_value(&Value::Tensor(negative)).is_err());
 
         let invalid = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, u64::MAX]),
             vec![1, 2],
         )
         .expect("range");
@@ -3662,13 +3661,13 @@ mod tests {
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{post, put};
     use axum::{Json, Router};
-    use runmat_builtins::{CellArray, IntegerStorage};
     use runmat_filesystem::data_contract::{
         DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
     };
     use runmat_filesystem::{
         DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags,
     };
+    use runmat_value::{CellArray, IntegerStorage};
     use serde::Deserialize;
     use std::path::Path;
     use std::sync::{Arc, Mutex, MutexGuard};
@@ -3686,8 +3685,8 @@ mod tests {
     #[test]
     fn attribute_json_preserves_native_integer_text() {
         for value in [
-            runmat_builtins::IntValue::I64(i64::MIN),
-            runmat_builtins::IntValue::U64(u64::MAX),
+            runmat_value::IntValue::I64(i64::MIN),
+            runmat_value::IntValue::U64(u64::MAX),
         ] {
             let json = value_to_json(&Value::Int(value.clone()));
             assert_eq!(json.to_string(), value.decimal_string());
@@ -5418,14 +5417,14 @@ mod tests {
             "DataArray.fill",
             &[
                 arr.clone(),
-                Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+                Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             ],
         )
         .expect("fill");
         let slice = Value::Cell(
             CellArray::new(
                 vec![
-                    Value::Int(runmat_builtins::IntValue::I32(1)),
+                    Value::Int(runmat_value::IntValue::I32(1)),
                     Value::String(":".to_string()),
                 ],
                 1,
@@ -5450,7 +5449,7 @@ mod tests {
             &[
                 tx.clone(),
                 Value::String("samples".to_string()),
-                Value::Int(runmat_builtins::IntValue::U64(1_u64 << 63)),
+                Value::Int(runmat_value::IntValue::U64(1_u64 << 63)),
             ],
         )
         .expect("queue transaction fill");

@@ -83,7 +83,7 @@ pub(in crate::builtins::table) fn colon_colon_payload() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     #[test]
     fn row_value_preserves_exact_integer_scalar() {

@@ -4,10 +4,10 @@ use glam::{Vec3, Vec4};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, NumericStorage, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{PatchData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
+use runmat_value::{IntegerStorage, NumericStorage, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -793,11 +793,10 @@ fn tensor_from_value(value: Value) -> BuiltinResult<Tensor> {
         Value::GpuTensor(handle) => gather_tensor_from_gpu(handle, BUILTIN_NAME),
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map_err(|err| patch_invalid(format!("patch: {err}"))),
-        Value::Int(value) => Tensor::new_integer(
-            runmat_builtins::IntegerStorage::from_scalar(value),
-            vec![1, 1],
-        )
-        .map_err(|err| patch_invalid(format!("patch: {err}"))),
+        Value::Int(value) => {
+            Tensor::new_integer(runmat_value::IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(|err| patch_invalid(format!("patch: {err}")))
+        }
         other => Tensor::try_from(&other).map_err(|err| patch_invalid(format!("patch: {err}"))),
     }
 }
@@ -1000,7 +999,7 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn tensor(rows: usize, cols: usize, data: &[f64]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("patch test tensor"))
@@ -1159,8 +1158,8 @@ mod tests {
         for (name, value) in [
             ("FaceAlpha", Value::Num(2.0)),
             ("EdgeAlpha", Value::Num(-0.5)),
-            ("LineWidth", Value::Int(runmat_builtins::IntValue::I16(0))),
-            ("Visible", Value::Int(runmat_builtins::IntValue::U8(2))),
+            ("LineWidth", Value::Int(runmat_value::IntValue::I16(0))),
+            ("Visible", Value::Int(runmat_value::IntValue::U8(2))),
             ("FutureProperty", Value::Num(1.0)),
         ] {
             let mut args = base();

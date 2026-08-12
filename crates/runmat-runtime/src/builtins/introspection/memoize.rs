@@ -9,14 +9,17 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
-    ClassDef, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, MethodDef, NumericScalar, ObjectInstance, PropertyDef, SparseTensor, StringArray,
-    StructValue, Tensor, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ClassDef, MethodDef,
+    PropertyDef,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
+    IntegerStorage, LogicalArray, NumericScalar, ObjectInstance, SparseTensor, StringArray,
+    StructValue, Tensor, Value,
+};
 
 use crate::{
     build_runtime_error, builtins::common::tensor, BuiltinResult, RuntimeError,
@@ -1206,7 +1209,7 @@ pub(crate) fn reset_memoize_registry_for_test() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_value::IntValue;
     use std::sync::{Arc, Mutex};
 
     fn counting_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {

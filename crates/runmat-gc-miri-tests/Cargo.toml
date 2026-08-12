@@ -7,5 +7,6 @@ description = "Miri-focused soundness tests for the RunMat garbage collector"
 license-file = "../../LICENSE.md"
 
 [dependencies]
+runmat-value = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-gc = { workspace = true }

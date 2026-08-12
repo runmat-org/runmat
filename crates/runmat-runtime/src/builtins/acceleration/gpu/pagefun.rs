@@ -16,9 +16,10 @@ use runmat_accelerate_api::{GpuTensorHandle, PagefunOp, PagefunRequest};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 type ComplexMatrixData = (Vec<(f64, f64)>, usize, usize);
 const BUILTIN_NAME: &str = "pagefun";
@@ -1194,7 +1195,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, StringArray, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CharArray, IntegerStorage, StringArray};
 
     #[test]
     fn pagefun_extensions_follow_compatibility_mode() {
@@ -1301,7 +1303,7 @@ pub(crate) mod tests {
     fn pagefun_rejects_wide_integer_scalar_before_float_materialization() {
         let result = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             vec![Value::Num(1.0)],
         );
 

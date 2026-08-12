@@ -1,8 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use runmat_builtins::Value;
 use runmat_core::RunMatSession;
 use runmat_gc::gc_test_context;
+use runmat_value::Value;
 use std::sync::Once;
 
 static INIT_ACCEL_REPROS: Once = Once::new();

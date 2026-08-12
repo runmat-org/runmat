@@ -14,11 +14,13 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar,
-    NumericStorage, StringArray, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar,
+    NumericStorage, StringArray, Tensor, Value,
+};
 
 const BUILTIN_NAME: &str = "repmat";
 
@@ -807,9 +809,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
-    };
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor};
 
     #[test]
     fn repmat_type_preserves_logical_kind() {

@@ -2,7 +2,7 @@ use std::{borrow::Cow, convert::TryFrom};
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorStorage, HostTensorOwned};
-use runmat_builtins::{
+use runmat_value::{
     ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor,
     Value,
 };
@@ -112,8 +112,8 @@ pub fn tensor_value_f64(tensor: &Tensor, index: usize) -> f64 {
         .numeric_value_at(index)
         .expect("tensor_value_f64: numeric storage index is in bounds")
     {
-        runmat_builtins::NumericScalar::F64(value) => value,
-        runmat_builtins::NumericScalar::F32(value) => f64::from(value),
+        runmat_value::NumericScalar::F64(value) => value,
+        runmat_value::NumericScalar::F32(value) => f64::from(value),
         scalar => scalar
             .into_int_value()
             .expect("non-floating numeric scalar is integer")
@@ -287,7 +287,7 @@ pub fn tensor_into_value(tensor: Tensor) -> Value {
         if let Some(storage) = tensor.integer_storage() {
             return Value::Int(storage.value_at(0).expect("one-element integer storage"));
         }
-        if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 {
+        if tensor.numeric_dtype() == runmat_value::NumericDType::F64 {
             Value::Num(tensor_value_f64(&tensor, 0))
         } else {
             Value::Tensor(tensor)
@@ -693,7 +693,7 @@ pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
 #[cfg(test)]
 mod dtype_tests {
     use super::{coerce_tensor_dtype, ones_with_dtype, zeros_with_dtype};
-    use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
+    use runmat_value::{IntegerStorage, NumericDType, Tensor};
 
     #[test]
     fn dtype_directed_constructors_materialize_all_integer_classes() {
@@ -811,7 +811,7 @@ mod dimension_tests {
         tensor_values_f64_cow,
     };
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
+    use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
 
     #[test]
     fn typed_dimension_parsers_preserve_representable_uint64_values() {

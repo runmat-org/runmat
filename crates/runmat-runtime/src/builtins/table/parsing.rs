@@ -40,10 +40,10 @@ pub(super) fn zero_one_bool_scalar(value: &Value, context: &str) -> BuiltinResul
         Value::Num(value) if *value == 0.0 => Ok(false),
         Value::Num(value) if *value == 1.0 => Ok(true),
         Value::Tensor(tensor) if tensor.len() == 1 => match tensor.numeric_value_at(0) {
-            Some(runmat_builtins::NumericScalar::F64(0.0)) => Ok(false),
-            Some(runmat_builtins::NumericScalar::F64(1.0)) => Ok(true),
-            Some(runmat_builtins::NumericScalar::F32(0.0)) => Ok(false),
-            Some(runmat_builtins::NumericScalar::F32(1.0)) => Ok(true),
+            Some(runmat_value::NumericScalar::F64(0.0)) => Ok(false),
+            Some(runmat_value::NumericScalar::F64(1.0)) => Ok(true),
+            Some(runmat_value::NumericScalar::F32(0.0)) => Ok(false),
+            Some(runmat_value::NumericScalar::F32(1.0)) => Ok(true),
             Some(value) if value.into_int_value().is_some_and(|value| value.is_zero()) => Ok(false),
             Some(value)
                 if value
@@ -213,7 +213,7 @@ pub(super) fn optional_sheet_selector(value: &Value) -> BuiltinResult<Option<She
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
         vec![

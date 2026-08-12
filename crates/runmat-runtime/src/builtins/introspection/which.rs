@@ -10,10 +10,11 @@ use std::path::Path;
 use runmat_builtins::{
     builtin_functions, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::fs::path_to_string;
 use crate::builtins::common::path_search::{
@@ -571,8 +572,8 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use once_cell::sync::Lazy;
-    use runmat_builtins::{CharArray, StringArray, Value};
     use runmat_thread_local::runmat_thread_local;
+    use runmat_value::{CharArray, StringArray, Value};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::fs::File;

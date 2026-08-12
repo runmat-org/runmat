@@ -3,10 +3,10 @@ use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use runmat_builtins::Value;
 use runmat_core::{TelemetryPlatformInfo, TelemetrySink};
 use runmat_runtime::build_runtime_error;
 use runmat_runtime::builtins::wasm_registry;
+use runmat_value::Value;
 
 use crate::api::plot::ensure_figure_event_bridge;
 use crate::api::session::RunMatWasm;

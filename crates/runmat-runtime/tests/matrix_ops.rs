@@ -1,11 +1,12 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{builtin_functions, IntegerStorage, Tensor as Matrix, Value};
+use runmat_builtins::builtin_functions;
 use runmat_runtime::{
     builtins::common::{indexing::*, matrix::*},
     call_builtin,
     comparison::*,
 };
+use runmat_value::{IntegerStorage, Tensor as Matrix, Value};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -216,8 +217,8 @@ fn test_builtin_dispatch() {
     let result = call_builtin(
         "zeros",
         &[
-            Value::Int(runmat_builtins::IntValue::I32(2)),
-            Value::Int(runmat_builtins::IntValue::I32(3)),
+            Value::Int(runmat_value::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(3)),
         ],
     )
     .unwrap();
@@ -230,7 +231,7 @@ fn test_builtin_dispatch() {
     }
 
     // Test eye function
-    let result = call_builtin("eye", &[Value::Int(runmat_builtins::IntValue::I32(2))]).unwrap();
+    let result = call_builtin("eye", &[Value::Int(runmat_value::IntValue::I32(2))]).unwrap();
     if let Value::Tensor(m) = result {
         assert_eq!(m.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
     } else {

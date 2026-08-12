@@ -42,6 +42,6 @@ fn compiled_gobjects_accepts_typed_integer_dimensions() {
     let values = execute_source("h = gobjects(uint16(2), int8(3));")
         .expect("compiled typed-integer gobjects dimensions");
     assert!(values.iter().any(|value| {
-        matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![2, 3])
+        matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape == vec![2, 3])
     }));
 }

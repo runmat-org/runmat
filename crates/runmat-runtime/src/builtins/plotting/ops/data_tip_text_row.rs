@@ -4,16 +4,16 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ClassDef, HandleRef, MethodDef, ObjectInstance,
-    PropertyDef, ResolveContext, StringArray, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ClassDef, MethodDef, PropertyDef, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, CharArray, HandleRef, ObjectInstance, StringArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -375,7 +375,7 @@ fn validate_host_vector_shape(shape: &[usize]) -> BuiltinResult<()> {
 mod tests {
     use super::*;
     use runmat_accelerate_api::GpuTensorHandle;
-    use runmat_builtins::{IntegerStorage, StringArray, Tensor};
+    use runmat_value::{IntegerStorage, StringArray, Tensor};
 
     fn handle_payload(value: Value) -> ObjectInstance {
         let Value::HandleObject(handle) = value else {
@@ -571,7 +571,7 @@ mod tests {
     fn rejects_values_outside_documented_source_union() {
         let error = data_tip_text_row_builtin(vec![
             Value::String("Bad".into()),
-            Value::Struct(runmat_builtins::StructValue::new()),
+            Value::Struct(runmat_value::StructValue::new()),
         ])
         .expect_err("unsupported source");
         assert_eq!(

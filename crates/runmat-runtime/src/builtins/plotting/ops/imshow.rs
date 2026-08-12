@@ -11,10 +11,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntegerStorage, NumericDType, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
+use runmat_value::{CharArray, IntegerStorage, NumericDType, StringArray, Tensor, Value};
 
 use super::common::SurfaceDataInput;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -921,8 +921,8 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray};
     use runmat_plot::plots::PlotElement;
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray};
 
     fn matrix(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
         Tensor::new(data, vec![rows, cols]).expect("imshow test matrix")
@@ -1032,9 +1032,8 @@ mod tests {
 
     #[test]
     fn display_range_reads_typed_integer_storage_exactly() {
-        let range =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1, 7]), vec![1, 2])
-                .expect("typed range");
+        let range = Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1, 7]), vec![1, 2])
+            .expect("typed range");
 
         let parsed =
             futures::executor::block_on(parse_display_range(Value::Tensor(range))).unwrap();

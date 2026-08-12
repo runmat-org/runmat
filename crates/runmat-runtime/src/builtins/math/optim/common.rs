@@ -1,4 +1,5 @@
-use runmat_builtins::{BuiltinExtensionDescriptor, CharArray, StructValue, Tensor, Value};
+use runmat_builtins::BuiltinExtensionDescriptor;
+use runmat_value::{CharArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -39,7 +40,7 @@ pub(crate) async fn call_scalar_function_with_precision_info(
 ) -> BuiltinResult<(f64, bool)> {
     let argument = if single {
         Value::Tensor(
-            Tensor::new_with_dtype(vec![x], vec![1, 1], runmat_builtins::NumericDType::F32)
+            Tensor::new_with_dtype(vec![x], vec![1, 1], runmat_value::NumericDType::F32)
                 .map_err(|error| optim_error(name, format!("{name}: {error}")))?,
         )
     } else {
@@ -47,7 +48,7 @@ pub(crate) async fn call_scalar_function_with_precision_info(
     };
     let value = call_function(handle, vec![argument]).await?;
     let output_single = match &value {
-        Value::Tensor(tensor) => tensor.numeric_dtype() == runmat_builtins::NumericDType::F32,
+        Value::Tensor(tensor) => tensor.numeric_dtype() == runmat_value::NumericDType::F32,
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_integer_type(handle).is_none()
                 && !runmat_accelerate_api::handle_is_logical(handle)
@@ -487,7 +488,7 @@ mod tests {
         prepare_floating_value, value_to_real_vector, value_to_scalar,
     };
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         CharArray, Closure, IntegerStorage, StringArray, StructValue, Tensor, Value,
     };
     use std::sync::Arc;

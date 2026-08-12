@@ -4,10 +4,12 @@ use glam::Vec4;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LineStyle, PlotElement};
+use runmat_value::{
+    CellArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor, Value,
+};
 
 use super::plot::build_line_plot_for_builtin;
 use super::properties::{resolve_plot_handle, PlotHandle};
@@ -1311,11 +1313,8 @@ mod tests {
 
     #[test]
     fn stackedplot_numeric_vector_reads_typed_integer_storage_exactly() {
-        let x = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1, 2, 3]),
-            vec![1, 3],
-        )
-        .expect("typed x vector");
+        let x = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3])
+            .expect("typed x vector");
 
         assert_eq!(
             numeric_vector(&Value::Tensor(x), "X").expect("numeric vector"),
@@ -1326,7 +1325,7 @@ mod tests {
     #[test]
     fn stackedplot_columns_reads_typed_integer_storage_exactly() {
         let y = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![10, 20, 30, 40]),
+            runmat_value::IntegerStorage::I16(vec![10, 20, 30, 40]),
             vec![2, 2],
         )
         .expect("typed y matrix");
@@ -1452,7 +1451,7 @@ mod tests {
         let logical = stackedplot_builtin(vec![
             table,
             Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(vec![0, 1, 1], vec![1, 3]).unwrap(),
+                runmat_value::LogicalArray::new(vec![0, 1, 1], vec![1, 3]).unwrap(),
             ),
             Value::String("XVariable".into()),
             Value::String("T".into()),
@@ -1467,7 +1466,7 @@ mod tests {
         let table = table_from_columns(
             vec!["Flag".into()],
             vec![Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap(),
+                runmat_value::LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap(),
             )],
         )
         .unwrap();

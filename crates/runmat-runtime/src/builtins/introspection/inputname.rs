@@ -1,7 +1,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_value::Value;
 
 use crate::builtins::common::tensor;
 
@@ -137,8 +138,8 @@ pub fn inputname_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Va
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
     use runmat_hir::{SourceId, Span};
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn span_of(source: &str, needle: &str) -> Span {
         let start = source.find(needle).expect("needle present");

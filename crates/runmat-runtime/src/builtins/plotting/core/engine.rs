@@ -714,7 +714,7 @@ mod tests {
     use crate::builtins::plotting::xlabel::xlabel_builtin;
     use crate::builtins::plotting::ylabel::ylabel_builtin;
     use futures::executor::block_on;
-    use runmat_builtins::{Tensor, Value};
+    use runmat_value::{Tensor, Value};
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_registry();

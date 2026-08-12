@@ -1,8 +1,8 @@
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_residency;
-use runmat_builtins::Value;
 use runmat_runtime::builtins::common::tensor::{scalar_integer_value, tensor_value_f64};
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 pub async fn execute_stochastic_evolution(
     state: Value,
@@ -204,10 +204,10 @@ async fn ensure_gpu_tensor_for_stochastic(
 }
 
 #[cfg(feature = "native-accel")]
-fn ensure_floating_state_tensor(tensor: &runmat_builtins::Tensor) -> Result<(), RuntimeError> {
+fn ensure_floating_state_tensor(tensor: &runmat_value::Tensor) -> Result<(), RuntimeError> {
     if matches!(
         tensor.numeric_dtype(),
-        runmat_builtins::NumericDType::F64 | runmat_builtins::NumericDType::F32
+        runmat_value::NumericDType::F64 | runmat_value::NumericDType::F32
     ) {
         return Ok(());
     }
@@ -223,32 +223,32 @@ fn ensure_floating_state_tensor(tensor: &runmat_builtins::Tensor) -> Result<(), 
 #[cfg(feature = "native-accel")]
 fn upload_tensor_view(
     provider: &dyn runmat_accelerate_api::AccelProvider,
-    tensor: &runmat_builtins::Tensor,
+    tensor: &runmat_value::Tensor,
 ) -> Result<runmat_accelerate_api::GpuTensorHandle, RuntimeError> {
     if let Some(storage) = tensor.integer_storage() {
         let data = match storage {
-            runmat_builtins::IntegerStorage::I8(values) => {
+            runmat_value::IntegerStorage::I8(values) => {
                 runmat_accelerate_api::HostIntegerDataView::I8(values)
             }
-            runmat_builtins::IntegerStorage::I16(values) => {
+            runmat_value::IntegerStorage::I16(values) => {
                 runmat_accelerate_api::HostIntegerDataView::I16(values)
             }
-            runmat_builtins::IntegerStorage::I32(values) => {
+            runmat_value::IntegerStorage::I32(values) => {
                 runmat_accelerate_api::HostIntegerDataView::I32(values)
             }
-            runmat_builtins::IntegerStorage::I64(values) => {
+            runmat_value::IntegerStorage::I64(values) => {
                 runmat_accelerate_api::HostIntegerDataView::I64(values)
             }
-            runmat_builtins::IntegerStorage::U8(values) => {
+            runmat_value::IntegerStorage::U8(values) => {
                 runmat_accelerate_api::HostIntegerDataView::U8(values)
             }
-            runmat_builtins::IntegerStorage::U16(values) => {
+            runmat_value::IntegerStorage::U16(values) => {
                 runmat_accelerate_api::HostIntegerDataView::U16(values)
             }
-            runmat_builtins::IntegerStorage::U32(values) => {
+            runmat_value::IntegerStorage::U32(values) => {
                 runmat_accelerate_api::HostIntegerDataView::U32(values)
             }
-            runmat_builtins::IntegerStorage::U64(values) => {
+            runmat_value::IntegerStorage::U64(values) => {
                 runmat_accelerate_api::HostIntegerDataView::U64(values)
             }
         };
@@ -275,7 +275,7 @@ mod tests {
     use super::ensure_floating_state_tensor;
     use super::{parse_integer_steps, scalar_from_value_scalar};
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor, Value};
+    use runmat_value::{IntegerStorage, Tensor, Value};
 
     #[test]
     fn scalar_from_value_scalar_reads_typed_integer_storage_exactly() {

@@ -3,10 +3,12 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericStorage, Tensor,
     Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor as tensor_utils;
@@ -486,7 +488,7 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))

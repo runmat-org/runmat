@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::format::{
     decode_escape_sequences, extract_format_string, flatten_arguments, format_variadic_with_cursor,
@@ -192,9 +192,9 @@ fn char_row_value(text: &str) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
-    use runmat_builtins::{
-        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, StringArray,
-        Tensor, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, StringArray, Tensor,
     };
 
     fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -414,7 +414,7 @@ pub(crate) mod tests {
             IntegerStorage::U64(vec![7, 0]),
         )
         .expect("matching complex integer storage");
-        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2])
+        let tensor = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2])
             .expect("complex integer tensor");
         let result = sprintf_builtin(
             Value::String("%s ".to_string()),

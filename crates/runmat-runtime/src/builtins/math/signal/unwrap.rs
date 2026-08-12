@@ -6,9 +6,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -396,7 +396,8 @@ fn principal_phase_delta(delta: f64) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntegerStorage, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray};
 
     const TOL: f64 = 1.0e-12;
 
@@ -511,7 +512,7 @@ pub(crate) mod tests {
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
         assert_eq!(
             out.into_numeric_storage().expect("output storage"),
-            runmat_builtins::NumericStorage::I16(vec![7, 7])
+            runmat_value::NumericStorage::I16(vec![7, 7])
         );
     }
 

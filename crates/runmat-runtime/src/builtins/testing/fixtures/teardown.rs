@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
 
@@ -39,7 +39,7 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
 }
 
 fn empty_value() -> BuiltinResult<Value> {
-    runmat_builtins::Tensor::new(Vec::new(), vec![0, 0])
+    runmat_value::Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
         .map_err(|error| build_runtime_error(error).build())
 }

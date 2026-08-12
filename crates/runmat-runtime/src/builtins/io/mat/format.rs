@@ -1,6 +1,6 @@
 //! Shared MAT-file format helpers.
 
-use runmat_builtins::NumericStorage;
+use runmat_value::NumericStorage;
 
 /// MAT-file data types used in Level 5 files.
 pub const MI_INT8: u32 = 1;

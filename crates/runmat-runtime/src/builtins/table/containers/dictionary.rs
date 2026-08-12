@@ -1,5 +1,5 @@
 use super::*;
-use runmat_builtins::{IntValue, IntegerStorage, NumericScalar};
+use runmat_value::{IntValue, IntegerStorage, NumericScalar};
 
 pub(in crate::builtins::table) fn dictionary_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let (mut keys, mut values, keys_are_cells, values_are_cells) = match args.as_slice() {
@@ -448,7 +448,7 @@ fn numeric_scalar_value(value: NumericScalar) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     #[test]
     fn dictionary_exact_integer_keys_do_not_saturate_wide_uint64_values() {

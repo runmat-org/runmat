@@ -5,9 +5,10 @@ use std::cmp::Ordering;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ObjectInstance, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{
@@ -1510,27 +1511,20 @@ fn tensor_row(data: Vec<f64>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, StringArray};
+    use runmat_value::{IntegerStorage, StringArray};
 
     #[test]
     fn perfcurve_scalar_text_preserves_exact_uint64() {
         assert_eq!(
-            scalar_text(
-                &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
-                "option"
-            )
-            .expect("scalar text"),
+            scalar_text(&Value::Int(runmat_value::IntValue::U64(u64::MAX)), "option")
+                .expect("scalar text"),
             "18446744073709551615"
         );
     }
 
     #[test]
     fn perfcurve_scalar_bool_rejects_wide_uint64_option() {
-        assert!(scalar_bool(
-            &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
-            "option"
-        )
-        .is_err());
+        assert!(scalar_bool(&Value::Int(runmat_value::IntValue::U64(u64::MAX)), "option").is_err());
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Value {
@@ -1598,7 +1592,7 @@ mod tests {
         let result = perfcurve_builtin(
             int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), &[4, 1]),
             int_tensor(IntegerStorage::U16(vec![9, 8, 4, 1]), &[4, 1]),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
             vec![
                 Value::String("Weights".into()),
                 int_tensor(IntegerStorage::U8(vec![1, 2, 1, 1]), &[4, 1]),
@@ -1744,7 +1738,7 @@ mod tests {
         let _guard = output_count::push_output_count(Some(5));
         let result = perfcurve_builtin(
             Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(vec![1, 0, 1, 0], vec![4, 1]).unwrap(),
+                runmat_value::LogicalArray::new(vec![1, 0, 1, 0], vec![4, 1]).unwrap(),
             ),
             tensor(&[0.9, f64::NAN, f64::NAN, 0.1], &[4, 1]),
             Value::String("true".into()),

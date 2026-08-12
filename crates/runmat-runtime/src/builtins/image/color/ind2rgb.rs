@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -252,7 +252,7 @@ fn map_index(value: f64, dtype: NumericDType, map_rows: usize) -> BuiltinResult<
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor};
+    use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
     fn call(indexed: Tensor, map: Tensor) -> BuiltinResult<Tensor> {
         let value = block_on(ind2rgb_builtin(

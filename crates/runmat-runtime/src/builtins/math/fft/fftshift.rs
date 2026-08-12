@@ -21,9 +21,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::fftshift")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -482,9 +482,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        builtin_function_by_name, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-        LogicalArray, ResolveContext, Tensor, Type,
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
 
     fn error_message(error: crate::RuntimeError) -> String {
@@ -594,18 +594,17 @@ pub(crate) mod tests {
         assert_eq!(builtin.extensions.len(), 1);
 
         let scalar_logical = fftshift_builtin(
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             vec![Value::Bool(true)],
         )
         .expect("documented logical scalar DIM");
         assert!(matches!(
             scalar_logical,
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX))
+            Value::Int(runmat_value::IntValue::U64(u64::MAX))
         ));
 
         let dims =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1, 2]), vec![1, 2])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1, 2]), vec![1, 2]).unwrap();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = fftshift_builtin(Value::Num(1.0), vec![Value::Tensor(dims)])
             .expect_err("multi-axis selector must gate");

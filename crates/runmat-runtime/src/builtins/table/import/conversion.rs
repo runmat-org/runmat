@@ -205,7 +205,7 @@ fn integer_from_import_cell(
     value: &ImportCell,
     options: &ReadTableOptions,
     target: crate::builtins::math::elementwise::integer_cast::IntegerTarget,
-) -> BuiltinResult<runmat_builtins::IntValue> {
+) -> BuiltinResult<runmat_value::IntValue> {
     let numeric = |value| Ok(target.cast_scalar(value));
     match value {
         ImportCell::Empty => numeric(f64::NAN),
@@ -753,7 +753,7 @@ pub(in crate::builtins::table) fn unquote(token: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn import_numeric_column_materializes_unsigned_typed_integer_storage() {

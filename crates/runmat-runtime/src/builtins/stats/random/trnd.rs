@@ -8,9 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random;
@@ -371,7 +372,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn reset() -> impl Drop {
         let guard = random::test_guard();
@@ -471,15 +472,15 @@ mod tests {
         reset();
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(trnd_builtin(vec![Value::Int(
-                runmat_builtins::IntValue::U16(0),
-            )]))
+            let error = block_on(trnd_builtin(vec![Value::Int(runmat_value::IntValue::U16(
+                0,
+            ))]))
             .expect_err("invalid typed-integer nu retains ordinary validation");
             assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
 
-            let error = block_on(trnd_builtin(vec![Value::Int(
-                runmat_builtins::IntValue::U16(5),
-            )]))
+            let error = block_on(trnd_builtin(vec![Value::Int(runmat_value::IntValue::U16(
+                5,
+            ))]))
             .expect_err("MATLAB mode rejects typed-integer degrees of freedom");
             assert_eq!(
                 error.identifier(),
@@ -535,7 +536,7 @@ mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let size = integer_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
             let out = block_on(trnd_builtin(vec![
-                Value::Int(runmat_builtins::IntValue::U16(5)),
+                Value::Int(runmat_value::IntValue::U16(5)),
                 Value::Tensor(size),
             ]))
             .expect("RunMat mode accepts typed-integer trnd arguments");

@@ -9,10 +9,11 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_hir::RUNTESTS_BUILTIN_NAME;
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::common::path_search::{
@@ -568,7 +569,7 @@ fn runtests_flow(err: RuntimeError) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, CharArray, LogicalArray, StringArray};
+    use runmat_value::{CellArray, CharArray, LogicalArray, StringArray};
 
     #[test]
     fn parse_accepts_target_and_include_subfolders() {

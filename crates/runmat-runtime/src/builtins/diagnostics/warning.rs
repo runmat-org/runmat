@@ -4,9 +4,9 @@ use once_cell::sync::Lazy;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, StructValue, Value};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::sync::Mutex;
@@ -477,7 +477,7 @@ fn emit_stderr_line(line: String) {
     record_console_line(ConsoleStream::Stderr, line);
 }
 
-fn reissue_exception(mex: &runmat_builtins::MException) -> crate::BuiltinResult<Value> {
+fn reissue_exception(mex: &runmat_value::MException) -> crate::BuiltinResult<Value> {
     let identifier = normalize_identifier(&mex.identifier);
     emit_warning(&identifier, &mex.message, &[])
 }
@@ -1227,7 +1227,7 @@ pub(crate) mod tests {
         let args = vec![
             Value::from("runmat:demo:test"),
             Value::from("value is %d"),
-            Value::Int(runmat_builtins::IntValue::I32(7)),
+            Value::Int(runmat_value::IntValue::I32(7)),
         ];
         warning_builtin(args).expect("warning ok");
         let last = with_manager(|mgr| mgr.last_warning.clone());

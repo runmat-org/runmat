@@ -1,7 +1,5 @@
-use runmat_builtins::{
-    ComplexStorage, IntValue, NumericScalar, ObjectInstance, StructValue, Value,
-};
 use runmat_core::{matlab_class_name, value_shape};
+use runmat_value::{ComplexStorage, IntValue, NumericScalar, ObjectInstance, StructValue, Value};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
 pub(crate) const MAX_DATA_PREVIEW: usize = 4096;
@@ -438,10 +436,7 @@ fn numeric_scalar_json_value(value: NumericScalar) -> JsonValue {
     }
 }
 
-fn sparse_entry_preview(
-    st: &runmat_builtins::SparseTensor,
-    limit: usize,
-) -> (Vec<JsonValue>, bool) {
+fn sparse_entry_preview(st: &runmat_value::SparseTensor, limit: usize) -> (Vec<JsonValue>, bool) {
     let mut entries = Vec::with_capacity(st.nnz().min(limit));
     for col in 0..st.cols {
         let start = st.col_ptrs[col];
@@ -464,10 +459,7 @@ fn sparse_entry_preview(
     (entries, false)
 }
 
-fn sparse_values_preview(
-    st: &runmat_builtins::SparseTensor,
-    limit: usize,
-) -> (Vec<JsonValue>, bool) {
+fn sparse_values_preview(st: &runmat_value::SparseTensor, limit: usize) -> (Vec<JsonValue>, bool) {
     let truncated = st.nnz() > limit;
     let preview = (0..st.nnz().min(limit))
         .map(|index| {
@@ -491,7 +483,7 @@ fn preview_slice<T: Clone>(data: &[T], limit: usize) -> (Vec<T>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, ObjectArray, ObjectInstance,
         SparseTensor, Tensor,
     };

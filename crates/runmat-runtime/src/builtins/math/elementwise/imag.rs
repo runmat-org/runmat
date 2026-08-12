@@ -4,9 +4,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -203,7 +203,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, StringArray, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray, StringArray};
 
     fn imag_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::imag_builtin(value))
@@ -269,9 +270,9 @@ pub(crate) mod tests {
     #[test]
     fn imag_integer_complex_scalar_preserves_int64_value() {
         let complex = ComplexTensor::new_integer(
-            runmat_builtins::IntegerComplexStorage::new(
-                runmat_builtins::IntegerStorage::I64(vec![i64::MIN]),
-                runmat_builtins::IntegerStorage::I64(vec![i64::MAX]),
+            runmat_value::IntegerComplexStorage::new(
+                runmat_value::IntegerStorage::I64(vec![i64::MIN]),
+                runmat_value::IntegerStorage::I64(vec![i64::MAX]),
             )
             .unwrap(),
             vec![1, 1],
@@ -301,7 +302,7 @@ pub(crate) mod tests {
     #[test]
     fn imag_typed_real_integer_tensor_zeros_from_storage_without_mirror() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![1, 9_223_372_036_854_775_809, u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![1, 9_223_372_036_854_775_809, u64::MAX]),
             vec![1, 3],
         )
         .expect("typed integer tensor");
@@ -313,7 +314,7 @@ pub(crate) mod tests {
         assert_eq!(output.shape, vec![1, 3]);
         assert_eq!(
             output.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![0, 0, 0]))
+            Some(&runmat_value::IntegerStorage::U64(vec![0, 0, 0]))
         );
     }
 

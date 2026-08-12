@@ -16,9 +16,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, NumericScalar, StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, IntValue, NumericScalar, StringArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1140,9 +1140,8 @@ pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    use runmat_builtins::{
-        CellArray, IntegerStorage, NumericStorage, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, IntegerStorage, NumericStorage, Tensor};
 
     fn extract_between_builtin(
         text: Value,

@@ -2809,10 +2809,10 @@ mod tests {
         ProviderMovingWindowEndpoints, ProviderMovingWindowOp, ProviderMovingWindowRequest,
         ProviderNanMode, ProviderStdNormalization, ProviderTrapezoidSpacing,
     };
-    use runmat_builtins::{ComplexTensor, Tensor};
     use runmat_runtime::builtins::math::reduction::{
         gradient_complex_tensor_host, gradient_real_tensor_host_with_coordinates,
     };
+    use runmat_value::{ComplexTensor, Tensor};
     use rustfft::FftPlanner;
     use std::sync::{Mutex, OnceLock};
 

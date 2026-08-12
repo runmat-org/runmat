@@ -3,8 +3,8 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{LogicalArray, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, Value};
 
 const ISGRAPHICS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn isgraphics_vectorizes_numeric_handle_arrays() {
-        let handles = runmat_builtins::Tensor::new(vec![f64::NAN, -1.0], vec![2, 1]).unwrap();
+        let handles = runmat_value::Tensor::new(vec![f64::NAN, -1.0], vec![2, 1]).unwrap();
         let result = isgraphics_builtin(vec![Value::Tensor(handles)]).unwrap();
         match result {
             Value::LogicalArray(logical) => {
@@ -118,8 +118,8 @@ mod tests {
 
     #[test]
     fn isgraphics_vectorizes_typed_handles_without_a_floating_mirror() {
-        let handles = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-1, -2]),
+        let handles = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I16(vec![-1, -2]),
             vec![2, 1],
         )
         .unwrap();

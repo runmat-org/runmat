@@ -1,6 +1,6 @@
 //! Shared polar coordinate helpers for plotting builtins.
 
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_pair};
@@ -193,12 +193,12 @@ fn polar_data_err(builtin: &'static str, msg: impl Into<String>) -> RuntimeError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     #[test]
     fn tensor_columns_read_typed_integer_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![1, 2, 3, 4]),
+            runmat_value::IntegerStorage::I16(vec![1, 2, 3, 4]),
             vec![2, 2],
         )
         .unwrap();
@@ -213,11 +213,9 @@ mod tests {
 
     #[test]
     fn vector_tensor_rows_reads_typed_integer_storage_without_mirror() {
-        let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U8(vec![1, 2, 3]),
-            vec![1, 3],
-        )
-        .unwrap();
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1, 2, 3]), vec![1, 3])
+                .unwrap();
 
         assert_eq!(tensor_rows(&tensor), 3);
     }
@@ -243,10 +241,9 @@ mod tests {
     #[test]
     fn evaluate_theta_rho_reads_vector_typed_integer_storage_exactly() {
         let theta =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![0, 1]), vec![1, 2])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![0, 1]), vec![1, 2]).unwrap();
         let rho = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![10, 20, 30, 40]),
+            runmat_value::IntegerStorage::I16(vec![10, 20, 30, 40]),
             vec![2, 2],
         )
         .unwrap();

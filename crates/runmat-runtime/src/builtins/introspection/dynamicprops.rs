@@ -6,12 +6,14 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, DynamicPropertyDef,
-    HandleRef, ObjectInstance, StructValue, Tensor, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value,
+};
 use std::collections::HashMap;
 
 pub const DYNAMICPROPS_CLASS: &str = "dynamicprops";
@@ -841,7 +843,7 @@ pub fn dynamic_property_metadata_struct(def: &DynamicPropertyDef) -> Value {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_value::IntValue;
 
     #[test]
     fn addprop_descriptor_is_integer_inapplicable() {
@@ -1033,14 +1035,14 @@ mod tests {
             BuiltinIntegerAuditKind::NotApplicable
         );
         for target in [
-            Value::Int(runmat_builtins::IntValue::I8(1)),
-            Value::Int(runmat_builtins::IntValue::I16(1)),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::Int(runmat_builtins::IntValue::I64(1)),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
-            Value::Int(runmat_builtins::IntValue::U16(1)),
-            Value::Int(runmat_builtins::IntValue::U32(1)),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
         ] {
             let error = findprop_builtin(target, "Name".into())
                 .expect_err("integer is not an object target");

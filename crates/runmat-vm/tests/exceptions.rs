@@ -12,14 +12,14 @@ fn error_identifier_and_catch() {
     .unwrap();
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:domainError"));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:domainError"));
     let has_msg = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "bad"));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "bad"));
     let has_exc = vars.iter().any(|v| {
         matches!(
             v,
-            runmat_builtins::Value::MException(me)
+            runmat_value::Value::MException(me)
                 if me.identifier == "RunMat:domainError" && me.message == "bad"
         )
     });
@@ -34,7 +34,7 @@ fn nested_try_catch_rethrow() {
     .unwrap();
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs()<1e-9)));
 }
 
 #[test]
@@ -46,10 +46,10 @@ fn catch_and_multi_assign_propagation() {
     .unwrap();
     let has_ok = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs()<1e-9));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs()<1e-9));
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
     assert!(has_ok && has_id);
 }
 
@@ -62,14 +62,14 @@ fn dot_access_identifier_and_message() {
             .unwrap();
     let catch_ran = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs() < 1e-9));
     assert!(catch_ran, "catch block did not run");
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
     let has_msg = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if !s.is_empty() && s != "RunMat:IndexOutOfBounds"));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if !s.is_empty() && s != "RunMat:IndexOutOfBounds"));
     assert!(
         has_id,
         "err.identifier did not produce a String via dot access"
@@ -89,10 +89,10 @@ fn catch_index_error_and_continue() {
     .unwrap();
     let has_ok = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs()<1e-9));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs()<1e-9));
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
+        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
     assert!(has_ok && has_id);
 }
 
@@ -105,15 +105,15 @@ fn assert_compiled_integer_conditions_and_formatting_are_exact() {
     assert!(
         vars.iter()
             .filter(|value| {
-                matches!(value, runmat_builtins::Value::Num(number) if *number == 1.0)
-                    || matches!(value, runmat_builtins::Value::Bool(true))
+                matches!(value, runmat_value::Value::Num(number) if *number == 1.0)
+                    || matches!(value, runmat_value::Value::Bool(true))
             })
             .count()
             >= 4,
         "missing one or more assert failure-mode sentinels: {vars:?}"
     );
     assert!(vars.iter().any(
-        |value| matches!(value, runmat_builtins::Value::String(text) if text == "wide=9007199254740993")
+        |value| matches!(value, runmat_value::Value::String(text) if text == "wide=9007199254740993")
     ));
 
     let err = execute_source("out = assert(true);").expect_err("assert has no public output");

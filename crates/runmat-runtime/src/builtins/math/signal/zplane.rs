@@ -5,11 +5,11 @@ use num_complex::Complex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::scatter::MarkerStyle;
 use runmat_plot::plots::{LinePlot, LineStyle, ScatterPlot};
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -649,7 +649,8 @@ fn map_internal(err: RuntimeError) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::IntegerStorage;
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).unwrap())

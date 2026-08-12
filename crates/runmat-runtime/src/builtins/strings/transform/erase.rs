@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, StringArray, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -649,8 +650,8 @@ pub(crate) mod tests {
     fn erase_rejects_nested_integer_text_before_conversion() {
         let cell = CellArray::new(
             vec![Value::Tensor(
-                runmat_builtins::Tensor::new_integer(
-                    runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(vec![u64::MAX]),
                     vec![1, 1],
                 )
                 .expect("integer tensor"),

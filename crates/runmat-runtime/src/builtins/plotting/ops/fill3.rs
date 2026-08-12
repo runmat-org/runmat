@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -522,9 +522,9 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
     use glam::Vec4;
-    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::figure::PlotElement;
     use runmat_plot::plots::{PatchEdgeColorMode, PatchFaceColorMode};
+    use runmat_value::IntegerStorage;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -817,7 +817,7 @@ mod tests {
             tensor(1, 3, &[0.25, 0.5, 0.75]),
             Value::String("FuturePatchProperty".into()),
             Value::Num(1.0),
-            Value::CharArray(runmat_builtins::CharArray::new_row("AnotherFutureProperty")),
+            Value::CharArray(runmat_value::CharArray::new_row("AnotherFutureProperty")),
             Value::String("value".into()),
         ];
 

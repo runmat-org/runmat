@@ -4,9 +4,11 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -1346,7 +1348,7 @@ pub(crate) mod tests {
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::num2str_builtin(value, rest))
     }
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

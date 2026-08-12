@@ -7,9 +7,9 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 use rustfft::FftPlanner;
 
 use crate::builtins::common::spec::{
@@ -579,7 +579,7 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
 }
 
 fn complex_tensor_to_signal_columns(
-    tensor: runmat_builtins::ComplexTensor,
+    tensor: runmat_value::ComplexTensor,
 ) -> BuiltinResult<SignalColumns> {
     if tensor.shape.len() > 2 {
         return Err(pwelch_error_with_detail(
@@ -1095,7 +1095,8 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::IntegerStorage;
 
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
@@ -1245,13 +1246,12 @@ mod tests {
 
     #[test]
     fn pwelch_scalar_detector_reads_typed_complex_integer_storage_without_mirror() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I16(vec![8]),
             IntegerStorage::I16(vec![0]),
         )
         .expect("complex integer storage");
-        let scalar =
-            runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 1]).expect("scalar");
+        let scalar = runmat_value::ComplexTensor::new_integer(storage, vec![1, 1]).expect("scalar");
 
         assert!(is_scalar_numeric(&Value::ComplexTensor(scalar)));
     }
@@ -1261,7 +1261,7 @@ mod tests {
         let data = (0..8)
             .map(|idx| (idx as f64, if idx % 2 == 0 { 0.0 } else { 0.25 }))
             .collect::<Vec<_>>();
-        let x = runmat_builtins::ComplexTensor::new(data, vec![1, 8]).unwrap();
+        let x = runmat_value::ComplexTensor::new(data, vec![1, 8]).unwrap();
         let two = call(
             Value::ComplexTensor(x.clone()),
             &[
@@ -1295,7 +1295,7 @@ mod tests {
 
     #[test]
     fn pwelch_centered_odd_nfft_uses_fftshift_order() {
-        let x = runmat_builtins::ComplexTensor::new(
+        let x = runmat_value::ComplexTensor::new(
             (0..5).map(|idx| (idx as f64, 0.25)).collect(),
             vec![1, 5],
         )

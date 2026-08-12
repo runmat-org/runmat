@@ -4,7 +4,7 @@
 //! Supports both horizontal concatenation [A, B] and vertical concatenation [A; B].
 
 use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
-use runmat_builtins::{
+use runmat_value::{
     CharArray, IntValue, NumericDType, NumericScalar, NumericStorage, SymbolicArray, SymbolicExpr,
     Tensor, Value,
 };
@@ -543,7 +543,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
         // Determine row count: if any is string array, its rows; if string scalar or numeric scalar, rows=1
         let mut rows: Option<usize> = None;
         let mut cols_total = 0usize;
-        let mut blocks: Vec<runmat_builtins::StringArray> = Vec::new();
+        let mut blocks: Vec<runmat_value::StringArray> = Vec::new();
         for v in values {
             match v {
                 Value::StringArray(sa) => {
@@ -556,8 +556,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa =
-                        runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
@@ -584,13 +583,13 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                         }
                         out.push(s);
                     }
-                    let sa = runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).unwrap();
+                    let sa = runmat_value::StringArray::new(out, vec![ca.rows, 1]).unwrap();
                     cols_total += 1;
                     blocks.push(sa);
                 }
                 Value::Num(n) => {
                     let sa =
-                        runmat_builtins::StringArray::new(vec![n.to_string()], vec![1, 1]).unwrap();
+                        runmat_value::StringArray::new(vec![n.to_string()], vec![1, 1]).unwrap();
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
@@ -600,8 +599,8 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa);
                 }
                 Value::Complex(re, im) => {
-                    let sa = runmat_builtins::StringArray::new(
-                        vec![runmat_builtins::Value::Complex(*re, *im).to_string()],
+                    let sa = runmat_value::StringArray::new(
+                        vec![runmat_value::Value::Complex(*re, *im).to_string()],
                         vec![1, 1],
                     )
                     .unwrap();
@@ -614,9 +613,8 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa);
                 }
                 Value::Int(i) => {
-                    let sa =
-                        runmat_builtins::StringArray::new(vec![i.decimal_string()], vec![1, 1])
-                            .unwrap();
+                    let sa = runmat_value::StringArray::new(vec![i.decimal_string()], vec![1, 1])
+                        .unwrap();
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
@@ -651,7 +649,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
             }
         }
-        let sa = runmat_builtins::StringArray::new(data, vec![rows, cols_total])
+        let sa = runmat_value::StringArray::new(data, vec![rows, cols_total])
             .map_err(|e| concat_error(format!("string hcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -831,7 +829,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
         // Normalize to string-arrays; for scalars, treat as 1x1
         let mut cols: Option<usize> = None;
         let mut rows_total = 0usize;
-        let mut blocks: Vec<runmat_builtins::StringArray> = Vec::new();
+        let mut blocks: Vec<runmat_value::StringArray> = Vec::new();
         for v in values {
             match v {
                 Value::StringArray(sa) => {
@@ -844,8 +842,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa =
-                        runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
                     rows_total += 1;
                     if cols.is_none() {
                         cols = Some(1);
@@ -859,7 +856,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                         continue;
                     }
                     let out: String = ca.data.iter().collect();
-                    let sa = runmat_builtins::StringArray::new(vec![out], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::new(vec![out], vec![1, 1]).unwrap();
                     rows_total += 1;
                     if cols.is_none() {
                         cols = Some(1);
@@ -870,7 +867,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
                 Value::Num(n) => {
                     let sa =
-                        runmat_builtins::StringArray::new(vec![n.to_string()], vec![1, 1]).unwrap();
+                        runmat_value::StringArray::new(vec![n.to_string()], vec![1, 1]).unwrap();
                     rows_total += 1;
                     if cols.is_none() {
                         cols = Some(1);
@@ -880,8 +877,8 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa);
                 }
                 Value::Complex(re, im) => {
-                    let sa = runmat_builtins::StringArray::new(
-                        vec![runmat_builtins::Value::Complex(*re, *im).to_string()],
+                    let sa = runmat_value::StringArray::new(
+                        vec![runmat_value::Value::Complex(*re, *im).to_string()],
                         vec![1, 1],
                     )
                     .unwrap();
@@ -894,9 +891,8 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa);
                 }
                 Value::Int(i) => {
-                    let sa =
-                        runmat_builtins::StringArray::new(vec![i.decimal_string()], vec![1, 1])
-                            .unwrap();
+                    let sa = runmat_value::StringArray::new(vec![i.decimal_string()], vec![1, 1])
+                        .unwrap();
                     rows_total += 1;
                     if cols.is_none() {
                         cols = Some(1);
@@ -923,7 +919,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
             }
         }
-        let sa = runmat_builtins::StringArray::new(data, vec![rows_total, cols])
+        let sa = runmat_value::StringArray::new(data, vec![rows_total, cols])
             .map_err(|e| concat_error(format!("string vcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -1317,7 +1313,7 @@ mod tests {
     #[test]
     fn test_hcat_values_promotes_numeric_and_logical_arrays() {
         let numeric = Tensor::new_2d(vec![1.0, 2.0], 2, 1).unwrap();
-        let logical = runmat_builtins::LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
+        let logical = runmat_value::LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
         let values = vec![
             Value::SymbolicArray(
                 SymbolicArray::new_2d(
@@ -1350,7 +1346,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_hcat_values_promotes_one_dimensional_logical_array() {
-        let logical = runmat_builtins::LogicalArray::new(vec![1], vec![1]).unwrap();
+        let logical = runmat_value::LogicalArray::new(vec![1], vec![1]).unwrap();
         let values = vec![
             Value::Symbolic(SymbolicExpr::variable("x")),
             Value::LogicalArray(logical),
@@ -1375,7 +1371,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn test_hcat_values_promotes_non_scalar_one_dimensional_logical_array() {
-        let logical = runmat_builtins::LogicalArray::new(vec![1, 0], vec![2]).unwrap();
+        let logical = runmat_value::LogicalArray::new(vec![1, 0], vec![2]).unwrap();
         let values = vec![
             Value::Symbolic(SymbolicExpr::variable("x")),
             Value::LogicalArray(logical),
@@ -1681,7 +1677,7 @@ mod tests {
     #[test]
     fn direct_matrix_concatenation_preserves_leftmost_integer_storage() {
         let left = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]),
             vec![2, 1],
         )
         .expect("left integer tensor");
@@ -1691,7 +1687,7 @@ mod tests {
         assert_eq!(horizontal.shape, vec![2, 2]);
         assert_eq!(
             horizontal.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
+            Some(&runmat_value::IntegerStorage::U64(vec![
                 u64::MAX,
                 9_223_372_036_854_775_808,
                 4,
@@ -1699,13 +1695,10 @@ mod tests {
             ]))
         );
 
-        let top = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I8(vec![12, -8]),
-            vec![1, 2],
-        )
-        .expect("top integer tensor");
+        let top = Tensor::new_integer(runmat_value::IntegerStorage::I8(vec![12, -8]), vec![1, 2])
+            .expect("top integer tensor");
         let bottom = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 2]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 2]),
             vec![1, 2],
         )
         .expect("bottom integer tensor");
@@ -1713,12 +1706,7 @@ mod tests {
         assert_eq!(vertical.shape, vec![2, 2]);
         assert_eq!(
             vertical.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::I8(vec![
-                12,
-                i8::MAX,
-                -8,
-                2,
-            ]))
+            Some(&runmat_value::IntegerStorage::I8(vec![12, i8::MAX, -8, 2,]))
         );
     }
 
@@ -1767,9 +1755,9 @@ mod tests {
     #[test]
     fn direct_value_concatenation_preserves_exact_integer_scalars() {
         let row = hcat_values(&[
-            Value::Int(runmat_builtins::IntValue::U64(9_223_372_036_854_775_808)),
+            Value::Int(runmat_value::IntValue::U64(9_223_372_036_854_775_808)),
             Value::Num(2.5),
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
         ])
         .expect("integer hcat values");
         let Value::Tensor(row) = row else {
@@ -1778,7 +1766,7 @@ mod tests {
         assert_eq!(row.shape, vec![1, 3]);
         assert_eq!(
             row.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
+            Some(&runmat_value::IntegerStorage::U64(vec![
                 9_223_372_036_854_775_808,
                 3,
                 u64::MAX,
@@ -1786,9 +1774,9 @@ mod tests {
         );
 
         let column = vcat_values(&[
-            Value::Int(runmat_builtins::IntValue::I16(-7)),
+            Value::Int(runmat_value::IntValue::I16(-7)),
             Value::Num(40000.0),
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
         ])
         .expect("integer vcat values");
         let Value::Tensor(column) = column else {
@@ -1797,7 +1785,7 @@ mod tests {
         assert_eq!(column.shape, vec![3, 1]);
         assert_eq!(
             column.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::I16(vec![
+            Some(&runmat_value::IntegerStorage::I16(vec![
                 -7,
                 i16::MAX,
                 i16::MAX,
@@ -1808,9 +1796,8 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn direct_value_concatenation_preserves_empty_integer_class() {
-        let empty =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(Vec::new()), vec![0, 0])
-                .expect("empty integer tensor");
+        let empty = Tensor::new_integer(runmat_value::IntegerStorage::U32(Vec::new()), vec![0, 0])
+            .expect("empty integer tensor");
 
         let Value::Tensor(row) = hcat_values(&[Value::Tensor(empty.clone())]).expect("hcat empty")
         else {
@@ -1819,7 +1806,7 @@ mod tests {
         assert_eq!(row.shape, vec![0, 0]);
         assert_eq!(
             row.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U32(Vec::new()))
+            Some(&runmat_value::IntegerStorage::U32(Vec::new()))
         );
 
         let Value::Tensor(column) = vcat_values(&[Value::Tensor(empty)]).expect("vcat empty")
@@ -1829,14 +1816,14 @@ mod tests {
         assert_eq!(column.shape, vec![0, 0]);
         assert_eq!(
             column.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U32(Vec::new()))
+            Some(&runmat_value::IntegerStorage::U32(Vec::new()))
         );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_concatenation_preserves_exact_uint64_scalar_text() {
-        let maximum = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+        let maximum = Value::Int(runmat_value::IntValue::U64(u64::MAX));
 
         let Value::StringArray(horizontal) =
             hcat_values(&[Value::String("id".to_string()), maximum.clone()]).expect("hcat")

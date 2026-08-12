@@ -1,5 +1,5 @@
-use runmat_builtins::Value;
 use runmat_test::lifecycle::QualificationKind;
+use runmat_value::Value;
 
 use super::shared::{self, BinaryPredicate};
 use crate::BuiltinResult;

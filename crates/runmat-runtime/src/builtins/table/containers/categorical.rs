@@ -1,6 +1,6 @@
 use super::*;
 use crate::builtins::table::display::trim_float;
-use runmat_builtins::NumericScalar;
+use runmat_value::NumericScalar;
 
 pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let source = args
@@ -556,9 +556,9 @@ fn normalize_category_label(value: &str) -> String {
     value.trim().to_string()
 }
 
-fn categorical_numeric_dtype(value: &Value) -> Option<runmat_builtins::NumericDType> {
+fn categorical_numeric_dtype(value: &Value) -> Option<runmat_value::NumericDType> {
     match value {
-        Value::Num(_) => Some(runmat_builtins::NumericDType::F64),
+        Value::Num(_) => Some(runmat_value::NumericDType::F64),
         Value::Int(value) => Some(NumericScalar::from(value.clone()).numeric_dtype()),
         Value::Tensor(tensor) => Some(tensor.numeric_dtype()),
         _ => None,
@@ -567,9 +567,9 @@ fn categorical_numeric_dtype(value: &Value) -> Option<runmat_builtins::NumericDT
 
 fn sort_categorical_values(
     labels: &mut [String],
-    dtype: Option<runmat_builtins::NumericDType>,
+    dtype: Option<runmat_value::NumericDType>,
 ) -> BuiltinResult<()> {
-    use runmat_builtins::NumericDType;
+    use runmat_value::NumericDType;
     match dtype {
         Some(NumericDType::I8 | NumericDType::I16 | NumericDType::I32 | NumericDType::I64) => {
             labels.sort_by_key(|label| label.parse::<i128>().unwrap_or_default());
@@ -591,7 +591,7 @@ fn sort_categorical_values(
 
 fn default_category_names(
     lookup: &[String],
-    dtype: Option<runmat_builtins::NumericDType>,
+    dtype: Option<runmat_value::NumericDType>,
 ) -> BuiltinResult<Vec<String>> {
     let categories = if dtype.is_some() {
         lookup
@@ -706,7 +706,7 @@ fn category_label_for_code(code: f64, categories: &[String]) -> Option<String> {
 }
 
 fn category_label_for_integer_code(
-    code: &runmat_builtins::IntValue,
+    code: &runmat_value::IntValue,
     categories: &[String],
 ) -> Option<String> {
     code.try_to_usize()
@@ -831,7 +831,7 @@ fn categorical_logical_result(data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
         vec![

@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use runmat_builtins::IntValue;
+use runmat_value::IntValue;
 
 pub(super) fn compare(
     a: &IntValue,

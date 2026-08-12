@@ -1,5 +1,5 @@
-use runmat_builtins::{NumericDType, NumericStorage, ObjectInstance, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, NumericStorage, ObjectInstance, Tensor, Value};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 

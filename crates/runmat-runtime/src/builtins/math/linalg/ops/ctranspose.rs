@@ -24,9 +24,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexStorage, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexStorage, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
 
 const NAME: &str = "ctranspose";
 
@@ -692,9 +694,10 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
-    use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, StringArray,
-        StructValue, Tensor, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,
+        Tensor,
     };
 
     fn call_ctranspose(value: Value) -> BuiltinResult<Value> {
@@ -794,7 +797,7 @@ pub(crate) mod tests {
         assert_eq!(result.shape, vec![3, 2]);
         assert_eq!(
             result.into_numeric_storage().unwrap(),
-            runmat_builtins::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+            runmat_value::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         );
     }
 
@@ -1069,7 +1072,7 @@ pub(crate) mod tests {
 
     #[test]
     fn ctranspose_integer_sparse_is_independently_gated() {
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             2,
             2,
             vec![0, 1, 2],

@@ -1,7 +1,7 @@
-use runmat_builtins::{IntValue, Value};
 use runmat_runtime::builtins::common::tensor::{
     complex_tensor_element_len, complex_tensor_value_complex64, is_scalar_tensor, tensor_value_f64,
 };
+use runmat_value::{IntValue, Value};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ValueToF64Error;
@@ -49,7 +49,7 @@ pub fn value_to_f64(v: &Value) -> Result<f64, ValueToF64Error> {
 #[cfg(test)]
 mod tests {
     use super::value_to_f64;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+    use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     #[test]
     fn value_to_f64_reads_all_typed_integer_tensor_classes_without_f64_mirrors() {

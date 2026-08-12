@@ -1,7 +1,7 @@
 use crate::build_runtime_error;
 use futures::executor::block_on;
 use runmat_accelerate_api::AccelProvider as _;
-use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_value::{LogicalArray, Tensor, Value};
 use std::cell::Cell;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},

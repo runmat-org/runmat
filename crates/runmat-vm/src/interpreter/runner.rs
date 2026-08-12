@@ -12,13 +12,13 @@ use crate::runtime::workspace::{
     refresh_workspace_state, workspace_assign, workspace_clear, workspace_lookup, workspace_remove,
     workspace_snapshot,
 };
-use runmat_builtins::{CellArray, Value};
 use runmat_runtime::builtins::common::validation as arg_validation;
 use runmat_runtime::{
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
     RuntimeError,
 };
+use runmat_value::{CellArray, Value};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -205,7 +205,7 @@ async fn invoke_semantic_function_value_with_input_residency(
                         Value::String(value.clone())
                     }
                     crate::bytecode::program::FunctionArgDefaultValue::EmptyArray => Value::Tensor(
-                        runmat_builtins::Tensor::new(Vec::new(), vec![0, 0])
+                        runmat_value::Tensor::new(Vec::new(), vec![0, 0])
                             .expect("empty default tensor"),
                     ),
                 };
@@ -1563,7 +1563,6 @@ mod tests {
     use crate::bytecode::Instr;
     use crate::interpreter::api::InterpreterState;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, HandleRef, StructValue, Tensor, Value};
     use runmat_hir::FunctionId;
     use runmat_runtime::builtins::common::validation::{
         value_is_empty, value_is_greater_than, value_is_greater_than_or_equal, value_is_integer,
@@ -1571,6 +1570,7 @@ mod tests {
         value_is_nonpositive, value_is_nonzero, value_is_numeric_or_logical, value_is_positive,
         value_is_real, value_is_scalar_or_empty, value_is_text,
     };
+    use runmat_value::{CellArray, HandleRef, StructValue, Tensor, Value};
     use std::collections::{HashMap, HashSet};
     use std::sync::{atomic::AtomicBool, Arc};
     #[cfg(feature = "native-accel")]
@@ -1664,7 +1664,7 @@ mod tests {
             "x".to_string()
         )));
         assert!(!value_is_numeric_or_logical(&Value::CharArray(
-            runmat_builtins::CharArray::new("x".chars().collect(), 1, 1).expect("char")
+            runmat_value::CharArray::new("x".chars().collect(), 1, 1).expect("char")
         )));
     }
 
@@ -1672,13 +1672,13 @@ mod tests {
     fn text_validator_accepts_string_char_vector_and_cellstr() {
         assert!(value_is_text(&Value::String("x".to_string())));
         assert!(value_is_text(&Value::CharArray(
-            runmat_builtins::CharArray::new("abc".chars().collect(), 1, 3).expect("char")
+            runmat_value::CharArray::new("abc".chars().collect(), 1, 3).expect("char")
         )));
         assert!(value_is_text(&Value::Cell(
             CellArray::new(
                 vec![
                     Value::CharArray(
-                        runmat_builtins::CharArray::new("a".chars().collect(), 1, 1).expect("char"),
+                        runmat_value::CharArray::new("a".chars().collect(), 1, 1).expect("char"),
                     ),
                     Value::String("b".to_string()),
                 ],
@@ -1694,8 +1694,7 @@ mod tests {
     fn nonempty_validator_rejects_empty_arrays_and_cells() {
         let empty_num = Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor");
         assert!(value_is_empty(&Value::Tensor(empty_num)));
-        let empty_char =
-            runmat_builtins::CharArray::new(Vec::new(), 1, 0).expect("empty char array");
+        let empty_char = runmat_value::CharArray::new(Vec::new(), 1, 0).expect("empty char array");
         assert!(value_is_empty(&Value::CharArray(empty_char)));
         let empty_cell = CellArray::new(Vec::new(), 0, 0).expect("empty cell");
         assert!(value_is_empty(&Value::Cell(empty_cell)));
@@ -1718,19 +1717,19 @@ mod tests {
         assert!(value_is_real(&Value::Num(1.0)));
         assert!(value_is_real(&Value::Complex(1.0, 0.0)));
         assert!(!value_is_real(&Value::Complex(1.0, 2.0)));
-        let complex_real = runmat_builtins::ComplexTensor::new(vec![(1.0, 0.0)], vec![1, 1])
-            .expect("complex tensor");
-        let complex_imag = runmat_builtins::ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1])
-            .expect("complex tensor");
+        let complex_real =
+            runmat_value::ComplexTensor::new(vec![(1.0, 0.0)], vec![1, 1]).expect("complex tensor");
+        let complex_imag =
+            runmat_value::ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).expect("complex tensor");
         assert!(value_is_real(&Value::ComplexTensor(complex_real)));
         assert!(!value_is_real(&Value::ComplexTensor(complex_imag)));
     }
 
     #[test]
     fn integer_validator_accepts_integer_valued_numeric_and_logical_inputs() {
-        assert!(value_is_integer(&Value::Int(
-            runmat_builtins::IntValue::I64(3)
-        )));
+        assert!(value_is_integer(&Value::Int(runmat_value::IntValue::I64(
+            3
+        ))));
         assert!(value_is_integer(&Value::Num(3.0)));
         assert!(!value_is_integer(&Value::Num(3.5)));
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
@@ -1739,7 +1738,7 @@ mod tests {
         assert!(!value_is_integer(&Value::Tensor(non_integer)));
         assert!(value_is_integer(&Value::Bool(true)));
         assert!(value_is_integer(&Value::LogicalArray(
-            runmat_builtins::LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical array")
+            runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical array")
         )));
     }
 
@@ -1748,11 +1747,11 @@ mod tests {
         assert!(value_is_positive(&Value::Num(1.0)));
         assert!(!value_is_positive(&Value::Num(0.0)));
         assert!(!value_is_positive(&Value::Num(-1.0)));
-        assert!(value_is_positive(&Value::Int(
-            runmat_builtins::IntValue::I64(2)
-        )));
+        assert!(value_is_positive(&Value::Int(runmat_value::IntValue::I64(
+            2
+        ))));
         assert!(!value_is_positive(&Value::Int(
-            runmat_builtins::IntValue::I64(0)
+            runmat_value::IntValue::I64(0)
         )));
         let positive = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
         assert!(value_is_positive(&Value::Tensor(positive)));
@@ -1765,9 +1764,9 @@ mod tests {
         assert!(value_is_negative(&Value::Num(-1.0)));
         assert!(!value_is_negative(&Value::Num(0.0)));
         assert!(!value_is_negative(&Value::Num(1.0)));
-        assert!(value_is_negative(&Value::Int(
-            runmat_builtins::IntValue::I64(-2)
-        )));
+        assert!(value_is_negative(&Value::Int(runmat_value::IntValue::I64(
+            -2
+        ))));
         let ok = Tensor::new(vec![-1.0, -2.0], vec![1, 2]).expect("tensor");
         assert!(value_is_negative(&Value::Tensor(ok)));
         let bad = Tensor::new(vec![-1.0, 0.0], vec![1, 2]).expect("tensor");
@@ -1780,7 +1779,7 @@ mod tests {
         assert!(value_is_nonnegative(&Value::Num(2.0)));
         assert!(!value_is_nonnegative(&Value::Num(-1.0)));
         assert!(value_is_nonnegative(&Value::Int(
-            runmat_builtins::IntValue::I64(0)
+            runmat_value::IntValue::I64(0)
         )));
         let ok = Tensor::new(vec![0.0, 1.0], vec![1, 2]).expect("tensor");
         assert!(value_is_nonnegative(&Value::Tensor(ok)));
@@ -1792,12 +1791,12 @@ mod tests {
     fn nonzero_validator_rejects_zero_values() {
         assert!(value_is_nonzero(&Value::Num(1.0)));
         assert!(!value_is_nonzero(&Value::Num(0.0)));
-        assert!(value_is_nonzero(&Value::Int(
-            runmat_builtins::IntValue::I64(2)
-        )));
-        assert!(!value_is_nonzero(&Value::Int(
-            runmat_builtins::IntValue::I64(0)
-        )));
+        assert!(value_is_nonzero(&Value::Int(runmat_value::IntValue::I64(
+            2
+        ))));
+        assert!(!value_is_nonzero(&Value::Int(runmat_value::IntValue::I64(
+            0
+        ))));
         assert!(value_is_nonzero(&Value::Complex(0.0, 1.0)));
         assert!(!value_is_nonzero(&Value::Complex(0.0, 0.0)));
         let ok = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
@@ -1812,7 +1811,7 @@ mod tests {
         assert!(value_is_nonpositive(&Value::Num(-2.0)));
         assert!(!value_is_nonpositive(&Value::Num(1.0)));
         assert!(value_is_nonpositive(&Value::Int(
-            runmat_builtins::IntValue::I64(0)
+            runmat_value::IntValue::I64(0)
         )));
         let ok = Tensor::new(vec![0.0, -1.0], vec![1, 2]).expect("tensor");
         assert!(value_is_nonpositive(&Value::Tensor(ok)));

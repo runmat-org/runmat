@@ -3,7 +3,7 @@
 
 use crate::builtins::common::random;
 use crate::BuiltinResult;
-use runmat_builtins::{NumericDType, NumericScalar, Tensor};
+use runmat_value::{NumericDType, NumericScalar, Tensor};
 
 const NAME: &str = "stochastic_evolution";
 
@@ -69,7 +69,7 @@ pub fn stochastic_evolution_host(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::random;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

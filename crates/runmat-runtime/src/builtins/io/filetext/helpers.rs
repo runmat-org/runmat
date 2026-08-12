@@ -1,8 +1,8 @@
 use std::io::{Read, Seek, SeekFrom};
 
 use encoding_rs::{Encoding, UTF_8};
-use runmat_builtins::{CharArray, Tensor, Value};
 use runmat_filesystem::File;
+use runmat_value::{CharArray, Tensor, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 

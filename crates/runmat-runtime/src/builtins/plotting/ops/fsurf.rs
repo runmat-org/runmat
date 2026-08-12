@@ -7,10 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
+use runmat_value::{IntValue, NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1074,8 +1074,8 @@ mod tests {
 
     #[test]
     fn fsurf_numeric_vector_reads_typed_integer_storage_exactly() {
-        let domain = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-2, 2]),
+        let domain = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I16(vec![-2, 2]),
             vec![1, 2],
         )
         .expect("typed domain vector");
@@ -1085,8 +1085,8 @@ mod tests {
             vec![-2.0, 2.0]
         );
 
-        let wide = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1, (1_u64 << 53) + 3]),
+        let wide = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1, (1_u64 << 53) + 3]),
             vec![1, 2],
         )
         .expect("wide typed domain vector");
@@ -1100,8 +1100,8 @@ mod tests {
             function: 1,
         };
         let domain = Value::Tensor(
-            runmat_builtins::Tensor::new_integer(
-                runmat_builtins::IntegerStorage::I16(vec![-2, 2]),
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::I16(vec![-2, 2]),
                 vec![1, 2],
             )
             .unwrap(),
@@ -1174,16 +1174,16 @@ mod tests {
     fn fsurf_all_integer_classes_use_exact_domain_and_callback_boundaries() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         for storage in [
-            runmat_builtins::IntegerStorage::I8(vec![1, 2]),
-            runmat_builtins::IntegerStorage::I16(vec![1, 2]),
-            runmat_builtins::IntegerStorage::I32(vec![1, 2]),
-            runmat_builtins::IntegerStorage::I64(vec![1, 2]),
-            runmat_builtins::IntegerStorage::U8(vec![1, 2]),
-            runmat_builtins::IntegerStorage::U16(vec![1, 2]),
-            runmat_builtins::IntegerStorage::U32(vec![1, 2]),
-            runmat_builtins::IntegerStorage::U64(vec![1, 2]),
+            runmat_value::IntegerStorage::I8(vec![1, 2]),
+            runmat_value::IntegerStorage::I16(vec![1, 2]),
+            runmat_value::IntegerStorage::I32(vec![1, 2]),
+            runmat_value::IntegerStorage::I64(vec![1, 2]),
+            runmat_value::IntegerStorage::U8(vec![1, 2]),
+            runmat_value::IntegerStorage::U16(vec![1, 2]),
+            runmat_value::IntegerStorage::U32(vec![1, 2]),
+            runmat_value::IntegerStorage::U64(vec![1, 2]),
         ] {
-            let tensor = runmat_builtins::Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            let tensor = runmat_value::Tensor::new_integer(storage, vec![1, 2]).unwrap();
             assert_eq!(
                 numeric_vector(&Value::Tensor(tensor)).unwrap(),
                 vec![1.0, 2.0]
@@ -1274,8 +1274,8 @@ mod tests {
 
     #[test]
     fn fsurf_logical_and_single_callback_samples_are_gated() {
-        let single = runmat_builtins::Tensor::from_numeric_storage(
-            runmat_builtins::NumericStorage::F32(vec![1.0]),
+        let single = runmat_value::Tensor::from_numeric_storage(
+            runmat_value::NumericStorage::F32(vec![1.0]),
             vec![1, 1],
         )
         .unwrap();
@@ -1339,9 +1339,7 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
             },
-            Value::Tensor(
-                runmat_builtins::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap(),
-            ),
+            Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(3.0),
             Value::String("DisplayName".into()),
@@ -1415,7 +1413,7 @@ mod tests {
                 function: 13,
             },
             Value::Tensor(
-                runmat_builtins::Tensor::new(vec![-1.0, 1.0, 2.0, 4.0], vec![1, 4]).unwrap(),
+                runmat_value::Tensor::new(vec![-1.0, 1.0, 2.0, 4.0], vec![1, 4]).unwrap(),
             ),
             Value::String("MeshDensity".into()),
             Value::Num(2.0),
@@ -1454,9 +1452,7 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
             },
-            Value::Tensor(
-                runmat_builtins::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap(),
-            ),
+            Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(2.0),
         ]))
@@ -1492,22 +1488,22 @@ mod tests {
 
     #[test]
     fn fsurf_mesh_density_reads_typed_integer_tensor_exactly() {
-        let exact = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![400]),
+        let exact = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![400]),
             vec![1, 1],
         )
         .expect("typed density");
         assert_eq!(parse_mesh_density(&Value::Tensor(exact)).unwrap(), 400);
 
-        let too_large = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![401]),
+        let too_large = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![401]),
             vec![1, 1],
         )
         .expect("large density");
         assert!(parse_mesh_density(&Value::Tensor(too_large)).is_err());
 
-        let negative = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-1]),
+        let negative = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I64(vec![-1]),
             vec![1, 1],
         )
         .expect("negative density");
@@ -1524,8 +1520,8 @@ mod tests {
     #[test]
     fn fsurf_function_scalar_reads_typed_integer_storage_exactly() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let tensor = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![12]),
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::I16(vec![12]),
             vec![1, 1],
         )
         .unwrap();
@@ -1535,8 +1531,8 @@ mod tests {
             12.0
         );
 
-        let wide = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+        let wide = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
             vec![1, 1],
         )
         .unwrap();

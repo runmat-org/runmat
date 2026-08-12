@@ -4,9 +4,9 @@ use num_bigint::BigInt;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    SymbolicExpr, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{SymbolicExpr, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 

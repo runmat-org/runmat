@@ -2,7 +2,7 @@
 
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive};
-use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::math::elementwise::extended_precision::Extended;
@@ -915,7 +915,7 @@ fn integer_values_into_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::LogicalArray;
+    use runmat_value::LogicalArray;
 
     fn integer(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))

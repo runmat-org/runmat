@@ -4,7 +4,7 @@
 
 use std::cmp::Ordering;
 
-use runmat_builtins::Tensor;
+use runmat_value::Tensor;
 
 use crate::builtins::common::tensor::tensor_values_f64_cow;
 use crate::builtins::logical::rel::integer_comparison::{

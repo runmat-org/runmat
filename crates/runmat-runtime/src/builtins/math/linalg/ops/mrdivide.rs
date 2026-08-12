@@ -9,9 +9,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexTensor, IntegerStorage, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -473,12 +474,12 @@ fn mrdivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<C
     let solution = solve_complex_matrix(&lhs_matrix, &rhs_matrix)?;
     matrix_complex_to_tensor(
         solution,
-        if lhs.numeric_dtype() == runmat_builtins::NumericDType::F32
-            || rhs.numeric_dtype() == runmat_builtins::NumericDType::F32
+        if lhs.numeric_dtype() == runmat_value::NumericDType::F32
+            || rhs.numeric_dtype() == runmat_value::NumericDType::F32
         {
-            runmat_builtins::NumericDType::F32
+            runmat_value::NumericDType::F32
         } else {
-            runmat_builtins::NumericDType::F64
+            runmat_value::NumericDType::F64
         },
     )
 }
@@ -519,7 +520,7 @@ fn compute_svd_tolerance(singular_values: &[f64], rows: usize, cols: usize) -> f
 
 fn matrix_real_to_tensor(
     matrix: DMatrix<f64>,
-    dtype: runmat_builtins::NumericDType,
+    dtype: runmat_value::NumericDType,
 ) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
@@ -529,7 +530,7 @@ fn matrix_real_to_tensor(
 
 fn matrix_complex_to_tensor(
     matrix: DMatrix<Complex64>,
-    dtype: runmat_builtins::NumericDType,
+    dtype: runmat_value::NumericDType,
 ) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
@@ -541,30 +542,30 @@ fn matrix_complex_to_tensor(
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let values = tensor::tensor_values_f64_cow(tensor);
     let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
-    let dtype = if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
-        runmat_builtins::NumericDType::F32
+    let dtype = if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+        runmat_value::NumericDType::F32
     } else {
-        runmat_builtins::NumericDType::F64
+        runmat_value::NumericDType::F64
     };
     ComplexTensor::from_f64_values_with_dtype(data, tensor.shape.clone(), dtype)
         .map_err(|e| mrdivide_internal_error(format!("{NAME}: {e}")))
 }
 
-fn floating_result_dtype(lhs: &Tensor, rhs: &Tensor) -> runmat_builtins::NumericDType {
-    if lhs.numeric_dtype() == runmat_builtins::NumericDType::F32
-        || rhs.numeric_dtype() == runmat_builtins::NumericDType::F32
+fn floating_result_dtype(lhs: &Tensor, rhs: &Tensor) -> runmat_value::NumericDType {
+    if lhs.numeric_dtype() == runmat_value::NumericDType::F32
+        || rhs.numeric_dtype() == runmat_value::NumericDType::F32
     {
-        runmat_builtins::NumericDType::F32
+        runmat_value::NumericDType::F32
     } else {
-        runmat_builtins::NumericDType::F64
+        runmat_value::NumericDType::F64
     }
 }
 
 fn scale_real_preserving_float_class(tensor: &Tensor, scalar: f64) -> BuiltinResult<Tensor> {
-    let dtype = if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
-        runmat_builtins::NumericDType::F32
+    let dtype = if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+        runmat_value::NumericDType::F32
     } else {
-        runmat_builtins::NumericDType::F64
+        runmat_value::NumericDType::F64
     };
     Tensor::new_with_dtype(
         tensor::tensor_values_f64_cow(tensor)
@@ -581,10 +582,10 @@ fn scale_complex_preserving_float_class(
     tensor: &ComplexTensor,
     scalar: Complex64,
 ) -> BuiltinResult<ComplexTensor> {
-    let dtype = if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
-        runmat_builtins::NumericDType::F32
+    let dtype = if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
+        runmat_value::NumericDType::F32
     } else {
-        runmat_builtins::NumericDType::F64
+        runmat_value::NumericDType::F64
     };
     let data = tensor
         .materialize_f64()
@@ -752,7 +753,7 @@ fn value_floating_precision(value: &Value) -> Option<ProviderPrecision> {
     match value {
         Value::Num(_) | Value::Bool(_) | Value::LogicalArray(_) => Some(ProviderPrecision::F64),
         Value::Tensor(tensor) => Some(
-            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+            if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
                 ProviderPrecision::F32
             } else {
                 ProviderPrecision::F64
@@ -818,7 +819,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostTensorView, IntegerElementType, ProviderTelemetry};
-    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -971,7 +973,7 @@ pub(crate) mod tests {
         else {
             panic!("expected tensor")
         };
-        assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(result.materialize_f64(), vec![4.0, 3.0]);
     }
 
@@ -985,7 +987,7 @@ pub(crate) mod tests {
             else {
                 panic!("precision mismatch must use host fallback")
             };
-            assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F32);
+            assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
         });
     }
 
@@ -1017,7 +1019,7 @@ pub(crate) mod tests {
         else {
             panic!("expected complex tensor")
         };
-        assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(result.shape, vec![1, 2]);
     }
 

@@ -3,10 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{AxesKind, BarChart, PolarHistogramDisplayStyle};
+use runmat_value::{Tensor, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn polarhistogram_numeric_vector_reads_typed_integer_storage_exactly() {
         let edges = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-3, 0, 3]),
+            runmat_value::IntegerStorage::I16(vec![-3, 0, 3]),
             vec![1, 3],
         )
         .expect("typed edge vector");

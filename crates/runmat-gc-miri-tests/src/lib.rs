@@ -9,10 +9,10 @@
 
 #[cfg(test)]
 mod tests {
-    use runmat_builtins::{
+    use runmat_gc::*;
+    use runmat_value::{
         CellArray, Closure, HandleRef, Listener, ObjectInstance, StructValue, Value,
     };
-    use runmat_gc::*;
     use std::ptr::NonNull;
 
     #[test]

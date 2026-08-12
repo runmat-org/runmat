@@ -6,17 +6,19 @@ use std::collections::HashMap;
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ClassDef, ComplexTensor, IntValue, IntegerComplexStorage,
-    IntegerStorage, LogicalArray, MethodDef, NumericDType, ObjectInstance, PropertyDef, Tensor,
-    Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    NumericDType, ObjectInstance, Tensor, Value,
+};
 
 use crate::builtins::common::tensor;
 use crate::builtins::math::linalg::ops::{mldivide::mldivide_eval, mrdivide::mrdivide_eval};
@@ -2189,7 +2191,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericScalar};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, NumericScalar};
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).unwrap())
@@ -2865,7 +2867,7 @@ mod tests {
             (3.0, 0.0)
         );
 
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I16(vec![4]),
             IntegerStorage::I16(vec![-2]),
         )
@@ -2935,7 +2937,7 @@ mod tests {
     #[test]
     fn sparse_inputs_are_rejected_until_sparse_solves_exist() {
         let sparse =
-            runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0, 2.0])
+            runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0, 2.0])
                 .expect("sparse");
 
         let err = call_constructor(vec![Value::SparseTensor(sparse)]).expect_err("sparse reject");

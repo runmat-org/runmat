@@ -6,10 +6,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, Closure, ComplexTensor, IntValue, IntegerStorage,
-    LogicalArray, NumericScalar, StructValue, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, Closure, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar,
+    StructValue, Tensor, Value,
+};
 
 use crate::builtins::cells::type_resolvers::cellfun_type;
 use crate::builtins::common::shape::{dims_to_row_tensor, value_numel};
@@ -606,7 +609,7 @@ fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
         Value::Num(1.0) => Ok(true),
         Value::Tensor(tensor)
             if tensor.len() == 1
-                && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 =>
+                && tensor.numeric_dtype() == runmat_value::NumericDType::F64 =>
         {
             match tensor.numeric_value_at(0) {
                 Some(NumericScalar::F64(0.0)) => Ok(false),
@@ -1152,7 +1155,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, StringArray,
     };
     use std::convert::TryInto;
@@ -1720,16 +1723,16 @@ pub(crate) mod tests {
     fn cellfun_string_identifier() {
         let cells = crate::make_cell(
             vec![
-                Value::CharArray(runmat_builtins::CharArray::new_row("")),
-                Value::CharArray(runmat_builtins::CharArray::new_row("abc")),
-                Value::CharArray(runmat_builtins::CharArray::new_row("")),
+                Value::CharArray(runmat_value::CharArray::new_row("")),
+                Value::CharArray(runmat_value::CharArray::new_row("abc")),
+                Value::CharArray(runmat_value::CharArray::new_row("")),
             ],
             1,
             3,
         )
         .expect("cell");
         let result = cellfun_builtin(
-            Value::CharArray(runmat_builtins::CharArray::new_row("isempty")),
+            Value::CharArray(runmat_value::CharArray::new_row("isempty")),
             vec![cells],
         )
         .expect("isempty");
@@ -1746,7 +1749,7 @@ pub(crate) mod tests {
     #[test]
     fn cellfun_string_array_identifier() {
         let cells = crate::make_cell(
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row(""))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row(""))],
             1,
             1,
         )
@@ -1894,7 +1897,7 @@ pub(crate) mod tests {
             Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap()),
             Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap()),
             Value::String("off".into()),
-            Value::CharArray(runmat_builtins::CharArray::new_row("false")),
+            Value::CharArray(runmat_value::CharArray::new_row("false")),
         ] {
             let error = parse_uniform_output(control)
                 .expect_err("unsupported UniformOutput control must reject");

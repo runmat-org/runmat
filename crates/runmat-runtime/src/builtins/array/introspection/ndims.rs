@@ -8,9 +8,10 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::ndims")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -103,9 +104,9 @@ pub(crate) mod tests {
     fn ndims_builtin(value: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ndims_builtin(value))
     }
-    use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor,
-        Type, Value,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
     };
 
     #[test]

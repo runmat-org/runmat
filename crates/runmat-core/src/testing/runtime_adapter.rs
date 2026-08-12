@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
-use runmat_builtins::Value;
 use runmat_test::descriptor::TestSelector;
 use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
+use runmat_value::Value;
 
 use crate::{CompatMode, RunMatSession};
 
@@ -229,7 +229,7 @@ fn result_value(
                     let functions =
                         coverage.summary(runmat_test::coverage::CoverageMetric::Function);
                     let mut summary =
-                        runmat_builtins::ObjectInstance::new("RunMatCoverageResult".into());
+                        runmat_value::ObjectInstance::new("RunMatCoverageResult".into());
                     summary.properties.insert(
                         "StatementsCovered".into(),
                         Value::Num(statements.covered as f64),
@@ -380,7 +380,7 @@ fn suite_targets(suite: Value) -> Vec<Value> {
 fn cell_value(values: Vec<Value>) -> Value {
     let count = values.len();
     Value::Cell(
-        runmat_builtins::CellArray::new(values, 1, count)
+        runmat_value::CellArray::new(values, 1, count)
             .expect("runtime test target rows have valid dimensions"),
     )
 }

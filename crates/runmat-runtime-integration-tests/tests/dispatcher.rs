@@ -2,10 +2,11 @@ use runmat_accelerate::simple_provider::register_inprocess_provider;
 use runmat_builtins::{
     builtin_functions, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_runtime::call_builtin;
+use runmat_value::{Tensor, Value};
 
 const TEST_ERRORS: [BuiltinErrorDescriptor; 0] = [];
 const OUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -131,7 +132,7 @@ fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, String> {
 
 #[test]
 fn call_registered_builtin() {
-    let result = call_builtin("double", &[Value::Int(runmat_builtins::IntValue::I32(4))]).unwrap();
+    let result = call_builtin("double", &[Value::Int(runmat_value::IntValue::I32(4))]).unwrap();
     if let Value::Int(n) = result {
         assert_eq!(n.to_i64(), 8);
     } else {

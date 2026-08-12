@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::limits::{limit_value, parse_limit_command, LimitCommand};
 use super::state::{axis_limits_snapshot, set_axis_limits};
@@ -122,12 +123,12 @@ mod tests {
         let _ = clear_figure(None);
 
         let _ = ylim_builtin(vec![Value::Tensor(
-            runmat_builtins::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("y limits"),
+            runmat_value::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("y limits"),
         )])
         .unwrap();
         let _ = ylim_builtin(vec![Value::String("auto".into())]).unwrap();
         let queried = ylim_builtin(Vec::new()).unwrap();
-        let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
+        let tensor = runmat_value::Tensor::try_from(&queried).unwrap();
         assert!(tensor.materialize_f64()[0].is_nan() && tensor.materialize_f64()[1].is_nan());
     }
 }

@@ -7,7 +7,6 @@ use crate::runtime::workspace::{
     replace_workspace_target_vars_and_state, workspace_assign_target, workspace_target_snapshot,
     WorkspaceTarget, WorkspaceValueSnapshot,
 };
-use runmat_builtins::Value;
 use runmat_hir::{CallableIdentity, FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
 use runmat_runtime::builtins::common::tensor::{
@@ -15,6 +14,7 @@ use runmat_runtime::builtins::common::tensor::{
 };
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "native-accel")]
@@ -1396,8 +1396,8 @@ mod tests {
         current_dynamic_eval_options, dynamic_source_context, imported_builtin_qualified_name,
         parse_finite_arity_bound, push_dynamic_eval_options, rethrow_without_explicit_exception,
     };
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
     use runmat_parser::CompatMode;
+    use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     #[test]
     fn dynamic_eval_guard_restores_runtime_extension_policy() {

@@ -11,9 +11,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -567,7 +567,7 @@ fn restore_hilbert_gpu_output(
         }
     };
     let expected_precision = match tensor.numeric_dtype() {
-        runmat_builtins::NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+        runmat_value::NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
         _ => runmat_accelerate_api::ProviderPrecision::F64,
     };
     if provider.precision() != expected_precision {
@@ -827,7 +827,8 @@ fn analytic_signal_multiplier(freq: usize, len: usize) -> f64 {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor as HostComplexTensor, IntValue, LogicalArray, Type};
+    use runmat_builtins::Type;
+    use runmat_value::{ComplexTensor as HostComplexTensor, IntValue, LogicalArray};
 
     const TOL: f64 = 1.0e-12;
 

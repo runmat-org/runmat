@@ -1,0 +1,20 @@
+[package]
+name = "runmat-value"
+version = "0.6.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../LICENSE.md"
+description = "Live runtime values and intrinsic storage for RunMat"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+runmat-accelerate-api = { workspace = true }
+runmat-execution = { workspace = true }
+runmat-gc-api = { workspace = true }
+runmat-thread-local = { workspace = true }
+indexmap = { version = "1.9", features = ["std"] }
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"

@@ -1,9 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericScalar, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericScalar, Value};
 use std::sync::OnceLock;
 
 pub(crate) const NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD: &str = "numArgumentsFromSubscript";
@@ -341,7 +341,7 @@ fn parse_subscript_levels(value: &Value) -> crate::BuiltinResult<Vec<SubscriptLe
 }
 
 fn parse_subscript_level(
-    struct_value: &runmat_builtins::StructValue,
+    struct_value: &runmat_value::StructValue,
 ) -> crate::BuiltinResult<SubscriptLevel> {
     let kind_value = struct_value.fields.get("type").ok_or_else(|| {
         num_args_error(
@@ -813,9 +813,8 @@ pub async fn num_arguments_from_subscript_builtin(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        Access, CellArray, ClassDef, IntValue, MethodDef, ObjectInstance, StructValue, Tensor,
-    };
+    use runmat_builtins::{ClassDef, MethodDef};
+    use runmat_value::{Access, CellArray, IntValue, ObjectInstance, StructValue, Tensor};
     use std::collections::HashMap;
 
     fn substruct(kind: &str, subs: Value) -> Value {

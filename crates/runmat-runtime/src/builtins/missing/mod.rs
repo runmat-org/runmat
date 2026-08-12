@@ -7,10 +7,13 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, IntValue, LogicalArray, NumericDType, ObjectInstance, ResolveContext,
-    StringArray, StructValue, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, IntValue, LogicalArray, NumericDType, ObjectInstance, StringArray,
+    StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::reduction::{mean, median, min, std as std_reduction, sum, var};
@@ -2579,7 +2582,7 @@ fn broadcast_pairwise_numeric(
     left: &Tensor,
     right: &Tensor,
     op: impl Fn(f64, f64) -> f64,
-) -> BuiltinResult<(Vec<f64>, Vec<usize>, runmat_builtins::NumericDType)> {
+) -> BuiltinResult<(Vec<f64>, Vec<usize>, runmat_value::NumericDType)> {
     let left_len = tensor_utils::tensor_element_len(left);
     let right_len = tensor_utils::tensor_element_len(right);
     if left_len == right_len && left.shape == right.shape {
@@ -2726,7 +2729,7 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -3118,7 +3121,7 @@ mod tests {
     #[test]
     fn fillmissing_rejects_complex_and_sparse_arrays_instead_of_aggregate_replacement() {
         let complex = Value::ComplexTensor(
-            runmat_builtins::ComplexTensor::new(vec![(f64::NAN, 0.0)], vec![1, 1]).unwrap(),
+            runmat_value::ComplexTensor::new(vec![(f64::NAN, 0.0)], vec![1, 1]).unwrap(),
         );
         let error = fill_missing_value(
             complex,
@@ -3131,7 +3134,7 @@ mod tests {
         assert!(error.message().contains("complex arrays are not supported"));
 
         let sparse = Value::SparseTensor(
-            runmat_builtins::SparseTensor::new(2, 1, vec![0, 1], vec![0], vec![f64::NAN]).unwrap(),
+            runmat_value::SparseTensor::new(2, 1, vec![0, 1], vec![0], vec![f64::NAN]).unwrap(),
         );
         let error = fill_missing_value(
             sparse,

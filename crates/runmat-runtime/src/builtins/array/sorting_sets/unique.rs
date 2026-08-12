@@ -17,10 +17,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
-    LogicalArray, NumericStorage, StringArray, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
+    NumericStorage, StringArray, Tensor, Value,
+};
 
 use super::{float_order::SetFloat, integer_order, type_resolvers::unique_values_output_type};
 use crate::build_runtime_error;
@@ -1997,9 +2000,9 @@ impl UniqueEvaluation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{
-        CharArray, IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext,
-        StringArray, Tensor, Type, Value,
+    use runmat_builtins::{LiteralValue, ResolveContext, Type};
+    use runmat_value::{
+        CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor, Value,
     };
 
     fn evaluate_sync(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {

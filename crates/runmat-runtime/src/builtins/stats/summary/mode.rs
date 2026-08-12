@@ -15,10 +15,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, IntegerStorage, LogicalArray, NumericDType,
-    ResolveContext, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::stats::type_resolvers::mode_type;
@@ -313,7 +313,7 @@ fn upload_mode_value(
                 .into_iter()
                 .map(|entry| upload_mode_value(provider, entry))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            runmat_builtins::CellArray::new_with_shape(data, shape)
+            runmat_value::CellArray::new_with_shape(data, shape)
                 .map(Value::Cell)
                 .map_err(mode_internal_error)
         }
@@ -1491,7 +1491,7 @@ fn compare_f64(a: f64, b: f64) -> Ordering {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, NumericDType, Tensor, Value};
+    use runmat_value::{IntValue, LogicalArray, NumericDType, Tensor, Value};
 
     fn mode_call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mode_builtin(value, rest))
@@ -1561,7 +1561,7 @@ pub(crate) mod tests {
         assert_eq!(values.numeric_dtype(), NumericDType::F32);
         assert_eq!(
             values.clone().into_numeric_storage().expect("mode storage"),
-            runmat_builtins::NumericStorage::F32(vec![2.0])
+            runmat_value::NumericStorage::F32(vec![2.0])
         );
         let Value::Cell(ties) = &outputs[2] else {
             panic!("expected ties cell");

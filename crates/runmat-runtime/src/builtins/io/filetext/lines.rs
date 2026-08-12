@@ -4,11 +4,11 @@ use std::path::PathBuf;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, StringArray,
-    Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, StringArray, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};

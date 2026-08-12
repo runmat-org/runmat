@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, StringArray, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StringArray, Value};
 
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -716,7 +717,7 @@ const KOREAN_STOP_WORDS: &[&str] = &[
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CharArray;
+    use runmat_value::CharArray;
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(stop_words_builtin(args))

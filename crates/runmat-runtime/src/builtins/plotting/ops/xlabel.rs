@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::{map_figure_error, parse_text_command};
 use super::state::set_xlabel_for_axes;
@@ -160,8 +161,8 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{CellArray, StringArray};
     use runmat_plot::plots::Figure;
+    use runmat_value::{CellArray, StringArray};
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_registry();

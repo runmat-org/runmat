@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use runmat_builtins::{NumericScalar, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericScalar, ObjectInstance, StructValue, Tensor, Value};
 
 use crate::{builtins::common::tensor, BuiltinResult};
 

@@ -2,7 +2,7 @@ use runmat_accelerate::precision::ensure_provider_supports_dtype;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision,
 };
-use runmat_builtins::NumericDType;
+use runmat_value::NumericDType;
 
 struct F32TestProvider;
 

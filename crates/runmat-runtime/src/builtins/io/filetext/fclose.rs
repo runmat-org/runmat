@@ -12,9 +12,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -687,8 +687,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fopen, registry};
-    use runmat_builtins::{CellArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
     use runmat_time::system_time_now;
+    use runmat_value::{CellArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
     use std::future::Future;
     use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
     use std::path::Path;
@@ -1212,7 +1212,7 @@ pub(crate) mod tests {
         }
         test_support::fs::remove_file(path).unwrap();
 
-        let all = run_evaluate(&[Value::CharArray(runmat_builtins::CharArray::new_row("all"))])
+        let all = run_evaluate(&[Value::CharArray(runmat_value::CharArray::new_row("all"))])
             .expect("documented char all");
         assert_eq!(all.status(), 0.0);
     }

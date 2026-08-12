@@ -4,9 +4,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -179,7 +179,8 @@ fn sinpi_error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     use crate::builtins::common::test_support;
 
@@ -290,7 +291,7 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn sinpi_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 2]),
+            runmat_value::IntegerStorage::I16(vec![-1, 0, 2]),
             vec![3, 1],
         )
         .expect("integer tensor");

@@ -1,4 +1,4 @@
-use runmat_builtins::IntValue;
+use runmat_value::IntValue;
 
 pub(super) fn zero_within(value: &IntValue, tol: f64) -> bool {
     if value.is_zero() {

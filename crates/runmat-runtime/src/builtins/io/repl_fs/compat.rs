@@ -13,11 +13,14 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, IntegerStorage, LogicalArray, NumericDType,
-    NumericScalar, ObjectInstance, StructValue, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, IntegerStorage, LogicalArray, NumericDType, NumericScalar,
+    ObjectInstance, StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::env as runtime_env;
 use crate::builtins::common::fs::{expand_user_path, home_directory, path_to_string};
@@ -1505,7 +1508,7 @@ fn shape_dim_from_numeric_scalar(value: NumericScalar) -> BuiltinResult<usize> {
     }
 }
 
-fn positive_integer_shape_dim(value: &runmat_builtins::IntValue) -> BuiltinResult<usize> {
+fn positive_integer_shape_dim(value: &runmat_value::IntValue) -> BuiltinResult<usize> {
     value
         .try_to_usize()
         .filter(|size| *size > 0)
@@ -1776,7 +1779,7 @@ mod tests {
     #[test]
     fn fileparts_preserves_scalar_string_array_text_input() {
         let input =
-            runmat_builtins::StringArray::new(vec!["folder/example.m".to_string()], vec![1, 1])
+            runmat_value::StringArray::new(vec!["folder/example.m".to_string()], vec![1, 1])
                 .expect("scalar string array");
         let value = run(fileparts_builtin(vec![Value::StringArray(input)])).expect("fileparts");
         let Value::OutputList(values) = value else {
@@ -1857,14 +1860,14 @@ mod tests {
     #[test]
     fn getpref_persists_and_preserves_every_integer_scalar_class() {
         for (index, value) in [
-            Value::Int(runmat_builtins::IntValue::I8(i8::MIN)),
-            Value::Int(runmat_builtins::IntValue::I16(i16::MIN)),
-            Value::Int(runmat_builtins::IntValue::I32(i32::MIN)),
-            Value::Int(runmat_builtins::IntValue::I64(i64::MIN)),
-            Value::Int(runmat_builtins::IntValue::U8(u8::MAX)),
-            Value::Int(runmat_builtins::IntValue::U16(u16::MAX)),
-            Value::Int(runmat_builtins::IntValue::U32(u32::MAX)),
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::I8(i8::MIN)),
+            Value::Int(runmat_value::IntValue::I16(i16::MIN)),
+            Value::Int(runmat_value::IntValue::I32(i32::MIN)),
+            Value::Int(runmat_value::IntValue::I64(i64::MIN)),
+            Value::Int(runmat_value::IntValue::U8(u8::MAX)),
+            Value::Int(runmat_value::IntValue::U16(u16::MAX)),
+            Value::Int(runmat_value::IntValue::U32(u32::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
         ]
         .into_iter()
         .enumerate()
@@ -1923,7 +1926,7 @@ mod tests {
 
     #[test]
     fn getpref_existing_value_wins_over_default_without_conversion() {
-        let existing = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+        let existing = Value::Int(runmat_value::IntValue::U64(u64::MAX));
         run(getpref_builtin(vec![
             Value::String("getprefExistingWins".into()),
             Value::String("value".into()),
@@ -1944,7 +1947,7 @@ mod tests {
         let mut object = ObjectInstance::new("PreferencePayload".to_string());
         object.properties.insert(
             "revision".to_string(),
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
         );
         let value = Value::Object(object);
         let created = run(getpref_builtin(vec![
@@ -1971,14 +1974,14 @@ mod tests {
     #[test]
     fn getpref_multiple_names_preserve_query_shape_and_persist_defaults() {
         let names = Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["signed".into(), "unsigned".into()], vec![2, 1])
+            runmat_value::StringArray::new(vec!["signed".into(), "unsigned".into()], vec![2, 1])
                 .expect("preference names"),
         );
         let defaults = Value::Cell(
             CellArray::new_with_shape(
                 vec![
-                    Value::Int(runmat_builtins::IntValue::I64(i64::MIN)),
-                    Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+                    Value::Int(runmat_value::IntValue::I64(i64::MIN)),
+                    Value::Int(runmat_value::IntValue::U64(u64::MAX)),
                 ],
                 vec![2, 1],
             )
@@ -2062,14 +2065,14 @@ mod tests {
     #[test]
     fn getpref_rejects_every_integer_class_in_text_control_positions() {
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(1)),
-            Value::Int(runmat_builtins::IntValue::I16(1)),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::Int(runmat_builtins::IntValue::I64(1)),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
-            Value::Int(runmat_builtins::IntValue::U16(1)),
-            Value::Int(runmat_builtins::IntValue::U32(1)),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
         ] {
             let error = run(getpref_builtin(vec![
                 value.clone(),
@@ -2125,7 +2128,7 @@ mod tests {
 
     #[test]
     fn memmapfile_typed_shape_offset_and_repeat_parsers_are_exact() {
-        use runmat_builtins::{IntValue, IntegerStorage};
+        use runmat_value::{IntValue, IntegerStorage};
 
         assert_eq!(
             shape_from_value(&Value::Int(IntValue::U16(7))).unwrap(),

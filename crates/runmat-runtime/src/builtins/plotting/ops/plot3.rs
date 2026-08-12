@@ -1,11 +1,12 @@
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::{line3::Line3GpuInputs, ScalarType};
 use runmat_plot::plots::{Line3Plot, LineStyle};
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -496,9 +497,9 @@ impl Plot3SeriesInput {
         self,
         name: &'static str,
     ) -> crate::BuiltinResult<(
-        runmat_builtins::Tensor,
-        runmat_builtins::Tensor,
-        runmat_builtins::Tensor,
+        runmat_value::Tensor,
+        runmat_value::Tensor,
+        runmat_value::Tensor,
     )> {
         Ok((
             self.x.into_tensor_async(name).await?,
@@ -695,8 +696,8 @@ mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
-    use runmat_builtins::Tensor;
     use runmat_plot::plots::PlotElement;
+    use runmat_value::Tensor;
 
     fn vec_tensor(data: &[f64]) -> Tensor {
         Tensor::new(data.to_vec(), vec![data.len()]).expect("plot3 test vector")
@@ -823,7 +824,7 @@ mod tests {
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
             Value::Tensor(vec_tensor(&[2.0, 3.0])),
             Value::String("LineStyleOrder".into()),
-            Value::StringArray(runmat_builtins::StringArray {
+            Value::StringArray(runmat_value::StringArray {
                 data: vec!["--".into(), ":".into()],
                 shape: vec![1, 2],
                 rows: 1,

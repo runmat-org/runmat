@@ -9,11 +9,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, StructValue,
-    Tensor, Type, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1359,9 +1359,9 @@ mod tests {
     #[test]
     fn hgsave_rejects_typed_integer_handle_spellings() {
         for value in [
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
             Value::Tensor(
-                Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1]), vec![1, 1])
+                Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1]), vec![1, 1])
                     .unwrap(),
             ),
         ] {
@@ -1438,7 +1438,7 @@ mod tests {
         let second = figure_builtin(vec![Value::String("next".into())]).expect("figure two");
         block_on(plot_builtin(vec![Value::Tensor(tensor(&[3.0, 2.0, 1.0]))])).expect("plot two");
         let handles = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![first as i64, second as i64]),
+            runmat_value::IntegerStorage::I64(vec![first as i64, second as i64]),
             vec![1, 2],
         )
         .expect("handle tensor");

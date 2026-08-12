@@ -15,10 +15,13 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericStorage,
-    ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericStorage,
+    StringArray, Tensor, Value,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::permute")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -393,10 +396,10 @@ fn permute_numeric_storage(
 
 fn permute_integer_storage(
     builtin: &'static str,
-    storage: runmat_builtins::IntegerStorage,
+    storage: runmat_value::IntegerStorage,
     shape: &[usize],
     order: &[usize],
-) -> crate::BuiltinResult<(runmat_builtins::IntegerStorage, Vec<usize>)> {
+) -> crate::BuiltinResult<(runmat_value::IntegerStorage, Vec<usize>)> {
     let (storage, shape) = permute_numeric_storage(
         builtin,
         NumericStorage::from_integer_storage(storage),
@@ -595,7 +598,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::permute_builtin(value, order))

@@ -12,10 +12,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, IntegerComplexStorage,
-    IntegerStorage, NumericStorage, ResolveContext, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
+    Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -425,7 +428,7 @@ fn value_is_host_typed_integer(value: &Value) -> bool {
 }
 
 fn value_is_single(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32)
+    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_precision(handle) == Some(runmat_accelerate_api::ProviderPrecision::F32))
 }
 
@@ -634,7 +637,7 @@ fn integer_component_values(
 
 fn prototype_storage_from_values(
     prototype: &IntegerStorage,
-    values: Vec<runmat_builtins::IntValue>,
+    values: Vec<runmat_value::IntValue>,
 ) -> BuiltinResult<IntegerStorage> {
     prototype
         .from_same_class_values(values)
@@ -662,7 +665,7 @@ fn is_scalar_tensor(tensor: &Tensor) -> bool {
 
 fn value_into_real_input(value: Value) -> BuiltinResult<RealInput> {
     let is_scalar_double = matches!(value, Value::Num(_))
-        || matches!(&value, Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64);
+        || matches!(&value, Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) && tensor.numeric_dtype() == runmat_value::NumericDType::F64);
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(complex_error_with_detail(
             &COMPLEX_ERROR_INVALID_INPUT,
@@ -691,9 +694,10 @@ pub(crate) mod tests {
     use crate::builtins::common::gpu_helpers;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_builtins::Type;
+    use runmat_value::{
         CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
-        StringArray, Tensor, Type, Value,
+        StringArray, Tensor, Value,
     };
 
     fn complex_call(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

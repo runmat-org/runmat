@@ -18,9 +18,9 @@ use crate::indexing::selectors::{
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
-use runmat_builtins::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
 use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
 use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_value::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -70,7 +70,7 @@ async fn assign_integer_scalar_with_plan(
     }
 }
 
-fn logical_value_from_tensor(t: runmat_builtins::Tensor) -> Result<Value, RuntimeError> {
+fn logical_value_from_tensor(t: runmat_value::Tensor) -> Result<Value, RuntimeError> {
     let logical_data: Vec<u8> = tensor_values_f64_cow(&t)
         .iter()
         .map(|&v| if v != 0.0 { 1 } else { 0 })
@@ -78,7 +78,7 @@ fn logical_value_from_tensor(t: runmat_builtins::Tensor) -> Result<Value, Runtim
     if logical_data.len() <= 1 {
         Ok(Value::Bool(logical_data.first().copied().unwrap_or(0) != 0))
     } else {
-        let logical = runmat_builtins::LogicalArray::new(logical_data, t.shape.clone())
+        let logical = runmat_value::LogicalArray::new(logical_data, t.shape.clone())
             .map_err(|e| map_slice_shape_error("slice assign", e))?;
         Ok(Value::LogicalArray(logical))
     }
@@ -109,7 +109,7 @@ async fn read_scalar_like_slice(
             .iter()
             .map(|&b| if b != 0 { 1.0 } else { 0.0 })
             .collect();
-        let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+        let tensor = runmat_value::Tensor::new(data, la.shape.clone())
             .map_err(|e| map_slice_shape_error("slice", e))?;
         let sliced = if dims == 1 {
             idx_read_slice::read_tensor_slice_1d(&tensor, colon_mask, end_mask, numeric).await?
@@ -249,7 +249,7 @@ fn validate_expr_range_step_metadata(
 }
 
 fn assign_scalar_struct_index(
-    _base: runmat_builtins::StructValue,
+    _base: runmat_value::StructValue,
     indices: &[usize],
     rhs: Value,
 ) -> Result<Value, RuntimeError> {
@@ -399,7 +399,7 @@ fn gather_cell_with_plan(
 }
 
 fn gather_object_array_with_plan(
-    array: &runmat_builtins::ObjectArray,
+    array: &runmat_value::ObjectArray,
     plan: &crate::indexing::plan::IndexPlan,
 ) -> Result<Value, RuntimeError> {
     if plan.indices.len() == 1 {
@@ -1331,7 +1331,7 @@ pub async fn dispatch_indexing(
                     idx_write_linear::assign_complex_scalar(t, &indices, &rhs, delete).await?,
                 ),
                 Value::Num(n) => {
-                    let scalar = runmat_builtins::Tensor::new(vec![n], vec![1, 1])
+                    let scalar = runmat_value::Tensor::new(vec![n], vec![1, 1])
                         .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
                     stack.push(
                         idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
@@ -1347,7 +1347,7 @@ pub async fn dispatch_indexing(
                 }
                 Value::Bool(b) => {
                     let scalar =
-                        runmat_builtins::Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
+                        runmat_value::Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                             .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
                     stack.push(
                         idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
@@ -1429,7 +1429,7 @@ pub async fn dispatch_indexing(
                         .iter()
                         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                         .collect();
-                    let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                    let tensor = runmat_value::Tensor::new(data, la.shape.clone())
                         .map_err(|e| map_slice_shape_error("slice", e))?;
                     Value::Tensor(tensor)
                 }
@@ -1685,7 +1685,7 @@ pub async fn dispatch_indexing(
                         .iter()
                         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                         .collect();
-                    let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                    let tensor = runmat_value::Tensor::new(data, la.shape.clone())
                         .map_err(|e| map_slice_shape_error("slice assign", e))?;
                     let selectors = build_slice_selectors(
                         *dims,
@@ -1985,7 +1985,7 @@ pub async fn dispatch_indexing(
                         &format!("slice: {e}"),
                     )
                 })?;
-                let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
+                let tensor = runmat_value::Tensor::new(host.data, host.shape)
                     .map_err(|e| map_slice_shape_error("slice", e))?;
                 base = Value::Tensor(tensor);
             }
@@ -2082,7 +2082,7 @@ pub async fn dispatch_indexing(
                         .iter()
                         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                         .collect();
-                    let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                    let tensor = runmat_value::Tensor::new(data, la.shape.clone())
                         .map_err(|e| map_slice_shape_error("slice", e))?;
                     let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
@@ -2587,7 +2587,7 @@ mod tests {
     use crate::bytecode::EndExpr;
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, IntValue, IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor,
         Value,
     };
@@ -2855,9 +2855,8 @@ mod tests {
 
     #[test]
     fn resolve_cell_indices_accepts_scalar_tensor_values() {
-        let scalar = Value::Tensor(
-            runmat_builtins::Tensor::new(vec![2.0], vec![1, 1]).expect("scalar tensor"),
-        );
+        let scalar =
+            Value::Tensor(runmat_value::Tensor::new(vec![2.0], vec![1, 1]).expect("scalar tensor"));
         let indices = block_on(super::resolve_cell_indices(&[scalar]))
             .expect("scalar tensor index should pass");
         assert_eq!(indices, vec![2]);
@@ -2893,7 +2892,7 @@ mod tests {
         ));
 
         let selector =
-            Value::Tensor(runmat_builtins::Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
+            Value::Tensor(runmat_value::Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
         let slice = block_on(super::paren_index_value(
             array,
             vec![selector],
@@ -2917,7 +2916,7 @@ mod tests {
         assert_eq!(
             value,
             Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical array")
+                runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical array")
             )
         );
     }

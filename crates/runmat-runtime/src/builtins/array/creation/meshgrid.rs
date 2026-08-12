@@ -7,9 +7,11 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor,
-    IntegerComplexStorage, IntegerStorage, NumericDType, NumericStorage, ResolveContext, Tensor,
-    Type, Value,
+    BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
+};
+use runmat_value::{
+    ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
+    NumericStorage, Tensor, Value,
 };
 
 use crate::builtins::array::type_resolvers::size_vector_len;
@@ -1546,7 +1548,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::AccelProvider;
 
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntValue;
+    use runmat_value::IntValue;
 
     fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
         block_on(super::evaluate(args))

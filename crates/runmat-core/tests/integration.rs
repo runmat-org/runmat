@@ -255,7 +255,7 @@ fn test_randi_wide_integer_outputs_follow_session_compatibility_mode() {
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
         assert_eq!(
             runmat.value,
-            Some(runmat_builtins::Value::String("int64".to_string()))
+            Some(runmat_value::Value::String("int64".to_string()))
         );
     });
 }
@@ -271,7 +271,7 @@ fn test_randi_prototype_forms_follow_session_compatibility_mode() {
         )
         .expect("documented like form");
         assert!(documented.error.is_none(), "{:?}", documented.error);
-        assert_eq!(documented.value, Some(runmat_builtins::Value::Num(1.0)));
+        assert_eq!(documented.value, Some(runmat_value::Value::Num(1.0)));
 
         let rejected = runmat_core::execute_text_request_for_testing(
             &mut engine,
@@ -290,7 +290,7 @@ fn test_randi_prototype_forms_follow_session_compatibility_mode() {
         )
         .expect("runmat mode should enable the bare prototype shorthand");
         assert!(extension.error.is_none(), "{:?}", extension.error);
-        assert_eq!(extension.value, Some(runmat_builtins::Value::Num(6.0)));
+        assert_eq!(extension.value, Some(runmat_value::Value::Num(6.0)));
     });
 }
 
@@ -420,7 +420,7 @@ fn test_macd_nondouble_matrix_extension_follows_session_compatibility_mode() {
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
         assert_eq!(
             runmat.value,
-            Some(runmat_builtins::Value::String("double".to_string()))
+            Some(runmat_value::Value::String("double".to_string()))
         );
     });
 }
@@ -456,7 +456,7 @@ fn test_fread_like_extension_follows_session_compatibility_mode() {
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
         assert_eq!(
             runmat.value,
-            Some(runmat_builtins::Value::String("uint8".to_string()))
+            Some(runmat_value::Value::String("uint8".to_string()))
         );
     });
 }
@@ -483,7 +483,7 @@ fn test_pagefun_host_extension_follows_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts all-host pagefun");
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
-        assert_eq!(runmat.value, Some(runmat_builtins::Value::Num(4.0)));
+        assert_eq!(runmat.value, Some(runmat_value::Value::Num(4.0)));
     });
 }
 
@@ -530,7 +530,7 @@ fn test_linalg_coefficient_extensions_follow_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts integer eigs coefficients");
         assert!(eigs.error.is_none(), "{:?}", eigs.error);
-        assert_eq!(eigs.value, Some(runmat_builtins::Value::Num(8.0)));
+        assert_eq!(eigs.value, Some(runmat_value::Value::Num(8.0)));
     });
 }
 
@@ -610,7 +610,7 @@ fn test_pskmod_integer_controls_follow_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts typed-integer pskmod controls");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        assert_eq!(outcome.value, Some(runmat_builtins::Value::Num(1.0)));
+        assert_eq!(outcome.value, Some(runmat_value::Value::Num(1.0)));
     });
 }
 
@@ -645,7 +645,7 @@ fn test_trnd_integer_arguments_follow_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts typed-integer trnd arguments");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_builtins::Value::Tensor(shape)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(shape)) = outcome.value else {
             panic!("expected size vector");
         };
         assert_eq!(shape.materialize_f64(), vec![2.0, 3.0]);
@@ -679,7 +679,7 @@ fn test_db_nonfloating_inputs_follow_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts nonfloating db inputs");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_builtins::Value::Tensor(shape)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(shape)) = outcome.value else {
             panic!("expected size vector");
         };
         assert_eq!(shape.materialize_f64(), vec![1.0, 4.0]);
@@ -717,7 +717,7 @@ fn test_delaunaytri_integer_extensions_follow_session_compatibility_mode() {
         )
         .expect("RunMat mode accepts typed-integer DelaunayTri coordinates");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_builtins::Value::Tensor(indices)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(indices)) = outcome.value else {
             panic!("expected nearest-neighbor index tensor");
         };
         assert_eq!(indices.materialize_f64(), vec![1.0]);
@@ -738,7 +738,7 @@ fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
         assert_eq!(
             outcome.value,
-            Some(runmat_builtins::Value::Int(runmat_builtins::IntValue::U64(
+            Some(runmat_value::Value::Int(runmat_value::IntValue::U64(
                 u64::MAX
             )))
         );
@@ -749,7 +749,7 @@ fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
         )
         .expect("fractional linspace count executes");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_builtins::Value::Tensor(values)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
             panic!("expected linspace tensor")
         };
         assert_eq!(values.shape, vec![1, 3]);
@@ -761,7 +761,7 @@ fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
         )
         .expect("NaN linspace count executes");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_builtins::Value::Tensor(values)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
             panic!("expected scalar NaN tensor")
         };
         assert_eq!(values.shape, vec![1, 1]);
@@ -788,12 +788,12 @@ fn test_number_theory_and_remainder_real_domain_match_documented_forms() {
         )
         .expect("gcd integer array and scalar double execute");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        let Some(runmat_builtins::Value::Tensor(values)) = outcome.value else {
+        let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
             panic!("expected gcd tensor")
         };
         assert_eq!(
             values.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::I16(vec![6, 6]))
+            Some(&runmat_value::IntegerStorage::I16(vec![6, 6]))
         );
 
         let outcome = runmat_core::execute_text_request_for_testing(
@@ -802,7 +802,7 @@ fn test_number_theory_and_remainder_real_domain_match_documented_forms() {
         )
         .expect("extended gcd outputs execute");
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
-        assert_eq!(outcome.value, Some(runmat_builtins::Value::Num(0.0)));
+        assert_eq!(outcome.value, Some(runmat_value::Value::Num(0.0)));
 
         let outcome =
             runmat_core::execute_text_request_for_testing(&mut engine, "out = lcm(-6, 3);")
@@ -841,7 +841,7 @@ fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
         assert_eq!(
             runmat.value,
-            Some(runmat_builtins::Value::String("uint64".to_string()))
+            Some(runmat_value::Value::String("uint64".to_string()))
         );
     });
 }
@@ -888,7 +888,7 @@ fn test_await_passes_through_non_spawn_operand_at_runtime() {
         );
         let readback = runmat_core::execute_text_request_for_testing(&mut engine, "y")
             .expect("readback should succeed");
-        assert_eq!(readback.value, Some(runmat_builtins::Value::Num(1.0)));
+        assert_eq!(readback.value, Some(runmat_value::Value::Num(1.0)));
     });
 }
 
@@ -909,7 +909,7 @@ fn test_spawn_handle_is_consumed_after_await() {
 
         let first = runmat_core::execute_text_request_for_testing(&mut engine, "first")
             .expect("first readback should succeed");
-        assert_eq!(first.value, Some(runmat_builtins::Value::Num(42.0)));
+        assert_eq!(first.value, Some(runmat_value::Value::Num(42.0)));
 
         let second_await =
             runmat_core::execute_text_request_for_testing(&mut engine, "second = await(t);");
@@ -980,13 +980,13 @@ fn test_control_flow_execution() {
 
         let x = runmat_core::execute_text_request_for_testing(&mut engine, "x")
             .expect("x readback should succeed");
-        assert_eq!(x.value, Some(runmat_builtins::Value::Num(10.0)));
+        assert_eq!(x.value, Some(runmat_value::Value::Num(10.0)));
         let y = runmat_core::execute_text_request_for_testing(&mut engine, "y")
             .expect("y readback should succeed");
-        assert_eq!(y.value, Some(runmat_builtins::Value::Num(30.0)));
+        assert_eq!(y.value, Some(runmat_value::Value::Num(30.0)));
         let z = runmat_core::execute_text_request_for_testing(&mut engine, "z")
             .expect("z readback should succeed");
-        assert_eq!(z.value, Some(runmat_builtins::Value::Num(6.0)));
+        assert_eq!(z.value, Some(runmat_value::Value::Num(6.0)));
     });
 }
 

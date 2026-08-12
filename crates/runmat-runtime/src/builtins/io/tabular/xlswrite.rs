@@ -7,11 +7,13 @@ use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as Sp
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, IntValue, LogicalArray, SparseTensor, StringArray, StructValue, Tensor,
-    Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, IntValue, LogicalArray, SparseTensor, StringArray, StructValue, Tensor,
+    Value,
+};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -1615,8 +1617,8 @@ mod tests {
     use super::*;
     use calamine::{open_workbook_auto, open_workbook_auto_from_rs, Data, Reader};
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, SparseTensor};
     use runmat_time::unix_timestamp_ms;
+    use runmat_value::{IntegerStorage, SparseTensor};
     use std::fs;
     use std::io::Cursor;
     use std::sync::atomic::{AtomicU64, Ordering};

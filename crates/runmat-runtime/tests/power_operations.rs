@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{Tensor, Value};
 use runmat_runtime::{elementwise_pow, power};
+use runmat_value::{Tensor, Value};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -12,19 +12,19 @@ fn test_scalar_power() {
 
     // Test integer scalar
     let result = power(
-        &Value::Int(runmat_builtins::IntValue::I32(3)),
-        &Value::Int(runmat_builtins::IntValue::I32(2)),
+        &Value::Int(runmat_value::IntValue::I32(3)),
+        &Value::Int(runmat_value::IntValue::I32(2)),
     )
     .unwrap();
-    assert_eq!(result, Value::Int(runmat_builtins::IntValue::I32(9)));
+    assert_eq!(result, Value::Int(runmat_value::IntValue::I32(9)));
 
     // Test mixed types
     let result = power(
         &Value::Num(2.5),
-        &Value::Int(runmat_builtins::IntValue::I32(2)),
+        &Value::Int(runmat_value::IntValue::I32(2)),
     )
     .unwrap();
-    assert_eq!(result, Value::Int(runmat_builtins::IntValue::I32(6)));
+    assert_eq!(result, Value::Int(runmat_value::IntValue::I32(6)));
 
     // Complex scalar power
     let result = power(&Value::Complex(2.0, 0.0), &Value::Num(3.0)).unwrap();
@@ -42,7 +42,7 @@ fn test_matrix_power() {
     let matrix = Tensor::new_2d(vec![2.0, 3.0, 4.0, 5.0], 2, 2).unwrap();
     let result = power(
         &Value::Tensor(matrix),
-        &Value::Int(runmat_builtins::IntValue::I32(0)),
+        &Value::Int(runmat_value::IntValue::I32(0)),
     )
     .unwrap();
 
@@ -59,7 +59,7 @@ fn test_matrix_power() {
     let expected = matrix.clone();
     let result = power(
         &Value::Tensor(matrix),
-        &Value::Int(runmat_builtins::IntValue::I32(1)),
+        &Value::Int(runmat_value::IntValue::I32(1)),
     )
     .unwrap();
 
@@ -76,7 +76,7 @@ fn test_matrix_power() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let result = power(
         &Value::Tensor(matrix),
-        &Value::Int(runmat_builtins::IntValue::I32(2)),
+        &Value::Int(runmat_value::IntValue::I32(2)),
     )
     .unwrap();
 
@@ -118,7 +118,7 @@ fn test_matrix_power_non_square_fails() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3).unwrap(); // 2x3 matrix
     let result = power(
         &Value::Tensor(matrix),
-        &Value::Int(runmat_builtins::IntValue::I32(2)),
+        &Value::Int(runmat_value::IntValue::I32(2)),
     );
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("square"));
@@ -130,7 +130,7 @@ fn test_matrix_power_negative_fails() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let result = power(
         &Value::Tensor(matrix),
-        &Value::Int(runmat_builtins::IntValue::I32(-1)),
+        &Value::Int(runmat_value::IntValue::I32(-1)),
     );
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Negative"));
@@ -145,7 +145,7 @@ fn test_elementwise_vs_matrix_power() {
     // Matrix power: A^2 = A * A
     let matrix_power_result = power(
         &Value::Tensor(matrix.clone()),
-        &Value::Int(runmat_builtins::IntValue::I32(2)),
+        &Value::Int(runmat_value::IntValue::I32(2)),
     )
     .unwrap();
 

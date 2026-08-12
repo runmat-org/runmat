@@ -9,10 +9,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexTensor, LogicalArray, NumericStorage, SparseTensor, StringArray,
     SymbolicArray, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
     gpu_helpers,
@@ -701,9 +703,10 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
-    use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, ResolveContext,
-        SparseTensor, SymbolicArray, SymbolicExpr, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, SparseTensor, SymbolicArray,
+        SymbolicExpr,
     };
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

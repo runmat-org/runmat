@@ -3,10 +3,12 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray,
     Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::format::{complex_to_string, format_variadic, number_to_string};
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -220,7 +222,7 @@ fn parse_encoding_text(raw: &str) -> BuiltinResult<StringEncoding> {
     }
 }
 
-fn cell_contains_only_text_scalars(cell: &runmat_builtins::CellArray) -> bool {
+fn cell_contains_only_text_scalars(cell: &runmat_value::CellArray) -> bool {
     cell.data.iter().all(|ptr| match &ptr {
         Value::String(_) => true,
         Value::StringArray(sa) => sa.data.len() <= 1,
@@ -856,7 +858,7 @@ fn logical_array_to_string_array(logical: LogicalArray) -> BuiltinResult<StringA
 }
 
 async fn cell_array_to_string_array(
-    cell: runmat_builtins::CellArray,
+    cell: runmat_value::CellArray,
     _encoding: StringEncoding,
 ) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(cell.data.len());
@@ -994,9 +996,9 @@ fn int_value_to_string(value: &IntValue) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{
-        CellArray, IntValue, IntegerComplexStorage, IntegerStorage, ResolveContext, StringArray,
-        StructValue, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        CellArray, IntValue, IntegerComplexStorage, IntegerStorage, StringArray, StructValue,
     };
 
     fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

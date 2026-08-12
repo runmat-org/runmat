@@ -23,12 +23,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
+use runmat_value::{ComplexTensor, Value};
 
-#[cfg(test)]
-use runmat_builtins::Tensor;
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::Tensor;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::ifftn")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

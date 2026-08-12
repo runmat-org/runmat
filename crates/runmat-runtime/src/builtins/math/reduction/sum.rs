@@ -9,8 +9,9 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, Type,
 };
+use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 const NAME: &str = "sum";
 
 use runmat_builtins::ResolveContext;
@@ -1400,7 +1401,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
     };
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn sum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::sum_builtin(value, rest))

@@ -9,9 +9,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ObjectInstance, ResolveContext, SparseTensor, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, ObjectInstance, SparseTensor, Tensor, Value};
 
 use crate::builtins::common::tensor::{tensor_into_values_f64, tensor_values_f64_cow};
 use crate::builtins::strings::common::is_missing_string;
@@ -243,14 +244,14 @@ fn value_has_integer(value: &Value) -> bool {
         || matches!(value, Value::ComplexTensor(t) if t.integer_storage().is_some())
         || matches!(value, Value::SparseTensor(s)
             if matches!(s.numeric_dtype(), Some(dtype) if !matches!(dtype,
-                runmat_builtins::NumericDType::F64 | runmat_builtins::NumericDType::F32)))
+                runmat_value::NumericDType::F64 | runmat_value::NumericDType::F32)))
         || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
 }
 fn value_is_single(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.numeric_dtype() == runmat_builtins::NumericDType::F32)
-        || matches!(value, Value::ComplexTensor(t) if t.numeric_dtype() == runmat_builtins::NumericDType::F32)
+    matches!(value, Value::Tensor(t) if t.numeric_dtype() == runmat_value::NumericDType::F32)
+        || matches!(value, Value::ComplexTensor(t) if t.numeric_dtype() == runmat_value::NumericDType::F32)
         || matches!(value, Value::SparseTensor(s)
-            if s.numeric_dtype() == Some(runmat_builtins::NumericDType::F32))
+            if s.numeric_dtype() == Some(runmat_value::NumericDType::F32))
         || matches!(value, Value::GpuTensor(h)
             if runmat_accelerate_api::handle_integer_type(h).is_none()
                 && !runmat_accelerate_api::handle_is_logical(h)
@@ -908,7 +909,7 @@ fn complex_dot_conj(lhs: &[(usize, (f64, f64))], rhs: &[(usize, (f64, f64))]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, IntegerComplexStorage, IntegerStorage, ObjectInstance, StringArray,
     };
 
@@ -1392,7 +1393,7 @@ mod tests {
 
     #[test]
     fn char_row_to_string_helper_is_not_dead_code() {
-        let array = runmat_builtins::CharArray::new_row("alpha beta");
+        let array = runmat_value::CharArray::new_row("alpha beta");
         assert_eq!(
             crate::builtins::strings::common::char_row_to_string_slice(&array.data, array.cols, 0),
             "alpha beta"

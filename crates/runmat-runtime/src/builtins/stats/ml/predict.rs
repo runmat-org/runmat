@@ -1,7 +1,7 @@
 //! Generic model prediction dispatcher.
 
-use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::{gather_if_needed_async, BuiltinResult};
 

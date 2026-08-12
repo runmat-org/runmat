@@ -27,9 +27,10 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LiteralValue, ResolveContext, Tensor, Type, Value,
+    LiteralValue, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::common::spec::{
@@ -716,7 +717,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{handle_precision, provider_for_handle, ProviderPrecision};
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::peaks_builtin(rest))
@@ -818,7 +819,7 @@ mod tests {
 
     #[test]
     fn peaks_xy_form() {
-        use runmat_builtins::Tensor;
+        use runmat_value::Tensor;
         let x = Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let y = Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![2, 2]).unwrap();
         let value =
@@ -1000,9 +1001,7 @@ mod tests {
             }
         }
 
-        fn gather_handle(
-            handle: runmat_accelerate_api::GpuTensorHandle,
-        ) -> runmat_builtins::Tensor {
+        fn gather_handle(handle: runmat_accelerate_api::GpuTensorHandle) -> runmat_value::Tensor {
             test_support::gather(Value::GpuTensor(handle)).expect("gather")
         }
 

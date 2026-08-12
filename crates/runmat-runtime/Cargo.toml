@@ -11,6 +11,7 @@ build = "build.rs"
 links = "runmat_runtime_native"
 
 [dependencies]
+runmat-value = { workspace = true }
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-execution = { workspace = true }

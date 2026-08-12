@@ -7,10 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, NumericStorage, ResolveContext,
-    Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -280,7 +280,7 @@ pub(crate) mod tests {
         .is_ok()
             && runmat_accelerate_api::provider().is_some()
     }
-    use runmat_builtins::{
+    use runmat_value::{
         CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
     };
     use std::f64::consts::PI;
@@ -450,7 +450,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn angle_rejects_integer_logical_and_char_inputs() {
-        let integer = angle_builtin(Value::Int(runmat_builtins::IntValue::I32(-1))).unwrap_err();
+        let integer = angle_builtin(Value::Int(runmat_value::IntValue::I32(-1))).unwrap_err();
         assert_eq!(integer.identifier(), ANGLE_ERROR_INVALID_INPUT.identifier);
 
         let logical = LogicalArray::new(vec![0, 1, 0, 1], vec![2, 2]).unwrap();

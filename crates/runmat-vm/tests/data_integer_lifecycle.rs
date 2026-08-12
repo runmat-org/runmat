@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::{IntegerStorage, Value};
+use runmat_value::{IntegerStorage, Value};
 use test_helpers::execute_source;
 
 fn source_path(path: &std::path::Path) -> String {

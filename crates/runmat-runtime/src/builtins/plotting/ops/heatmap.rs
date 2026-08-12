@@ -8,10 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
+use runmat_value::{IntegerStorage, Tensor, Value};
 
 use super::common::SurfaceDataInput;
 use super::op_common::surface_inputs::AxisSource;
@@ -842,8 +842,8 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{CellArray, Value};
     use runmat_plot::plots::PlotElement;
+    use runmat_value::{CellArray, Value};
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -858,7 +858,7 @@ mod tests {
     }
 
     fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data), vec![rows, cols])
+        Tensor::new_integer(runmat_value::IntegerStorage::I16(data), vec![rows, cols])
             .expect("integer tensor")
     }
 
@@ -872,15 +872,10 @@ mod tests {
             transposed.materialize_f64(),
             vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]
         );
-        assert_eq!(
-            transposed.numeric_dtype(),
-            runmat_builtins::NumericDType::I16
-        );
+        assert_eq!(transposed.numeric_dtype(), runmat_value::NumericDType::I16);
         assert_eq!(
             transposed.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::I16(vec![
-                1, 3, 5, 2, 4, 6
-            ]))
+            Some(&runmat_value::IntegerStorage::I16(vec![1, 3, 5, 2, 4, 6]))
         );
     }
 
@@ -1196,7 +1191,7 @@ mod tests {
                 Value::String("GridVisible".into()),
                 one,
                 Value::String("FontSize".into()),
-                Value::Int(runmat_builtins::IntValue::U64(12)),
+                Value::Int(runmat_value::IntValue::U64(12)),
             ],
             2,
             2,
@@ -1207,7 +1202,7 @@ mod tests {
         let err = crate::builtins::plotting::properties::validate_heatmap_property_pairs(
             &[
                 Value::String("ColorbarVisible".into()),
-                Value::Int(runmat_builtins::IntValue::U64(2)),
+                Value::Int(runmat_value::IntValue::U64(2)),
             ],
             2,
             2,
@@ -1225,7 +1220,7 @@ mod tests {
         let handle = futures::executor::block_on(heatmap_builtin(vec![
             Value::Tensor(source.clone()),
             Value::String("FontSize".into()),
-            Value::Int(runmat_builtins::IntValue::U8(12)),
+            Value::Int(runmat_value::IntValue::U8(12)),
             Value::String("ColorLimits".into()),
             Value::Tensor(
                 Tensor::new_integer(IntegerStorage::U64(vec![15, 35]), vec![1, 2]).unwrap(),

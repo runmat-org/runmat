@@ -3,10 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
-    StringArray, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::cells::type_resolvers::cellstr_type;
 use crate::builtins::common::spec::{
@@ -241,7 +241,7 @@ fn cellstr_from_string_array(sa: StringArray) -> BuiltinResult<Value> {
         .map_err(|e| cellstr_error_with_message(format!("cellstr: {e}"), &CELLSTR_ERROR_INTERNAL))
 }
 
-fn cellstr_from_symbolic_array(array: runmat_builtins::SymbolicArray) -> BuiltinResult<Value> {
+fn cellstr_from_symbolic_array(array: runmat_value::SymbolicArray) -> BuiltinResult<Value> {
     let shape = array.shape.clone();
     let total = array.data.len();
     if total == 0 {
@@ -362,7 +362,7 @@ fn multi_to_linear_column_major(coords: &[usize], shape: &[usize]) -> usize {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{SymbolicArray, SymbolicExpr};
+    use runmat_value::{SymbolicArray, SymbolicExpr};
 
     fn cellstr_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::cellstr_builtin(value))
@@ -567,14 +567,14 @@ pub(crate) mod tests {
             BuiltinIntegerAuditKind::NotApplicable
         );
         let values = [
-            runmat_builtins::IntValue::I8(1),
-            runmat_builtins::IntValue::I16(1),
-            runmat_builtins::IntValue::I32(1),
-            runmat_builtins::IntValue::I64(1),
-            runmat_builtins::IntValue::U8(1),
-            runmat_builtins::IntValue::U16(1),
-            runmat_builtins::IntValue::U32(1),
-            runmat_builtins::IntValue::U64(1),
+            runmat_value::IntValue::I8(1),
+            runmat_value::IntValue::I16(1),
+            runmat_value::IntValue::I32(1),
+            runmat_value::IntValue::I64(1),
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U16(1),
+            runmat_value::IntValue::U32(1),
+            runmat_value::IntValue::U64(1),
         ];
         for value in values {
             let err = cellstr_builtin(Value::Int(value)).expect_err("integer must reject");

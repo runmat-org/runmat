@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use runmat_builtins::{CellArray, ObjectInstance, ResolveContext, Type, Value};
+use runmat_builtins::{ResolveContext, Type};
+use runmat_value::{CellArray, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 
@@ -88,7 +89,7 @@ fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
             object.properties.insert(
                 "Tags".into(),
                 Value::StringArray(
-                    runmat_builtins::StringArray::new(Vec::new(), vec![1, 0])
+                    runmat_value::StringArray::new(Vec::new(), vec![1, 0])
                         .expect("empty tag row is valid"),
                 ),
             );

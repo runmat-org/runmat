@@ -27,9 +27,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntValue, NumericDType, NumericScalar, Tensor, Value};
 
 const BUILTIN_NAME: &str = "eig";
 
@@ -1476,9 +1476,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()

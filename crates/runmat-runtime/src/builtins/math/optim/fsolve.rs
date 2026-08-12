@@ -8,8 +8,8 @@ use runmat_builtins::{
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{StructValue, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -556,7 +556,7 @@ impl LeastSquaresEvaluator for FsolveEvaluator<'_> {
                 Value::Num(x[0])
             } else {
                 Value::Tensor(
-                    runmat_builtins::Tensor::new(x.to_vec(), self.shape.clone())
+                    runmat_value::Tensor::new(x.to_vec(), self.shape.clone())
                         .map_err(|e| fsolve_error_with_detail(&FSOLVE_ERROR_INVALID_INPUT, e))?,
                 )
             };
@@ -615,7 +615,7 @@ fn finalize(outcome: FsolveOutcome, x_shape: &[usize], x_scalar: bool) -> Builti
         }
     }
     let jacobian = Value::Tensor(
-        runmat_builtins::Tensor::new(
+        runmat_value::Tensor::new(
             jacobian_data,
             vec![result.residual_len, result.variable_len],
         )
@@ -652,7 +652,7 @@ fn finalize(outcome: FsolveOutcome, x_shape: &[usize], x_scalar: bool) -> Builti
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
     use std::sync::{Arc, Mutex};
 
     #[test]

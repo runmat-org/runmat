@@ -1,7 +1,5 @@
 //! MATLAB-compatible `addpath` builtin for manipulating the RunMat search path.
 
-#[cfg(test)]
-use runmat_builtins::CellArray;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -9,9 +7,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::CellArray;
+use runmat_value::{CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::common::path_state::{
@@ -650,7 +650,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::path_state::set_path_string;
     use crate::builtins::common::path_state::{current_path_segments, PATH_LIST_SEPARATOR};
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
     use std::convert::TryFrom;
     use std::fs;
     use tempfile::tempdir;

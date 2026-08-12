@@ -3,15 +3,15 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike, Weekday};
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef,
-    StringArray, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ClassDef, MethodDef, PropertyDef,
 };
+use runmat_value::{Access, CharArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{
@@ -2244,11 +2244,10 @@ async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => tensor,
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map_err(|err| datetime_error(format!("datetime.subsref: {err}")))?,
-        Value::Int(value) => Tensor::new_integer(
-            runmat_builtins::IntegerStorage::from_scalar(value),
-            vec![1, 1],
-        )
-        .map_err(|err| datetime_error(format!("datetime.subsref: {err}")))?,
+        Value::Int(value) => {
+            Tensor::new_integer(runmat_value::IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(|err| datetime_error(format!("datetime.subsref: {err}")))?
+        }
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
             .map_err(|err| datetime_error(format!("datetime.subsref: {err}")))?,
         other => {
@@ -2485,7 +2484,7 @@ async fn day_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
             ));
         }
         return Ok(Value::Cell(
-            runmat_builtins::CellArray::new_with_shape(out, shape)
+            runmat_value::CellArray::new_with_shape(out, shape)
                 .map_err(|err| datetime_error(format!("day: {err}")))?,
         ));
     }
@@ -4479,7 +4478,7 @@ mod tests {
         datenum_from_naive(midnight(NaiveDate::from_ymd_opt(year, month, day).unwrap()))
     }
 
-    fn integer_tensor(storage: runmat_builtins::IntegerStorage, shape: Vec<usize>) -> Value {
+    fn integer_tensor(storage: runmat_value::IntegerStorage, shape: Vec<usize>) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
     }
@@ -4542,14 +4541,11 @@ mod tests {
     #[test]
     fn datetime_typed_integer_components_and_serials_cross_double_boundary_exactly() {
         let years = integer_tensor(
-            runmat_builtins::IntegerStorage::U16(vec![2024, 2025]),
+            runmat_value::IntegerStorage::U16(vec![2024, 2025]),
             vec![1, 2],
         );
-        let months = integer_tensor(runmat_builtins::IntegerStorage::U8(vec![1, 6]), vec![1, 2]);
-        let days = integer_tensor(
-            runmat_builtins::IntegerStorage::I16(vec![15, 20]),
-            vec![1, 2],
-        );
+        let months = integer_tensor(runmat_value::IntegerStorage::U8(vec![1, 6]), vec![1, 2]);
+        let days = integer_tensor(runmat_value::IntegerStorage::I16(vec![15, 20]), vec![1, 2]);
         let value = run_datetime(vec![years, months, days]);
         let rendered = datetime_display_text(&value)
             .expect("display")
@@ -4560,7 +4556,7 @@ mod tests {
         let serial = serial_for_date(2024, 3, 14);
         let object = run_datetime(vec![
             integer_tensor(
-                runmat_builtins::IntegerStorage::U32(vec![serial as u32]),
+                runmat_value::IntegerStorage::U32(vec![serial as u32]),
                 vec![1, 1],
             ),
             Value::from("ConvertFrom"),
@@ -4577,19 +4573,19 @@ mod tests {
     #[test]
     fn datetime_date_vectors_cover_all_integer_classes_and_preaccess_gates() {
         let storages = [
-            runmat_builtins::IntegerStorage::I8(vec![24, 1, 2]),
-            runmat_builtins::IntegerStorage::I16(vec![2024, 1, 2]),
-            runmat_builtins::IntegerStorage::I32(vec![2024, 1, 2]),
-            runmat_builtins::IntegerStorage::I64(vec![2024, 1, 2]),
-            runmat_builtins::IntegerStorage::U8(vec![24, 1, 2]),
-            runmat_builtins::IntegerStorage::U16(vec![2024, 1, 2]),
-            runmat_builtins::IntegerStorage::U32(vec![2024, 1, 2]),
-            runmat_builtins::IntegerStorage::U64(vec![2024, 1, 2]),
+            runmat_value::IntegerStorage::I8(vec![24, 1, 2]),
+            runmat_value::IntegerStorage::I16(vec![2024, 1, 2]),
+            runmat_value::IntegerStorage::I32(vec![2024, 1, 2]),
+            runmat_value::IntegerStorage::I64(vec![2024, 1, 2]),
+            runmat_value::IntegerStorage::U8(vec![24, 1, 2]),
+            runmat_value::IntegerStorage::U16(vec![2024, 1, 2]),
+            runmat_value::IntegerStorage::U32(vec![2024, 1, 2]),
+            runmat_value::IntegerStorage::U64(vec![2024, 1, 2]),
         ];
         for storage in storages {
             let small_year = matches!(
                 storage,
-                runmat_builtins::IntegerStorage::I8(_) | runmat_builtins::IntegerStorage::U8(_)
+                runmat_value::IntegerStorage::I8(_) | runmat_value::IntegerStorage::U8(_)
             );
             let value = run_datetime(vec![integer_tensor(storage, vec![1, 3])]);
             assert_eq!(
@@ -4644,8 +4640,8 @@ mod tests {
     #[test]
     fn wide_integer_serials_are_rejected_before_lossy_conversion() {
         for storage in [
-            runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
-            runmat_builtins::IntegerStorage::I64(vec![i64::MIN]),
+            runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            runmat_value::IntegerStorage::I64(vec![i64::MIN]),
         ] {
             let explicit = futures::executor::block_on(datetime_builtin(vec![
                 integer_tensor(storage.clone(), vec![1, 1]),
@@ -4801,7 +4797,7 @@ mod tests {
             input.clone(),
             Value::from("dayofweek"),
             Value::from("monday"),
-            vec![Value::Int(runmat_builtins::IntValue::I8(0))],
+            vec![Value::Int(runmat_value::IntValue::I8(0))],
         ))
         .expect("numeric zero current-week Monday");
         assert_eq!(
@@ -4822,14 +4818,14 @@ mod tests {
         );
 
         for weekday in [
-            runmat_builtins::IntValue::I8(2),
-            runmat_builtins::IntValue::I16(2),
-            runmat_builtins::IntValue::I32(2),
-            runmat_builtins::IntValue::I64(2),
-            runmat_builtins::IntValue::U8(2),
-            runmat_builtins::IntValue::U16(2),
-            runmat_builtins::IntValue::U32(2),
-            runmat_builtins::IntValue::U64(2),
+            runmat_value::IntValue::I8(2),
+            runmat_value::IntValue::I16(2),
+            runmat_value::IntValue::I32(2),
+            runmat_value::IntValue::I64(2),
+            runmat_value::IntValue::U8(2),
+            runmat_value::IntValue::U16(2),
+            runmat_value::IntValue::U32(2),
+            runmat_value::IntValue::U64(2),
         ] {
             let shifted = futures::executor::block_on(dateshift_builtin(
                 input.clone(),
@@ -4958,7 +4954,7 @@ mod tests {
     #[test]
     fn datetime_date_vectors_normalize_and_day_supports_modern_and_legacy_forms() {
         let datetime = run_datetime(vec![integer_tensor(
-            runmat_builtins::IntegerStorage::I64(vec![2024, 13, 1]),
+            runmat_value::IntegerStorage::I64(vec![2024, 13, 1]),
             vec![1, 3],
         )]);
         assert_eq!(
@@ -5016,7 +5012,7 @@ mod tests {
         let days = Value::Tensor(Tensor::new(vec![15.0, 20.0], vec![1, 2]).unwrap());
         let value = run_datetime(vec![years, months, days]);
         let payload =
-            Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap());
+            Value::Cell(runmat_value::CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap());
         let indexed =
             futures::executor::block_on(datetime_subsref(value.clone(), "()".to_string(), payload))
                 .expect("subsref");
@@ -5032,19 +5028,16 @@ mod tests {
     #[test]
     fn datetime_typed_integer_index_selectors_are_exact() {
         let years = integer_tensor(
-            runmat_builtins::IntegerStorage::U16(vec![2024, 2025]),
+            runmat_value::IntegerStorage::U16(vec![2024, 2025]),
             vec![1, 2],
         );
-        let months = integer_tensor(runmat_builtins::IntegerStorage::U8(vec![1, 6]), vec![1, 2]);
-        let days = integer_tensor(
-            runmat_builtins::IntegerStorage::U8(vec![15, 20]),
-            vec![1, 2],
-        );
+        let months = integer_tensor(runmat_value::IntegerStorage::U8(vec![1, 6]), vec![1, 2]);
+        let days = integer_tensor(runmat_value::IntegerStorage::U8(vec![15, 20]), vec![1, 2]);
         let value = run_datetime(vec![years, months, days]);
         let payload = Value::Cell(
-            runmat_builtins::CellArray::new(
+            runmat_value::CellArray::new(
                 vec![integer_tensor(
-                    runmat_builtins::IntegerStorage::U64(vec![2]),
+                    runmat_value::IntegerStorage::U64(vec![2]),
                     vec![1, 1],
                 )],
                 1,
@@ -5167,7 +5160,7 @@ mod tests {
     fn datenum_typed_integer_date_vector_reads_exact_storage() {
         let serial = serial_for_date(2024, 3, 14);
         let typed_date_vector = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![2024, 3, 14]),
+            runmat_value::IntegerStorage::U16(vec![2024, 3, 14]),
             vec![1, 3],
         )
         .expect("typed date vector");
@@ -5180,17 +5173,15 @@ mod tests {
     #[test]
     fn datenum_typed_integer_serials_read_exact_storage() {
         let serial = serial_for_date(2024, 3, 14).floor() as u32;
-        let scalar = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U32(vec![serial]),
-            vec![1, 1],
-        )
-        .expect("typed serial");
+        let scalar =
+            Tensor::new_integer(runmat_value::IntegerStorage::U32(vec![serial]), vec![1, 1])
+                .expect("typed serial");
         let scalar_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(scalar)]))
             .expect("datenum typed scalar serial");
         assert_eq!(scalar_out, Value::Num(f64::from(serial)));
 
         let vector = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U32(vec![serial, serial + 1]),
+            runmat_value::IntegerStorage::U32(vec![serial, serial + 1]),
             vec![1, 2],
         )
         .expect("typed serial vector");
@@ -5304,7 +5295,7 @@ mod tests {
             Value::Num(3.0)
         );
         let typed_basis =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1]), vec![1, 1])
+            Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1]), vec![1, 1])
                 .expect("basis");
         assert_eq!(
             futures::executor::block_on(daysdif_builtin(
@@ -5342,8 +5333,7 @@ mod tests {
             .contains(&serial_for_date(2024, 1, 1)));
 
         let typed_year =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2024]), vec![1, 1])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2024]), vec![1, 1]).unwrap();
         let holidays =
             futures::executor::block_on(holidays_builtin(vec![Value::Tensor(typed_year)]))
                 .expect("holidays from typed year");

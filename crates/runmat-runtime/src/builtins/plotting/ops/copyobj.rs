@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, Tensor, Value};
 
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
@@ -420,7 +420,7 @@ mod tests {
     use crate::builtins::plotting::state::{clone_figure, current_figure_handle, reset_plot_state};
     use crate::builtins::plotting::subplot::subplot_builtin;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn tensor(data: &[f64]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![1, data.len()]).unwrap())
@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn copyobj_handle_scalar_reads_typed_integer_storage_exactly() {
         let tensor =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![7]), vec![1, 1]).unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U32(vec![7]), vec![1, 1]).unwrap();
 
         assert_eq!(
             handle_scalar(&Value::Tensor(tensor), "source").unwrap(),
@@ -467,8 +467,7 @@ mod tests {
     #[test]
     fn copyobj_handle_list_reads_typed_integer_storage_exactly() {
         let tensor =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U32(vec![3, 5]), vec![1, 2])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U32(vec![3, 5]), vec![1, 2]).unwrap();
 
         let list = handle_list(&Value::Tensor(tensor), "source").expect("handle list");
 

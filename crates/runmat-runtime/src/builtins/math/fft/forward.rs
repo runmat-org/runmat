@@ -13,9 +13,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -466,10 +466,8 @@ pub(crate) mod tests {
     use num_complex::Complex;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{
-        builtin_function_by_name, ComplexTensor as HostComplexTensor, IntValue, ResolveContext,
-        Tensor, Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{ComplexTensor as HostComplexTensor, IntValue, Tensor};
     use rustfft::FftPlanner;
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
@@ -839,15 +837,15 @@ pub(crate) mod tests {
         assert_eq!(builtin.extensions.len(), 2);
 
         let logical_length = fft_builtin_sync(
-            Value::Int(runmat_builtins::IntValue::I8(7)),
+            Value::Int(runmat_value::IntValue::I8(7)),
             vec![Value::Bool(true)],
         )
         .expect("logical N is documented");
         assert!(matches!(logical_length, Value::Complex(_, _)));
 
         let wide = Value::Tensor(
-            runmat_builtins::Tensor::new_integer(
-                runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
                 vec![1, 1],
             )
             .expect("wide integer tensor"),
@@ -861,8 +859,8 @@ pub(crate) mod tests {
         drop(_compat);
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let lossy = Value::Tensor(
-            runmat_builtins::Tensor::new_integer(
-                runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
                 vec![1, 1],
             )
             .expect("wide integer tensor"),
@@ -872,8 +870,8 @@ pub(crate) mod tests {
         assert!(error.message().contains("exactly representable as double"));
 
         let exact_above_contiguous_range = Value::Tensor(
-            runmat_builtins::Tensor::new_integer(
-                runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_994]),
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_994]),
                 vec![1, 1],
             )
             .expect("exact wide integer tensor"),

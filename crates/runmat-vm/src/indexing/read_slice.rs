@@ -1,10 +1,10 @@
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
-use runmat_builtins::{
+use runmat_runtime::RuntimeError;
+use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
     SparseTensor, StringArray, Tensor, Value,
 };
-use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
 
 fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
@@ -1001,7 +1001,7 @@ mod tests {
     use crate::indexing::plan::IndexPlan;
     use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericScalar,
         SparseTensor, StringArray, Tensor, Value,
     };
@@ -1066,7 +1066,7 @@ mod tests {
         };
         assert_eq!(
             output.numeric_dtype(),
-            Some(runmat_builtins::NumericDType::F32)
+            Some(runmat_value::NumericDType::F32)
         );
         assert_eq!(output.col_ptrs, vec![0, 2, 2]);
         assert_eq!(output.row_indices, vec![0, 1]);
@@ -1077,10 +1077,7 @@ mod tests {
         let Value::SparseTensor(empty) = empty else {
             panic!("expected sparse output");
         };
-        assert_eq!(
-            empty.numeric_dtype(),
-            Some(runmat_builtins::NumericDType::F32)
-        );
+        assert_eq!(empty.numeric_dtype(), Some(runmat_value::NumericDType::F32));
         assert_eq!(empty.shape(), vec![0, 1]);
         assert_eq!(empty.as_f32_slice(), Some(&[][..]));
     }
@@ -1233,7 +1230,7 @@ mod tests {
         else {
             panic!("expected native-single tensor result");
         };
-        assert_eq!(out.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(out.shape, vec![1, 2]);
         assert_eq!(out.numeric_value_at(0), Some(NumericScalar::F32(3.75)));
         assert_eq!(out.numeric_value_at(1), Some(NumericScalar::F32(1.25)));
@@ -1248,7 +1245,7 @@ mod tests {
         else {
             panic!("expected native-single scalar tensor");
         };
-        assert_eq!(out.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(out.numeric_value_at(0), Some(NumericScalar::F32(2.5)));
     }
 

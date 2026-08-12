@@ -3,10 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray,
-    ObjectInstance, ResolveContext, StringArray, Type, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, ObjectInstance, StringArray, Value};
 
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
@@ -651,7 +651,7 @@ mod tests {
     use crate::builtins::strings::text_analytics::details::token_details_builtin;
     use crate::builtins::strings::text_analytics::documents::tokenized_document_builtin;
     use crate::builtins::table::{table_variable_names_from_object, table_variables};
-    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor};
+    use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tokenized_document_builtin(args))

@@ -1,4 +1,4 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::dispatcher::gather_if_needed_async;
@@ -112,7 +112,7 @@ pub fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -158,12 +158,12 @@ pub(crate) mod tests {
 
     #[test]
     fn numel_reads_typed_complex_integer_storage_length_exactly() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::U64(vec![u64::MAX, 7]),
             IntegerStorage::U64(vec![0, 0]),
         )
         .unwrap();
-        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+        let tensor = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
 
         assert_eq!(
             block_on(value_numel(&Value::ComplexTensor(tensor))).unwrap(),

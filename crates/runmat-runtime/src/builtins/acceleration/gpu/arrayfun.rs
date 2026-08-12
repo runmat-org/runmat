@@ -23,10 +23,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, Closure, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
     LogicalArray, NumericScalar, StringArray, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::arrayfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -739,8 +741,7 @@ fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
         Value::Num(0.0) => Ok(false),
         Value::Num(1.0) => Ok(true),
         Value::Tensor(tensor)
-            if tensor.len() == 1
-                && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 =>
+            if tensor.len() == 1 && tensor.numeric_dtype() == runmat_value::NumericDType::F64 =>
         {
             match tensor.numeric_value_at(0) {
                 Some(NumericScalar::F64(0.0)) => Ok(false),
@@ -1532,7 +1533,7 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
 
 fn make_error_struct(raw_error: &str, linear_index: usize) -> Value {
     let (identifier, message) = split_error_message(raw_error);
-    let mut st = runmat_builtins::StructValue::new();
+    let mut st = runmat_value::StructValue::new();
     st.fields
         .insert("identifier".to_string(), Value::String(identifier));
     st.fields
@@ -1577,9 +1578,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        ComplexTensor, IntegerComplexStorage, IntegerStorage, ResolveContext, Tensor, Type, Value,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor, Value};
     use std::sync::Arc;
 
     fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1603,7 +1603,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             input.value_at(0, &[1, 1]).expect("value"),
-            Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993))
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993))
         );
     }
 

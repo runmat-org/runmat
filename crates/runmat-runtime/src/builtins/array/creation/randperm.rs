@@ -4,9 +4,10 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
@@ -577,7 +578,7 @@ pub(crate) mod tests {
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::randperm_builtin(args))
@@ -772,7 +773,7 @@ pub(crate) mod tests {
             let Value::Tensor(output) = output else {
                 panic!("zero-count randperm must return a tensor");
             };
-            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
             assert_eq!(output.shape, vec![1, 0]);
         }
     }

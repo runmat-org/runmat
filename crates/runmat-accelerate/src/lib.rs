@@ -8,7 +8,7 @@
 
 use once_cell::sync::Lazy;
 use runmat_accelerate_api::HostIntegerDataOwned;
-use runmat_builtins::{IntegerStorage, Tensor, Value};
+use runmat_value::{IntegerStorage, Tensor, Value};
 use std::path::PathBuf;
 use std::sync::RwLock;
 

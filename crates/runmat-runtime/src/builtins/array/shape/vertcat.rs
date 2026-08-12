@@ -8,9 +8,10 @@ use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -316,7 +317,7 @@ pub(crate) mod tests {
         block_on(super::vertcat_builtin(args))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor,
     };
 

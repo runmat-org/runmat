@@ -4,7 +4,7 @@ use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, Rend
 use crate::geometry::stroke3d::{tessellate_polyline, StrokeCap3D, StrokeStyle3D};
 use crate::plots::line::LineStyle;
 use glam::{Vec2, Vec3, Vec4};
-use runmat_builtins::NumericStorage;
+use runmat_value::NumericStorage;
 
 const TRIANGULATION_EPSILON: f32 = 1.0e-6;
 

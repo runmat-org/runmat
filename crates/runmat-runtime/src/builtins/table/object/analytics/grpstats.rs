@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::stats::summary::distribution_math::student_t_inv;
-use runmat_builtins::NumericScalar;
+use runmat_value::NumericScalar;
 
 pub(in crate::builtins::table) fn grpstats_impl(
     value: Value,
@@ -861,7 +861,7 @@ fn group_names_value<'a>(keys: impl Iterator<Item = &'a Vec<GroupAtom>>) -> Valu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn scalar_number_reads_typed_integer_storage_exactly() {

@@ -10,9 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, IntValue, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, IntValue, StringArray, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::keyword_of;
@@ -1827,23 +1828,23 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     #[test]
     fn tabulate_labels_preserve_exact_uint64_text() {
         assert_eq!(
-            label_for_value(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))),
+            label_for_value(&Value::Int(runmat_value::IntValue::U64(u64::MAX))),
             Some("18446744073709551615".to_string())
         );
     }
 
     #[test]
     fn scalar_flag_accepts_typed_integer_tensor_scalars() {
-        let one = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1]), vec![1, 1])
+        let one = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1]), vec![1, 1])
             .expect("flag");
         assert_eq!(scalar_flag("mad", &Value::Tensor(one)).unwrap(), Some(1));
 
-        let two = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2]), vec![1, 1])
+        let two = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![2]), vec![1, 1])
             .expect("flag");
         assert!(scalar_flag("mad", &Value::Tensor(two)).is_err());
     }
@@ -1879,7 +1880,7 @@ mod tests {
     }
 
     fn complex_int_tensor(real: IntegerStorage, imag: IntegerStorage, shape: Vec<usize>) -> Value {
-        let tensor = runmat_builtins::ComplexTensor::new_integer(
+        let tensor = runmat_value::ComplexTensor::new_integer(
             IntegerComplexStorage::new(real, imag).unwrap(),
             shape,
         )
@@ -1892,7 +1893,7 @@ mod tests {
         let x = Value::Tensor(Tensor::new(vec![1.0, 4.0, f64::NAN, 9.0], vec![2, 2]).unwrap());
         let out = block_on(geomean::geomean_builtin(
             x,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row(
+            vec![Value::CharArray(runmat_value::CharArray::new_row(
                 "omitnan",
             ))],
         ))
@@ -1908,14 +1909,14 @@ mod tests {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0], vec![1, 3]).unwrap());
         let harmonic = block_on(harmmean::harmmean_builtin(
             x.clone(),
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(harmonic).0[0], 12.0 / 7.0);
 
         let rms = block_on(rms::rms_builtin(
             x,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(rms).0[0], (21.0_f64 / 3.0).sqrt());
@@ -1925,7 +1926,7 @@ mod tests {
     fn descriptive_reductions_read_typed_integer_storage_exactly() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let x = int_tensor(IntegerStorage::U16(vec![1, 4, 9]), vec![1, 3]);
-        let all = vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))];
+        let all = vec![Value::CharArray(runmat_value::CharArray::new_row("all"))];
 
         let geometric = block_on(geomean::geomean_builtin(x.clone(), all.clone())).unwrap();
         assert_close(tensor_values(geometric).0[0], (36.0_f64).powf(1.0 / 3.0));
@@ -1995,7 +1996,7 @@ mod tests {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 10.0], vec![1, 3]).unwrap());
         let default_mad = block_on(mad::mad_builtin(
             x.clone(),
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(default_mad).0[0], 34.0 / 9.0);
@@ -2004,7 +2005,7 @@ mod tests {
             x.clone(),
             vec![
                 Value::Num(0.0),
-                Value::CharArray(runmat_builtins::CharArray::new_row("all")),
+                Value::CharArray(runmat_value::CharArray::new_row("all")),
             ],
         ))
         .unwrap();
@@ -2014,7 +2015,7 @@ mod tests {
             x,
             vec![
                 Value::Num(1.0),
-                Value::CharArray(runmat_builtins::CharArray::new_row("all")),
+                Value::CharArray(runmat_value::CharArray::new_row("all")),
             ],
         ))
         .unwrap();
@@ -2170,14 +2171,14 @@ mod tests {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
         let skew = block_on(skewness::skewness_builtin(
             x.clone(),
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(skew).0[0], 0.0);
 
         let kurt = block_on(kurtosis::kurtosis_builtin(
             x,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(kurt).0[0], 1.5);
@@ -2190,7 +2191,7 @@ mod tests {
         let out = block_on(rmse::rmse_builtin(
             x,
             y,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(
@@ -2207,7 +2208,7 @@ mod tests {
         let out = block_on(rmse::rmse_builtin(
             x,
             y,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(
@@ -2226,8 +2227,8 @@ mod tests {
             y,
             vec![
                 Value::Num(1.0),
-                Value::CharArray(runmat_builtins::CharArray::new_row("omitnan")),
-                Value::CharArray(runmat_builtins::CharArray::new_row("Weights")),
+                Value::CharArray(runmat_value::CharArray::new_row("omitnan")),
+                Value::CharArray(runmat_value::CharArray::new_row("Weights")),
                 weights,
             ],
         ))
@@ -2248,7 +2249,7 @@ mod tests {
             y,
             vec![
                 Value::Num(1.0),
-                Value::CharArray(runmat_builtins::CharArray::new_row("Weights")),
+                Value::CharArray(runmat_value::CharArray::new_row("Weights")),
                 weights,
             ],
         ))
@@ -2271,7 +2272,7 @@ mod tests {
             y,
             vec![
                 Value::Num(1.0),
-                Value::CharArray(runmat_builtins::CharArray::new_row("Weights")),
+                Value::CharArray(runmat_value::CharArray::new_row("Weights")),
                 weights,
             ],
         ))
@@ -2288,21 +2289,21 @@ mod tests {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, f64::NAN], vec![1, 3]).unwrap());
         let mad_out = block_on(mad::mad_builtin(
             x.clone(),
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(mad_out).0[0], 0.5);
 
         let skew_out = block_on(skewness::skewness_builtin(
             x.clone(),
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(skew_out).0[0], 0.0);
 
         let kurt_out = block_on(kurtosis::kurtosis_builtin(
             x,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(kurt_out).0[0], 1.0);
@@ -2311,11 +2312,11 @@ mod tests {
     #[test]
     fn rms_and_rmse_support_complex_magnitudes() {
         let x = Value::ComplexTensor(
-            runmat_builtins::ComplexTensor::new(vec![(3.0, 4.0), (0.0, 12.0)], vec![2, 1]).unwrap(),
+            runmat_value::ComplexTensor::new(vec![(3.0, 4.0), (0.0, 12.0)], vec![2, 1]).unwrap(),
         );
         let out = block_on(rms::rms_builtin(
             x,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(out).0[0], ((25.0 + 144.0) / 2.0_f64).sqrt());
@@ -2323,7 +2324,7 @@ mod tests {
         let out = block_on(rmse::rmse_builtin(
             Value::Complex(3.0, 4.0),
             Value::Num(0.0),
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(out).0[0], 5.0);
@@ -2339,7 +2340,7 @@ mod tests {
         );
         let out = block_on(rms::rms_builtin(
             x,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(out).0[0], ((25.0 + 144.0) / 2.0_f64).sqrt());
@@ -2361,7 +2362,7 @@ mod tests {
         let out = block_on(rmse::rmse_builtin(
             x,
             y,
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row("all"))],
+            vec![Value::CharArray(runmat_value::CharArray::new_row("all"))],
         ))
         .unwrap();
         assert_close(tensor_values(out).0[0], ((8.0 + 101.0) / 2.0_f64).sqrt());
@@ -2381,8 +2382,8 @@ mod tests {
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             Value::Num(0.0),
             vec![
-                Value::CharArray(runmat_builtins::CharArray::new_row("all")),
-                Value::CharArray(runmat_builtins::CharArray::new_row("Weights")),
+                Value::CharArray(runmat_value::CharArray::new_row("all")),
+                Value::CharArray(runmat_value::CharArray::new_row("Weights")),
                 Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap()),
             ],
         ))
@@ -2452,7 +2453,7 @@ mod tests {
     #[test]
     fn tabulate_logical_returns_cell_table() {
         let x = Value::LogicalArray(
-            runmat_builtins::LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap(),
+            runmat_value::LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap(),
         );
         let out = block_on(tabulate::tabulate_builtin(x)).unwrap();
         match out {

@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Tensor, Value};
 use std::io::{self, Read};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
@@ -359,7 +359,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{
         client_handle, configure_stream, insert_client, remove_client_for_test,
     };
-    use runmat_builtins::{IntValue, StructValue, Value};
+    use runmat_value::{IntValue, StructValue, Value};
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
     use std::thread;

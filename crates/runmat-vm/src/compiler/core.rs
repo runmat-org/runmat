@@ -3902,11 +3902,9 @@ impl Compiler {
                             .with_identifier(IDENT_MIR_CONSTANT_UNKNOWN)
                     })?;
                 match &constant.value {
-                    runmat_builtins::Value::Num(value) => self.emit(Instr::LoadConst(*value)),
-                    runmat_builtins::Value::Complex(re, im) => {
-                        self.emit(Instr::LoadComplex(*re, *im))
-                    }
-                    runmat_builtins::Value::Bool(value) => self.emit(Instr::LoadBool(*value)),
+                    runmat_value::Value::Num(value) => self.emit(Instr::LoadConst(*value)),
+                    runmat_value::Value::Complex(re, im) => self.emit(Instr::LoadComplex(*re, *im)),
+                    runmat_value::Value::Bool(value) => self.emit(Instr::LoadBool(*value)),
                     _ => {
                         return Err(self.compile_error(format!(
                             "constant {name} is not supported in primary MIR lowering yet"

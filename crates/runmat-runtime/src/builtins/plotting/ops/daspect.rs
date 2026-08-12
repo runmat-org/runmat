@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use super::op_common::axes_target::AxesTarget;
 use super::properties::{data_aspect_ratio_mode_from_value, resolve_plot_handle, PlotHandle};
@@ -384,7 +384,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, LogicalArray};
+    use runmat_value::{IntegerStorage, LogicalArray};
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -541,11 +541,8 @@ mod tests {
         let logical = Value::LogicalArray(LogicalArray::new(vec![1, 1, 1], vec![1, 3]).unwrap());
         assert!(set_daspect(vec![logical]).is_err());
         let complex = Value::ComplexTensor(
-            runmat_builtins::ComplexTensor::new(
-                vec![(1.0, 0.0), (2.0, 0.0), (3.0, 0.0)],
-                vec![1, 3],
-            )
-            .unwrap(),
+            runmat_value::ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0), (3.0, 0.0)], vec![1, 3])
+                .unwrap(),
         );
         assert!(set_daspect(vec![complex]).is_err());
         let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
@@ -577,14 +574,14 @@ mod tests {
     #[test]
     fn daspect_parses_all_eight_integer_handle_classes_exactly() {
         for value in [
-            runmat_builtins::IntValue::I8(1),
-            runmat_builtins::IntValue::I16(1),
-            runmat_builtins::IntValue::I32(1),
-            runmat_builtins::IntValue::I64(1),
-            runmat_builtins::IntValue::U8(1),
-            runmat_builtins::IntValue::U16(1),
-            runmat_builtins::IntValue::U32(1),
-            runmat_builtins::IntValue::U64(1),
+            runmat_value::IntValue::I8(1),
+            runmat_value::IntValue::I16(1),
+            runmat_value::IntValue::I32(1),
+            runmat_value::IntValue::I64(1),
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U16(1),
+            runmat_value::IntValue::U32(1),
+            runmat_value::IntValue::U64(1),
         ] {
             assert_eq!(
                 exact_numeric_axes_alias(&Value::Int(value)).unwrap(),
@@ -592,7 +589,7 @@ mod tests {
             );
         }
         assert!(
-            exact_numeric_axes_alias(&Value::Int(runmat_builtins::IntValue::U64(
+            exact_numeric_axes_alias(&Value::Int(runmat_value::IntValue::U64(
                 9_007_199_254_740_993,
             )))
             .is_err()
@@ -606,7 +603,7 @@ mod tests {
         let Value::Num(ax) = ax_value else {
             panic!("expected numeric axes handle");
         };
-        let alias = Value::Int(runmat_builtins::IntValue::U64(ax as u64));
+        let alias = Value::Int(runmat_value::IntValue::U64(ax as u64));
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = daspect_builtin(vec![alias.clone()]).expect_err("numeric axes alias gate");
         assert_eq!(

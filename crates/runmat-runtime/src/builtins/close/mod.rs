@@ -9,9 +9,10 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 const CLOSE_OUTPUT_RESULT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",
@@ -184,7 +185,7 @@ fn close_plotting_targets(_args: &[Value]) -> crate::BuiltinResult<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn compatibility_mode_rejects_all_integer_figure_number_classes() {
@@ -250,7 +251,7 @@ mod tests {
 
     #[test]
     fn invalid_network_structure_uses_canonical_invalid_handle_error() {
-        let invalid = Value::Struct(runmat_builtins::StructValue::new());
+        let invalid = Value::Struct(runmat_value::StructValue::new());
         let err = futures::executor::block_on(close_builtin(vec![invalid]))
             .expect_err("invalid networking handle");
         assert_eq!(err.identifier(), Some("RunMat:close:InvalidHandle"));

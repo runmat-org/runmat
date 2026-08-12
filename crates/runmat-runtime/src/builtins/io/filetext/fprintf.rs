@@ -9,9 +9,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, Value};
 
 use crate::builtins::common::format::{
     decode_escape_sequences, flatten_arguments, format_variadic_with_cursor, ArgCursor,
@@ -1022,9 +1022,9 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fclose, fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
@@ -1108,7 +1108,7 @@ pub(crate) mod tests {
     fn fprintf_all_host_numeric_format_tensors_are_gated_before_gathering() {
         let double = Tensor::new(vec![b'%' as f64, b'd' as f64], vec![1, 2]).expect("double");
         let single = Tensor::from_numeric_storage(
-            runmat_builtins::NumericStorage::F32(vec![b'%' as f32, b'd' as f32]),
+            runmat_value::NumericStorage::F32(vec![b'%' as f32, b'd' as f32]),
             vec![1, 2],
         )
         .expect("single");

@@ -12,9 +12,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1355,7 +1355,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
     use std::ffi::OsString;
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -1457,9 +1457,8 @@ pub(crate) mod tests {
 
     #[test]
     fn fspecial_lengths_preserve_typed_integer_tensor_bounds() {
-        let dims =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2, 4]), vec![1, 2])
-                .expect("dims");
+        let dims = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![2, 4]), vec![1, 2])
+            .expect("dims");
         assert_eq!(
             parse_lengths_strict(
                 &Value::Tensor(dims),
@@ -1469,9 +1468,8 @@ pub(crate) mod tests {
             vec![2, 4]
         );
 
-        let negative =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
-                .expect("negative");
+        let negative = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative");
         assert!(parse_lengths_strict(
             &Value::Tensor(negative),
             "fspecial: LENGTHS must be positive integers",
@@ -1541,11 +1539,9 @@ pub(crate) mod tests {
             FSPECIAL_NONDOUBLE_SIZE_EXTENSION.error_identifier
         );
 
-        let single_parameter = Tensor::from_numeric_storage(
-            runmat_builtins::NumericStorage::F32(vec![1.0]),
-            vec![1, 1],
-        )
-        .unwrap();
+        let single_parameter =
+            Tensor::from_numeric_storage(runmat_value::NumericStorage::F32(vec![1.0]), vec![1, 1])
+                .unwrap();
         let single_parameter = block_on(fspecial_builtin(
             Value::from("laplacian"),
             vec![Value::Tensor(single_parameter)],
@@ -1617,17 +1613,15 @@ pub(crate) mod tests {
             17
         );
 
-        let tensor =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![21]), vec![1, 1])
-                .expect("typed scalar length");
+        let tensor = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![21]), vec![1, 1])
+            .expect("typed scalar length");
         assert_eq!(
             parse_motion_length(Some(&Value::Tensor(tensor))).unwrap(),
             21
         );
 
-        let negative =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
-                .expect("negative");
+        let negative = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative");
         assert!(parse_motion_length(Some(&Value::Tensor(negative))).is_err());
 
         let boundary = if usize::BITS == 64 {

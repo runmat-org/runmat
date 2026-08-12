@@ -11,9 +11,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericScalar, ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericScalar, Value};
 
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::html::{extract_html_text_value, ExtractionMethod};
@@ -682,8 +683,8 @@ fn xml_unescape(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
     use runmat_time::unix_timestamp_ms;
+    use runmat_value::{CellArray, IntegerStorage, Tensor};
     use std::io::Write;
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -872,7 +873,7 @@ mod tests {
         let path = unique_path("cell", "txt");
         test_support::fs::write(&path, "cell path").expect("write sample");
         let cell = CellArray::new(
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row(
+            vec![Value::CharArray(runmat_value::CharArray::new_row(
                 &path.to_string_lossy(),
             ))],
             1,

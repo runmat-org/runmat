@@ -8,7 +8,7 @@ use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
 use runmat_accelerate::graph::{InstrSpan, ShapeInfo, ValueId};
 use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
-use runmat_builtins::Value;
+use runmat_value::Value;
 use std::collections::HashMap;
 
 static TEST_MUTEX: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =

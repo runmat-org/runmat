@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use runmat_builtins::Value;
 use runmat_execution::{ExecutionScopeId, FutureId, TaskId};
 use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_execution_runner::Driver;
 use runmat_runtime::execution::{DeferredCall, ExecutionServiceError};
+use runmat_value::Value;
 
 pub(super) enum FutureState {
     Deferred(DeferredCall),

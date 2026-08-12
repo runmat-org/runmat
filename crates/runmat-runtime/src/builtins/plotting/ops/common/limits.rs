@@ -1,4 +1,4 @@
-use runmat_builtins::{NumericScalar, Tensor, Value};
+use runmat_value::{NumericScalar, Tensor, Value};
 
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
@@ -90,7 +90,7 @@ pub fn limit_value(limits: Option<(f64, f64)>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn limits_read_typed_integer_storage() {

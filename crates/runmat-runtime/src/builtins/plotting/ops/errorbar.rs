@@ -4,7 +4,7 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::errorbar::ErrorBarGpuInputs;
@@ -13,6 +13,7 @@ use runmat_plot::gpu::line::{
 };
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{ErrorBar, LineMarkerAppearance};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1141,8 +1142,8 @@ mod tests {
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
         subplot::subplot_builtin,
     };
-    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
+    use runmat_value::IntegerStorage;
 
     fn vec_tensor(data: &[f64]) -> Tensor {
         Tensor::new(data.to_vec(), vec![data.len()]).expect("errorbar test vector")
@@ -1510,8 +1511,8 @@ mod tests {
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
-        let y = runmat_builtins::LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
-        let err = runmat_builtins::LogicalArray::new(vec![1, 1], vec![1, 2]).unwrap();
+        let y = runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
+        let err = runmat_value::LogicalArray::new(vec![1, 1], vec![1, 2]).unwrap();
         errorbar_builtin(vec![Value::LogicalArray(y), Value::LogicalArray(err)]).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::ErrorBar(error) = fig.plots().next().unwrap() else {

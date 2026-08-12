@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use runmat_builtins::{ComplexStorage, NumericStorage};
+use runmat_value::{ComplexStorage, NumericStorage};
 
 pub(super) trait SetFloat: Copy + Default + PartialOrd + std::fmt::Debug {
     fn canonical_key(self) -> u64;

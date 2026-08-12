@@ -124,9 +124,30 @@ if (manifest.stage === "structural-baseline" && fs.existsSync(path.join(repo, "c
 
 if (["extracted", "catalog-separated"].includes(manifest.stage)) {
   const builtins = rustSources.filter(({ file }) => file.startsWith("crates/runmat-builtins/")).map(({ text }) => text).join("\n");
+  const legacyQualifiedNames = [...declaredSymbols]
+    .map(escapeRegex)
+    .sort((lhs, rhs) => rhs.length - lhs.length)
+    .join("|");
   for (const symbol of declaredSymbols) {
     const reexport = new RegExp(`\\bpub\\s+use\\b[^;]*\\b${escapeRegex(symbol)}\\b`);
     if (reexport.test(builtins)) fail(`runmat-builtins re-exports extracted live-value symbol ${symbol}`);
+  }
+  const legacyQualified = new RegExp(`\\brunmat_builtins::(?:${legacyQualifiedNames})\\b`);
+  for (const { file, text } of rustSources) {
+    if (legacyQualified.test(text)) {
+      fail(`${file} still addresses an extracted live-value symbol through runmat_builtins`);
+    }
+  }
+
+  const valueManifest = fs.readFileSync(path.join(repo, "crates/runmat-value/Cargo.toml"), "utf8");
+  const forbiddenDependencies = [
+    "runmat-builtins", "runmat-runtime", "runmat-hir", "runmat-mir", "runmat-vm",
+    "runmat-core", "runmat-accelerate", "runmat-filesystem", "runmat-process-host",
+  ];
+  for (const dependency of forbiddenDependencies) {
+    if (new RegExp(`^${escapeRegex(dependency)}\\s*=`, "m").test(valueManifest)) {
+      fail(`runmat-value has forbidden upward dependency ${dependency}`);
+    }
   }
 }
 

@@ -4,9 +4,9 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -18,7 +18,7 @@ use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor
 use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::SymbolicFunction;
+use runmat_value::SymbolicFunction;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -510,7 +510,8 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, Tensor};
 
     use crate::builtins::common::{gpu_helpers, test_support};
 
@@ -585,11 +586,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_reads_typed_integer_tensor_storage_exactly() {
-        let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![0, 1, 2]),
-            vec![3, 1],
-        )
-        .expect("integer tensor");
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1])
+                .expect("integer tensor");
 
         let result = block_on(sin_builtin(Value::Tensor(tensor), Vec::new())).expect("sin");
         match result {
@@ -608,7 +607,7 @@ pub(crate) mod tests {
     #[test]
     fn sin_host_complex_conversion_reads_typed_integer_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-3, 0, 5]),
+            runmat_value::IntegerStorage::I64(vec![-3, 0, 5]),
             vec![3, 1],
         )
         .expect("integer tensor");

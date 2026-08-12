@@ -20,10 +20,13 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, NumericScalar, NumericStorage, ResolveContext,
-    StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor,
+    Value,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::flip")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -898,7 +901,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::{
+    use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
         StringArray, Tensor,
     };
@@ -1265,7 +1268,7 @@ pub(crate) mod tests {
     fn flip_dimension_vector_reads_integer_tensor_exactly() {
         let large = 9_007_199_254_740_993_u64;
         let dims = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![1, large]),
+            runmat_value::IntegerStorage::U64(vec![1, large]),
             vec![1, 2],
         )
         .expect("dims");
@@ -1280,11 +1283,8 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let original = tensor.clone();
         let large = 9_007_199_254_740_993_u64;
-        let dims = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![large]),
-            vec![1, 1],
-        )
-        .expect("dims");
+        let dims = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![large]), vec![1, 1])
+            .expect("dims");
         let value = flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("flip");
         match value {
             Value::Tensor(t) => assert_eq!(t.materialize_f64(), original.materialize_f64()),

@@ -23,9 +23,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::ifftshift")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -530,7 +530,7 @@ fn restore_ifftshift_gpu_value(
         Value::Tensor(tensor) => {
             if tensor.integer_storage().is_none() {
                 let required = match tensor.numeric_dtype() {
-                    runmat_builtins::NumericDType::F32 => {
+                    runmat_value::NumericDType::F32 => {
                         runmat_accelerate_api::ProviderPrecision::F32
                     }
                     _ => runmat_accelerate_api::ProviderPrecision::F64,
@@ -545,7 +545,7 @@ fn restore_ifftshift_gpu_value(
         }
         Value::ComplexTensor(tensor) => {
             let required = match tensor.numeric_dtype() {
-                runmat_builtins::NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+                runmat_value::NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
                 _ => runmat_accelerate_api::ProviderPrecision::F64,
             };
             if provider.precision() != required {
@@ -592,9 +592,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        builtin_function_by_name, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-        LogicalArray, ResolveContext, Tensor, Type,
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
 
     fn error_message(error: crate::RuntimeError) -> String {

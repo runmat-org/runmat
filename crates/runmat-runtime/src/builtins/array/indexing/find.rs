@@ -8,10 +8,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext,
-    Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Value,
+};
 
 use super::common::fits_positive_platform_index;
 use crate::builtins::array::type_resolvers::column_vector_type;
@@ -950,7 +952,7 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
 }
 
 fn sparse_find_values(
-    sparse: &runmat_builtins::SparseTensor,
+    sparse: &runmat_value::SparseTensor,
     real_values: Vec<f64>,
     single_values: Vec<f32>,
     logical_values: Vec<u8>,
@@ -967,17 +969,14 @@ fn sparse_find_values(
     }
 }
 
-fn sparse_stored_value_is_nonzero(sparse: &runmat_builtins::SparseTensor, index: usize) -> bool {
+fn sparse_stored_value_is_nonzero(sparse: &runmat_value::SparseTensor, index: usize) -> bool {
     !sparse
         .numeric_value_at(index)
         .expect("SparseTensor value storage is consistent")
         .is_zero()
 }
 
-fn compute_find_sparse(
-    sparse: &runmat_builtins::SparseTensor,
-    options: &FindOptions,
-) -> FindResult {
+fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOptions) -> FindResult {
     let shape = vec![sparse.rows, sparse.cols];
     let limit = options.effective_limit();
 
@@ -1330,7 +1329,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, IntValue, Type};
+    use runmat_builtins::Type;
+    use runmat_value::{CharArray, IntValue};
 
     fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::find_builtin(value, rest))
@@ -1748,7 +1748,7 @@ pub(crate) mod tests {
     #[test]
     fn find_sparse_values_preserve_exact_storage_and_traversal_order() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             3,
             2,
             vec![0, 2, 3],
@@ -1795,7 +1795,7 @@ pub(crate) mod tests {
 
     #[test]
     fn find_sparse_values_preserve_native_single_class_and_order() {
-        let sparse = runmat_builtins::SparseTensor::new_f32(
+        let sparse = runmat_value::SparseTensor::new_f32(
             3,
             2,
             vec![0, 2, 3],
@@ -1807,13 +1807,13 @@ pub(crate) mod tests {
         let Value::Tensor(values) = eval.values_value().expect("values") else {
             panic!("expected native-single find values");
         };
-        assert_eq!(values.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(values.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(values.as_f32_slice(), Some(&[1.25, 3.5, 7.75][..]));
     }
 
     #[test]
     fn find_sparse_values_preserve_logical_class_and_order() {
-        let sparse = runmat_builtins::SparseTensor::new_logical(3, 2, vec![0, 2, 3], vec![0, 2, 1])
+        let sparse = runmat_value::SparseTensor::new_logical(3, 2, vec![0, 2, 3], vec![0, 2, 1])
             .expect("logical sparse");
         let eval = evaluate(Value::SparseTensor(sparse), &[]).expect("find sparse");
         let Value::LogicalArray(values) = eval.values_value().expect("values") else {
@@ -1969,7 +1969,7 @@ pub(crate) mod tests {
             FIND_DIRECTION_ONLY_EXTENSION.error_identifier
         );
 
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             1,
             1,
             vec![0, 1],

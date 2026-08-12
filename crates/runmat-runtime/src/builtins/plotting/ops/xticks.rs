@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::axis_ticks::{axis_ticks_builtin, TickAxis};
 use crate::builtins::plotting::type_resolvers::get_type;
@@ -128,7 +129,7 @@ mod tests {
 
     fn tensor(data: Vec<f64>) -> Value {
         let len = data.len();
-        Value::Tensor(runmat_builtins::Tensor::new(data, vec![1, len]).expect("x tick row"))
+        Value::Tensor(runmat_value::Tensor::new(data, vec![1, len]).expect("x tick row"))
     }
 
     #[test]
@@ -140,7 +141,7 @@ mod tests {
 
         let set = xticks_builtin(vec![tensor(vec![0.0, 2.5, 5.0])]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&set)
+            runmat_value::Tensor::try_from(&set)
                 .unwrap()
                 .materialize_f64(),
             vec![0.0, 2.5, 5.0]
@@ -152,7 +153,7 @@ mod tests {
 
         let queried = xticks_builtin(Vec::new()).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&queried)
+            runmat_value::Tensor::try_from(&queried)
                 .unwrap()
                 .materialize_f64(),
             vec![0.0, 2.5, 5.0]
@@ -160,7 +161,7 @@ mod tests {
         let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
         let prop = get_builtin(vec![ax, Value::String("XTick".into())]).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&prop)
+            runmat_value::Tensor::try_from(&prop)
                 .unwrap()
                 .materialize_f64(),
             vec![0.0, 2.5, 5.0]
@@ -211,7 +212,7 @@ mod tests {
         ]))
         .unwrap();
         let queried = xticks_builtin(Vec::new()).unwrap();
-        let ticks = runmat_builtins::Tensor::try_from(&queried)
+        let ticks = runmat_value::Tensor::try_from(&queried)
             .unwrap()
             .materialize_f64();
 

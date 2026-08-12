@@ -3,8 +3,8 @@
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // Use a local trait-alias shim to avoid compile-time dependency ordering issues.
 // Downstream crates in the workspace provide runmat_builtins; during GC unit tests, we provide a minimal Value.
-use runmat_builtins::Value;
 use runmat_time::Instant;
+use runmat_value::Value;
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1127,7 +1127,7 @@ mod tests {
 
     #[test]
     fn collection_skips_when_other_thread_has_registered_roots() {
-        use runmat_builtins::HandleRef;
+        use runmat_value::HandleRef;
         use std::sync::mpsc;
         use std::thread;
 

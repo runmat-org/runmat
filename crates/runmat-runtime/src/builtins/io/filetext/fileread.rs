@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CharArray, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -568,7 +569,7 @@ pub(crate) mod tests {
         test_support::fs::write(&path, "xyz").expect("write sample file");
 
         let path_str = path.to_string_lossy().to_string();
-        let string_array = runmat_builtins::StringArray::new(vec![path_str.clone()], vec![1, 1])
+        let string_array = runmat_value::StringArray::new(vec![path_str.clone()], vec![1, 1])
             .expect("string array scalar");
         let value = Value::StringArray(string_array);
 

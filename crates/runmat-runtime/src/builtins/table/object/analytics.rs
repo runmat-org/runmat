@@ -1,6 +1,6 @@
 use super::selectors::parse_variable_selector;
 use super::*;
-use runmat_builtins::IntValue;
+use runmat_value::IntValue;
 
 mod grpstats;
 
@@ -775,7 +775,7 @@ fn double_value_at(tensor: &Tensor, index: usize) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn typed_integer_group_atoms_and_table_ordering_remain_exact() {

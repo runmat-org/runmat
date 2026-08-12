@@ -1,5 +1,5 @@
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::{gather_tensor_from_gpu, gather_tensor_from_gpu_async};
@@ -63,7 +63,7 @@ fn scalar_tensor(value: f64) -> Tensor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn numeric_input_wraps_scalar_num() {

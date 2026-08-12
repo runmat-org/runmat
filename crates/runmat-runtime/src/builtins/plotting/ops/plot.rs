@@ -5,11 +5,11 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{LineGpuStyle, LinePlot, LineStyle};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -969,8 +969,9 @@ pub(crate) mod tests {
     use crate::builtins::plotting::{clone_figure, configure_subplot, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
     use runmat_plot::plots::PlotElement;
+    use runmat_value::IntegerStorage;
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -1304,7 +1305,7 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[1.0, 2.0])),
             Value::String("LineStyleOrder".into()),
-            Value::StringArray(runmat_builtins::StringArray {
+            Value::StringArray(runmat_value::StringArray {
                 data: vec!["--".into(), ":".into()],
                 shape: vec![1, 2],
                 rows: 1,

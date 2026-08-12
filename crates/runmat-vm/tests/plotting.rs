@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 use test_helpers::execute_source;
 
 fn disable_interactive_plots_for_test() -> runmat_runtime::builtins::plotting::PlotTestLockGuard {
@@ -1043,7 +1043,7 @@ fn caxis_compiled_dispatch_gates_integer_limits_and_returns_double_state() {
         assert!(values.iter().any(|value| matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                if tensor.numeric_dtype() == runmat_value::NumericDType::F64
                     && tensor.len() == 2
         )));
     }

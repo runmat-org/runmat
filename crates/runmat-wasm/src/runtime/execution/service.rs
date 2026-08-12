@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::{Rc, Weak};
 
-use runmat_builtins::Value;
 use runmat_execution::identity::{ArtifactId, WorkerId};
 use runmat_execution::state::PoolState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
@@ -21,6 +20,7 @@ use runmat_execution_runner::{
 use runmat_runtime::execution::{
     AwaitAction, DeferredCall, ExecutionServiceError, RuntimeExecutionServices,
 };
+use runmat_value::Value;
 
 use super::host::BrowserExecutionHost;
 use super::model::BrowserExecutionCapabilities;

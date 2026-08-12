@@ -5,9 +5,9 @@ use num_complex::Complex64;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::{
     spec::{
@@ -914,7 +914,8 @@ fn lqr_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, ResolveContext};
+    use runmat_builtins::ResolveContext;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("tensor"))

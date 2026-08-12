@@ -11,10 +11,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
-    LogicalArray, NumericStorage, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor,
+    Value,
+};
 
 use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
 use crate::build_runtime_error;
@@ -1258,9 +1261,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage,
-        ResolveContext, Tensor, Type, Value,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
+        Value,
     };
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

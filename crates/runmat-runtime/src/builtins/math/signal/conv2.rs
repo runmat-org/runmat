@@ -8,9 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -856,10 +857,8 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
-    use runmat_builtins::{
-        builtin_function_by_name, ComplexStorage, IntegerStorage, LogicalArray, ResolveContext,
-        Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{ComplexStorage, IntegerStorage, LogicalArray};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -972,14 +971,14 @@ pub(crate) mod tests {
             let a = Tensor::new_integer(storage, vec![2, 1]).unwrap();
             let output = conv2_builtin(
                 Value::Tensor(a),
-                Value::Int(runmat_builtins::IntValue::U8(2)),
+                Value::Int(runmat_value::IntValue::U8(2)),
                 Vec::new(),
             )
             .expect("direct integer conv2");
             let Value::Tensor(output) = output else {
                 panic!("tensor")
             };
-            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
             assert_eq!(output.materialize_f64(), vec![2.0, 4.0]);
         }
         let u = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
@@ -991,7 +990,7 @@ pub(crate) mod tests {
         else {
             panic!("tensor")
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(output.shape, vec![3, 3]);
     }
 
@@ -1004,31 +1003,31 @@ pub(crate) mod tests {
         else {
             panic!("tensor")
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
     }
 
     #[test]
     fn conv2_typed_complex_integer_crosses_to_complex_double() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I16(vec![1, 2]),
             IntegerStorage::I16(vec![1, -1]),
         )
         .unwrap();
         let tensor = ComplexTensor::from_complex_storage(
-            runmat_builtins::ComplexStorage::Integer(storage),
+            runmat_value::ComplexStorage::Integer(storage),
             vec![2, 1],
         )
         .unwrap();
         let output = conv2_builtin(
             Value::ComplexTensor(tensor),
-            Value::Int(runmat_builtins::IntValue::I8(2)),
+            Value::Int(runmat_value::IntValue::I8(2)),
             Vec::new(),
         )
         .unwrap();
         let Value::ComplexTensor(output) = output else {
             panic!("complex tensor")
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(output.materialize_f64(), vec![(2.0, 2.0), (4.0, -2.0)]);
     }
 
@@ -1043,7 +1042,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
             let output = conv2_builtin(
                 Value::GpuTensor(handle),
-                Value::Int(runmat_builtins::IntValue::U8(1)),
+                Value::Int(runmat_value::IntValue::U8(1)),
                 Vec::new(),
             )
             .unwrap();
@@ -1056,7 +1055,7 @@ pub(crate) mod tests {
             let Value::Tensor(gathered) = gathered else {
                 panic!("tensor")
             };
-            assert_eq!(gathered.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F64);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![9_007_199_254_740_992.0, 18_446_744_073_709_551_616.0]
@@ -1077,7 +1076,7 @@ pub(crate) mod tests {
         .unwrap() else {
             panic!("tensor")
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(output.shape, vec![3, 2]);
         assert_eq!(
             output.materialize_f64(),
@@ -1100,7 +1099,7 @@ pub(crate) mod tests {
         .unwrap() else {
             panic!("explicitly complex tensor")
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(output.materialize_f64(), vec![(1.0, 0.0), (2.0, 0.0)]);
     }
 
@@ -1186,7 +1185,7 @@ pub(crate) mod tests {
             else {
                 panic!("class-preserving host fallback")
             };
-            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
             assert_eq!(output.materialize_f64(), vec![2.0, 4.0]);
         });
     }

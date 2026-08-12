@@ -11,8 +11,8 @@ use runmat_builtins::{
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -844,8 +844,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
-    use runmat_builtins::IntegerStorage;
     use runmat_time::unix_timestamp_ms;
+    use runmat_value::IntegerStorage;
     use std::io::Read;
 
     fn unwrap_error_message(err: RuntimeError) -> String {

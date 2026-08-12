@@ -4,9 +4,10 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -157,7 +158,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
+    use runmat_value::{CharArray, LogicalArray, Tensor, Value};
 
     fn run_islogical(value: Value) -> BuiltinResult<Value> {
         block_on(super::islogical_builtin(value))
@@ -215,8 +216,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn structures_and_cells_report_false() {
-        let struct_value = runmat_builtins::StructValue::new();
-        let cell = runmat_builtins::CellArray::new(vec![Value::Bool(true)], 1, 1).unwrap();
+        let struct_value = runmat_value::StructValue::new();
+        let cell = runmat_value::CellArray::new(vec![Value::Bool(true)], 1, 1).unwrap();
         assert_eq!(
             run_islogical(Value::Struct(struct_value)).unwrap(),
             Value::Bool(false)

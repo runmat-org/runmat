@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, LogicalArray, NumericScalar, SparseTensor, Tensor, Value};
+use runmat_value::{IntValue, LogicalArray, NumericScalar, SparseTensor, Tensor, Value};
 
 /// A scalar value in a workspace numeric preview.
 ///
@@ -235,7 +235,7 @@ fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<NumericPrevie
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{ComplexTensor, IntegerStorage, NumericDType, ObjectInstance, Tensor};
+    use runmat_value::{ComplexTensor, IntegerStorage, NumericDType, ObjectInstance, Tensor};
 
     #[test]
     fn approximate_size_bytes_uses_authoritative_native_storage() {

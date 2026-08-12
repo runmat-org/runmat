@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::keyword_of;
@@ -1048,7 +1048,7 @@ async fn bitcmp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn sparse_bitcmp(
-    sparse: runmat_builtins::SparseTensor,
+    sparse: runmat_value::SparseTensor,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<Value> {
     if sparse.integer_storage().is_some() {
@@ -1111,7 +1111,7 @@ async fn bitget_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn sparse_bitget(
-    sparse: runmat_builtins::SparseTensor,
+    sparse: runmat_value::SparseTensor,
     bit: Value,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<Value> {
@@ -1220,7 +1220,7 @@ async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn sparse_bitset(
-    sparse: runmat_builtins::SparseTensor,
+    sparse: runmat_value::SparseTensor,
     bit: Value,
     value_to_set: Option<Value>,
     assumed: Option<IntegerClass>,
@@ -1435,7 +1435,7 @@ fn enforce_bitshift_compatibility(args: &[Value]) -> BuiltinResult<()> {
 }
 
 async fn sparse_bitshift(
-    sparse: runmat_builtins::SparseTensor,
+    sparse: runmat_value::SparseTensor,
     shift: Value,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<Value> {
@@ -1578,7 +1578,7 @@ async fn binary_bitwise(
 }
 
 enum SparseBitwiseOperand {
-    Sparse(runmat_builtins::SparseTensor),
+    Sparse(runmat_value::SparseTensor),
     Dense(BitBuffer),
 }
 
@@ -1720,7 +1720,7 @@ fn sparse_or_full_from_bits(
             }
             col_ptrs.push(values.len());
         }
-        return runmat_builtins::SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+        return runmat_value::SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
             .map(Value::SparseTensor)
             .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err));
     }

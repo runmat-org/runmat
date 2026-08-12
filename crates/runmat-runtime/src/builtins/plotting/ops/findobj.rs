@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use super::properties::{get_properties, map_figure_error, resolve_plot_handle, PlotHandle};
 use super::state::{self, FigureHandle, PlotObjectKind};
@@ -224,7 +224,7 @@ fn split_root_handles(args: &[Value]) -> crate::BuiltinResult<Option<(Vec<f64>, 
     }
 }
 
-fn exact_numeric_root(value: &runmat_builtins::IntValue) -> crate::BuiltinResult<f64> {
+fn exact_numeric_root(value: &runmat_value::IntValue) -> crate::BuiltinResult<f64> {
     numeric_handle_from_integer(value).ok_or_else(|| {
         invalid_argument("integer root handle must be nonnegative and exactly representable")
     })
@@ -716,7 +716,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run, reset_plot_state};
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, IntegerStorage};
+    use runmat_value::{CellArray, IntegerStorage};
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -807,11 +807,11 @@ mod tests {
                 .expect("root list");
             assert_eq!(roots, vec![3.0]);
         }
-        assert!(exact_numeric_root(&runmat_builtins::IntValue::I64(-1)).is_err());
-        assert!(exact_numeric_root(&runmat_builtins::IntValue::U64((1_u64 << 53) + 1)).is_err());
+        assert!(exact_numeric_root(&runmat_value::IntValue::I64(-1)).is_err());
+        assert!(exact_numeric_root(&runmat_value::IntValue::U64((1_u64 << 53) + 1)).is_err());
 
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = findobj_builtin(vec![Value::Int(runmat_builtins::IntValue::U8(1))])
+        let error = findobj_builtin(vec![Value::Int(runmat_value::IntValue::U8(1))])
             .expect_err("integer root aliases must be gated");
         assert_eq!(
             error.identifier(),
@@ -853,7 +853,7 @@ mod tests {
         assert!(!values_match(
             "UserData",
             &Value::Num(9_007_199_254_740_992.0),
-            &Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_992)),
+            &Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_992)),
         ));
     }
 

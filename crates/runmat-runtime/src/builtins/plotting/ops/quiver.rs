@@ -1,11 +1,11 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::axis::{AxisData, OwnedAxisData};
 use runmat_plot::plots::QuiverPlot;
+use runmat_value::{Tensor, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -1061,7 +1061,7 @@ mod tests {
     }
 
     fn int_tensor(data: &[i16], shape: Vec<usize>) -> Tensor {
-        Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data.to_vec()), shape)
+        Tensor::new_integer(runmat_value::IntegerStorage::I16(data.to_vec()), shape)
             .expect("integer tensor")
     }
 
@@ -1096,11 +1096,9 @@ mod tests {
 
     #[test]
     fn quiver_axis_source_reads_typed_integer_storage_exactly() {
-        let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-2, 0, 2]),
-            vec![3],
-        )
-        .expect("typed quiver axis");
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-2, 0, 2]), vec![3])
+                .expect("typed quiver axis");
         let host = QuiverCoordinateInput::Explicit(NumericInput::Host(tensor));
 
         let f64_axis =

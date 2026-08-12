@@ -1,7 +1,7 @@
 use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::Figure;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::BuiltinResult;
@@ -55,7 +55,7 @@ pub fn numeric_triplet(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn numeric_pair_accepts_matching_numel_vectors_with_different_shapes() {

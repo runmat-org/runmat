@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};
 use serde_json::Value as JsonValue;
 
 use crate::builtins::common::spec::{
@@ -563,7 +563,7 @@ fn parse_rectangular_cell_array(values: &[JsonValue]) -> BuiltinResult<Option<Va
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_value::{IntValue, Tensor};
 
     use crate::RuntimeError;
 

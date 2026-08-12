@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::signal::type_resolvers::{
@@ -1149,8 +1149,8 @@ fn apply_resample(
             };
             let (output, shape) = resample_rational_column_major(data, shape, p, q, options)?;
             let storage = match dtype {
-                runmat_builtins::NumericDType::F64 => NumericStorage::F64(output),
-                runmat_builtins::NumericDType::F32 => {
+                runmat_value::NumericDType::F64 => NumericStorage::F64(output),
+                runmat_value::NumericDType::F32 => {
                     NumericStorage::F32(output.into_iter().map(|value| value as f32).collect())
                 }
                 _ => unreachable!("resample input dtype was validated"),
@@ -1242,7 +1242,7 @@ fn parse_positive_integer(
 }
 
 fn parse_positive_integer_value(
-    value: runmat_builtins::IntValue,
+    value: runmat_value::IntValue,
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<usize> {
@@ -1254,7 +1254,7 @@ fn parse_positive_integer_value(
 }
 
 fn parse_nonnegative_integer_value(
-    value: runmat_builtins::IntValue,
+    value: runmat_value::IntValue,
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<usize> {
@@ -1907,7 +1907,7 @@ mod tests {
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
         HostTensorView, IntegerElementType, ProviderPrecision,
     };
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -2302,7 +2302,7 @@ mod tests {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let factor_error = block_on(downsample_builtin(
             tensor(vec![1.0, 2.0], vec![1, 2]),
-            Value::Int(runmat_builtins::IntValue::U8(2)),
+            Value::Int(runmat_value::IntValue::U8(2)),
             vec![],
         ))
         .expect_err("integer factor extension");
@@ -2313,7 +2313,7 @@ mod tests {
         let phase_error = block_on(downsample_builtin(
             tensor(vec![1.0, 2.0], vec![1, 2]),
             Value::Num(2.0),
-            vec![Value::Int(runmat_builtins::IntValue::U8(1))],
+            vec![Value::Int(runmat_value::IntValue::U8(1))],
         ))
         .expect_err("integer phase extension");
         assert_eq!(
@@ -2427,8 +2427,8 @@ mod tests {
         let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let output = call_downsample(vec![
             Value::GpuTensor(input.clone()),
-            Value::Int(runmat_builtins::IntValue::U8(2)),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U8(2)),
+            Value::Int(runmat_value::IntValue::U8(1)),
         ]);
         drop(extensions);
         let Value::GpuTensor(output) = output else {
@@ -3097,7 +3097,7 @@ mod tests {
             Value::Num(2.0),
             Value::Num(1.0),
             tensor(vec![0.0, 1.0, 0.0], vec![1, 3]),
-            Value::CharArray(runmat_builtins::CharArray::new_row("Dimension")),
+            Value::CharArray(runmat_value::CharArray::new_row("Dimension")),
             Value::Num(2.0),
         ]);
         let Value::Tensor(tensor) = out else {
@@ -3203,7 +3203,7 @@ mod tests {
             tensor(vec![1.0, 2.0], vec![1, 2]),
             Value::Num(2.0),
             Value::Num(1.0),
-            vec![Value::CharArray(runmat_builtins::CharArray::new_row(
+            vec![Value::CharArray(runmat_value::CharArray::new_row(
                 "Dimension",
             ))],
         ))

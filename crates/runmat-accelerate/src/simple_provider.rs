@@ -23,7 +23,6 @@ use runmat_accelerate_api::{
     ProviderStdNormalization, ProviderSymmetryKind, ProviderTrapezoidSpacing, SetdiffOptions,
     SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
-use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
 use runmat_runtime::builtins::common::broadcast::{
     broadcast_index as runtime_broadcast_index, broadcast_shapes as runtime_broadcast_shapes,
@@ -34,6 +33,7 @@ use runmat_runtime::builtins::stats::summary::{
     cov_from_tensors as runtime_cov_from_tensors, CovWeightSpec,
 };
 use runmat_runtime::RuntimeError;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use runmat_runtime::builtins::math::linalg::ops::{
     dot_host_real_for_provider, mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
@@ -10190,7 +10190,7 @@ mod tests {
     use runmat_accelerate_api::{
         IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
     };
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     #[test]
     fn conv1d_valid_empty_kernel_returns_signal_length_zeros() {

@@ -5,9 +5,9 @@ use std::collections::VecDeque;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, LogicalArray, StructValue, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -826,7 +826,7 @@ mod tests {
     use super::*;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn run_optimoptions(rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(optimoptions_builtin(rest))

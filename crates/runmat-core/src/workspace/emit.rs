@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use runmat_builtins::Value;
 use runmat_hir::{HirAssembly, HirExprKind, HirPlace, HirStmtKind};
+use runmat_value::Value;
 
 use crate::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
@@ -347,7 +347,7 @@ pub(crate) fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{SymbolicArray, SymbolicExpr};
+    use runmat_value::{SymbolicArray, SymbolicExpr};
 
     #[test]
     fn symbolic_nd_array_is_not_labeled_scalar() {

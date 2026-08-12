@@ -11,7 +11,8 @@
 )]
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
-use runmat_builtins::{BuiltinErrorDescriptor, Value};
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_value::{Access, Value};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -55,21 +56,21 @@ pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
 pub(crate) const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
 
-fn object_handle_flag_valid(obj: &runmat_builtins::ObjectInstance) -> bool {
+fn object_handle_flag_valid(obj: &runmat_value::ObjectInstance) -> bool {
     !matches!(
         obj.properties.get(HANDLE_VALID_FLAG_PROPERTY),
         Some(Value::Bool(false))
     )
 }
 
-pub(crate) fn is_handle_valid(handle: &runmat_builtins::HandleRef) -> bool {
+pub(crate) fn is_handle_valid(handle: &runmat_value::HandleRef) -> bool {
     if !handle.valid {
         return false;
     }
     is_handle_target_valid(handle)
 }
 
-pub(crate) fn is_handle_target_valid(handle: &runmat_builtins::HandleRef) -> bool {
+pub(crate) fn is_handle_target_valid(handle: &runmat_value::HandleRef) -> bool {
     runmat_gc::gc_with_value(&handle.target, |target| match target {
         Value::Object(obj) => object_handle_flag_valid(obj),
         _ => false,
@@ -77,7 +78,7 @@ pub(crate) fn is_handle_target_valid(handle: &runmat_builtins::HandleRef) -> boo
     .unwrap_or(false)
 }
 
-pub(crate) fn set_handle_valid(handle: &runmat_builtins::HandleRef, valid: bool) -> bool {
+pub(crate) fn set_handle_valid(handle: &runmat_value::HandleRef, valid: bool) -> bool {
     runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
         Value::Object(obj) => {
             obj.properties
@@ -190,8 +191,8 @@ fn build_shape_checked_cell(
     rows: usize,
     cols: usize,
     context: &str,
-) -> Result<runmat_builtins::CellArray, RuntimeError> {
-    runmat_builtins::CellArray::new(values, rows, cols).map_err(|err| {
+) -> Result<runmat_value::CellArray, RuntimeError> {
+    runmat_value::CellArray::new(values, rows, cols).map_err(|err| {
         build_runtime_error(format!("{context}: {err}"))
             .with_identifier("RunMat:ShapeMismatch")
             .build()
@@ -406,7 +407,7 @@ pub use blas::*;
 pub use lapack::*;
 
 pub fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Value, String> {
-    let ca = runmat_builtins::CellArray::new_with_shape(values, shape)
+    let ca = runmat_value::CellArray::new_with_shape(values, shape)
         .map_err(|e| format!("Cell creation error: {e}"))?;
     Ok(Value::Cell(ca))
 }
@@ -420,10 +421,11 @@ fn to_string_scalar(v: &Value) -> Result<String, String> {
     Ok(s)
 }
 
-fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
+fn to_string_array(v: &Value) -> Result<runmat_value::StringArray, String> {
     match v {
-        Value::String(s) => runmat_builtins::StringArray::new(vec![s.clone()], vec![1, 1])
-            .map_err(|e| e.to_string()),
+        Value::String(s) => {
+            runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).map_err(|e| e.to_string())
+        }
         Value::StringArray(sa) => Ok(sa.clone()),
         Value::CharArray(ca) => {
             // Convert each row to a string; treat as column vector
@@ -435,7 +437,7 @@ fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
                 }
                 out.push(s);
             }
-            runmat_builtins::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| e.to_string())
+            runmat_value::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| e.to_string())
         }
         other => Err(format!("cannot convert to string array: {other:?}")),
     }
@@ -448,7 +450,7 @@ pub(crate) async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinRes
     let cols = *sa.shape.get(1).unwrap_or(&1);
     if rows == 0 || cols == 0 {
         return Ok(Value::StringArray(
-            runmat_builtins::StringArray::new(Vec::new(), vec![0, 0]).unwrap(),
+            runmat_value::StringArray::new(Vec::new(), vec![0, 0]).unwrap(),
         ));
     }
     let mut out: Vec<String> = Vec::with_capacity(rows);
@@ -463,8 +465,7 @@ pub(crate) async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinRes
         out.push(s);
     }
     Ok(Value::StringArray(
-        runmat_builtins::StringArray::new(out, vec![rows, 1])
-            .map_err(|e| format!("strjoin: {e}"))?,
+        runmat_value::StringArray::new(out, vec![rows, 1]).map_err(|e| format!("strjoin: {e}"))?,
     ))
 }
 
@@ -520,7 +521,7 @@ pub(crate) async fn new_handle_object_builtin(class_name: String) -> crate::Buil
         return Ok(obj);
     }
     let gc = runmat_gc::gc_allocate(obj).map_err(|e| format!("gc: {e}"))?;
-    Ok(Value::HandleObject(runmat_builtins::HandleRef {
+    Ok(Value::HandleObject(runmat_value::HandleRef {
         class_name,
         target: gc,
         valid: true,
@@ -540,7 +541,7 @@ use std::cell::RefCell;
 #[derive(Default)]
 struct EventRegistry {
     next_id: u64,
-    listeners: std::collections::HashMap<(usize, String), Vec<runmat_builtins::Listener>>,
+    listeners: std::collections::HashMap<(usize, String), Vec<runmat_value::Listener>>,
     listener_roots: std::collections::HashMap<u64, ListenerRoots>,
 }
 
@@ -706,7 +707,7 @@ pub(crate) async fn addlistener_builtin(
     };
     let callback = canonicalize_listener_callback(callback);
     let callback_root = runmat_gc::gc_allocate_rooted(callback).map_err(|e| format!("gc: {e}"))?;
-    let listener = runmat_builtins::Listener {
+    let listener = runmat_value::Listener {
         id,
         target: target_root.handle(),
         target_class_name,
@@ -765,7 +766,7 @@ pub(crate) async fn notify_builtin(
             )
         }
     };
-    let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
+    let mut to_call: Vec<runmat_value::Listener> = Vec::new();
     EVENT_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         if let Some(list) = registry.listeners.get(&(key_ptr, event_name.clone())) {
@@ -888,11 +889,10 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
         }
         // Reverse to root-first
         chain.reverse();
-        let mut obj = runmat_builtins::ObjectInstance::new(def.name.clone());
+        let mut obj = runmat_value::ObjectInstance::new(def.name.clone());
         // Apply defaults from root to leaf (leaf overrides effectively by later assignment)
-        let empty_default = || {
-            Value::Tensor(runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"))
-        };
+        let empty_default =
+            || Value::Tensor(runmat_value::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"));
         for cd in chain {
             for (k, p) in cd.properties.iter() {
                 if !p.is_static {
@@ -905,7 +905,7 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
         }
         if is_handle_class {
             let gc = runmat_gc::gc_allocate(Value::Object(obj)).map_err(|e| format!("gc: {e}"))?;
-            Ok(Value::HandleObject(runmat_builtins::HandleRef {
+            Ok(Value::HandleObject(runmat_value::HandleRef {
                 class_name: def.name.clone(),
                 target: gc,
                 valid: true,
@@ -914,9 +914,7 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
             Ok(Value::Object(obj))
         }
     } else {
-        Ok(Value::Object(runmat_builtins::ObjectInstance::new(
-            class_name,
-        )))
+        Ok(Value::Object(runmat_value::ObjectInstance::new(class_name)))
     }
 }
 
@@ -957,7 +955,7 @@ pub async fn call_super_constructor(
         return Ok(receiver);
     };
     fn merge_parent_props_into_object(
-        receiver_obj: &mut runmat_builtins::ObjectInstance,
+        receiver_obj: &mut runmat_value::ObjectInstance,
         ctor_result: Value,
         owner: Option<&runmat_gc::GcHandle>,
     ) -> Result<(), RuntimeError> {
@@ -1078,11 +1076,11 @@ pub async fn call_super_method(
         .build());
     }
     let access_allowed = match method.access {
-        runmat_builtins::Access::Public => true,
-        runmat_builtins::Access::Protected => {
+        runmat_value::Access::Public => true,
+        runmat_value::Access::Protected => {
             runmat_builtins::is_class_or_subclass(&class_name, &owner)
         }
-        runmat_builtins::Access::Private => class_name == owner,
+        runmat_value::Access::Private => class_name == owner,
     };
     if !access_allowed {
         return Err(build_runtime_error(format!(
@@ -1676,9 +1674,8 @@ mod tests {
     use super::*;
     use crate::builtins::introspection::test_methods::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        register_class, Access, ClassDef, HandleRef, IntegerStorage, PropertyDef, Tensor,
-    };
+    use runmat_builtins::{register_class, ClassDef, PropertyDef};
+    use runmat_value::{Access, HandleRef, IntegerStorage, Tensor};
     use std::collections::HashMap;
     use std::sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -1781,7 +1778,7 @@ mod tests {
                 Box::pin(async { Ok(Value::Num(7.0)) })
             },
         )));
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".to_string(),
             bound_function: Some(42),
             captures: Vec::new(),
@@ -1903,7 +1900,7 @@ mod tests {
             }),
         ));
 
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "resolved_target".to_string(),
             bound_function: None,
             captures: vec![Value::Num(9.0)],
@@ -1922,7 +1919,7 @@ mod tests {
             })));
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(None);
 
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "sin".to_string(),
             bound_function: None,
             captures: Vec::new(),
@@ -1984,7 +1981,7 @@ mod tests {
     #[test]
     fn feval_accepts_documented_plain_char_function_name() {
         let value = block_on(feval_builtin(
-            Value::CharArray(runmat_builtins::CharArray::new_row("sin")),
+            Value::CharArray(runmat_value::CharArray::new_row("sin")),
             vec![Value::Num(0.0)],
         ))
         .expect("plain character-vector function name should resolve");
@@ -2023,7 +2020,7 @@ mod tests {
                 Tensor::new_integer(storage, vec![1, 2]).expect("integer forwarding input"),
             );
             let output = block_on(feval_builtin(
-                Value::CharArray(runmat_builtins::CharArray::new_row("integer_identity")),
+                Value::CharArray(runmat_value::CharArray::new_row("integer_identity")),
                 vec![input.clone()],
             ))
             .expect("integer argument should be forwarded unchanged");
@@ -2033,7 +2030,7 @@ mod tests {
 
     #[test]
     fn feval_rejects_non_row_char_handle_with_identifier() {
-        let chars = runmat_builtins::CharArray::new(vec!['@', 's'], 2, 1)
+        let chars = runmat_value::CharArray::new(vec!['@', 's'], 2, 1)
             .expect("char array construction should succeed");
         let err = block_on(feval_builtin(
             Value::CharArray(chars),
@@ -2174,7 +2171,7 @@ mod tests {
 
     #[test]
     fn str2func_rejects_non_row_char_name_with_identifier() {
-        let chars = runmat_builtins::CharArray::new(vec!['a', 'b'], 2, 1)
+        let chars = runmat_value::CharArray::new(vec!['a', 'b'], 2, 1)
             .expect("char array construction should succeed");
         let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::CharArray(chars),
@@ -2197,7 +2194,7 @@ mod tests {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2209,7 +2206,7 @@ mod tests {
     fn str2func_rejects_nonscalar_string_array_name_with_identifier() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["@a".to_string(), "@b".to_string()], vec![1, 2])
+            runmat_value::StringArray::new(vec!["@a".to_string(), "@b".to_string()], vec![1, 2])
                 .expect("string array construction should succeed"),
         );
         let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(value)
@@ -2225,7 +2222,7 @@ mod tests {
             })));
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2244,7 +2241,7 @@ mod tests {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2260,7 +2257,7 @@ mod tests {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2273,7 +2270,7 @@ mod tests {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(vec!["   ".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["   ".to_string()], vec![1, 1])
                     .expect("string array construction should succeed"),
             ),
         )
@@ -2289,7 +2286,7 @@ mod tests {
             })));
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
-                runmat_builtins::StringArray::new(
+                runmat_value::StringArray::new(
                     vec!["@pkg.resolved_target".to_string()],
                     vec![1, 1],
                 )
@@ -2540,7 +2537,7 @@ mod tests {
         );
         assert_eq!(
             crate::builtins::introspection::function_handle_text::dispatch_func2str(
-                Value::Closure(runmat_builtins::Closure {
+                Value::Closure(runmat_value::Closure {
                     function_name: "captured_fn".to_string(),
                     bound_function: None,
                     captures: Vec::new(),
@@ -2871,7 +2868,7 @@ mod tests {
     #[test]
     fn call_method_fallback_preserves_requested_outputs() {
         let _output_guard = crate::output_count::push_output_count(Some(3));
-        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+        let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
         let result = block_on(
@@ -2898,7 +2895,7 @@ mod tests {
     #[test]
     fn call_method_trims_method_name_for_resolution() {
         let _output_guard = crate::output_count::push_output_count(Some(3));
-        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+        let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
         let result = block_on(
@@ -2925,10 +2922,10 @@ mod tests {
     #[test]
     fn feval_call_method_closure_fast_path_preserves_requested_outputs() {
         let _output_guard = crate::output_count::push_output_count(Some(3));
-        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+        let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
             bound_function: None,
             captures: vec![
@@ -2957,10 +2954,10 @@ mod tests {
     #[test]
     fn feval_call_method_closure_fast_path_trims_method_name_for_resolution() {
         let _output_guard = crate::output_count::push_output_count(Some(3));
-        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+        let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
             bound_function: None,
             captures: vec![
@@ -2988,11 +2985,11 @@ mod tests {
 
     #[test]
     fn feval_call_method_closure_rejects_nontext_method_capture_with_identifier() {
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
             bound_function: None,
             captures: vec![
-                Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
+                Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
                 Value::Num(1.0),
             ],
         });
@@ -3018,7 +3015,7 @@ mod tests {
     fn call_method_rejects_empty_method_name_with_identifier() {
         let err = block_on(
             crate::builtins::introspection::call_method::dispatch_call_method(
-                Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
+                Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
                 "  ".to_string(),
                 Vec::new(),
             ),
@@ -3058,11 +3055,11 @@ mod tests {
     fn subsref_missing_protocol_errors_with_identifier() {
         let err = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsref(
-                Value::Object(runmat_builtins::ObjectInstance::new(
+                Value::Object(runmat_value::ObjectInstance::new(
                     "NoSubsrefProtocolClass".to_string(),
                 )),
                 OBJECT_INDEX_PAREN.to_string(),
-                Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
             ),
         )
         .expect_err("missing subsref protocol should fail");
@@ -3073,11 +3070,11 @@ mod tests {
     fn subsasgn_missing_protocol_errors_with_identifier() {
         let err = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsasgn(
-                Value::Object(runmat_builtins::ObjectInstance::new(
+                Value::Object(runmat_value::ObjectInstance::new(
                     "NoSubsasgnProtocolClass".to_string(),
                 )),
                 OBJECT_INDEX_PAREN.to_string(),
-                Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
                 Value::Num(3.0),
             ),
         )
@@ -3123,7 +3120,7 @@ mod tests {
     #[test]
     fn overidx_subsref_unsupported_payload_errors_with_identifier() {
         let err = block_on(overidx_subsref(
-            Value::Object(runmat_builtins::ObjectInstance::new("OverIdx".to_string())),
+            Value::Object(runmat_value::ObjectInstance::new("OverIdx".to_string())),
             OBJECT_INDEX_PAREN.to_string(),
             Value::Num(1.0),
         ))
@@ -3137,7 +3134,7 @@ mod tests {
     #[test]
     fn overidx_subsasgn_unsupported_payload_errors_with_identifier() {
         let err = block_on(overidx_subsasgn(
-            Value::Object(runmat_builtins::ObjectInstance::new("OverIdx".to_string())),
+            Value::Object(runmat_value::ObjectInstance::new("OverIdx".to_string())),
             OBJECT_INDEX_PAREN.to_string(),
             Value::Num(1.0),
             Value::Num(2.0),
@@ -3153,7 +3150,7 @@ mod tests {
     fn feval_object_receiver_routes_to_subsref_identifier() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let err = block_on(feval_builtin(
-            Value::Object(runmat_builtins::ObjectInstance::new(
+            Value::Object(runmat_value::ObjectInstance::new(
                 "NoSubsrefProtocolClass".to_string(),
             )),
             vec![Value::Num(1.0)],
@@ -3166,7 +3163,7 @@ mod tests {
     fn feval_strict_mode_rejects_object_receiver_before_subsref_dispatch() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(feval_builtin(
-            Value::Object(runmat_builtins::ObjectInstance::new(
+            Value::Object(runmat_value::ObjectInstance::new(
                 "NoSubsrefProtocolClass".to_string(),
             )),
             vec![Value::Num(1.0)],
@@ -3198,7 +3195,7 @@ mod tests {
     #[test]
     fn feval_accepts_scalar_string_array_function_name() {
         let handle =
-            runmat_builtins::StringArray::new(vec!["sin".to_string()], vec![1, 1]).expect("sa");
+            runmat_value::StringArray::new(vec!["sin".to_string()], vec![1, 1]).expect("sa");
         let result = block_on(feval_builtin(
             Value::StringArray(handle),
             vec![Value::Num(0.0)],
@@ -3209,7 +3206,7 @@ mod tests {
 
     #[test]
     fn feval_rejects_nonscalar_string_array_handle_with_identifier() {
-        let handle = runmat_builtins::StringArray::new(
+        let handle = runmat_value::StringArray::new(
             vec!["@sin".to_string(), "@cos".to_string()],
             vec![1, 2],
         )
@@ -3235,10 +3232,7 @@ mod tests {
 
     #[test]
     fn addlistener_rejects_non_object_target_with_identifier() {
-        for target in [
-            Value::Num(1.0),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
-        ] {
+        for target in [Value::Num(1.0), Value::Int(runmat_value::IntValue::U64(1))] {
             let err = block_on(addlistener_builtin(
                 target,
                 "Changed".to_string(),
@@ -3252,11 +3246,11 @@ mod tests {
     #[test]
     fn addlistener_rejects_invalid_handle_target_with_identifier() {
         listener_gc_test(|| {
-            let target = runmat_builtins::HandleRef {
+            let target = runmat_value::HandleRef {
                 class_name: "EventTarget".to_string(),
-                target: runmat_gc::gc_allocate(Value::Object(
-                    runmat_builtins::ObjectInstance::new("EventTarget".to_string()),
-                ))
+                target: runmat_gc::gc_allocate(Value::Object(runmat_value::ObjectInstance::new(
+                    "EventTarget".to_string(),
+                )))
                 .expect("allocate target"),
                 valid: true,
             };
@@ -3428,7 +3422,7 @@ mod tests {
             let listener = block_on(addlistener_builtin(
                 target,
                 "Changed".to_string(),
-                Value::CharArray(runmat_builtins::CharArray::new_row("@event_callback")),
+                Value::CharArray(runmat_value::CharArray::new_row("@event_callback")),
             ))
             .expect("listener registered");
             let Value::Listener(listener) = listener else {
@@ -3453,7 +3447,7 @@ mod tests {
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let callback =
-                runmat_builtins::StringArray::new(vec!["@event_callback".to_string()], vec![1, 1])
+                runmat_value::StringArray::new(vec!["@event_callback".to_string()], vec![1, 1])
                     .expect("string array");
             let listener = block_on(addlistener_builtin(
                 target,
@@ -3482,7 +3476,7 @@ mod tests {
                 })));
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
-            let callback = Value::Closure(runmat_builtins::Closure {
+            let callback = Value::Closure(runmat_value::Closure {
                 function_name: "event_callback".to_string(),
                 bound_function: None,
                 captures: vec![Value::Num(9.0)],
@@ -3495,7 +3489,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::Closure(runmat_builtins::Closure {
+                Value::Closure(runmat_value::Closure {
                     function_name,
                     bound_function: Some(65),
                     captures,
@@ -3547,7 +3541,7 @@ mod tests {
             block_on(addlistener_builtin(
                 target.clone(),
                 "Changed".to_string(),
-                Value::CharArray(runmat_builtins::CharArray::new_row(
+                Value::CharArray(runmat_value::CharArray::new_row(
                     "@definitely_missing_callback",
                 )),
             ))
@@ -3564,7 +3558,7 @@ mod tests {
             let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
-            let callback = runmat_builtins::StringArray::new(
+            let callback = runmat_value::StringArray::new(
                 vec!["@definitely_missing_callback".to_string()],
                 vec![1, 1],
             )
@@ -3629,7 +3623,7 @@ mod tests {
     #[test]
     fn feval_semantic_closure_errors_when_semantic_invoker_unavailable() {
         let _guard = crate::user_functions::install_semantic_function_invoker(None);
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".to_string(),
             bound_function: Some(9044),
             captures: vec![Value::Num(1.0)],

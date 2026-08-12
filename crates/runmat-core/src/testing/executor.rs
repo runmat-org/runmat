@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
 
-use runmat_builtins::Value;
 use runmat_runtime::testing::{install_test_context, ActiveTestContext, RuntimeTeardownInvocation};
 use runmat_test::context::TestCommand;
 use runmat_test::descriptor::{
@@ -13,6 +12,7 @@ use runmat_test::executor::{
 use runmat_test::identity::TestId;
 use runmat_test::lifecycle::{ExecutionPhase, FixtureScopeKey};
 use runmat_test::protocol::ProtocolLimits;
+use runmat_value::Value;
 
 use crate::{ExecutableUnit, InvocationControl, ProcedureInvocation, RunError, RunMatSession};
 

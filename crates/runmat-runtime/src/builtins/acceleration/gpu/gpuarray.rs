@@ -20,10 +20,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor,
-    Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor, Value,
+};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -1464,9 +1465,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
-    use runmat_builtins::{
-        ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);

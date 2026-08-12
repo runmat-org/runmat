@@ -4,12 +4,12 @@ use glam::{Vec3, Vec4};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::figure::PlotElement;
 use runmat_plot::plots::scatter::MarkerStyle;
 use runmat_plot::plots::{Figure, Scatter3Plot, ScatterPlot, TextStyle};
+use runmat_value::{StringArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -1478,11 +1478,8 @@ mod tests {
     }
 
     fn int_tensor(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(values),
-            vec![rows, cols],
-        )
-        .expect("integer tensor")
+        Tensor::new_integer(runmat_value::IntegerStorage::I16(values), vec![rows, cols])
+            .expect("integer tensor")
     }
 
     #[test]
@@ -1512,7 +1509,7 @@ mod tests {
     fn textscatter_vector_coordinates_read_typed_integer_storage_exactly() {
         let _guard = setup();
         let labels =
-            runmat_builtins::StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
+            runmat_value::StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
                 .expect("labels");
         let handle = textscatter3_builtin(vec![
             Value::Tensor(int_tensor(vec![1, 2], 1, 2)),

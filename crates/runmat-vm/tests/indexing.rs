@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::{IntValue, IntegerStorage, Value};
+use runmat_value::{IntValue, IntegerStorage, Value};
 use test_helpers::execute_source;
 
 #[test]

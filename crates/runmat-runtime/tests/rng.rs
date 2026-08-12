@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{CharArray, NumericDType, Value};
+use runmat_value::{CharArray, NumericDType, Value};
 
 fn mean_variance(samples: &[f64]) -> (f64, f64) {
     let n = samples.len() as f64;

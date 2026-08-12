@@ -7,16 +7,16 @@ use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, ClassDef, ObjectInstance, PropertyDef,
-    ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ClassDef, PropertyDef, ResolveContext, Type,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, CellArray, CharArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
@@ -2549,16 +2549,16 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn int_value_to_f64(value: &runmat_builtins::IntValue) -> f64 {
+fn int_value_to_f64(value: &runmat_value::IntValue) -> f64 {
     match value {
-        runmat_builtins::IntValue::I8(value) => *value as f64,
-        runmat_builtins::IntValue::I16(value) => *value as f64,
-        runmat_builtins::IntValue::I32(value) => *value as f64,
-        runmat_builtins::IntValue::I64(value) => *value as f64,
-        runmat_builtins::IntValue::U8(value) => *value as f64,
-        runmat_builtins::IntValue::U16(value) => *value as f64,
-        runmat_builtins::IntValue::U32(value) => *value as f64,
-        runmat_builtins::IntValue::U64(value) => *value as f64,
+        runmat_value::IntValue::I8(value) => *value as f64,
+        runmat_value::IntValue::I16(value) => *value as f64,
+        runmat_value::IntValue::I32(value) => *value as f64,
+        runmat_value::IntValue::I64(value) => *value as f64,
+        runmat_value::IntValue::U8(value) => *value as f64,
+        runmat_value::IntValue::U16(value) => *value as f64,
+        runmat_value::IntValue::U32(value) => *value as f64,
+        runmat_value::IntValue::U64(value) => *value as f64,
     }
 }
 
@@ -2646,7 +2646,7 @@ fn embedding_error_with_source(
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, IntegerStorage};
+    use runmat_value::{CellArray, IntegerStorage};
     use std::fs::File as StdFile;
     use std::io::Write;
     use tempfile::tempdir;
@@ -2795,14 +2795,14 @@ mod tests {
 
         object.properties.insert(
             "Dimension".to_string(),
-            Value::Int(runmat_builtins::IntValue::U16(2)),
+            Value::Int(runmat_value::IntValue::U16(2)),
         );
         assert_eq!(embedding_from_object(&object, "test").unwrap().dimension, 2);
 
         for value in [
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
         ] {
             object.properties.insert("Dimension".to_string(), value);
             assert!(embedding_from_object(&object, "test").is_err());
@@ -3593,7 +3593,7 @@ mod tests {
     #[test]
     fn embedding_counts_preserve_typed_integers_and_validate_f64_bounds() {
         assert_eq!(
-            parse_positive_integer(&Value::Int(runmat_builtins::IntValue::U16(3)), "test").unwrap(),
+            parse_positive_integer(&Value::Int(runmat_value::IntValue::U16(3)), "test").unwrap(),
             3
         );
         assert_eq!(
@@ -3666,7 +3666,7 @@ mod tests {
             assert!(parse_bool_scalar(&poisoned_integer_scalar(storage), "test").unwrap());
         }
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {

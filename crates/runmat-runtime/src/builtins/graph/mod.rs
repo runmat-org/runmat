@@ -5,12 +5,12 @@ use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::sync::OnceLock;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, IntValue, MethodDef, ObjectInstance, PropertyDef, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    ClassDef, MethodDef, PropertyDef, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, IntValue, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::table::{table_from_columns, table_variables};
@@ -1697,7 +1697,7 @@ fn register_graph_class(name: &str) {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn numeric(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("tensor"))
@@ -1849,8 +1849,8 @@ mod tests {
         .expect("graph");
         let path = block_on(shortestpath_builtin(
             graph,
-            Value::CharArray(runmat_builtins::CharArray::new_row("a")),
-            Value::CharArray(runmat_builtins::CharArray::new_row("c")),
+            Value::CharArray(runmat_value::CharArray::new_row("a")),
+            Value::CharArray(runmat_value::CharArray::new_row("c")),
         ))
         .expect("path");
         let Value::StringArray(path) = path else {

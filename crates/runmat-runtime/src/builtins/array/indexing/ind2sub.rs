@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Tensor, Value};
 
 use super::common::{
     build_strides, dims_from_tokens, fits_positive_platform_index, materialize_value, parse_dims,
@@ -405,13 +406,14 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ind2sub_builtin(dims_val, indices_val))
     }
 
-    fn cell_to_vec(cell: &runmat_builtins::CellArray) -> Vec<Value> {
+    fn cell_to_vec(cell: &runmat_value::CellArray) -> Vec<Value> {
         cell.data.clone()
     }
 

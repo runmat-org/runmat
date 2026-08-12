@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::random;
 use crate::builtins::common::tensor;
@@ -673,7 +674,7 @@ fn logical_value(data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = crate::output_count::push_output_count(outputs);
@@ -833,12 +834,12 @@ mod tests {
 
     #[test]
     fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
-        let typed_six = Value::Int(runmat_builtins::IntValue::U16(6));
+        let typed_six = Value::Int(runmat_value::IntValue::U16(6));
         assert_eq!(observation_count(&typed_six).unwrap(), 6);
         let typed_tensor_six = int_tensor(IntegerStorage::U16(vec![6]), 1, 1);
         assert_eq!(observation_count(&typed_tensor_six).unwrap(), 6);
         assert_eq!(
-            positive_integer(&Value::Int(runmat_builtins::IntValue::U8(3)), "KFold").unwrap(),
+            positive_integer(&Value::Int(runmat_value::IntValue::U8(3)), "KFold").unwrap(),
             3
         );
         assert_eq!(
@@ -846,7 +847,7 @@ mod tests {
             3
         );
         assert_eq!(
-            holdout_count(&Value::Int(runmat_builtins::IntValue::U8(2)), 6).unwrap(),
+            holdout_count(&Value::Int(runmat_value::IntValue::U8(2)), 6).unwrap(),
             2
         );
         assert_eq!(
@@ -866,12 +867,12 @@ mod tests {
         assert_eq!(folds.shape, vec![6, 1]);
 
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {
             assert!(positive_integer(&value, "KFold").is_err());
         }
-        assert!(holdout_count(&Value::Int(runmat_builtins::IntValue::I8(-1)), 6).is_err());
+        assert!(holdout_count(&Value::Int(runmat_value::IntValue::I8(-1)), 6).is_err());
     }
 }

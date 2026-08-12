@@ -5,9 +5,9 @@ use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, SymbolicExpr, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, SymbolicExpr, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -483,7 +483,7 @@ fn vpa_error_with_message(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
     use std::sync::Mutex;
 
     static DIGITS_TEST_LOCK: Mutex<()> = Mutex::new(());

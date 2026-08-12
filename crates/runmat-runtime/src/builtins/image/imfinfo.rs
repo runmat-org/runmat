@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use image::io::Reader as ImageReader;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CharArray, StructValue,
-    Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StructValue, Value};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};

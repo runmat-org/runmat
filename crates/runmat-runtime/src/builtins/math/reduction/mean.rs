@@ -7,8 +7,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
-    NumericDType, NumericScalar, NumericStorage, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, Type,
+};
+use runmat_value::{
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar,
+    NumericStorage, Tensor, Value,
 };
 const NAME: &str = "mean";
 
@@ -2641,7 +2644,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mean_builtin(value, rest))
@@ -2833,8 +2836,7 @@ pub(crate) mod tests {
 
     #[test]
     fn mean_weights_logical_default_and_native_are_double() {
-        let input =
-            runmat_builtins::LogicalArray::new(vec![0, 1], vec![2, 1]).expect("logical input");
+        let input = runmat_value::LogicalArray::new(vec![0, 1], vec![2, 1]).expect("logical input");
         let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
         for suffix in [Vec::new(), vec![Value::from("native")]] {
             let mut args = vec![Value::from("Weights"), Value::Tensor(weights.clone())];
@@ -3100,7 +3102,7 @@ pub(crate) mod tests {
     #[test]
     fn mean_native_uint64_uses_exact_storage_and_rounds_halves_up() {
         let input = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, u64::MAX, 0, 0]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, u64::MAX, 0, 0]),
             vec![2, 2],
         )
         .expect("integer tensor");
@@ -3116,7 +3118,7 @@ pub(crate) mod tests {
     #[test]
     fn mean_native_integer_default_dimension_preserves_typed_tensor() {
         let input = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1, 2, 4, 5]),
+            runmat_value::IntegerStorage::U16(vec![1, 2, 4, 5]),
             vec![2, 2],
         )
         .expect("integer tensor");
@@ -3128,7 +3130,7 @@ pub(crate) mod tests {
         assert_eq!(output.shape, vec![1, 2]);
         assert_eq!(
             output.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U16(vec![2, 5]))
+            Some(&runmat_value::IntegerStorage::U16(vec![2, 5]))
         );
     }
 
@@ -3193,7 +3195,7 @@ pub(crate) mod tests {
     #[test]
     fn mean_native_int64_rounds_negative_halves_away_from_zero() {
         let input = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-2, -1, 0, 1]),
+            runmat_value::IntegerStorage::I64(vec![-2, -1, 0, 1]),
             vec![2, 2],
         )
         .expect("integer tensor");
@@ -3209,7 +3211,7 @@ pub(crate) mod tests {
     #[test]
     fn mean_native_vecdim_reduces_once_before_rounding() {
         let input = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I8(vec![0, 0, 0, 5]),
+            runmat_value::IntegerStorage::I8(vec![0, 0, 0, 5]),
             vec![2, 2],
         )
         .expect("integer tensor");

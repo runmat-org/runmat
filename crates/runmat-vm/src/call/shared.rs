@@ -1,8 +1,8 @@
 use crate::bytecode::ArgSpec;
 use crate::bytecode::EndExpr;
-use runmat_builtins::Value;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
 use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_value::Value;
 use std::future::Future;
 
 const OBJECT_PROTOCOL_SUBSREF: &str = runmat_runtime::OBJECT_SUBSREF_METHOD;
@@ -15,13 +15,13 @@ const OBJECT_SELECTOR_END: &str = "end";
 const OBJECT_END_RANGE_TAG: &str = "end_expr";
 
 pub fn expand_cell_indices(
-    cell: &runmat_builtins::CellArray,
+    cell: &runmat_value::CellArray,
     indices: &[Value],
 ) -> Result<Vec<Value>, RuntimeError> {
     crate::ops::cells::expand_cell_indices(cell, indices)
 }
 
-pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, RuntimeError> {
+pub fn expand_all_cell(cell: &runmat_value::CellArray) -> Result<Vec<Value>, RuntimeError> {
     crate::ops::cells::expand_all_cell_values(cell)
 }
 
@@ -372,7 +372,7 @@ fn build_matlab_substruct_arg(descriptor: &ObjectIndexDescriptor) -> Result<Valu
         ObjectIndexSelector::IndexValues { values } => build_protocol_index_cell(values.clone())?,
         ObjectIndexSelector::Member(field) => Value::String(field.clone()),
     };
-    let mut value = runmat_builtins::StructValue::new();
+    let mut value = runmat_value::StructValue::new();
     value.fields.insert(
         "type".to_string(),
         Value::String(matlab_index_type(descriptor.kind).to_string()),
@@ -979,8 +979,8 @@ fn build_cell_array_with_shape(
     rows: usize,
     cols: usize,
     context: &str,
-) -> Result<runmat_builtins::CellArray, RuntimeError> {
-    runmat_builtins::CellArray::new(values, rows, cols).map_err(|e| {
+) -> Result<runmat_value::CellArray, RuntimeError> {
+    runmat_value::CellArray::new(values, rows, cols).map_err(|e| {
         build_runtime_error(format!("{context}: {e}"))
             .with_identifier("RunMat:ShapeMismatch")
             .build()
@@ -999,11 +999,10 @@ mod tests {
     use crate::bytecode::ArgSpec;
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        register_class, Access, ClassDef, HandleRef, IntValue, MethodDef, Value,
-    };
+    use runmat_builtins::{register_class, ClassDef, MethodDef};
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
+    use runmat_value::{Access, HandleRef, IntValue, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1268,7 +1267,7 @@ mod tests {
             1,
             0,
             0,
-            &[Value::Struct(runmat_builtins::StructValue::new())],
+            &[Value::Struct(runmat_value::StructValue::new())],
         )
         .expect_err("unsupported selector should fail");
         assert_eq!(
@@ -1556,7 +1555,7 @@ mod tests {
             &[],
             &[],
             &[],
-            &[Value::Struct(runmat_builtins::StructValue::new())],
+            &[Value::Struct(runmat_value::StructValue::new())],
         )
         .expect_err("unsupported object selector type should fail");
         assert_eq!(
@@ -1586,7 +1585,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan() {
-        let key_cell = runmat_builtins::CellArray::new(vec![Value::String("k".to_string())], 1, 1)
+        let key_cell = runmat_value::CellArray::new(vec![Value::String("k".to_string())], 1, 1)
             .expect("key cell");
         let selectors = build_object_paren_expr_selector_values_from_parts!(
             2,
@@ -1735,7 +1734,7 @@ mod tests {
 
         let mut stack = vec![
             Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
-            Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         ];
         let expanded = block_on(build_expanded_args_from_specs(
             &mut stack,

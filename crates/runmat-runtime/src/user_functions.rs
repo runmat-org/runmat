@@ -1,7 +1,7 @@
 use crate::RuntimeError;
-use runmat_builtins::Value;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SourceId};
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;

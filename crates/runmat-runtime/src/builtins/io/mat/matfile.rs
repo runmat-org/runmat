@@ -5,12 +5,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ObjectInstance, PropertyDef, StringArray, StructValue, Value,
+    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, ObjectInstance, StringArray, StructValue, Value};
 
 use super::load::read_mat_file_for_builtin;
 use super::save::encode_workspace_to_mat_bytes;
@@ -633,7 +634,7 @@ mod tests {
     use super::*;
     use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntegerStorage, Tensor};
+    use runmat_value::{CharArray, IntegerStorage, Tensor};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);

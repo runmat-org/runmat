@@ -12,10 +12,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntegerStorage,
-    LogicalArray, NumericScalar, NumericStorage, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericScalar,
+    NumericStorage, Tensor, Value,
+};
 
 use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
 use crate::build_runtime_error;
@@ -1512,9 +1515,8 @@ impl SortRowsEvaluation {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{
-        CellArray, IntValue, IntegerStorage, ResolveContext, StringArray, Type, Value,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, IntValue, IntegerStorage, StringArray, Value};
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
         futures::executor::block_on(super::evaluate(value, rest))

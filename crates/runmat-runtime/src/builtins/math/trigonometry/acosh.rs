@@ -12,9 +12,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -385,7 +385,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex64;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -428,7 +429,7 @@ pub(crate) mod tests {
         else {
             panic!("expected complex-single tensor");
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
     }
 
     fn error_message(err: &RuntimeError) -> String {
@@ -521,11 +522,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_reads_typed_integer_tensor_storage_exactly() {
-        let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![1, 2, 3]),
-            vec![3, 1],
-        )
-        .expect("integer tensor");
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1])
+                .expect("integer tensor");
 
         match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
             Value::Tensor(out) => {
@@ -543,9 +542,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_below_domain_typed_integer_promotes_from_storage() {
-        let tensor =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![0, 2]), vec![1, 2])
-                .expect("integer tensor");
+        let tensor = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![0, 2]), vec![1, 2])
+            .expect("integer tensor");
 
         match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
             Value::ComplexTensor(out) => {

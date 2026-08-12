@@ -9,7 +9,7 @@ pub use error::ValueCodecError;
 #[cfg(test)]
 mod tests {
     use crate::execution::RuntimeExecutionServices;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
         MException, StringArray, StructValue, Tensor, Value,
     };
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn callable_captures_round_trip_and_failures_name_the_local_path() {
-        let closure = Value::Closure(runmat_builtins::Closure {
+        let closure = Value::Closure(runmat_value::Closure {
             function_name: "worker".into(),
             bound_function: Some(7),
             captures: vec![Value::Num(2.0)],

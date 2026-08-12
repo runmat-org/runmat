@@ -7,8 +7,8 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{CharArray, StringArray, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -433,7 +433,7 @@ fn collect_string_array(array: StringArray) -> BuiltinResult<SubjectCollection> 
 
 async fn collect_cell_array(
     builtin: &'static str,
-    cell: runmat_builtins::CellArray,
+    cell: runmat_value::CellArray,
 ) -> BuiltinResult<SubjectCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
     for ptr in &cell.data {
@@ -516,7 +516,7 @@ fn collect_pattern_string_array(
 
 async fn collect_pattern_cell(
     builtin: &'static str,
-    cell: runmat_builtins::CellArray,
+    cell: runmat_value::CellArray,
     subjects: &SubjectCollection,
 ) -> BuiltinResult<PatternCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
@@ -595,7 +595,7 @@ fn collect_replacement_string_array(
 
 async fn collect_replacement_cell(
     builtin: &'static str,
-    cell: runmat_builtins::CellArray,
+    cell: runmat_value::CellArray,
     subjects: &SubjectCollection,
 ) -> BuiltinResult<ReplacementCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
@@ -1092,7 +1092,7 @@ pub(crate) mod tests {
         let subject =
             Value::StringArray(StringArray::new(vec!["Color: red".into()], vec![1, 1]).unwrap());
         let patterns = Value::Cell(
-            runmat_builtins::CellArray::new(
+            runmat_value::CellArray::new(
                 vec![Value::String("Color".into()), Value::String("red".into())],
                 1,
                 2,
@@ -1100,7 +1100,7 @@ pub(crate) mod tests {
             .unwrap(),
         );
         let replacements = Value::Cell(
-            runmat_builtins::CellArray::new(
+            runmat_value::CellArray::new(
                 vec![Value::String("Shade".into()), Value::String("blue".into())],
                 1,
                 2,
@@ -1292,7 +1292,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_cell_subject_outputs_cell() {
-        let cell = runmat_builtins::CellArray::new(
+        let cell = runmat_value::CellArray::new(
             vec![Value::String("cat".into()), Value::String("dog".into())],
             2,
             1,

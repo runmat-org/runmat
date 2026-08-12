@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::format::{flatten_arguments, format_variadic};
 use crate::builtins::common::gpu_helpers;
@@ -757,9 +757,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        ResolveContext, Tensor, Type,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
 
     fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -937,12 +937,12 @@ pub(crate) mod tests {
 
     #[test]
     fn assert_real_condition_conversion_rejects_nan_and_accepts_character_vectors() {
-        let chars = runmat_builtins::CharArray::new(vec!['o', 'k'], 1, 2).expect("chars");
+        let chars = runmat_value::CharArray::new(vec!['o', 'k'], 1, 2).expect("chars");
         assert_builtin(vec![Value::CharArray(chars)]).expect("nonzero character codes pass");
 
         for chars in [
-            runmat_builtins::CharArray::new(Vec::new(), 1, 0).expect("empty"),
-            runmat_builtins::CharArray::new(vec!['o', '\0'], 1, 2).expect("zero character"),
+            runmat_value::CharArray::new(Vec::new(), 1, 0).expect("empty"),
+            runmat_value::CharArray::new(vec!['o', '\0'], 1, 2).expect("zero character"),
         ] {
             let err =
                 assert_builtin(vec![Value::CharArray(chars)]).expect_err("condition should fail");

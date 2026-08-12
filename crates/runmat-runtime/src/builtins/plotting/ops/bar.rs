@@ -10,7 +10,7 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, NumericScalar, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
@@ -18,6 +18,7 @@ use runmat_plot::gpu::bar::{BarGpuInputs, BarGpuParams, BarLayoutMode, BarOrient
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::bar::Orientation;
 use runmat_plot::plots::BarChart;
+use runmat_value::{NumericScalar, Tensor, Value};
 use std::convert::TryFrom;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -1494,8 +1495,8 @@ pub(crate) mod tests {
     use crate::builtins::common::{gpu_helpers, test_support};
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Value};
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, Value};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

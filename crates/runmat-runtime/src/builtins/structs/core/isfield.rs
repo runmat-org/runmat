@@ -8,9 +8,9 @@ use crate::builtins::structs::type_resolvers::isfield_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, LogicalArray, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, LogicalArray, StructValue, Value};
 use std::collections::HashSet;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -434,7 +434,7 @@ fn field_name_type_error() -> RuntimeError {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, CharArray, StringArray, StructValue};
+    use runmat_value::{CellArray, CharArray, StringArray, StructValue};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

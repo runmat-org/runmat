@@ -1,10 +1,11 @@
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ObjectInstance, StructValue, Tensor, Value,
+    ClassDef, MethodDef,
 };
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, ObjectInstance, StructValue, Tensor, Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -515,7 +516,7 @@ where
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Value;
+    use runmat_value::Value;
 
     #[test]
     fn geometry_inspect_builtin_returns_object_value() {

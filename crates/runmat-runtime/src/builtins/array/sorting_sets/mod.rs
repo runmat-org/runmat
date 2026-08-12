@@ -3,8 +3,8 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, IntegerElementType};
 use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerScalarDoubleRule,
-    ComplexTensor, IntegerStorage, Tensor, Value,
 };
+use runmat_value::{ComplexTensor, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
 

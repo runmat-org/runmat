@@ -16,9 +16,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -651,12 +651,10 @@ pub(crate) mod tests {
     use num_complex::Complex;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{
-        builtin_function_by_name, ComplexTensor as HostComplexTensor, IntValue, ResolveContext,
-        Tensor, Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{ComplexTensor as HostComplexTensor, IntValue, Tensor};
     #[cfg(feature = "wgpu")]
-    use runmat_builtins::{IntegerStorage, LogicalArray};
+    use runmat_value::{IntegerStorage, LogicalArray};
     use rustfft::FftPlanner;
 
     fn approx_eq((a_re, a_im): (f64, f64), (b_re, b_im): (f64, f64), tol: f64) -> bool {
@@ -979,7 +977,7 @@ pub(crate) mod tests {
     fn ifft_wide_integer_data_is_mode_gated_and_exact() {
         let input = || {
             Value::Tensor(
-                Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![1, 2]), vec![1, 2])
+                Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1, 2]), vec![1, 2])
                     .unwrap(),
             )
         };
@@ -1000,7 +998,7 @@ pub(crate) mod tests {
         ));
         let inexact = Value::Tensor(
             Tensor::new_integer(
-                runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
                 vec![1, 1],
             )
             .unwrap(),
@@ -1012,13 +1010,13 @@ pub(crate) mod tests {
     #[test]
     fn ifft_documented_integer_data_returns_double_complex_storage() {
         let input = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I32(vec![1, 2, 3, 4]),
+            runmat_value::IntegerStorage::I32(vec![1, 2, 3, 4]),
             vec![1, 4],
         )
         .unwrap();
         let output = ifft_builtin(Value::Tensor(input), Vec::new()).expect("integer ifft");
         let complex = value_as_complex_tensor(output);
-        assert_eq!(complex.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(complex.numeric_dtype(), runmat_value::NumericDType::F64);
     }
 
     #[test]
@@ -1043,7 +1041,7 @@ pub(crate) mod tests {
         let spectrum = || {
             Value::ComplexTensor(
                 HostComplexTensor::from_complex_storage(
-                    runmat_builtins::ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0)]),
+                    runmat_value::ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0)]),
                     vec![1, 2],
                 )
                 .unwrap(),
@@ -1052,14 +1050,14 @@ pub(crate) mod tests {
         let complex = value_as_complex_tensor(
             ifft_builtin(spectrum(), Vec::new()).expect("complex single ifft"),
         );
-        assert_eq!(complex.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(complex.numeric_dtype(), runmat_value::NumericDType::F32);
 
         let real = ifft_builtin(spectrum(), vec![Value::from("symmetric")])
             .expect("symmetric single ifft");
         let Value::Tensor(real) = real else {
             panic!("expected real tensor")
         };
-        assert_eq!(real.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(real.numeric_dtype(), runmat_value::NumericDType::F32);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1219,7 +1217,7 @@ pub(crate) mod tests {
             };
             assert_eq!(
                 integer_output.numeric_dtype(),
-                runmat_builtins::NumericDType::F64
+                runmat_value::NumericDType::F64
             );
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&integer_handle),
@@ -1243,7 +1241,7 @@ pub(crate) mod tests {
             };
             assert_eq!(
                 logical_output.numeric_dtype(),
-                runmat_builtins::NumericDType::F64
+                runmat_value::NumericDType::F64
             );
             assert!(runmat_accelerate_api::handle_is_logical(&logical_handle));
 

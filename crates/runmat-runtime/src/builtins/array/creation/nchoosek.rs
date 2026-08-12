@@ -6,11 +6,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue,
-    IntegerComplexStorage, LogicalArray, NumericDType, NumericStorage, ResolveContext, Tensor,
-    Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
+    NumericDType, NumericStorage, Tensor, Value,
+};
 
 use crate::builtins::common::{
     spec::{
@@ -632,12 +634,10 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
     }
 }
 
-fn parse_nonnegative_integer_numeric(value: runmat_builtins::NumericScalar) -> Option<usize> {
+fn parse_nonnegative_integer_numeric(value: runmat_value::NumericScalar) -> Option<usize> {
     match value {
-        runmat_builtins::NumericScalar::F64(value) => parse_nonnegative_integer_f64(value),
-        runmat_builtins::NumericScalar::F32(value) => {
-            parse_nonnegative_integer_f64(f64::from(value))
-        }
+        runmat_value::NumericScalar::F64(value) => parse_nonnegative_integer_f64(value),
+        runmat_value::NumericScalar::F32(value) => parse_nonnegative_integer_f64(f64::from(value)),
         value => parse_nonnegative_integer_int(&value.into_int_value()?),
     }
 }
@@ -765,7 +765,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn call(first: Value, k: Value) -> BuiltinResult<Value> {
         block_on(evaluate(first, k))

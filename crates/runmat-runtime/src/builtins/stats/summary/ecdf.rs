@@ -9,10 +9,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericScalar, ResolveContext, StructValue, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle};
+use runmat_value::{IntValue, NumericScalar, StructValue, Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
@@ -1591,7 +1592,8 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntegerStorage, LogicalArray};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntegerStorage, LogicalArray};
 
     fn tensor(data: Vec<f64>) -> Value {
         Value::Tensor(Tensor::new(data.clone(), vec![data.len(), 1]).unwrap())

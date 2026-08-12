@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -220,7 +220,7 @@ fn cospi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         return Tensor::new(data, tensor.shape.clone())
             .map_err(|err| cospi_error_with_detail(&ERROR_INTERNAL, err));
     }
-    if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+    if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
         let data = tensor
             .as_f32_slice()
             .expect("single tensor storage")
@@ -238,16 +238,16 @@ fn cospi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         .map_err(|err| cospi_error_with_detail(&ERROR_INTERNAL, err))
 }
 
-fn integer_is_even(value: &runmat_builtins::IntValue) -> bool {
+fn integer_is_even(value: &runmat_value::IntValue) -> bool {
     match value {
-        runmat_builtins::IntValue::I8(v) => v % 2 == 0,
-        runmat_builtins::IntValue::I16(v) => v % 2 == 0,
-        runmat_builtins::IntValue::I32(v) => v % 2 == 0,
-        runmat_builtins::IntValue::I64(v) => v % 2 == 0,
-        runmat_builtins::IntValue::U8(v) => v % 2 == 0,
-        runmat_builtins::IntValue::U16(v) => v % 2 == 0,
-        runmat_builtins::IntValue::U32(v) => v % 2 == 0,
-        runmat_builtins::IntValue::U64(v) => v % 2 == 0,
+        runmat_value::IntValue::I8(v) => v % 2 == 0,
+        runmat_value::IntValue::I16(v) => v % 2 == 0,
+        runmat_value::IntValue::I32(v) => v % 2 == 0,
+        runmat_value::IntValue::I64(v) => v % 2 == 0,
+        runmat_value::IntValue::U8(v) => v % 2 == 0,
+        runmat_value::IntValue::U16(v) => v % 2 == 0,
+        runmat_value::IntValue::U32(v) => v % 2 == 0,
+        runmat_value::IntValue::U64(v) => v % 2 == 0,
     }
 }
 
@@ -354,7 +354,8 @@ fn cospi_error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     use crate::builtins::common::test_support;
 
@@ -513,7 +514,7 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn cospi_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 2]),
+            runmat_value::IntegerStorage::I16(vec![-1, 0, 2]),
             vec![3, 1],
         )
         .expect("integer tensor");

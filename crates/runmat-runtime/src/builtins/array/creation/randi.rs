@@ -4,10 +4,10 @@ use runmat_accelerate_api::{GpuTensorHandle, HostIntegerDataView, HostIntegerTen
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, IntValue, IntegerStorage, LogicalArray,
-    NumericDType, Tensor, Value,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
@@ -692,7 +692,7 @@ fn randi_single(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value>
         .into_iter()
         .map(|value| value as f64)
         .collect();
-    Tensor::new_with_dtype(data, shape.to_vec(), runmat_builtins::NumericDType::F32)
+    Tensor::new_with_dtype(data, shape.to_vec(), runmat_value::NumericDType::F32)
         .map(tensor::tensor_into_value)
         .map_err(|error| builtin_error(format!("randi: {error}")))
 }
@@ -744,8 +744,8 @@ async fn randi_like(
         Value::GpuTensor(handle) => randi_like_gpu(handle, bounds, shape).await,
         Value::LogicalArray(_) | Value::Bool(_) => randi_logical(bounds, shape),
         Value::Tensor(tensor) => match tensor.numeric_dtype() {
-            runmat_builtins::NumericDType::F32 => randi_single(bounds, shape),
-            runmat_builtins::NumericDType::F64 => randi_double(bounds, shape),
+            runmat_value::NumericDType::F32 => randi_single(bounds, shape),
+            runmat_value::NumericDType::F64 => randi_double(bounds, shape),
             dtype => randi_integer(
                 bounds,
                 shape,
@@ -1199,7 +1199,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_value::LogicalArray;
 
     fn reset_rng_clean() -> impl Drop {
         let guard = random::test_guard();
@@ -1354,7 +1354,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected single tensor");
         };
-        assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F32);
         assert!(tensor.integer_storage().is_none());
     }
 

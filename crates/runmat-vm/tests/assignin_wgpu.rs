@@ -16,7 +16,7 @@ fn assignin_wgpu_preserves_exact_resident_integer_value() {
     let resident_ids = vars
         .iter()
         .filter_map(|value| match value {
-            runmat_builtins::Value::GpuTensor(handle) => Some(handle.buffer_id),
+            runmat_value::Value::GpuTensor(handle) => Some(handle.buffer_id),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -31,9 +31,9 @@ fn assignin_wgpu_preserves_exact_resident_integer_value() {
     assert!(vars.iter().any(|value| {
         matches!(
             value,
-            runmat_builtins::Value::Tensor(tensor)
+            runmat_value::Value::Tensor(tensor)
                 if tensor.integer_storage()
-                    == Some(&runmat_builtins::IntegerStorage::U64(vec![
+                    == Some(&runmat_value::IntegerStorage::U64(vec![
                         9_007_199_254_740_993,
                         u64::MAX,
                     ]))

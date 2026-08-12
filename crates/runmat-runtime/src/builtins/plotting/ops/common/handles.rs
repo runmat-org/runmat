@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, Value};
+use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::plotting_error;
@@ -192,7 +192,7 @@ pub fn parse_string_handle_or_next(text: &str, ctx: &str) -> BuiltinResult<Optio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn handles_read_typed_integer_storage() {

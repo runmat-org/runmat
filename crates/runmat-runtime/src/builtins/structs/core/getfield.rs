@@ -14,16 +14,18 @@ use crate::{
     BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, HandleRef, Listener,
-    LogicalArray, MException, NumericScalar, ObjectInstance, StructValue, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
+    NumericScalar, ObjectInstance, StructValue, Tensor, Value,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::getfield")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -1090,7 +1092,7 @@ fn cell_dimension_length(cell: &CellArray, dims: usize, dim_idx: usize) -> Built
 }
 
 fn string_array_dimension_length(
-    array: &runmat_builtins::StringArray,
+    array: &runmat_value::StringArray,
     dims: usize,
     dim_idx: usize,
 ) -> BuiltinResult<usize> {
@@ -1469,7 +1471,7 @@ fn get_listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
             })?;
             Ok(value)
         }
-        "Id" | "id" => Ok(Value::Int(runmat_builtins::IntValue::U64(listener.id))),
+        "Id" | "id" => Ok(Value::Int(runmat_value::IntValue::U64(listener.id))),
         other => Err(getfield_error_with_message(
             format!("getfield: unknown field '{}' on listener object", other),
             &GETFIELD_ERROR_MISSING_FIELD,
@@ -1511,9 +1513,10 @@ fn is_struct_array(cell: &CellArray) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{
-        Access, CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, IntegerStorage,
-        Listener, MException, NumericStorage, ObjectInstance, PropertyDef, StructValue,
+    use runmat_builtins::{ClassDef, PropertyDef};
+    use runmat_value::{
+        Access, CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerStorage, Listener,
+        MException, NumericStorage, ObjectInstance, StructValue,
     };
 
     #[cfg(feature = "wgpu")]

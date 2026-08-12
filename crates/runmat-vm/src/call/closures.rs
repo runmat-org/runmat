@@ -8,11 +8,10 @@ use crate::call::shared::{
 };
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
-use runmat_builtins::{
-    builtin_function_by_name, builtin_functions, get_class, lookup_method, Access, Closure, Value,
-};
+use runmat_builtins::{builtin_function_by_name, builtin_functions, get_class, lookup_method};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
+use runmat_value::{Access, Closure, Value};
 
 fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<String> {
     let caller_function_name = caller_function_name?;
@@ -638,8 +637,9 @@ pub fn collect_method_args(
 mod tests {
     use super::{call_method_or_member_index_with_outputs, load_method_closure};
     use futures::executor::block_on;
-    use runmat_builtins::{register_class, Access, ClassDef, MethodDef, Value};
+    use runmat_builtins::{register_class, ClassDef, MethodDef};
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId};
+    use runmat_value::{Access, Value};
     use std::collections::HashMap;
     use std::sync::Arc;
 

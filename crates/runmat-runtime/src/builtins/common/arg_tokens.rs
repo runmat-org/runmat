@@ -1,4 +1,5 @@
-use runmat_builtins::{IntValue, LiteralValue, ResolveContext, Value};
+use runmat_builtins::{LiteralValue, ResolveContext};
+use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::tensor;
 
@@ -57,10 +58,7 @@ fn token_from_value(value: &Value) -> ArgToken {
     }
 }
 
-fn token_from_integer_storage(
-    storage: &runmat_builtins::IntegerStorage,
-    shape: &[usize],
-) -> ArgToken {
+fn token_from_integer_storage(storage: &runmat_value::IntegerStorage, shape: &[usize]) -> ArgToken {
     if storage.len() == 1 {
         return ArgToken::Integer(storage.value_at(0).expect("one-element integer storage"));
     }
@@ -112,9 +110,8 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{
-        IntValue, IntegerStorage, LiteralValue, NumericStorage, ResolveContext, Tensor,
-    };
+    use runmat_builtins::{LiteralValue, ResolveContext};
+    use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor};
 
     #[test]
     fn tokens_from_context_lowercases_strings() {
@@ -161,7 +158,7 @@ mod tests {
 
     #[test]
     fn tokens_from_values_handles_vector_tensor() {
-        let tensor = runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let tensor = runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         assert_eq!(
             tokens_from_values(&args),

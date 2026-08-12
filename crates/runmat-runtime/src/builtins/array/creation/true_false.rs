@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LogicalArray, NumericDType, NumericScalar, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, LogicalArray, NumericDType, NumericScalar, Value};
 
 use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -504,7 +504,7 @@ async fn false_output(parsed: ParsedFalse) -> BuiltinResult<Value> {
                 ));
             };
             Ok(Value::SparseTensor(
-                runmat_builtins::SparseTensor::zeros_logical(*rows, *cols),
+                runmat_value::SparseTensor::zeros_logical(*rows, *cols),
             ))
         }
         Some(Value::GpuTensor(prototype)) => false_gpu_output(prototype, &parsed.shape),
@@ -531,9 +531,8 @@ fn false_gpu_output(
     let result = match provider.zeros(shape) {
         Ok(result) => result,
         Err(_) => {
-            let host =
-                runmat_builtins::Tensor::new(vec![0.0; shape.iter().product()], shape.to_vec())
-                    .map_err(|error| builtin_error("false", format!("false: {error}")))?;
+            let host = runmat_value::Tensor::new(vec![0.0; shape.iter().product()], shape.to_vec())
+                .map_err(|error| builtin_error("false", format!("false: {error}")))?;
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &host)
                 .map_err(|error| builtin_error("false", format!("false: {error}")))?
         }
@@ -837,7 +836,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
-    use runmat_builtins::{IntegerStorage, SparseTensor, Tensor};
+    use runmat_value::{IntegerStorage, SparseTensor, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

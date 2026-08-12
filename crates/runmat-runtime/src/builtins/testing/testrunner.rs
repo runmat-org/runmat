@@ -1,4 +1,5 @@
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{ResolveContext, Type};
+use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
 
@@ -61,7 +62,7 @@ fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
                 .properties
                 .entry("Plugins".into())
                 .or_insert_with(|| {
-                    Value::Cell(runmat_builtins::CellArray::new(Vec::new(), 1, 0).unwrap())
+                    Value::Cell(runmat_value::CellArray::new(Vec::new(), 1, 0).unwrap())
                 });
             if let Value::Cell(plugins) = plugins {
                 plugins.data.push(plugin);
@@ -122,7 +123,7 @@ fn set_plugins(runner: &Value, plugins: Vec<Value>) -> BuiltinResult<()> {
             object.properties.insert(
                 "Plugins".into(),
                 Value::Cell(
-                    runmat_builtins::CellArray::new(plugins, 1, count)
+                    runmat_value::CellArray::new(plugins, 1, count)
                         .expect("plugin row shape is valid"),
                 ),
             );

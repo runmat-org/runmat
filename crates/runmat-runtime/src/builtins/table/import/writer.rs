@@ -146,7 +146,7 @@ pub(in crate::builtins::table) fn char_rows(array: &CharArray) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn cell_to_text_preserves_exact_integer_scalar_storage() {

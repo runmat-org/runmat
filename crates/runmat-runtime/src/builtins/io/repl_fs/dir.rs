@@ -13,9 +13,9 @@ use glob::glob;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Value};
 
 use crate::builtins::common::fs::{
     compare_names, contains_wildcards, expand_user_path, path_to_string,
@@ -555,8 +555,8 @@ fn sort_records(records: &mut [DirRecord]) {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::{CharArray, StringArray, StructValue as TestStruct};
     use runmat_filesystem::File;
+    use runmat_value::{CharArray, StringArray, StructValue as TestStruct};
     use tempfile::tempdir;
 
     fn dir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

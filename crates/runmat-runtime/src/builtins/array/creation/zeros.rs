@@ -7,9 +7,11 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
+};
 use std::sync::OnceLock;
 
 use crate::build_runtime_error;
@@ -22,8 +24,8 @@ use crate::builtins::common::{
     gpu_helpers, random_args::validate_constructor_gpu_output, shape::normalize_scalar_shape,
     tensor,
 };
-use runmat_builtins::NumericDType;
 use runmat_builtins::Type;
+use runmat_value::NumericDType;
 
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use runmat_builtins::ResolveContext;
@@ -652,7 +654,7 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
 }
 
 fn zeros_integer_like(storage: &IntegerStorage, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    let tensor = runmat_builtins::Tensor::new_integer(
+    let tensor = runmat_value::Tensor::new_integer(
         storage.zeros_like(tensor::element_count(shape)),
         shape.to_vec(),
     )
@@ -945,7 +947,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor, Tensor};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, SparseTensor, Tensor};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct InvalidAutomaticZerosProvider {

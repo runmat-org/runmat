@@ -11,9 +11,9 @@ use glob::glob;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, Value};
 
 use crate::builtins::common::fs::{
     contains_wildcards, expand_user_path, path_to_string, sort_entries,
@@ -358,8 +358,8 @@ async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::CharArray;
     use runmat_filesystem::File;
+    use runmat_value::CharArray;
     use tempfile::tempdir;
 
     fn ls_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

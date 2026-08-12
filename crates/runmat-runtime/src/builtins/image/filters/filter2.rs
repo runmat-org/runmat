@@ -13,9 +13,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use super::imfilter::apply_imfilter_tensor;
 use crate::builtins::common::spec::{
@@ -555,7 +555,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostTensorView, ImfilterMode, ImfilterOptions, ImfilterShape};
-    use runmat_builtins::LogicalArray;
+    use runmat_value::LogicalArray;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
         Tensor::new(data, vec![rows, cols]).expect("tensor construction")
@@ -819,7 +819,7 @@ pub(crate) mod tests {
 
     #[test]
     fn typed_integer_inputs_produce_double_and_single_input_is_preserved() {
-        use runmat_builtins::IntegerStorage;
+        use runmat_value::IntegerStorage;
 
         let integer =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();

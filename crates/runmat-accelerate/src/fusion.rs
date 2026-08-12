@@ -7,8 +7,8 @@ use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
 
 use runmat_accelerate_api::ReductionFlavor;
-use runmat_builtins::Value;
 use runmat_runtime::builtins::common::tensor::tensor_element_len;
+use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{
@@ -2887,7 +2887,7 @@ fn value_info_scalar(info: &ValueInfo) -> Option<f64> {
         // lossy f64 mirror of a native integer tensor.
         Some(Value::Tensor(t)) if t.integer_storage().is_none() && t.len() == 1 => t
             .numeric_value_at(0)
-            .map(runmat_builtins::NumericScalar::materialize_f64),
+            .map(runmat_value::NumericScalar::materialize_f64),
         Some(Value::LogicalArray(arr)) if arr.data.len() == 1 => Some(arr.data[0] as f64),
         Some(Value::Bool(flag)) => Some(if *flag { 1.0 } else { 0.0 }),
         _ => None,
@@ -3521,7 +3521,8 @@ mod tests {
         AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan,
         PrimitiveOp, ValueId, ValueInfo, ValueOrigin, VarKind,
     };
-    use runmat_builtins::{IntValue, Type, Value};
+    use runmat_builtins::Type;
+    use runmat_value::{IntValue, Value};
     use std::collections::HashMap as StdHashMap;
 
     fn simple_elementwise_graph() -> AccelGraph {
@@ -3834,8 +3835,8 @@ mod tests {
 
     #[test]
     fn native_integer_tensor_constants_decline_float_fusion() {
-        let tensor = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![1_u64 << 63]),
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![1_u64 << 63]),
             vec![1, 1],
         )
         .expect("integer tensor");

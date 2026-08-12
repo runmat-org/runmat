@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -375,9 +375,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CharArray, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type, Value,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CharArray, IntegerStorage, LogicalArray, Tensor, Value};
     use std::f64::consts::PI;
 
     const EPS: f64 = 1e-12;
@@ -622,7 +621,7 @@ pub(crate) mod tests {
     #[test]
     fn atan2_nonfloating_inputs_are_independently_gated() {
         let integer = atan2_builtin(
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             Value::Num(1.0),
         )
         .expect_err("integer input must be gated");
@@ -649,14 +648,14 @@ pub(crate) mod tests {
     fn atan2_integer_extension_covers_all_eight_classes_exactly() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let values = [
-            runmat_builtins::IntValue::I8(i8::MAX),
-            runmat_builtins::IntValue::I16(i16::MAX),
-            runmat_builtins::IntValue::I32(i32::MAX),
-            runmat_builtins::IntValue::I64(i64::MAX),
-            runmat_builtins::IntValue::U8(u8::MAX),
-            runmat_builtins::IntValue::U16(u16::MAX),
-            runmat_builtins::IntValue::U32(u32::MAX),
-            runmat_builtins::IntValue::U64(u64::MAX),
+            runmat_value::IntValue::I8(i8::MAX),
+            runmat_value::IntValue::I16(i16::MAX),
+            runmat_value::IntValue::I32(i32::MAX),
+            runmat_value::IntValue::I64(i64::MAX),
+            runmat_value::IntValue::U8(u8::MAX),
+            runmat_value::IntValue::U16(u16::MAX),
+            runmat_value::IntValue::U32(u32::MAX),
+            runmat_value::IntValue::U64(u64::MAX),
         ];
         for value in values {
             let expected = matlab_atan2_f64(value.to_f64(), 1.0);

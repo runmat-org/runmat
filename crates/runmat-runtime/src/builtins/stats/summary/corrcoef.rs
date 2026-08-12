@@ -11,9 +11,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntValue, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -665,7 +665,7 @@ fn parse_alpha(value: &Value) -> BuiltinResult<f64> {
                 && tensor.integer_storage().is_none()
                 && matches!(
                     tensor.numeric_dtype(),
-                    runmat_builtins::NumericDType::F32 | runmat_builtins::NumericDType::F64
+                    runmat_value::NumericDType::F32 | runmat_value::NumericDType::F64
                 ) =>
         {
             let value = tensor.materialize_f64()[0];
@@ -1335,9 +1335,9 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{
-        ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Tensor,
-        Type, Value,
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
+        ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Value,
     };
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Tensor {

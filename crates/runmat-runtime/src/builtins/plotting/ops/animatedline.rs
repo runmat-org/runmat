@@ -6,10 +6,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{Line3Plot, LinePlot};
+use runmat_value::{Tensor, Value};
 
 use super::line::handles_value;
 use super::op_common::line_inputs::NumericInput;
@@ -487,7 +488,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[cfg(feature = "wgpu")]
     fn register_wgpu_provider_available() -> bool {
@@ -664,23 +665,23 @@ mod tests {
         if usize::BITS == 64 {
             let wide = 9_007_199_254_740_993_u64;
             assert_eq!(
-                block_on(maximum_from_value(Value::Int(
-                    runmat_builtins::IntValue::U64(wide)
-                )))
+                block_on(maximum_from_value(Value::Int(runmat_value::IntValue::U64(
+                    wide
+                ))))
                 .expect("wide exact maximum"),
                 Some(wide as usize)
             );
             assert_eq!(
-                block_on(maximum_from_value(Value::Int(
-                    runmat_builtins::IntValue::U64(u64::MAX)
-                )))
+                block_on(maximum_from_value(Value::Int(runmat_value::IntValue::U64(
+                    u64::MAX
+                ))))
                 .expect("full-width exact maximum"),
                 Some(usize::MAX)
             );
         }
         for invalid in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
-            Value::Int(runmat_builtins::IntValue::U8(0)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::U8(0)),
         ] {
             assert!(block_on(maximum_from_value(invalid)).is_err());
         }
@@ -812,7 +813,7 @@ mod tests {
 
     fn integer_vector(values: &[i16]) -> Value {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(values.to_vec()),
+            runmat_value::IntegerStorage::I16(values.to_vec()),
             vec![1, values.len()],
         )
         .unwrap();

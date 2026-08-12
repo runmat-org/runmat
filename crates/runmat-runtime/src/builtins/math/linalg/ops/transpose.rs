@@ -17,14 +17,14 @@ use crate::builtins::math::linalg::type_resolvers::matrix_transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
 use runmat_accelerate_api::GpuTensorHandle;
-#[cfg(test)]
-use runmat_builtins::IntegerStorage;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::IntegerStorage;
+use runmat_value::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 const NAME: &str = "transpose";
 
@@ -415,9 +415,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor};
 
     fn call_transpose(value: Value) -> BuiltinResult<Value> {
         block_on(super::transpose_builtin(vec![value]))
@@ -548,7 +547,7 @@ pub(crate) mod tests {
         assert_eq!(result.shape, vec![3, 2]);
         assert_eq!(
             result.into_numeric_storage().unwrap(),
-            runmat_builtins::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+            runmat_value::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         );
     }
 

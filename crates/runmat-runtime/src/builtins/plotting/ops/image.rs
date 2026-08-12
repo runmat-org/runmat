@@ -10,10 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
+use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
 
 use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::op_common::surface_inputs::{
@@ -781,8 +781,8 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
+    use runmat_value::IntegerStorage;
 
     fn truecolor_tensor() -> Tensor {
         Tensor::new(

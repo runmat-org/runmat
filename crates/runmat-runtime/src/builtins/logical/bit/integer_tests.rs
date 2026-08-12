@@ -641,7 +641,7 @@ fn bitand_broadcasts_tensor_and_scalar() {
 
 #[test]
 fn binary_bitwise_sparse_operands_preserve_or_materialize_by_zero_semantics() {
-    let left = runmat_builtins::SparseTensor::new(
+    let left = runmat_value::SparseTensor::new(
         2,
         2,
         vec![0, 1, 2],
@@ -649,7 +649,7 @@ fn binary_bitwise_sparse_operands_preserve_or_materialize_by_zero_semantics() {
         vec![0b0110 as f64, 0b1010 as f64],
     )
     .expect("left sparse");
-    let right = runmat_builtins::SparseTensor::new(
+    let right = runmat_value::SparseTensor::new(
         2,
         2,
         vec![0, 1, 2],
@@ -697,7 +697,7 @@ fn binary_bitwise_sparse_operands_preserve_or_materialize_by_zero_semantics() {
 
 #[test]
 fn binary_bitwise_sparse_dense_and_broadcast_forms_use_zero_aware_output_storage() {
-    let sparse = runmat_builtins::SparseTensor::new(
+    let sparse = runmat_value::SparseTensor::new(
         2,
         2,
         vec![0, 1, 2],
@@ -736,7 +736,7 @@ fn binary_bitwise_sparse_dense_and_broadcast_forms_use_zero_aware_output_storage
 
 #[test]
 fn binary_bitwise_rejects_runmat_typed_sparse_integer_extension() {
-    let typed = runmat_builtins::SparseTensor::new_integer(
+    let typed = runmat_value::SparseTensor::new_integer(
         1,
         1,
         vec![0, 1],
@@ -889,9 +889,8 @@ fn bitcmp_preserves_exact_integer_arrays_and_default_double_behavior() {
 
 #[test]
 fn bitcmp_sparse_double_materializes_when_complementing_implicit_zeros() {
-    let sparse =
-        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![5.0, 1.0])
-            .expect("sparse");
+    let sparse = runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![5.0, 1.0])
+        .expect("sparse");
     let Value::Tensor(output) = block_on(bitcmp_builtin(vec![
         Value::SparseTensor(sparse),
         Value::String("uint8".to_string()),
@@ -979,9 +978,8 @@ fn bitget_handles_signed_bits_double_output_and_invalid_positions() {
 
 #[test]
 fn bitget_sparse_double_scalar_position_preserves_sparse_storage() {
-    let sparse =
-        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![5.0, 2.0])
-            .expect("sparse");
+    let sparse = runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![5.0, 2.0])
+        .expect("sparse");
     let Value::SparseTensor(output) = block_on(bitget_builtin(vec![
         Value::SparseTensor(sparse),
         Value::Num(1.0),
@@ -997,9 +995,8 @@ fn bitget_sparse_double_scalar_position_preserves_sparse_storage() {
 
 #[test]
 fn sparse_bitwise_position_and_value_arrays_require_matching_sizes() {
-    let sparse =
-        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
-            .expect("sparse");
+    let sparse = runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
+        .expect("sparse");
 
     let Value::SparseTensor(shifted) = block_on(bitshift_builtin(vec![
         Value::SparseTensor(sparse.clone()),
@@ -1115,9 +1112,8 @@ fn bitset_supports_explicit_set_clear_and_uint64_high_bits() {
 
 #[test]
 fn bitset_sparse_scalar_forms_preserve_or_materialize_from_zero_semantics() {
-    let sparse =
-        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 2.0])
-            .expect("sparse");
+    let sparse = runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 2.0])
+        .expect("sparse");
     let Value::SparseTensor(cleared) = block_on(bitset_builtin(vec![
         Value::SparseTensor(sparse.clone()),
         Value::Num(1.0),
@@ -1223,9 +1219,8 @@ fn scalar_or_exact_size_plan_ignores_only_trailing_singletons() {
 
 #[test]
 fn sparse_bit_position_and_count_operations_reject_general_singleton_expansion() {
-    let sparse =
-        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
-            .expect("sparse");
+    let sparse = runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
+        .expect("sparse");
     let column = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("column operand");
     for error in [
         block_on(bitshift_builtin(vec![
@@ -1463,9 +1458,8 @@ fn bitshift_preserves_integer_width() {
 
 #[test]
 fn bitshift_sparse_double_preserves_sparse_implicit_zeros() {
-    let sparse =
-        runmat_builtins::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
-            .expect("sparse");
+    let sparse = runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 5.0])
+        .expect("sparse");
     let Value::SparseTensor(output) = block_on(bitshift_builtin(vec![
         Value::SparseTensor(sparse),
         Value::Num(1.0),

@@ -4,9 +4,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::spec::{
@@ -477,7 +477,7 @@ pub(crate) mod tests {
     #[test]
     fn scalar_numeric_value_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
             vec![1, 1],
         )
         .expect("integer tensor");
@@ -491,12 +491,12 @@ pub(crate) mod tests {
     #[test]
     fn le_dense_integer_arrays_read_exact_storage_without_mirror() {
         let lhs = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]),
+            runmat_value::IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]),
             vec![2, 1],
         )
         .expect("lhs");
         let rhs = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![0, 1, i64::MAX]),
+            runmat_value::IntegerStorage::I64(vec![0, 1, i64::MAX]),
             vec![1, 3],
         )
         .expect("rhs");

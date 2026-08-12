@@ -3,8 +3,8 @@
 //! These tests verify that the GC can handle high-pressure scenarios
 //! and integration with the interpreter and JIT.
 
-use runmat_builtins::Value;
 use runmat_gc::*;
+use runmat_value::Value;
 use std::sync::atomic::Ordering;
 
 #[test]
@@ -18,7 +18,7 @@ fn test_massive_allocation_cycle() {
             for i in 0..1000 {
                 let value = match i % 4 {
                     0 => Value::Num(i as f64),
-                    1 => Value::Int(runmat_builtins::IntValue::I32(i)),
+                    1 => Value::Int(runmat_value::IntValue::I32(i)),
                     2 => Value::Bool(i % 2 == 0),
                     _ => Value::String(format!("string_{i}")),
                 };
@@ -50,7 +50,7 @@ fn test_large_matrix_stress() {
         for i in 0..100 {
             let size = 100; // 100x100 matrix = 10,000 elements
             let data = vec![i as f64; size * size];
-            let tensor = runmat_builtins::Tensor::new_2d(data, size, size)
+            let tensor = runmat_value::Tensor::new_2d(data, size, size)
                 .expect("tensor creation should succeed");
             let ptr = gc_allocate(Value::Tensor(tensor)).expect("tensor allocation should succeed");
             matrices.push(ptr);
@@ -84,7 +84,7 @@ fn test_nested_cell_stress() {
                 for _ in 0..width {
                     cells.push(create_nested_cell(depth - 1, width));
                 }
-                let ca = runmat_builtins::CellArray::new(cells, 1, width).expect("cell creation");
+                let ca = runmat_value::CellArray::new(cells, 1, width).expect("cell creation");
                 Value::Cell(ca)
             }
         }
@@ -234,13 +234,13 @@ fn test_gc_under_memory_pressure() {
                 0 => Value::Num(i as f64),
                 1 => Value::String(format!("pressure_test_{i}")),
                 2 => Value::Tensor(
-                    runmat_builtins::Tensor::new_2d(vec![i as f64; 100], 10, 10).unwrap(),
+                    runmat_value::Tensor::new_2d(vec![i as f64; 100], 10, 10).unwrap(),
                 ),
                 3 => {
-                    let ca = runmat_builtins::CellArray::new(
+                    let ca = runmat_value::CellArray::new(
                         vec![
                             Value::Num(i as f64),
-                            Value::Int(runmat_builtins::IntValue::I32(i)),
+                            Value::Int(runmat_value::IntValue::I32(i)),
                         ],
                         1,
                         2,

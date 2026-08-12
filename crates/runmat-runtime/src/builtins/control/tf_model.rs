@@ -5,10 +5,8 @@ use std::collections::HashMap;
 
 use nalgebra::DMatrix;
 use num_complex::Complex64;
-use runmat_builtins::{
-    Access, CharArray, ClassDef, ComplexTensor, MethodDef, ObjectInstance, PropertyDef, Tensor,
-    Value,
-};
+use runmat_builtins::{ClassDef, MethodDef, PropertyDef};
+use runmat_value::{Access, CharArray, ComplexTensor, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
@@ -1278,7 +1276,7 @@ fn internal_identifier(builtin: &str) -> &'static str {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");

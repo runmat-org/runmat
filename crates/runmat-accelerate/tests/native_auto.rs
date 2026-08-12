@@ -2,7 +2,7 @@ use std::sync::Once;
 
 use runmat_accelerate::simple_provider::register_inprocess_provider;
 use runmat_accelerate::{prepare_builtin_args, promote_binary, BinaryOp};
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 static INIT: Once = Once::new();
 

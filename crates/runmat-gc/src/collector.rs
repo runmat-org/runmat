@@ -6,8 +6,8 @@
 use crate::{
     roots::collect_value_roots, GcConfig, GcHandle, GcStats, GenerationalAllocator, Result,
 };
-use runmat_builtins::Value;
 use runmat_time::Instant;
+use runmat_value::Value;
 use std::collections::HashSet;
 
 /// Mark-and-sweep garbage collector
@@ -565,12 +565,12 @@ mod tests {
             .allocate(Value::String("alive".to_string()), &stats)
             .expect("target allocation");
         let target_addr = target.addr();
-        let handle_value = Value::HandleObject(runmat_builtins::HandleRef {
+        let handle_value = Value::HandleObject(runmat_value::HandleRef {
             class_name: "TestHandle".to_string(),
             target,
             valid: true,
         });
-        let cell = runmat_builtins::CellArray::new(vec![handle_value], 1, 1).expect("cell shape");
+        let cell = runmat_value::CellArray::new(vec![handle_value], 1, 1).expect("cell shape");
         let cell_root = allocator
             .allocate(Value::Cell(cell), &stats)
             .expect("cell allocation");
@@ -600,12 +600,12 @@ mod tests {
         let stale_handle =
             unsafe { GcHandle::from_parts_unchecked(stale_target.as_ptr_unchecked(), stale_epoch) };
 
-        let handle_value = Value::HandleObject(runmat_builtins::HandleRef {
+        let handle_value = Value::HandleObject(runmat_value::HandleRef {
             class_name: "TestHandle".to_string(),
             target: stale_handle,
             valid: true,
         });
-        let cell = runmat_builtins::CellArray::new(vec![handle_value], 1, 1).expect("cell shape");
+        let cell = runmat_value::CellArray::new(vec![handle_value], 1, 1).expect("cell shape");
         let cell_root = allocator
             .allocate(Value::Cell(cell), &stats)
             .expect("cell allocation");

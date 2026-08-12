@@ -1,17 +1,14 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::{IntValue, Value};
+use runmat_value::{IntValue, Value};
 use test_helpers::execute_source;
 
 const INTEGER_CONSTRUCTORS: [&str; 8] = [
     "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
 ];
 
-fn object_of_class<'a>(
-    values: &'a [Value],
-    class_name: &str,
-) -> &'a runmat_builtins::ObjectInstance {
+fn object_of_class<'a>(values: &'a [Value], class_name: &str) -> &'a runmat_value::ObjectInstance {
     values
         .iter()
         .find_map(|value| match value {

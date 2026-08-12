@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -22,7 +22,7 @@ use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor
 use crate::builtins::math::symbolic::symbolic_function;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::SymbolicFunction;
+use runmat_value::SymbolicFunction;
 
 const BUILTIN_NAME: &str = "cos";
 
@@ -314,16 +314,16 @@ fn ensure_integer_exact_f64(value: &Value) -> BuiltinResult<()> {
     }
 }
 
-pub(crate) fn integer_is_exact_f64(value: &runmat_builtins::IntValue) -> bool {
+pub(crate) fn integer_is_exact_f64(value: &runmat_value::IntValue) -> bool {
     let magnitude = match value {
-        runmat_builtins::IntValue::I8(value) => u64::from(value.unsigned_abs()),
-        runmat_builtins::IntValue::I16(value) => u64::from(value.unsigned_abs()),
-        runmat_builtins::IntValue::I32(value) => u64::from(value.unsigned_abs()),
-        runmat_builtins::IntValue::I64(value) => value.unsigned_abs(),
-        runmat_builtins::IntValue::U8(value) => u64::from(*value),
-        runmat_builtins::IntValue::U16(value) => u64::from(*value),
-        runmat_builtins::IntValue::U32(value) => u64::from(*value),
-        runmat_builtins::IntValue::U64(value) => *value,
+        runmat_value::IntValue::I8(value) => u64::from(value.unsigned_abs()),
+        runmat_value::IntValue::I16(value) => u64::from(value.unsigned_abs()),
+        runmat_value::IntValue::I32(value) => u64::from(value.unsigned_abs()),
+        runmat_value::IntValue::I64(value) => value.unsigned_abs(),
+        runmat_value::IntValue::U8(value) => u64::from(*value),
+        runmat_value::IntValue::U16(value) => u64::from(*value),
+        runmat_value::IntValue::U32(value) => u64::from(*value),
+        runmat_value::IntValue::U64(value) => *value,
     };
     if magnitude == 0 {
         return true;
@@ -401,7 +401,7 @@ fn cos_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn cos_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+    if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
         let data = tensor
             .as_f32_slice()
             .expect("single tensor storage")
@@ -764,7 +764,8 @@ pub(crate) mod tests {
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorOwned,
         HostTensorView, ProviderPrecision,
     };
-    use runmat_builtins::{IntValue, ResolveContext, StringArray, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, StringArray, Tensor};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -1027,11 +1028,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cos_reads_typed_integer_tensor_storage_exactly() {
-        let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![0, 1, 2]),
-            vec![3, 1],
-        )
-        .expect("integer tensor");
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1])
+                .expect("integer tensor");
 
         let result = cos_builtin(Value::Tensor(tensor), Vec::new()).expect("cos");
         match result {
@@ -1050,7 +1049,7 @@ pub(crate) mod tests {
     #[test]
     fn cos_host_complex_conversion_reads_typed_integer_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-3, 0, 5]),
+            runmat_value::IntegerStorage::I64(vec![-3, 0, 5]),
             vec![3, 1],
         )
         .expect("integer tensor");

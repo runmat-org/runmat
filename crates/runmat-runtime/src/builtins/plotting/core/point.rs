@@ -1,8 +1,8 @@
 use futures::executor::block_on;
 use glam::Vec4;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
 use runmat_plot::plots::surface::ColorMap;
+use runmat_value::{Tensor, Value};
 use std::collections::VecDeque;
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
@@ -563,7 +563,7 @@ pub fn validate_gpu_color_matrix(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn point_size_and_color_vectors_read_typed_integer_storage() {

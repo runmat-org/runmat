@@ -1,8 +1,9 @@
 //! Active language compatibility policy for runtime builtin dispatch.
 
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{BuiltinExtensionDescriptor, BuiltinExtensionMode, Value};
+use runmat_builtins::{BuiltinExtensionDescriptor, BuiltinExtensionMode};
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::Value;
 use std::cell::Cell;
 use std::collections::HashSet;
 
@@ -136,7 +137,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_policy_checks_nested_results() {
-        use runmat_builtins::{IntegerStorage, SparseTensor, StructValue};
+        use runmat_value::{IntegerStorage, SparseTensor, StructValue};
 
         let sparse = SparseTensor::new_integer(
             1,

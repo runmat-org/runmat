@@ -1,6 +1,6 @@
 use anyhow::Result;
-use runmat_builtins::{self, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
+use runmat_value::Value;
 #[cfg(feature = "jit")]
 use tracing::warn;
 use tracing::{debug, info, info_span};
@@ -111,7 +111,7 @@ pub struct RunMatSession {
     top_level_await_enabled: bool,
     dynamic_eval_enabled: bool,
     /// Persisted numeric display format for this session (survives across executions).
-    format_mode: runmat_builtins::FormatMode,
+    format_mode: runmat_value::FormatMode,
     /// Persisted diary logging state for this session (survives across executions).
     diary_state: runmat_runtime::console::DiaryStateSnapshot,
     /// Preloaded companion statements discovered asynchronously by the request path.

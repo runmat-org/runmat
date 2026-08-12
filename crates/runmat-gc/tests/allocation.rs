@@ -1,7 +1,7 @@
 //! Basic allocation tests for the garbage collector
 
-use runmat_builtins::Value;
 use runmat_gc::*;
+use runmat_value::Value;
 
 #[test]
 fn test_basic_allocation() {
@@ -21,7 +21,7 @@ fn test_multiple_allocations() {
     gc_test_context(|| {
         let values = vec![
             Value::Num(1.0),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             Value::Bool(true),
             Value::String("test".to_string()),
         ];
@@ -39,7 +39,7 @@ fn test_multiple_allocations() {
         );
         assert_eq!(
             gc_clone_value(&ptrs[1]).expect("valid GC handle"),
-            Value::Int(runmat_builtins::IntValue::I32(2))
+            Value::Int(runmat_value::IntValue::I32(2))
         );
         assert_eq!(
             gc_clone_value(&ptrs[2]).expect("valid GC handle"),
@@ -55,7 +55,7 @@ fn test_multiple_allocations() {
 #[test]
 fn test_matrix_allocation() {
     gc_test_context(|| {
-        let tensor = runmat_builtins::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2)
+        let tensor = runmat_value::Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2)
             .expect("tensor creation should succeed");
         let value = Value::Tensor(tensor);
 
@@ -79,8 +79,7 @@ fn test_cell_allocation() {
             Value::String("nested".to_string()),
             Value::Bool(false),
         ];
-        let cell =
-            Value::Cell(runmat_builtins::CellArray::new(cell_contents.clone(), 1, 3).unwrap());
+        let cell = Value::Cell(runmat_value::CellArray::new(cell_contents.clone(), 1, 3).unwrap());
 
         let ptr = gc_allocate(cell).expect("allocation should succeed");
 
@@ -130,8 +129,8 @@ fn test_large_allocation() {
 
         let size = 100;
         let data = vec![1.0; size * size];
-        let tensor = runmat_builtins::Tensor::new_2d(data, size, size)
-            .expect("tensor creation should succeed");
+        let tensor =
+            runmat_value::Tensor::new_2d(data, size, size).expect("tensor creation should succeed");
         let value = Value::Tensor(tensor);
 
         let ptr = gc_allocate(value).expect("large allocation should succeed");
@@ -191,11 +190,11 @@ fn test_nested_cell_allocation() {
 
         // Create nested cell arrays
         let inner_cell = Value::Cell(
-            runmat_builtins::CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap(),
+            runmat_value::CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap(),
         );
 
         let outer_cell = Value::Cell(
-            runmat_builtins::CellArray::new(
+            runmat_value::CellArray::new(
                 vec![inner_cell, Value::String("outer".to_string())],
                 1,
                 2,

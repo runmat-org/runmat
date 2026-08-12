@@ -10,9 +10,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -779,9 +779,8 @@ fn text_scalar(value: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        builtin_function_by_name, CharArray, IntValue, IntegerStorage, NumericStorage,
-    };
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{CharArray, IntValue, IntegerStorage, NumericStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(gauspuls_builtin(t, rest))

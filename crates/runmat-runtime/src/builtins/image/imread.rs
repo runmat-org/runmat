@@ -7,9 +7,9 @@ use image::{DynamicImage, ImageFormat};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 use url::Url;
 
 use crate::builtins::common::spec::{
@@ -836,7 +836,7 @@ fn empty_tensor_value() -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use image::{ImageBuffer, ImageOutputFormat, Luma, Rgb, RgbImage, Rgba, RgbaImage};
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::Arc;

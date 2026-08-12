@@ -5,9 +5,11 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderBandwidth
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, LogicalArray, NumericStorage, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, LogicalArray, NumericStorage, SparseTensor, Tensor, Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -641,9 +643,8 @@ mod tests {
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, HostTensorOwned, HostTensorView,
     };
-    use runmat_builtins::{
-        IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, ResolveContext, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage};
 
     use crate::builtins::common::test_support;
 

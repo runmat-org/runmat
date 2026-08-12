@@ -1,7 +1,6 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::line::{
@@ -10,6 +9,7 @@ use runmat_plot::gpu::line::{
 use runmat_plot::gpu::stem::{StemGpuInputs, StemGpuParams};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{LineMarkerAppearance, StemPlot};
+use runmat_value::{Tensor, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 

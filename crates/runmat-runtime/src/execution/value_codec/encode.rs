@@ -1,9 +1,9 @@
 use super::ValueCodecError;
-use runmat_builtins::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 use runmat_execution::value::{
     CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, SparseValue, StructField,
     ValuePayload,
 };
+use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
 pub fn encode_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
     encode(value, "$")

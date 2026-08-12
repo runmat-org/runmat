@@ -6,10 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, SparseTensor, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, SparseTensor, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -264,9 +264,9 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext,
-        StringArray,
+    use runmat_builtins::ResolveContext;
+    use runmat_value::{
+        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
     };
 
     fn call(value: Value) -> BuiltinResult<Value> {
@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn rejects_non_numeric_containers() {
         let err = call(Value::Cell(
-            runmat_builtins::CellArray::new(Vec::new(), 0, 0).unwrap(),
+            runmat_value::CellArray::new(Vec::new(), 0, 0).unwrap(),
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:allfinite:InvalidInput"));

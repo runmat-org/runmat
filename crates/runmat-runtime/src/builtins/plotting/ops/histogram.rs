@@ -4,10 +4,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::BarChart;
+use runmat_value::{Tensor, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -655,8 +656,8 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
+    use runmat_value::IntegerStorage;
 
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor::new(data.to_vec(), vec![data.len()]).expect("histogram test vector")
@@ -721,7 +722,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Data".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(data.numeric_dtype(), runmat_builtins::NumericDType::U16);
+        assert_eq!(data.numeric_dtype(), runmat_value::NumericDType::U16);
         assert_eq!(
             data.integer_storage(),
             Some(&IntegerStorage::U16(vec![0, 1, 1, 2]))

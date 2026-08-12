@@ -8,10 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, SparseTensor, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, SparseTensor, Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
@@ -808,9 +808,9 @@ pub(crate) mod tests {
     fn inf_integer_dimensions_clamp_negative_and_normalize_trailing_singletons() {
         let _guard = clear_accel_provider_state();
         let result = block_on(inf_builtin(vec![
-            Value::Int(runmat_builtins::IntValue::I16(-2)),
-            Value::Int(runmat_builtins::IntValue::U8(3)),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::I16(-2)),
+            Value::Int(runmat_value::IntValue::U8(3)),
+            Value::Int(runmat_value::IntValue::U64(1)),
         ]))
         .expect("inf integer dimensions");
         let Value::Tensor(tensor) = result else {
@@ -830,9 +830,8 @@ pub(crate) mod tests {
     #[test]
     fn inf_column_size_vector_follows_compatibility_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let size =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2, 3]), vec![2, 1])
-                .expect("column size vector");
+        let size = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2, 3]), vec![2, 1])
+            .expect("column size vector");
         let error = block_on(inf_builtin(vec![Value::Tensor(size)])).unwrap_err();
         assert_eq!(
             error.identifier(),
@@ -959,14 +958,14 @@ pub(crate) mod tests {
     fn inf_rejects_every_integer_like_prototype() {
         let _guard = clear_accel_provider_state();
         let prototypes = [
-            runmat_builtins::IntegerStorage::I8(vec![0]),
-            runmat_builtins::IntegerStorage::I16(vec![0]),
-            runmat_builtins::IntegerStorage::I32(vec![0]),
-            runmat_builtins::IntegerStorage::I64(vec![0]),
-            runmat_builtins::IntegerStorage::U8(vec![0]),
-            runmat_builtins::IntegerStorage::U16(vec![0]),
-            runmat_builtins::IntegerStorage::U32(vec![0]),
-            runmat_builtins::IntegerStorage::U64(vec![0]),
+            runmat_value::IntegerStorage::I8(vec![0]),
+            runmat_value::IntegerStorage::I16(vec![0]),
+            runmat_value::IntegerStorage::I32(vec![0]),
+            runmat_value::IntegerStorage::I64(vec![0]),
+            runmat_value::IntegerStorage::U8(vec![0]),
+            runmat_value::IntegerStorage::U16(vec![0]),
+            runmat_value::IntegerStorage::U32(vec![0]),
+            runmat_value::IntegerStorage::U64(vec![0]),
         ];
 
         for storage in prototypes {
@@ -983,7 +982,7 @@ pub(crate) mod tests {
         let prototype = SparseTensor::zeros_with_integer_storage(
             1,
             1,
-            &runmat_builtins::IntegerStorage::U64(Vec::new()),
+            &runmat_value::IntegerStorage::U64(Vec::new()),
         );
         let err = block_on(inf_builtin(vec![
             Value::Num(2.0),

@@ -4,9 +4,9 @@ use runmat_builtins::{
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    NumericDType,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::NumericDType;
 
 const ARRAY_DATASTORE_BUILTIN_NAME: &str = "arrayDatastore";
 

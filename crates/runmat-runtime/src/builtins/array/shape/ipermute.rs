@@ -20,9 +20,10 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::ipermute")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -247,7 +248,7 @@ pub(crate) mod tests {
         permute_logical_array, permute_string_array, permute_tensor,
     };
     use crate::builtins::common::{tensor, test_support};
-    use runmat_builtins::{
+    use runmat_value::{
         CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
         Tensor, Value,
     };

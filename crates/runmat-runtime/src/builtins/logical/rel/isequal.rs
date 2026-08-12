@@ -5,10 +5,12 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CellArray, CharArray, ComplexTensor, LogicalArray, NumericDType, NumericScalar, StringArray,
     Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, RuntimeError};
@@ -303,8 +305,8 @@ fn cells_equal(a: &CellArray, b: &CellArray, nan_equal: bool) -> bool {
 }
 
 fn structs_equal(
-    a: &runmat_builtins::StructValue,
-    b: &runmat_builtins::StructValue,
+    a: &runmat_value::StructValue,
+    b: &runmat_value::StructValue,
     nan_equal: bool,
 ) -> bool {
     if a.fields.len() != b.fields.len() {
@@ -346,7 +348,7 @@ fn equality_error_with_detail(
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn run_isequal(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(isequal_builtin(args))
@@ -542,11 +544,9 @@ pub(crate) mod tests {
     #[test]
     fn isequal_tensor_dtype_must_match() {
         let double_tensor =
-            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_builtins::NumericDType::F64)
-                .unwrap();
+            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_value::NumericDType::F64).unwrap();
         let uint32_tensor =
-            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_builtins::NumericDType::U32)
-                .unwrap();
+            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_value::NumericDType::U32).unwrap();
         let result = run_isequal(vec![
             Value::Tensor(double_tensor),
             Value::Tensor(uint32_tensor),

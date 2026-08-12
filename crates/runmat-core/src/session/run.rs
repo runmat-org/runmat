@@ -463,7 +463,7 @@ impl RunMatSession {
         runmat_runtime::console::record_diary_command(input);
         runmat_runtime::plotting_hooks::reset_recent_figures();
         runmat_runtime::warning_store::reset();
-        runmat_builtins::set_display_format(self.format_mode);
+        runmat_value::set_display_format(self.format_mode);
         reset_provider_telemetry();
         self.interrupt_flag.store(false, Ordering::Relaxed);
         let _interrupt_guard =
@@ -1435,7 +1435,7 @@ impl RunMatSession {
             profiling,
         };
 
-        self.format_mode = runmat_builtins::get_display_format();
+        self.format_mode = runmat_value::get_display_format();
         Ok(SessionExecution {
             outcome,
             workspace_snapshot,

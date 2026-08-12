@@ -1,5 +1,5 @@
 use futures::executor::block_on;
-use runmat_builtins::{CharArray, IntegerStorage, NumericDType, SparseTensor, Tensor, Value};
+use runmat_value::{CharArray, IntegerStorage, NumericDType, SparseTensor, Tensor, Value};
 
 #[test]
 fn zeros_single_uses_f32_dtype() {
@@ -307,13 +307,13 @@ fn sparse_triplets_preserve_uint64_and_expand_integer_scalars() {
 
     let rows = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1])
         .expect("integer row subscripts");
-    let cols = Value::Int(runmat_builtins::IntValue::I16(1));
+    let cols = Value::Int(runmat_value::IntValue::I16(1));
     let sparse = match runmat_runtime::call_builtin(
         "sparse",
         &[
             Value::Tensor(rows),
             cols,
-            Value::Int(runmat_builtins::IntValue::I16(3)),
+            Value::Int(runmat_value::IntValue::I16(3)),
         ],
     )
     .expect("expanded integer scalar sparse triplets")

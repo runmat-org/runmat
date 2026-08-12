@@ -6,9 +6,10 @@ use std::collections::HashMap;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::{random_args::keyword_of, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -648,7 +649,7 @@ fn cluster_key(a: usize, b: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, CharArray, IntegerStorage};
+    use runmat_value::{CellArray, CharArray, IntegerStorage};
 
     use super::*;
 

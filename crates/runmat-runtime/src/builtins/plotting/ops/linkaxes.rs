@@ -2,9 +2,10 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::plotting_error;
 use super::state::{
@@ -194,7 +195,7 @@ mod tests {
     use crate::builtins::plotting::subplot::subplot_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -238,7 +239,7 @@ mod tests {
         let first = subplot(1.0, 2.0, 1.0);
         let second = subplot(1.0, 2.0, 2.0);
         let handles = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U32(vec![first as u32, second as u32]),
+            runmat_value::IntegerStorage::U32(vec![first as u32, second as u32]),
             vec![1, 2],
         )
         .expect("typed axes handles");

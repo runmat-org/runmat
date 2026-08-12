@@ -1,8 +1,8 @@
 use crate::indexing::selectors::IndexScalar;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{CellArray, NumericScalar, StructValue, Tensor, Value};
 use runmat_runtime::builtins::common::tensor::tensor_element_len;
 use runmat_runtime::RuntimeError;
+use runmat_value::{CellArray, NumericScalar, StructValue, Tensor, Value};
 
 const CELL_END_PLUS_TAG_MASK: u64 = 0xffff_ffff_0000_0000;
 const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
@@ -717,7 +717,7 @@ mod tests {
         assign_cell_member, expand_cell_indices, map_cell_shape_error,
         resolve_cell_assignment_positions,
     };
-    use runmat_builtins::{CellArray, IntegerStorage, StructValue, Tensor, Value};
+    use runmat_value::{CellArray, IntegerStorage, StructValue, Tensor, Value};
 
     #[test]
     fn assign_cell_member_rejects_shape_mismatch_cell_rhs() {

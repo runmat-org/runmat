@@ -4,7 +4,7 @@
 
 use crate::builtins::common::{linalg, tensor};
 use crate::BuiltinResult;
-use runmat_builtins::{NumericDType, NumericScalar, NumericStorage, Tensor};
+use runmat_value::{NumericDType, NumericScalar, NumericStorage, Tensor};
 
 /// Matrix addition: C = A + B
 pub fn matrix_add(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
@@ -53,16 +53,16 @@ pub fn matrix_mul(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 
 /// GPU-aware matmul entry: if both inputs are GpuTensor handles, call provider; otherwise fall back to CPU.
 pub async fn value_matmul(
-    a: &runmat_builtins::Value,
-    b: &runmat_builtins::Value,
-) -> BuiltinResult<runmat_builtins::Value> {
+    a: &runmat_value::Value,
+    b: &runmat_value::Value,
+) -> BuiltinResult<runmat_value::Value> {
     crate::builtins::math::linalg::ops::mtimes::mtimes_eval(a, b).await
 }
 
 fn complex_matrix_mul(
-    a: &runmat_builtins::ComplexTensor,
-    b: &runmat_builtins::ComplexTensor,
-) -> Result<runmat_builtins::ComplexTensor, String> {
+    a: &runmat_value::ComplexTensor,
+    b: &runmat_value::ComplexTensor,
+) -> Result<runmat_value::ComplexTensor, String> {
     linalg::matmul_complex(a, b)
 }
 
@@ -219,9 +219,9 @@ fn numeric_square_matmul(
 /// Complex matrix power: C = A^n (for positive integer n)
 /// Uses binary exponentiation with complex matrix multiply
 pub fn complex_matrix_power(
-    a: &runmat_builtins::ComplexTensor,
+    a: &runmat_value::ComplexTensor,
     n: i32,
-) -> Result<runmat_builtins::ComplexTensor, String> {
+) -> Result<runmat_value::ComplexTensor, String> {
     if a.rows != a.cols {
         return Err(format!(
             "Matrix must be square for matrix power: {}x{}",
@@ -250,12 +250,12 @@ pub fn complex_matrix_power(
     Ok(result)
 }
 
-fn complex_matrix_eye(n: usize) -> runmat_builtins::ComplexTensor {
+fn complex_matrix_eye(n: usize) -> runmat_value::ComplexTensor {
     let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); n * n];
     for i in 0..n {
         data[i * n + i] = (1.0, 0.0);
     }
-    runmat_builtins::ComplexTensor::new_2d(data, n, n).unwrap()
+    runmat_value::ComplexTensor::new_2d(data, n, n).unwrap()
 }
 
 /// Create identity matrix

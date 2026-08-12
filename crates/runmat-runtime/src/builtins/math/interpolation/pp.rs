@@ -1,4 +1,4 @@
-use runmat_builtins::{StructValue, Tensor, Value};
+use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
@@ -742,7 +742,7 @@ fn validate_finite_coefs(coefs: &[f64], name: &'static str) -> BuiltinResult<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn scalar_series(y: &[f64]) -> NumericSeries {
         NumericSeries {

@@ -1,10 +1,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::PieChart;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -384,7 +384,7 @@ mod tests {
 
     fn int_vec_tensor(data: Vec<i16>) -> Tensor {
         Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(data.clone()),
+            runmat_value::IntegerStorage::I16(data.clone()),
             vec![data.len()],
         )
         .expect("integer tensor")
@@ -400,7 +400,7 @@ mod tests {
         let _ = futures::executor::block_on(pie_builtin(vec![
             Value::Tensor(vec_tensor(&[1.0, 2.0, 3.0])),
             Value::Tensor(vec_tensor(&[0.0, 1.0, 0.0])),
-            Value::StringArray(runmat_builtins::StringArray {
+            Value::StringArray(runmat_value::StringArray {
                 data: vec!["A".into(), "B".into(), "C".into()],
                 shape: vec![1, 3],
                 rows: 1,
@@ -452,7 +452,7 @@ mod tests {
         let _ = futures::executor::block_on(pie_builtin(vec![
             ax,
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
-            Value::StringArray(runmat_builtins::StringArray {
+            Value::StringArray(runmat_value::StringArray {
                 data: vec!["Left".into(), "Right".into()],
                 shape: vec![1, 2],
                 rows: 1,
@@ -465,7 +465,7 @@ mod tests {
 
         let err = futures::executor::block_on(pie_builtin(vec![
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
-            Value::StringArray(runmat_builtins::StringArray {
+            Value::StringArray(runmat_value::StringArray {
                 data: vec!["Only".into()],
                 shape: vec![1, 1],
                 rows: 1,

@@ -226,7 +226,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let is_last_variadic = param_types
         .last()
         .map(|ty| {
-            // crude detection: type path starts with Vec and inner type is runmat_builtins::Value or Value
+            // crude detection: type path starts with Vec and inner type is runmat_value::Value or Value
             if let syn::Type::Path(tp) = ty {
                 if tp
                     .path
@@ -272,10 +272,10 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         // Collect the rest into Vec<Value>
         let last_ident = &param_idents[param_len - 1];
         stmts.push(quote! {
-            let #last_ident : Vec<runmat_builtins::Value> = {
+            let #last_ident : Vec<runmat_value::Value> = {
                 let mut v = Vec::new();
                 for j in (#param_len-1)..args.len() {
-                    let item : runmat_builtins::Value = std::convert::TryInto::try_into(&args[j])?;
+                    let item : runmat_value::Value = std::convert::TryInto::try_into(&args[j])?;
                     v.push(item);
                 }
                 v
@@ -300,7 +300,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let wrapper = quote! {
-        fn #wrapper_ident(args: &[runmat_builtins::Value]) -> runmat_builtins::BuiltinFuture {
+        fn #wrapper_ident(args: &[runmat_value::Value]) -> runmat_builtins::BuiltinFuture {
             #![allow(unused_variables)]
             let args = args.to_vec();
             Box::pin(async move {
@@ -321,7 +321,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
                 #(#conv_stmts)*
                 let value = #call_expr;
-                Ok(runmat_builtins::Value::from(value))
+                Ok(runmat_value::Value::from(value))
             })
         }
     };
@@ -480,7 +480,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Example:
 /// ```rust,ignore
 /// use runmat_macros::runtime_constant;
-/// use runmat_builtins::Value;
+/// use runmat_value::Value;
 ///
 /// #[runtime_constant(name = "pi", value = std::f64::consts::PI)]
 /// const PI_CONSTANT: ();

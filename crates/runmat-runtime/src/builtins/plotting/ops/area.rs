@@ -5,10 +5,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::AreaPlot;
+use runmat_value::{IntegerStorage, NumericScalar, Tensor, Value};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -1281,7 +1281,7 @@ mod tests {
     #[test]
     fn area_vector_from_tensor_reads_typed_integer_storage_exactly() {
         let x = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
+            runmat_value::IntegerStorage::I16(vec![-1, 0, 1]),
             vec![1, 3],
         )
         .expect("typed area x vector");
@@ -1296,7 +1296,7 @@ mod tests {
     #[test]
     fn area_series_reads_typed_integer_storage_without_mirror() {
         let y = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![1, 2, 3, 4]),
+            runmat_value::IntegerStorage::U64(vec![1, 2, 3, 4]),
             vec![2, 2],
         )
         .expect("typed area matrix");
@@ -1475,7 +1475,7 @@ mod tests {
         let _guard = setup();
         let handles = area_builtin(vec![
             Value::Tensor(matrix_tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2)),
-            Value::Int(runmat_builtins::IntValue::I16(-2)),
+            Value::Int(runmat_value::IntValue::I16(-2)),
         ])
         .expect("positional integer BaseValue");
         let Value::Tensor(handles) = handles else {
@@ -1611,7 +1611,7 @@ mod tests {
     #[test]
     fn area_rejects_logical_data() {
         let error = area_builtin(vec![Value::LogicalArray(
-            runmat_builtins::LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical array"),
+            runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical array"),
         )])
         .expect_err("logical Y is undocumented");
         assert_eq!(error.identifier(), AREA_ERROR_INVALID_ARGUMENT.identifier);

@@ -10,9 +10,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
+};
 
 use crate::build_runtime_error;
 use crate::builtins::common::random_args::{
@@ -24,8 +26,8 @@ use crate::builtins::common::spec::{
     ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use runmat_builtins::NumericDType;
 use runmat_builtins::Type;
+use runmat_value::NumericDType;
 
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use runmat_builtins::ResolveContext;
@@ -572,7 +574,7 @@ async fn ones_gpu(shape: &[usize], template: OutputTemplate) -> crate::BuiltinRe
             .map_err(|error| builtin_error(format!("ones: {error}")))?,
         OutputTemplate::Single => tensor::ones_with_dtype(shape, NumericDType::F32)
             .map_err(|error| builtin_error(format!("ones: {error}")))?,
-        OutputTemplate::Integer(storage) => runmat_builtins::Tensor::new_integer(
+        OutputTemplate::Integer(storage) => runmat_value::Tensor::new_integer(
             storage.ones_like(tensor::element_count(shape)),
             shape.to_vec(),
         )
@@ -746,7 +748,7 @@ fn ones_sparse_like(prototype: &SparseTensor, shape: &[usize]) -> crate::Builtin
 }
 
 fn ones_integer_like(storage: &IntegerStorage, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    let tensor = runmat_builtins::Tensor::new_integer(
+    let tensor = runmat_value::Tensor::new_integer(
         storage.ones_like(tensor::element_count(shape)),
         shape.to_vec(),
     )
@@ -951,7 +953,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1312,7 +1314,7 @@ pub(crate) mod tests {
         };
         // Build GPU prototype via gpuArray
         let proto =
-            Tensor::new_with_dtype(vec![0.0; 4], vec![2, 2], runmat_builtins::NumericDType::F32)
+            Tensor::new_with_dtype(vec![0.0; 4], vec![2, 2], runmat_value::NumericDType::F32)
                 .unwrap();
         let g = block_on(crate::call_builtin_async(
             "gpuArray",

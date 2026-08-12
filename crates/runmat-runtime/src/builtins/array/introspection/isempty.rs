@@ -8,9 +8,10 @@ use crate::builtins::common::spec::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::isempty")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -106,7 +107,8 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{CellArray, CharArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CellArray, CharArray, Tensor};
 
     #[test]
     fn isempty_type_returns_bool() {
@@ -163,7 +165,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isempty_string_array_zero_rows_is_true() {
-        let array = runmat_builtins::StringArray::new(Vec::new(), vec![0, 2]).unwrap();
+        let array = runmat_value::StringArray::new(Vec::new(), vec![0, 2]).unwrap();
         let result = isempty_builtin(Value::StringArray(array)).expect("isempty");
         assert_eq!(result, Value::Bool(true));
     }

@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, LiteralValue, LogicalArray, NumericDType, ResolveContext, Tensor, Type, Value,
+    LiteralValue, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, LogicalArray, NumericDType, Tensor, Value};
 
 use super::type_resolvers::logical_output_type;
 use crate::builtins::common::{
@@ -1164,7 +1165,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, LiteralValue, ResolveContext, Type};
+    use runmat_builtins::{LiteralValue, ResolveContext, Type};
+    use runmat_value::IntegerStorage;
 
     fn eval(a: Value, b: Value, rest: &[Value]) -> BuiltinResult<IsMemberTolEvaluation> {
         block_on(evaluate(a, b, rest))
@@ -1640,7 +1642,7 @@ mod tests {
             let data_handle = gpu_helpers::upload_tensor(provider, &data).unwrap();
             let options = [
                 Value::from("ByRows"),
-                Value::Int(runmat_builtins::IntValue::I8(1)),
+                Value::Int(runmat_value::IntValue::I8(1)),
             ];
             {
                 let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -1672,7 +1674,7 @@ mod tests {
                     Value::GpuTensor(data_handle),
                     vec![
                         Value::from("OutputAllIndices"),
-                        Value::Int(runmat_builtins::IntValue::I8(1)),
+                        Value::Int(runmat_value::IntValue::I8(1)),
                     ],
                 )
                 .unwrap() else {

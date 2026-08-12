@@ -13,9 +13,10 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, Tensor, Value,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -325,7 +326,8 @@ fn sawtooth_tensor(tensor: Tensor, xmax: f64) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(sawtooth_builtin(t, Vec::new()))
@@ -557,12 +559,12 @@ mod tests {
     fn sawtooth_single_extension_promotes_to_documented_double_domain() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = Tensor::from_numeric_storage(
-            runmat_builtins::NumericStorage::F32(vec![0.0, 1.0]),
+            runmat_value::NumericStorage::F32(vec![0.0, 1.0]),
             vec![1, 2],
         )
         .unwrap();
         let result = expect_tensor(call(Value::Tensor(input)).unwrap());
-        assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_close(result.materialize_f64()[0], -1.0);
         assert_close(result.materialize_f64()[1], sawtooth_scalar(1.0, 1.0));
     }
@@ -572,7 +574,7 @@ mod tests {
         let single = || {
             Value::Tensor(
                 Tensor::from_numeric_storage(
-                    runmat_builtins::NumericStorage::F32(vec![0.0, 1.0]),
+                    runmat_value::NumericStorage::F32(vec![0.0, 1.0]),
                     vec![1, 2],
                 )
                 .expect("single input"),

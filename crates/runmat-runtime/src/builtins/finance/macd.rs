@@ -3,10 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, ResolveContext, Tensor, Type,
-    Value,
+    BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::table::{
@@ -155,7 +155,7 @@ enum MacdInput {
         close: Tensor,
     },
     Tabular {
-        source: runmat_builtins::ObjectInstance,
+        source: runmat_value::ObjectInstance,
         close: Tensor,
     },
 }
@@ -312,7 +312,7 @@ fn close_column_from_matrix(tensor: &Tensor, shape: &[usize]) -> BuiltinResult<T
     Tensor::new(close, vec![rows, 1]).map_err(|err| macd_internal(format!("macd: {err}")))
 }
 
-fn validate_price_variables(object: &runmat_builtins::ObjectInstance) -> BuiltinResult<Tensor> {
+fn validate_price_variables(object: &runmat_value::ObjectInstance) -> BuiltinResult<Tensor> {
     let variables = table_variables(object)?;
     let height = table_height(object)?;
     let mut close = None;
@@ -379,7 +379,7 @@ fn macd_error(descriptor: BuiltinErrorDescriptor, message: impl Into<String>) ->
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, NumericDType, NumericScalar, Value};
+    use runmat_value::{IntegerStorage, NumericDType, NumericScalar, Value};
 
     use crate::builtins::table::{table_from_columns, table_variables};
 

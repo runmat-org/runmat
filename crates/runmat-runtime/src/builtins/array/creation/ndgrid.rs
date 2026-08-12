@@ -6,10 +6,13 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
-    NumericStorage, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
+    NumericStorage, Tensor, Value,
+};
 
 use crate::builtins::array::type_resolvers::size_vector_len;
 use crate::builtins::common::gpu_helpers;
@@ -980,7 +983,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerComplexStorage;
+    use runmat_value::IntegerComplexStorage;
 
     fn eval(args: &[Value], outputs: Option<usize>) -> BuiltinResult<NdgridEval> {
         block_on(evaluate(args, outputs))

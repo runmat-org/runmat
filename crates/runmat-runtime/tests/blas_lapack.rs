@@ -1,7 +1,7 @@
 #![cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
 
-use runmat_builtins::{CellArray, IntegerStorage, Tensor as Matrix, Value};
 use runmat_runtime::{blas::*, call_builtin, lapack::*};
+use runmat_value::{CellArray, IntegerStorage, Tensor as Matrix, Value};
 
 #[test]
 fn test_blas_matrix_multiplication() {

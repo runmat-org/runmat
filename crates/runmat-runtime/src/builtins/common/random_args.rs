@@ -1,5 +1,5 @@
 use crate::builtins::common::tensor;
-use runmat_builtins::{ComplexTensor, IntValue, NumericScalar, Value};
+use runmat_value::{ComplexTensor, IntValue, NumericScalar, Value};
 
 pub(crate) fn validate_constructor_gpu_output(
     label: &str,
@@ -246,7 +246,7 @@ pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>,
 
 /// Convert a complex tensor back into an appropriate runtime value.
 pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.len() == 1 && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 {
+    if tensor.len() == 1 && tensor.numeric_dtype() == runmat_value::NumericDType::F64 {
         let (re, im) = tensor
             .as_f64_slice()
             .expect("double complex tensor")
@@ -263,7 +263,7 @@ pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 mod constructor_dimension_tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn exact_integer_size_vectors_cover_every_integer_class() {

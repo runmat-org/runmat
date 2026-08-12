@@ -561,14 +561,14 @@ pub(in crate::builtins::table) fn name_at_index(
 
 fn name_at_integer_index(
     names: &[String],
-    value: &runmat_builtins::IntValue,
+    value: &runmat_value::IntValue,
 ) -> BuiltinResult<String> {
     let idx = one_based_integer_to_zero(value, names.len(), "variable")?;
     Ok(names[idx].clone())
 }
 
 fn one_based_integer_to_zero(
-    value: &runmat_builtins::IntValue,
+    value: &runmat_value::IntValue,
     len: usize,
     context: &str,
 ) -> BuiltinResult<usize> {
@@ -610,7 +610,7 @@ pub(in crate::builtins::table) fn one_based_to_zero(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
         vec![
@@ -638,16 +638,13 @@ mod tests {
 
         let names = vec!["left".to_string(), "right".to_string()];
         let variables =
-            parse_variable_selector(Some(&Value::Int(runmat_builtins::IntValue::U64(2))), &names)
+            parse_variable_selector(Some(&Value::Int(runmat_value::IntValue::U64(2))), &names)
                 .unwrap();
         assert_eq!(variables, vec!["right"]);
 
-        let err = parse_row_selector(
-            Some(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))),
-            2,
-        )
-        .unwrap_err()
-        .to_string();
+        let err = parse_row_selector(Some(&Value::Int(runmat_value::IntValue::U64(u64::MAX))), 2)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("exceeds bounds"), "unexpected error: {err}");
     }
 

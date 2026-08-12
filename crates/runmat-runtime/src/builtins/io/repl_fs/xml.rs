@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray,
-    ObjectInstance, StructValue, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
 
 use crate::builtins::common::fs::path_to_string;
 use crate::builtins::common::identifiers::is_valid_varname;
@@ -702,8 +702,7 @@ mod tests {
     #[test]
     fn xml_scalar_text_preserves_exact_uint64() {
         assert_eq!(
-            scalar_xml_text(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)))
-                .expect("xml text"),
+            scalar_xml_text(&Value::Int(runmat_value::IntValue::U64(u64::MAX))).expect("xml text"),
             "18446744073709551615"
         );
     }

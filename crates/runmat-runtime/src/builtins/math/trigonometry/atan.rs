@@ -13,9 +13,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
@@ -611,7 +611,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, Tensor};
 
     fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -622,7 +623,7 @@ pub(crate) mod tests {
     fn atan_extensions_like_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let integer = block_on(super::atan_builtin(
-            Value::Int(runmat_builtins::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I8(1)),
             Vec::new(),
         ))
         .expect_err("integer input must be gated");
@@ -663,10 +664,7 @@ pub(crate) mod tests {
         else {
             panic!("expected single tensor");
         };
-        assert_eq!(
-            real_output.numeric_dtype(),
-            runmat_builtins::NumericDType::F32
-        );
+        assert_eq!(real_output.numeric_dtype(), runmat_value::NumericDType::F32);
         let complex = ComplexTensor::from_f32(vec![(0.5, 0.25), (2.0, -1.0)], vec![2, 1]).unwrap();
         let Value::ComplexTensor(complex_output) =
             atan_builtin(Value::ComplexTensor(complex), Vec::new()).expect("complex-single atan")
@@ -675,7 +673,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             complex_output.numeric_dtype(),
-            runmat_builtins::NumericDType::F32
+            runmat_value::NumericDType::F32
         );
     }
 
@@ -754,11 +752,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_reads_typed_integer_tensor_storage_exactly() {
-        let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![0, 1, 2]),
-            vec![3, 1],
-        )
-        .expect("integer tensor");
+        let tensor =
+            Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1])
+                .expect("integer tensor");
 
         let result = atan_builtin(Value::Tensor(tensor), Vec::new()).expect("atan");
         match result {
@@ -777,7 +773,7 @@ pub(crate) mod tests {
     #[test]
     fn atan_like_complex_reads_typed_integer_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![-3, 0, 5]),
+            runmat_value::IntegerStorage::I64(vec![-3, 0, 5]),
             vec![3, 1],
         )
         .expect("integer tensor");

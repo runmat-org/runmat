@@ -7,10 +7,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
+use runmat_value::Value;
 
 use super::common::tensor_to_surface_grid_matlab_xy;
 use super::contour::{
@@ -555,9 +556,9 @@ pub(crate) mod tests {
     use crate::builtins::plotting::lock_plot_test_context;
     use crate::builtins::plotting::state::{clone_figure, current_figure_handle, reset_plot_state};
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::{IntegerStorage, Tensor};
     use runmat_builtins::{ResolveContext, Type};
     use runmat_plot::plots::figure::PlotElement;
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -817,7 +818,7 @@ pub(crate) mod tests {
                 Value::from("LineColor"),
                 rgb,
                 Value::from("LineWidth"),
-                Value::Int(runmat_builtins::IntValue::U16(3)),
+                Value::Int(runmat_value::IntValue::U16(3)),
             ],
         )
         .expect("integer RGB and LineWidth contourf");

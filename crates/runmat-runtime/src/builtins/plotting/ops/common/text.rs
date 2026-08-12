@@ -1,5 +1,5 @@
-use runmat_builtins::Value;
 use runmat_plot::plots::{LegendStyle, TextStyle};
+use runmat_value::Value;
 
 use crate::builtins::plotting::properties::{parse_text_style_pairs, split_legend_style_pairs};
 use crate::builtins::plotting::state::{
@@ -209,7 +209,7 @@ pub fn vec4_eq(a: Option<glam::Vec4>, b: glam::Vec4) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn axes_target_parser_reads_typed_integer_storage_exactly() {

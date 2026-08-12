@@ -16,10 +16,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
 };
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -693,7 +693,7 @@ pub(crate) mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray};
 
     use crate::builtins::common::fs as fs_helpers;
     use crate::builtins::common::test_support;
@@ -1020,7 +1020,7 @@ pub(crate) mod tests {
         for complex in [
             ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap(),
             ComplexTensor::from_complex_storage(
-                runmat_builtins::ComplexStorage::F32(vec![(1.0, 2.0), (3.0, -4.0)]),
+                runmat_value::ComplexStorage::F32(vec![(1.0, 2.0), (3.0, -4.0)]),
                 vec![1, 2],
             )
             .unwrap(),

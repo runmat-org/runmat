@@ -158,7 +158,7 @@ impl fmt::Display for ObjectArray {
 #[cfg(test)]
 mod tests {
     use super::ObjectArray;
-    use crate::{ObjectInstance, Type, Value};
+    use crate::{ObjectInstance, Value};
 
     #[test]
     fn validates_homogeneous_column_major_storage() {
@@ -169,13 +169,7 @@ mod tests {
         let array = ObjectArray::new("pkg.Result", values, vec![1, 2]).unwrap();
         assert_eq!(array.shape(), &[1, 2]);
         assert_eq!(array.len(), 2);
-        assert!(matches!(
-            Type::from_value(&Value::ObjectArray(array)),
-            Type::Object {
-                class_name: Some(name),
-                shape: Some(shape)
-            } if name == "pkg.Result" && shape == vec![Some(1), Some(2)]
-        ));
+        assert_eq!(array.class_name(), "pkg.Result");
     }
 
     #[test]

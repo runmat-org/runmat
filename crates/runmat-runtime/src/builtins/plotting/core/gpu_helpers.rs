@@ -2,7 +2,7 @@
 
 use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{NumericScalar, Tensor, Value};
+use runmat_value::{NumericScalar, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{gather_if_needed_async, value_contains_gpu, BuiltinResult};
@@ -192,7 +192,7 @@ pub async fn gpu_xyz_bounds_async(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, NumericStorage};
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     #[test]
     fn value_to_scalar_reads_authoritative_single_and_integer_storage() {

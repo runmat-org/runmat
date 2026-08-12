@@ -3,9 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ResolveContext, StringArray, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, Value};
 
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::core::compat::scalar_text;
@@ -298,7 +299,7 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
 }
 
 fn normalize_tokenized_document(
-    object: &runmat_builtins::ObjectInstance,
+    object: &runmat_value::ObjectInstance,
     mut options: NormalizeOptions,
 ) -> BuiltinResult<Value> {
     if options.language_explicit {
@@ -712,7 +713,7 @@ fn cvc(word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, ObjectInstance, Tensor};
+    use runmat_value::{CellArray, ObjectInstance, Tensor};
 
     use crate::builtins::strings::text_analytics::documents::documents_from_object;
 

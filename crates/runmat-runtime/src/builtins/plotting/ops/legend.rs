@@ -1,9 +1,9 @@
-use runmat_builtins::Value;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::parse_legend_command;
 use super::state::{set_legend_for_axes, FigureError};
@@ -216,8 +216,8 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use glam::Vec4;
-    use runmat_builtins::{CellArray, StringArray, Value};
     use runmat_plot::plots::{Figure, LinePlot};
+    use runmat_value::{CellArray, StringArray, Value};
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_registry();

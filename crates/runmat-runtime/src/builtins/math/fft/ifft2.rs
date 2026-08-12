@@ -25,9 +25,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::ifft2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -862,10 +862,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Tensor as HostTensor,
-        Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, Tensor as HostTensor};
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
         (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
@@ -970,7 +968,7 @@ pub(crate) mod tests {
             value_to_complex_tensor(output, BUILTIN_NAME)
                 .unwrap()
                 .numeric_dtype(),
-            runmat_builtins::NumericDType::F64
+            runmat_value::NumericDType::F64
         );
         let single = HostTensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let output = ifft2_builtin(Value::Tensor(single), Vec::new()).unwrap();
@@ -978,7 +976,7 @@ pub(crate) mod tests {
             value_to_complex_tensor(output, BUILTIN_NAME)
                 .unwrap()
                 .numeric_dtype(),
-            runmat_builtins::NumericDType::F32
+            runmat_value::NumericDType::F32
         );
     }
 

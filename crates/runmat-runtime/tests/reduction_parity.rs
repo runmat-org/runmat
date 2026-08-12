@@ -1,8 +1,8 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use futures::executor::block_on;
-use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_runtime as rt;
+use runmat_value::{NumericDType, Tensor, Value};
 
 fn tensor_from_f32(data: &[f32], shape: &[usize]) -> Tensor {
     Tensor::from_f32(data.to_vec(), shape.to_vec()).expect("tensor")

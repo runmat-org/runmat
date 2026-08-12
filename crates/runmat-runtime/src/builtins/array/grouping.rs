@@ -10,10 +10,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar,
     NumericStorage, ObjectInstance, SparseTensor, StringArray, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::table::{
@@ -3553,7 +3555,7 @@ fn is_missing_text(text: &str) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage};
+    use runmat_value::{IntValue, IntegerStorage, NumericStorage};
 
     #[test]
     fn discretize_descriptor_covers_public_forms_and_output_arity() {
@@ -4370,7 +4372,7 @@ mod tests {
         let large = 9_007_199_254_740_992_u64;
         let groups = Value::Tensor(
             Tensor::new_integer(
-                runmat_builtins::IntegerStorage::U64(vec![large, large + 1, large]),
+                runmat_value::IntegerStorage::U64(vec![large, large + 1, large]),
                 vec![3, 1],
             )
             .unwrap(),
@@ -4428,8 +4430,8 @@ mod tests {
         let groups = Value::Cell(
             CellArray::new(
                 vec![
-                    Value::CharArray(runmat_builtins::CharArray::new(Vec::new(), 1, 0).unwrap()),
-                    Value::CharArray(runmat_builtins::CharArray::new(vec!['a'], 1, 1).unwrap()),
+                    Value::CharArray(runmat_value::CharArray::new(Vec::new(), 1, 0).unwrap()),
+                    Value::CharArray(runmat_value::CharArray::new(vec!['a'], 1, 1).unwrap()),
                 ],
                 2,
                 1,
@@ -4488,8 +4490,7 @@ mod tests {
 
     #[test]
     fn findgroups_rejects_sparse_and_complex_grouping_values() {
-        let sparse =
-            runmat_builtins::SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![1.0]).unwrap();
+        let sparse = runmat_value::SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![1.0]).unwrap();
         block_on(findgroups_builtin(Value::SparseTensor(sparse), Vec::new()))
             .expect_err("sparse grouping must reject");
         block_on(findgroups_builtin(Value::Complex(1.0, 2.0), Vec::new()))

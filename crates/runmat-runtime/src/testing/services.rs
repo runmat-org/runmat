@@ -3,7 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 use crate::BuiltinResult;
 
@@ -117,7 +117,7 @@ mod tests {
                 Box::pin(async move {
                     let count = args.len();
                     Ok(Value::Cell(
-                        runmat_builtins::CellArray::new(args, 1, count).unwrap(),
+                        runmat_value::CellArray::new(args, 1, count).unwrap(),
                     ))
                 })
             },

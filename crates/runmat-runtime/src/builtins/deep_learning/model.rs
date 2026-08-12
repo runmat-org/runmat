@@ -1,8 +1,8 @@
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CellArray, NumericDType, NumericStorage, ObjectInstance, StructValue, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::{builtins::common::tensor, BuiltinResult};
 

@@ -1,7 +1,7 @@
 use crate::runtime::call_stack::error_namespace;
 use crate::runtime::workspace::mark_workspace_assigned;
-use runmat_builtins::{MException, Value};
 use runmat_runtime::RuntimeError;
+use runmat_value::{MException, Value};
 
 pub enum ExceptionHandling {
     Caught,

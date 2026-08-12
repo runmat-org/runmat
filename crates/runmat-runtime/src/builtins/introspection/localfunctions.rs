@@ -1,7 +1,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamDescriptor, BuiltinSignatureDescriptor, CellArray, Value,
+    BuiltinParamDescriptor, BuiltinSignatureDescriptor,
 };
+use runmat_value::{CellArray, Value};
 
 const LOCALFUNCTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "handles",

@@ -5,7 +5,6 @@ use wasm_bindgen::prelude::JsValue;
 
 use crate::wire::errors::{js_error, RunMatErrorKind, RunMatErrorPayload, RunMatErrorSpanPayload};
 use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
-use runmat_builtins::Value;
 use runmat_core::{
     abi::{
         DiagnosticSeverity, DisplayEvent, DisplayLabel, ExecutionOutcome, ExecutionSourceContext,
@@ -18,6 +17,7 @@ use runmat_core::{
     WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions,
     WorkspaceSnapshot,
 };
+use runmat_value::Value;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -891,8 +891,8 @@ mod tests {
         let payload = WorkspacePreviewPayload::from(WorkspacePreview {
             values: vec![
                 NumericPreviewValue::Float(1.5),
-                NumericPreviewValue::Integer(runmat_builtins::IntValue::U64(42)),
-                NumericPreviewValue::Integer(runmat_builtins::IntValue::U64(u64::MAX)),
+                NumericPreviewValue::Integer(runmat_value::IntValue::U64(42)),
+                NumericPreviewValue::Integer(runmat_value::IntValue::U64(u64::MAX)),
             ],
             truncated: false,
         });

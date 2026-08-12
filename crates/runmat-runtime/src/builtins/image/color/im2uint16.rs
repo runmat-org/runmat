@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, NumericDType, NumericStorage, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -449,7 +450,7 @@ mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
     };
-    use runmat_builtins::{IntegerStorage, LogicalArray};
+    use runmat_value::{IntegerStorage, LogicalArray};
 
     fn call(value: Value) -> Value {
         block_on(im2uint16_builtin(value, Vec::new())).expect("im2uint16")

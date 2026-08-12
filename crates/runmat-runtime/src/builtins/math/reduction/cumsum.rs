@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexTensor, ResolveContext, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use super::floating_cumulative_arithmetic::{
     self, CumulativeDirection, CumulativeNanMode, CumulativeOperation,
@@ -815,7 +816,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage,
         Tensor as BuiltinsTensor,
     };
@@ -920,7 +921,7 @@ pub(crate) mod tests {
     #[test]
     fn cumsum_native_integer_preserves_storage_for_dimensions_and_reverse() {
         let input = BuiltinsTensor::new_integer(
-            runmat_builtins::IntegerStorage::U8(vec![250, 10, 2, 3]),
+            runmat_value::IntegerStorage::U8(vec![250, 10, 2, 3]),
             vec![2, 2],
         )
         .expect("input");
@@ -928,7 +929,7 @@ pub(crate) mod tests {
             cumsum_builtin(Value::Tensor(input.clone()), Vec::new()).expect("default cumsum"),
             Value::Tensor(
                 BuiltinsTensor::new_integer(
-                    runmat_builtins::IntegerStorage::U8(vec![250, 255, 2, 5]),
+                    runmat_value::IntegerStorage::U8(vec![250, 255, 2, 5]),
                     vec![2, 2],
                 )
                 .expect("default output"),
@@ -946,7 +947,7 @@ pub(crate) mod tests {
             .expect("reverse cumsum"),
             Value::Tensor(
                 BuiltinsTensor::new_integer(
-                    runmat_builtins::IntegerStorage::U8(vec![252, 13, 2, 3]),
+                    runmat_value::IntegerStorage::U8(vec![252, 13, 2, 3]),
                     vec![2, 2],
                 )
                 .expect("reverse output"),
@@ -980,16 +981,14 @@ pub(crate) mod tests {
             cumsum_builtin(Value::Int(IntValue::I64(i64::MIN)), Vec::new()).expect("scalar"),
             Value::Int(IntValue::I64(i64::MIN))
         );
-        let empty = BuiltinsTensor::new_integer(
-            runmat_builtins::IntegerStorage::U32(Vec::new()),
-            vec![0, 1],
-        )
-        .expect("empty input");
+        let empty =
+            BuiltinsTensor::new_integer(runmat_value::IntegerStorage::U32(Vec::new()), vec![0, 1])
+                .expect("empty input");
         assert_eq!(
             cumsum_builtin(Value::Tensor(empty), Vec::new()).expect("empty cumsum"),
             Value::Tensor(
                 BuiltinsTensor::new_integer(
-                    runmat_builtins::IntegerStorage::U32(Vec::new()),
+                    runmat_value::IntegerStorage::U32(Vec::new()),
                     vec![0, 1]
                 )
                 .expect("empty output"),

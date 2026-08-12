@@ -9,10 +9,10 @@ use encoding_rs::Encoding;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -359,7 +359,7 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
 }
 
 async fn parse_struct_options(
-    struct_value: &runmat_builtins::StructValue,
+    struct_value: &runmat_value::StructValue,
     options: &mut ReadMatrixOptions,
 ) -> BuiltinResult<()> {
     for (name, value) in &struct_value.fields {
@@ -1581,7 +1581,7 @@ pub(crate) mod tests {
     use std::fs;
 
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
     fn unique_path(prefix: &str) -> PathBuf {
         let millis = unix_timestamp_ms();
@@ -1974,7 +1974,7 @@ pub(crate) mod tests {
     fn readmatrix_accepts_struct_options() {
         let path = unique_path("readmatrix_struct_opts");
         fs::write(&path, "header1,header2\n9,10\n11,12\n").expect("write sample file");
-        let mut options_struct = runmat_builtins::StructValue::new();
+        let mut options_struct = runmat_value::StructValue::new();
         options_struct
             .fields
             .insert("Delimiter".to_string(), Value::from(","));

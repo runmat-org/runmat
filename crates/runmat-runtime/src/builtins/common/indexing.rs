@@ -6,7 +6,7 @@ use crate::builtins::common::shape::{is_scalar_shape, normalize_scalar_shape};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::HostIntegerDataOwned;
-use runmat_builtins::{
+use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, NumericDType, NumericScalar, NumericStorage,
     SparseTensor, Tensor, Value,
 };
@@ -201,7 +201,7 @@ fn sparse_scalar_index(sparse: &SparseTensor, indices: &[f64]) -> Result<Value, 
 }
 
 fn cell_row_major_pos_from_linear(
-    ca: &runmat_builtins::CellArray,
+    ca: &runmat_value::CellArray,
     idx: usize,
 ) -> Result<usize, RuntimeError> {
     if idx == 0 || idx > ca.data.len() {
@@ -688,7 +688,7 @@ mod tests {
     use super::{matrix_get_col, matrix_get_row, matrix_set_element, perform_indexing};
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
         NumericStorage, SparseTensor, StringArray, SymbolicArray, SymbolicExpr, Tensor, Value,
     };

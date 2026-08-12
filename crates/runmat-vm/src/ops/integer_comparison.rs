@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use runmat_builtins::{IntValue, Tensor, Value};
+use runmat_value::{IntValue, Tensor, Value};
 
 /// Returns an exact ordering whenever either scalar needs integer-aware
 /// comparison. `None` leaves ordinary floating-point comparison untouched.
@@ -115,7 +115,7 @@ fn integer_f64_order(integer: &IntValue, float: f64) -> Option<Ordering> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn scalar_comparisons_preserve_64_bit_integer_precision() {

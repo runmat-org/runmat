@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -283,7 +283,7 @@ fn cosh_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn cosh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 {
+    if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
         let data = tensor
             .as_f32_slice()
             .expect("single tensor storage")
@@ -412,7 +412,8 @@ pub(crate) mod tests {
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorOwned,
         HostTensorView, ProviderPrecision,
     };
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, LogicalArray, Tensor};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -662,7 +663,7 @@ pub(crate) mod tests {
     #[test]
     fn cosh_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
+            runmat_value::IntegerStorage::I16(vec![-1, 0, 1]),
             vec![3, 1],
         )
         .expect("integer tensor");

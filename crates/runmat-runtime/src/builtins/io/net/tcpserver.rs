@@ -4,9 +4,9 @@ use once_cell::sync::OnceCell;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -647,7 +647,7 @@ pub(crate) fn default_user_data() -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor, Value};
+    use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
     use std::time::Duration;
 

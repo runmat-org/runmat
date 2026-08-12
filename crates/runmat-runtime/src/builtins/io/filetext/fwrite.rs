@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, IntValue, NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -964,7 +964,7 @@ fn flatten_char_array(ca: &CharArray) -> Vec<f64> {
     values
 }
 
-fn flatten_string_array(sa: &runmat_builtins::StringArray) -> Vec<f64> {
+fn flatten_string_array(sa: &runmat_value::StringArray) -> Vec<f64> {
     if sa.data.is_empty() {
         return Vec::new();
     }
@@ -1294,9 +1294,9 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntegerStorage, Tensor};
     use runmat_filesystem::File;
     use runmat_time::system_time_now;
+    use runmat_value::{IntegerStorage, Tensor};
     use std::io::Read;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;

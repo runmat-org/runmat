@@ -18,11 +18,11 @@ use runmat_accelerate_api::{
     ProviderLinsolveResult, ProviderNormOrder, ProviderPinvOptions, ProviderPrecision,
     UniqueOptions, UniqueResult,
 };
-use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::{gather_if_needed, gather_if_needed_async, RuntimeError};
+use runmat_value::{Tensor, Value};
 use runmat_vm::{
     interpret as interpret_async, interpret_function as interpret_function_async, Instr,
 };
@@ -1460,7 +1460,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                 })
                 .next()
                 .unwrap_or(0);
-            let tensor = runmat_builtins::Tensor::new(data, vec![rows, cols]).unwrap();
+            let tensor = runmat_value::Tensor::new(data, vec![rows, cols]).unwrap();
             vars[x_index] = Value::Tensor(tensor);
 
             // CPU path (no provider registered yet)
@@ -1510,7 +1510,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                     }
                 } else {
                     // Fallback: search all variables for a tensor of length==rows
-                    let mut found: Option<runmat_builtins::Tensor> = None;
+                    let mut found: Option<runmat_value::Tensor> = None;
                     for v in &vars_gpu {
                         if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                             if t.materialize_f64().len() == rows {
@@ -1698,7 +1698,7 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
         // Run CPU path with host tensor injected
         let cpu = {
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-            let t = runmat_builtins::Tensor::new(data.clone(), vec![rows, cols]).unwrap();
+            let t = runmat_value::Tensor::new(data.clone(), vec![rows, cols]).unwrap();
             vars[x_index] = Value::Tensor(t);
             interpret_function(&bytecode, vars).expect("interpret")
         };
@@ -1860,7 +1860,7 @@ fn reduction_sum_include_omit_dim1_dim2_degenerate_gpu_cpu() {
             // CPU path
             let cpu = {
                 let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-                let t = runmat_builtins::Tensor::new(data.clone(), vec![rows, cols]).unwrap();
+                let t = runmat_value::Tensor::new(data.clone(), vec![rows, cols]).unwrap();
                 vars[x_index] = Value::Tensor(t);
                 interpret_function(&bytecode, vars).expect("interpret")
             };
@@ -2312,7 +2312,7 @@ fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
             runmat_accelerate_api::set_thread_provider(None);
             runmat_accelerate_api::clear_provider();
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-            let t = runmat_builtins::Tensor::new(data.clone(), vec![rows, cols]).unwrap();
+            let t = runmat_value::Tensor::new(data.clone(), vec![rows, cols]).unwrap();
             vars[x_index] = Value::Tensor(t);
             interpret_function(&bytecode, vars).expect("interpret")
         };

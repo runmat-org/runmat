@@ -1,4 +1,4 @@
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 use super::axis_ticks::TickAxis;
 use super::properties::{resolve_plot_handle, PlotHandle};
@@ -182,7 +182,7 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn axis_tick_angle_scalar_reads_typed_integer_storage_exactly() {

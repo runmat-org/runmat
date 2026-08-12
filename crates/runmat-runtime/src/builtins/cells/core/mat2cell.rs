@@ -3,10 +3,12 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
     NumericDType, StringArray, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::cells::type_resolvers::mat2cell_type;
 use crate::builtins::common::spec::{
@@ -317,7 +319,7 @@ impl Mat2CellInput {
                     NumericDType::F32 => {
                         let values: Vec<f32> = (0..t.len())
                             .map(|index| match t.numeric_value_at(index) {
-                                Some(runmat_builtins::NumericScalar::F32(value)) => value,
+                                Some(runmat_value::NumericScalar::F32(value)) => value,
                                 _ => unreachable!("single tensor has native single storage"),
                             })
                             .collect();
@@ -860,7 +862,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, NumericStorage};
+    use runmat_value::{LogicalArray, NumericStorage};
 
     fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mat2cell_builtin(value, rest))

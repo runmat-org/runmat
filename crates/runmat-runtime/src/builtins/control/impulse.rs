@@ -4,9 +4,9 @@ use nalgebra::DMatrix;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -345,10 +345,7 @@ impl TfSystem {
     }
 }
 
-fn property<'a>(
-    object: &'a runmat_builtins::ObjectInstance,
-    name: &str,
-) -> BuiltinResult<&'a Value> {
+fn property<'a>(object: &'a runmat_value::ObjectInstance, name: &str) -> BuiltinResult<&'a Value> {
     object.properties.get(name).ok_or_else(|| {
         impulse_error_with_detail(
             &IMPULSE_ERROR_INVALID_MODEL,
@@ -824,7 +821,7 @@ async fn render_impulse_plot(_response: &ImpulseResponse) -> BuiltinResult<Value
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntegerStorage, ObjectInstance};
+    use runmat_value::{CharArray, IntegerStorage, ObjectInstance};
 
     fn tf_object(num: Vec<f64>, den: Vec<f64>, ts: f64) -> Value {
         tf_object_with_delays(num, den, ts, 0.0, 0.0)

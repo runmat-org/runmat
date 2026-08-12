@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, Value};
+use runmat_value::{IntValue, Value};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
@@ -175,7 +175,7 @@ fn clear_abi_gc_roots_for_test() {
 #[cfg(test)]
 mod tests {
     use super::{TurbineValue, TurbineValueTag};
-    use runmat_builtins::{IntValue, Value};
+    use runmat_value::{IntValue, Value};
 
     #[test]
     fn scalar_values_round_trip_through_turbine_value() {

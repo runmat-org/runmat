@@ -9,10 +9,10 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, HandleRef, Listener, ObjectInstance,
-    StructValue, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, HandleRef, Listener, ObjectInstance, StructValue, Value};
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -274,9 +274,9 @@ fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{
-        Access, CellArray, ClassDef, HandleRef, IntValue, ObjectInstance, PropertyDef, StructValue,
-        Value,
+    use runmat_builtins::{ClassDef, PropertyDef};
+    use runmat_value::{
+        Access, CellArray, HandleRef, IntValue, ObjectInstance, StructValue, Value,
     };
     use std::collections::HashMap;
 

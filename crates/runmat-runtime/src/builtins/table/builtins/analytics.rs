@@ -340,7 +340,7 @@ fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> B
 #[cfg(test)]
 mod integer_compatibility_tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn grouping_metadata_distinguishes_documented_groups_from_runmat_data() {
@@ -428,7 +428,7 @@ mod integer_compatibility_tests {
             &[
                 Value::from("DataVars"),
                 Value::StringArray(
-                    runmat_builtins::StringArray::new(vec!["X".into()], vec![1, 1]).unwrap(),
+                    runmat_value::StringArray::new(vec!["X".into()], vec![1, 1]).unwrap(),
                 ),
             ],
         )
@@ -443,7 +443,7 @@ mod integer_compatibility_tests {
             &[
                 Value::from("DataVars"),
                 Value::StringArray(
-                    runmat_builtins::StringArray::new(vec!["I".into()], vec![1, 1]).unwrap(),
+                    runmat_value::StringArray::new(vec!["I".into()], vec![1, 1]).unwrap(),
                 ),
             ],
         )

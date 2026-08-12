@@ -1,6 +1,6 @@
 use super::*;
 use crate::builtins::common::tensor;
-use runmat_builtins::NumericScalar;
+use runmat_value::NumericScalar;
 #[derive(Clone)]
 pub(in crate::builtins::table) struct ReadTableOptions {
     pub(super) file_type: ImportFileType,
@@ -1256,12 +1256,12 @@ impl RangeSpec {
     }
 }
 
-fn tensor_len(tensor: &runmat_builtins::Tensor) -> usize {
+fn tensor_len(tensor: &runmat_value::Tensor) -> usize {
     tensor.len()
 }
 
 fn one_based_integer_to_zero(
-    value: &runmat_builtins::IntValue,
+    value: &runmat_value::IntValue,
     context: &str,
 ) -> BuiltinResult<usize> {
     value
@@ -1322,7 +1322,7 @@ pub(in crate::builtins::table) fn parse_cell_ref(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
         vec![
@@ -1410,7 +1410,7 @@ mod tests {
             assert_eq!(range.end_row, Some(4));
             assert_eq!(range.end_col, None);
         }
-        let scalar = Value::Int(runmat_builtins::IntValue::U64(3));
+        let scalar = Value::Int(runmat_value::IntValue::U64(3));
         let range = RangeSpec::parse_data_range(&scalar).unwrap();
         assert_eq!(range.start_row, 2);
         assert_eq!(range.end_row, None);
@@ -1448,7 +1448,7 @@ mod tests {
         assert!(options
             .apply(
                 "ExpectedNumVariables",
-                &Value::Int(runmat_builtins::IntValue::U8(0)),
+                &Value::Int(runmat_value::IntValue::U8(0)),
             )
             .is_err());
     }
@@ -1459,9 +1459,7 @@ mod tests {
             let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
             assert!(zero_one_bool_scalar(&value, "ReadVariableNames").unwrap());
         }
-        assert!(
-            zero_one_bool_scalar(&Value::Int(runmat_builtins::IntValue::I8(-1)), "flag").is_err()
-        );
+        assert!(zero_one_bool_scalar(&Value::Int(runmat_value::IntValue::I8(-1)), "flag").is_err());
         assert!(zero_one_bool_scalar(&Value::Num(2.0), "flag").is_err());
         assert!(zero_one_bool_scalar(&Value::from("on"), "flag").is_err());
     }

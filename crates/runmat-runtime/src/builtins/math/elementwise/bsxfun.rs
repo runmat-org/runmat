@@ -7,10 +7,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexTensor, LogicalArray, NumericDType, NumericScalar, NumericStorage, Tensor,
     Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -833,7 +835,7 @@ fn bsxfun_error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
     use std::sync::Arc;
 
     fn call(function: Value, left: Value, right: Value) -> BuiltinResult<Value> {
@@ -1160,9 +1162,9 @@ mod tests {
 
     #[test]
     fn bsxfun_callback_classifier_reads_typed_complex_integer_storage_exactly() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
-            runmat_builtins::IntegerStorage::I16(vec![8]),
-            runmat_builtins::IntegerStorage::I16(vec![-3]),
+        let storage = runmat_value::IntegerComplexStorage::new(
+            runmat_value::IntegerStorage::I16(vec![8]),
+            runmat_value::IntegerStorage::I16(vec![-3]),
         )
         .expect("storage");
         let complex = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
@@ -1176,9 +1178,9 @@ mod tests {
     #[test]
     fn bsxfun_rejects_typed_complex_integer_inputs_before_callback_dispatch() {
         let complex = ComplexTensor::new_integer(
-            runmat_builtins::IntegerComplexStorage::new(
-                runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
-                runmat_builtins::IntegerStorage::U64(vec![1]),
+            runmat_value::IntegerComplexStorage::new(
+                runmat_value::IntegerStorage::U64(vec![u64::MAX]),
+                runmat_value::IntegerStorage::U64(vec![1]),
             )
             .expect("storage"),
             vec![1, 1],

@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -487,9 +487,10 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
+    use runmat_builtins::{ResolveContext, Type};
     #[cfg(feature = "wgpu")]
-    use runmat_builtins::Tensor;
-    use runmat_builtins::{CellArray, CharArray, IntValue, ResolveContext, StringArray, Type};
+    use runmat_value::Tensor;
+    use runmat_value::{CellArray, CharArray, IntValue, StringArray};
 
     fn run_strcat(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strcat_builtin(rest))

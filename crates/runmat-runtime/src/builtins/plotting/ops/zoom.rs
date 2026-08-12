@@ -1,9 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    HandleRef, ObjectInstance, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{HandleRef, ObjectInstance, StructValue, Value};
 
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{

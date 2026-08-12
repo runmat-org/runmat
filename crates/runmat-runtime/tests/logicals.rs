@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_value::{LogicalArray, Tensor, Value};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -64,8 +64,8 @@ fn logical_from_numeric_and_stringarray() {
     } else {
         panic!();
     }
-    let sa = runmat_builtins::StringArray::new(vec!["".to_string(), "a".to_string()], vec![2, 1])
-        .unwrap();
+    let sa =
+        runmat_value::StringArray::new(vec!["".to_string(), "a".to_string()], vec![2, 1]).unwrap();
     let l2 = runmat_runtime::call_builtin("logical", &[Value::StringArray(sa)]).unwrap();
     if let Value::LogicalArray(la) = l2 {
         assert_eq!(la.data, vec![0, 1]);

@@ -3,10 +3,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{AxesKind, LinePlot, LineStyle};
+use runmat_value::{ComplexTensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -517,7 +517,7 @@ mod tests {
     use crate::builtins::plotting::{
         clone_figure, current_figure_handle, reset_hold_state_for_run, reset_plot_state,
     };
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn tensor(data: &[f64]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![data.len()]).expect("polar plot vector"))

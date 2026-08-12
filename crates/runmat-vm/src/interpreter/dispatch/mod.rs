@@ -13,12 +13,12 @@ use crate::runtime::workspace::{
     refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
 };
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ObjectInstance, StructValue, Tensor, Value};
 use runmat_runtime::builtins::common::tensor::{
     is_scalar_tensor, tensor_element_len, tensor_value_f64,
 };
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
+use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 use std::collections::{HashMap, HashSet};
 
 pub use arrays::{
@@ -67,7 +67,7 @@ pub struct DispatchState<'a> {
     pub vars: &'a mut Vec<Value>,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,
     pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
-    pub last_exception: &'a mut Option<runmat_builtins::MException>,
+    pub last_exception: &'a mut Option<runmat_value::MException>,
     pub imports: &'a mut Vec<(Vec<String>, bool)>,
     pub global_aliases: &'a mut HashMap<usize, String>,
     pub persistent_aliases: &'a mut HashMap<usize, String>,
@@ -1970,7 +1970,7 @@ mod tests {
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
         SpawnHandleConcurrency, ThreadProviderGuard,
     };
-    use runmat_builtins::{CellArray, HandleRef, IntegerStorage, StructValue, Tensor, Value};
+    use runmat_value::{CellArray, HandleRef, IntegerStorage, StructValue, Tensor, Value};
 
     struct RejectSpawnProvider;
     static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
@@ -2132,7 +2132,7 @@ mod tests {
     #[test]
     fn spawn_policy_rejects_gpu_handles_captured_by_closure_values() {
         let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
-        let value = Value::Closure(runmat_builtins::Closure {
+        let value = Value::Closure(runmat_value::Closure {
             function_name: "worker".to_string(),
             bound_function: None,
             captures: vec![

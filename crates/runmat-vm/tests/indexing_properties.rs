@@ -3,11 +3,11 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
-fn find_last_tensor(vars: &[runmat_builtins::Value]) -> runmat_builtins::Tensor {
+fn find_last_tensor(vars: &[runmat_value::Value]) -> runmat_value::Tensor {
     vars.iter()
         .rev()
         .find_map(|v| {
-            if let runmat_builtins::Value::Tensor(t) = v {
+            if let runmat_value::Value::Tensor(t) = v {
                 Some(t.clone())
             } else {
                 None
@@ -23,7 +23,7 @@ fn logical_mask_write_rows_scalar_broadcast() {
     let vars = execute_source(src).unwrap();
     // Rows 1 and 3 all set to 7
     // Final A = [7 7; 3 4; 7 7] → column-major data [7 3 7 7 4 7]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 2] && tensor.materialize_f64() == vec![7.0, 3.0, 7.0, 7.0, 4.0, 7.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape == vec![3, 2] && tensor.materialize_f64() == vec![7.0, 3.0, 7.0, 7.0, 4.0, 7.0])));
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn logical_mask_write_cols_vector_broadcast() {
     let vars = execute_source(src).unwrap();
     // Columns 2 and 4 replaced by [8;9]
     // Expected columns: [1 2], [8 9], [5 6], [8 9] → data col-major [1,2,8,9,5,6,8,9]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![2, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 8.0, 9.0, 5.0, 6.0, 8.0, 9.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape == vec![2, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 8.0, 9.0, 5.0, 6.0, 8.0, 9.0])));
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn mixed_mask_and_range_write_matrix_no_broadcast() {
     // After assignment: rows 1 and 3, cols 2..3 set to [[10,11];[12,13]] respecting column-major write
     // Final A row-major for intuition:
     // [1 10 11; 4 5 6; 7 12 13] → column-major data [1,4,7,10,5,12,11,6,13]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 3] && tensor.materialize_f64() == vec![1.0, 4.0, 7.0, 10.0, 5.0, 12.0, 11.0, 6.0, 13.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape == vec![3, 3] && tensor.materialize_f64() == vec![1.0, 4.0, 7.0, 10.0, 5.0, 12.0, 11.0, 6.0, 13.0])));
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn broadcast_invariants_scalar_to_submatrix() {
     // After setting rows 1..2, cols 2..3 to 5:
     // Columns become: [1 5 3], [4 5 6]-> actually col2 [5 5 6]? Wait rows 1..2 become 5, row3 stays same.
     // Correct columns: c1=[1,2,3], c2=[5,5,6], c3=[5,5,9], c4=[10,11,12]
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 3.0, 5.0, 5.0, 6.0, 5.0, 5.0, 9.0, 10.0, 11.0, 12.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape == vec![3, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 3.0, 5.0, 5.0, 6.0, 5.0, 5.0, 9.0, 10.0, 11.0, 12.0])));
 }
 
 #[test]
@@ -67,13 +67,13 @@ fn end_arithmetic_range_store_linear_and_subscripted() {
     let vars = execute_source(src).unwrap();
     // A indices 2,4,6,8 replaced → [1,99,3,98,5,97,7,96,9,10]
     // MATLAB 1:10 yields a row vector (1 x 10)
-    assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![1, 10] && tensor.materialize_f64() == vec![1.0, 99.0, 3.0, 98.0, 5.0, 97.0, 7.0, 96.0, 9.0, 10.0])));
+    assert!(vars.iter().any(|value| matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape == vec![1, 10] && tensor.materialize_f64() == vec![1.0, 99.0, 3.0, 98.0, 5.0, 97.0, 7.0, 96.0, 9.0, 10.0])));
 
     // 2D subscripted with end arithmetic on a range dim
     let src2 = "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 3,4); A(1:end-1, 3) = [42; 43];";
     let vars2 = execute_source(src2).unwrap();
     // Column 3 becomes [42,43,9]
-    assert!(vars2.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.shape == vec![3, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 42.0, 43.0, 9.0, 10.0, 11.0, 12.0])));
+    assert!(vars2.iter().any(|value| matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape == vec![3, 4] && tensor.materialize_f64() == vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 42.0, 43.0, 9.0, 10.0, 11.0, 12.0])));
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn gather_scatter_roundtrip_consistency() {
     let a = vars
         .iter()
         .filter_map(|v| {
-            if let runmat_builtins::Value::Tensor(t) = v {
+            if let runmat_value::Value::Tensor(t) = v {
                 Some(t)
             } else {
                 None
@@ -108,13 +108,13 @@ fn fastpath_roundtrip_and_broadcast() {
     let src = "A=reshape([1 2 3 4 5 6 7 8 9 10 11 12],3,4); C1=A(:,2); A(:,2)=[30;31;32]; B1=A; A(1,:)=100; B2=A; A(:,3)=7; B3=A;";
     let vars = execute_source(src).unwrap();
     // C1 == original second column [4;5;6]
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,1] && t.materialize_f64()==vec![4.0,5.0,6.0])));
+    assert!(vars.iter().any(|v| matches!(v, runmat_value::Value::Tensor(t) if t.shape==vec![3,1] && t.materialize_f64()==vec![4.0,5.0,6.0])));
     // After A(:,2)=[30;31;32], B1 reflects updated column in col-major
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()==vec![1.0,2.0,3.0,30.0,31.0,32.0,7.0,8.0,9.0,10.0,11.0,12.0])));
+    assert!(vars.iter().any(|v| matches!(v, runmat_value::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()==vec![1.0,2.0,3.0,30.0,31.0,32.0,7.0,8.0,9.0,10.0,11.0,12.0])));
     // After A(1,:)=100, B2 has first row set across all columns (col-major indices 0,3,6,9)
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()[0]==100.0 && t.materialize_f64()[3]==100.0 && t.materialize_f64()[6]==100.0 && t.materialize_f64()[9]==100.0)));
+    assert!(vars.iter().any(|v| matches!(v, runmat_value::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()[0]==100.0 && t.materialize_f64()[3]==100.0 && t.materialize_f64()[6]==100.0 && t.materialize_f64()[9]==100.0)));
     // After A(:,3)=7 (scalar broadcast), all entries in third column are 7
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()[6]==7.0 && t.materialize_f64()[7]==7.0 && t.materialize_f64()[8]==7.0)));
+    assert!(vars.iter().any(|v| matches!(v, runmat_value::Value::Tensor(t) if t.shape==vec![3,4] && t.materialize_f64()[6]==7.0 && t.materialize_f64()[7]==7.0 && t.materialize_f64()[8]==7.0)));
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn negative_step_2d_subscript_index() {
     let src = "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12],3,4); B = A(3:-1:1, 4:-2:2);";
     let vars = execute_source(src).unwrap();
     let b = match &vars[1] {
-        runmat_builtins::Value::Tensor(t) => t.clone(),
+        runmat_value::Value::Tensor(t) => t.clone(),
         other => panic!("expected B tensor, got {other:?}"),
     };
     assert_eq!(b.shape, vec![3, 2]);
@@ -145,7 +145,7 @@ fn empty_row_selection() {
     let src = "A = reshape([1 2 3 4 5 6],3,2); B = A([], :);";
     let vars = execute_source(src).unwrap();
     let b = match &vars[1] {
-        runmat_builtins::Value::Tensor(t) => t.clone(),
+        runmat_value::Value::Tensor(t) => t.clone(),
         other => panic!("expected B tensor, got {other:?}"),
     };
     assert_eq!(b.shape, vec![0, 2]);
@@ -157,7 +157,7 @@ fn empty_col_selection() {
     let src = "A = reshape([1 2 3 4 5 6],3,2); B = A(:, []);";
     let vars = execute_source(src).unwrap();
     let b = match &vars[1] {
-        runmat_builtins::Value::Tensor(t) => t.clone(),
+        runmat_value::Value::Tensor(t) => t.clone(),
         other => panic!("expected B tensor, got {other:?}"),
     };
     assert_eq!(b.shape, vec![3, 0]);
@@ -178,7 +178,7 @@ fn mixed_selectors_rows_vector_and_col_range() {
     let src = "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12],3,4); B = A([1 3], 2:3);";
     let vars = execute_source(src).unwrap();
     let b = match &vars[1] {
-        runmat_builtins::Value::Tensor(t) => t.clone(),
+        runmat_value::Value::Tensor(t) => t.clone(),
         other => panic!("expected B tensor, got {other:?}"),
     };
     assert_eq!(b.shape, vec![2, 2]);
@@ -196,7 +196,7 @@ fn gather_scatter_roundtrip_negative_step() {
     let a = vars
         .iter()
         .filter_map(|v| {
-            if let runmat_builtins::Value::Tensor(t) = v {
+            if let runmat_value::Value::Tensor(t) = v {
                 Some(t)
             } else {
                 None
@@ -224,7 +224,7 @@ fn multidim_empty_mixes() {
     let mut saw_b3 = false;
     let mut saw_b4 = false;
     for v in &vars {
-        if let runmat_builtins::Value::Tensor(t) = v {
+        if let runmat_value::Value::Tensor(t) = v {
             if t.shape == vec![0, 4, 2] && t.materialize_f64().is_empty() {
                 saw_b1 = true;
             }
@@ -254,7 +254,7 @@ fn mixed_logical_mask_and_range_across_3d() {
     "#;
     let vars = execute_source(src).unwrap();
     let s = match &vars[4] {
-        runmat_builtins::Value::Tensor(t) => t.clone(),
+        runmat_value::Value::Tensor(t) => t.clone(),
         other => panic!("expected S tensor, got {other:?}"),
     };
     assert_eq!(s.shape, vec![2, 2, 1]);
@@ -274,7 +274,7 @@ fn scatter_broadcasts_negative_steps_and_degenerate_dims() {
     let a = vars
         .iter()
         .filter_map(|v| {
-            if let runmat_builtins::Value::Tensor(t) = v {
+            if let runmat_value::Value::Tensor(t) = v {
                 Some(t)
             } else {
                 None
@@ -303,9 +303,9 @@ fn fastpath_gather_multi_columns_and_rows() {
 	"#;
     let vars = execute_source(src).unwrap();
     // C is columns 2 and 4 -> data [4 5 6 10 11 12]
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,2] && t.materialize_f64()==vec![4.0,5.0,6.0,10.0,11.0,12.0])));
+    assert!(vars.iter().any(|v| matches!(v, runmat_value::Value::Tensor(t) if t.shape==vec![3,2] && t.materialize_f64()==vec![4.0,5.0,6.0,10.0,11.0,12.0])));
     // R is rows [1 3] across all columns -> shape [2,4]; data per col-major: [1,3,4,6,7,9,10,12]
-    assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![2,4] && t.materialize_f64()==vec![1.0,3.0,4.0,6.0,7.0,9.0,10.0,12.0])));
+    assert!(vars.iter().any(|v| matches!(v, runmat_value::Value::Tensor(t) if t.shape==vec![2,4] && t.materialize_f64()==vec![1.0,3.0,4.0,6.0,7.0,9.0,10.0,12.0])));
 }
 
 #[test]
@@ -321,13 +321,13 @@ fn fastpath_scatter_multi_columns_and_rows() {
     // After column scatter, B should have col2=[30 31 32] and col4=[40 41 42]
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
+        .any(|v| matches!(v, runmat_value::Value::Tensor(t)
 		if t.shape==vec![3,4] && t.materialize_f64()==vec![1.0,2.0,3.0,30.0,31.0,32.0,7.0,8.0,9.0,40.0,41.0,42.0])));
     // After row scatter (rows 1 and 3 set to 9 across all columns), C reflects broadcasts
     let expected_c: Vec<f64> = vec![9.0, 2.0, 9.0, 9.0, 31.0, 9.0, 9.0, 8.0, 9.0, 9.0, 41.0, 9.0];
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
+        .any(|v| matches!(v, runmat_value::Value::Tensor(t)
 		if t.shape==vec![3,4] && t.materialize_f64()==expected_c)));
 }
 
@@ -349,17 +349,17 @@ fn func_returns_into_row_col_linear_slices() {
     // B should have row1 col2..3 set to 7,8
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
+        .any(|v| matches!(v, runmat_value::Value::Tensor(t)
 		if t.shape==vec![2,3] && t.materialize_f64()==vec![0.0,0.0, 7.0,0.0, 8.0,0.0])));
     // D should have col1 rows 1..2 set to 7,8
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
+        .any(|v| matches!(v, runmat_value::Value::Tensor(t)
 		if t.shape==vec![3,2] && t.materialize_f64()[0]==7.0 && t.materialize_f64()[1]==8.0)));
     // F should have indices 1 and 9 set to 7 and 8
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
+        .any(|v| matches!(v, runmat_value::Value::Tensor(t)
 		if t.shape==vec![3,3] && t.materialize_f64()[0]==7.0 && t.materialize_f64()[8]==8.0)));
 }
 
@@ -383,17 +383,17 @@ fn cell_expansion_into_row_col_linear_slices() {
     // B row1 col2..3 set to 7,8
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
+        .any(|v| matches!(v, runmat_value::Value::Tensor(t)
 		if t.shape==vec![2,3] && t.materialize_f64()==vec![0.0,0.0, 7.0,0.0, 8.0,0.0])));
     // F col1 rows 1..2 set to 11,12
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
+        .any(|v| matches!(v, runmat_value::Value::Tensor(t)
 		if t.shape==vec![3,2] && t.materialize_f64()[0]==11.0 && t.materialize_f64()[1]==12.0)));
     // I indices 1 and 9 set to 70 and 80
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Tensor(t)
+        .any(|v| matches!(v, runmat_value::Value::Tensor(t)
 		if t.shape==vec![3,3] && t.materialize_f64()[0]==70.0 && t.materialize_f64()[8]==80.0)));
 }
 
@@ -427,7 +427,7 @@ fn cell_expansion_into_slice_with_degenerate_dims() {
     let vars = execute_source(program).unwrap();
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-60.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n-60.0).abs()<1e-9)));
 }
 
 #[test]
@@ -465,44 +465,40 @@ fn cell_paren_range_end_and_colon_semantics() {
     let b = vars
         .iter()
         .find_map(|value| match value {
-            runmat_builtins::Value::Cell(cell) if cell.shape == vec![1, 2] => Some(cell.clone()),
+            runmat_value::Value::Cell(cell) if cell.shape == vec![1, 2] => Some(cell.clone()),
             _ => None,
         })
         .expect("expected B cell with row-vector shape");
     assert_eq!(b.data.len(), 2);
-    assert!(
-        matches!(&b.data[0], runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON)
-    );
-    assert!(
-        matches!(&b.data[1], runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
-    );
+    assert!(matches!(&b.data[0], runmat_value::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON));
+    assert!(matches!(&b.data[1], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON));
 
     let c_final = vars
         .iter()
         .find_map(|value| match value {
-            runmat_builtins::Value::Cell(cell) if cell.shape == vec![1, 4] => Some(cell.clone()),
+            runmat_value::Value::Cell(cell) if cell.shape == vec![1, 4] => Some(cell.clone()),
             _ => None,
         })
         .expect("expected final C cell");
     assert_eq!(c_final.data.len(), 4);
     assert!(
-        matches!(&c_final.data[0], runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+        matches!(&c_final.data[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&c_final.data[1], runmat_builtins::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON)
+        matches!(&c_final.data[1], runmat_value::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&c_final.data[2], runmat_builtins::Value::Num(n) if (*n - 300.0).abs() < f64::EPSILON)
+        matches!(&c_final.data[2], runmat_value::Value::Num(n) if (*n - 300.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&c_final.data[3], runmat_builtins::Value::Num(n) if (*n - 40.0).abs() < f64::EPSILON)
+        matches!(&c_final.data[3], runmat_value::Value::Num(n) if (*n - 40.0).abs() < f64::EPSILON)
     );
 
     let d = vars
         .iter()
         .rev()
         .find_map(|value| match value {
-            runmat_builtins::Value::Cell(cell) => Some(cell.clone()),
+            runmat_value::Value::Cell(cell) => Some(cell.clone()),
             _ => None,
         })
         .expect("expected D cell");
@@ -522,9 +518,9 @@ fn cell_brace_assignment_preserves_copied_cell_values() {
     let copied = vars
         .iter()
         .find_map(|value| match value {
-            runmat_builtins::Value::Cell(cell)
+            runmat_value::Value::Cell(cell)
                 if cell.shape == vec![1, 3]
-                    && matches!(&cell.data[1], runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON) =>
+                    && matches!(&cell.data[1], runmat_value::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON) =>
             {
                 Some(cell.clone())
             }
@@ -532,18 +528,18 @@ fn cell_brace_assignment_preserves_copied_cell_values() {
         })
         .expect("expected copied cell with preserved second element");
     assert!(
-        matches!(&copied.data[0], runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+        matches!(&copied.data[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&copied.data[2], runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
+        matches!(&copied.data[2], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
     );
 
     let updated = vars
         .iter()
         .find_map(|value| match value {
-            runmat_builtins::Value::Cell(cell)
+            runmat_value::Value::Cell(cell)
                 if cell.shape == vec![1, 3]
-                    && matches!(&cell.data[1], runmat_builtins::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON) =>
+                    && matches!(&cell.data[1], runmat_value::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON) =>
             {
                 Some(cell.clone())
             }
@@ -551,9 +547,9 @@ fn cell_brace_assignment_preserves_copied_cell_values() {
         })
         .expect("expected updated cell with replaced second element");
     assert!(
-        matches!(&updated.data[0], runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+        matches!(&updated.data[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&updated.data[2], runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
+        matches!(&updated.data[2], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
     );
 }

@@ -7,8 +7,8 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{CharArray, StringArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -544,7 +544,7 @@ fn collect_string_array(
 
 async fn collect_cell_array(
     builtin: &'static str,
-    cell: runmat_builtins::CellArray,
+    cell: runmat_value::CellArray,
     _force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
     let mut entries = Vec::with_capacity(cell.data.len());
@@ -1541,7 +1541,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_cell_array_multi_dim_order() {
-        let cell = runmat_builtins::CellArray::new(
+        let cell = runmat_value::CellArray::new(
             vec![
                 Value::String("r0c0".into()),
                 Value::String("r0c1".into()),

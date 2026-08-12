@@ -17,12 +17,14 @@ use crate::{
     object_property_setter_name, BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, NumericScalar, ObjectInstance,
-    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, NumericScalar,
+    ObjectInstance, StructValue, Tensor, Value,
+};
 use std::convert::TryFrom;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::setfield")]
@@ -809,7 +811,7 @@ fn assign_logical_element(
 }
 
 fn assign_string_array_element(
-    array: &mut runmat_builtins::StringArray,
+    array: &mut runmat_value::StringArray,
     selector: &IndexSelector,
     rhs: Value,
 ) -> BuiltinResult<()> {
@@ -1312,7 +1314,7 @@ fn cell_dimension_length(cell: &CellArray, dims: usize, dim_idx: usize) -> Built
 }
 
 fn string_array_dimension_length(
-    array: &runmat_builtins::StringArray,
+    array: &runmat_value::StringArray,
     dims: usize,
     dim_idx: usize,
 ) -> BuiltinResult<usize> {
@@ -1476,11 +1478,12 @@ fn is_struct_array(cell: &CellArray) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{
-        Access, CellArray, ClassDef, HandleRef, IntValue, IntegerStorage, LogicalArray,
-        ObjectInstance, PropertyDef, StructValue,
-    };
+    use runmat_builtins::{ClassDef, PropertyDef};
     use runmat_gc::gc_allocate;
+    use runmat_value::{
+        Access, CellArray, HandleRef, IntValue, IntegerStorage, LogicalArray, ObjectInstance,
+        StructValue,
+    };
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()

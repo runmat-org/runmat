@@ -6,15 +6,18 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, ClassDef, IntegerStorage, LogicalArray, NumericScalar,
-    ObjectInstance, PropertyDef, ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ClassDef, PropertyDef, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    Access, CellArray, IntegerStorage, LogicalArray, NumericScalar, ObjectInstance, StringArray,
+    Tensor, Value,
+};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
@@ -1140,7 +1143,7 @@ fn parse_regular_expressions(value: &Value) -> BuiltinResult<Vec<RegexTokenRule>
 }
 
 fn text_column(
-    variables: &runmat_builtins::StructValue,
+    variables: &runmat_value::StructValue,
     name: &str,
     option_name: &str,
 ) -> BuiltinResult<Vec<String>> {
@@ -1154,7 +1157,7 @@ fn text_column(
 }
 
 fn optional_text_column(
-    variables: &runmat_builtins::StructValue,
+    variables: &runmat_value::StructValue,
     name: &str,
     option_name: &str,
     expected_len: usize,
@@ -3062,7 +3065,7 @@ fn positive_platform_usize(value: f64) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::builtins::table::table_from_columns;
-    use runmat_builtins::{IntegerStorage, NumericStorage};
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
@@ -3222,7 +3225,7 @@ mod tests {
         document.properties.remove("Shape");
         document.properties.insert(
             "NumDocuments".to_string(),
-            Value::Int(runmat_builtins::IntValue::U16(2)),
+            Value::Int(runmat_value::IntValue::U16(2)),
         );
         assert_eq!(
             document_shape_from_object(&document, "test").unwrap(),
@@ -3607,7 +3610,7 @@ mod tests {
                     .expect("integer bag"),
             );
             let actual = tensor_property(&bag, "Counts");
-            assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(actual.numeric_dtype(), runmat_value::NumericDType::F64);
             assert_eq!(actual.materialize_f64(), vec![2.0, 3.0]);
         }
     }
@@ -3618,13 +3621,13 @@ mod tests {
         let bag = object(
             run_bag(vec![
                 Value::StringArray(words),
-                Value::Int(runmat_builtins::IntValue::U64(7)),
+                Value::Int(runmat_value::IntValue::U64(7)),
             ])
             .expect("scalar integer count"),
         );
         let actual = tensor_property(&bag, "Counts");
         assert_eq!(actual.shape, vec![1, 1]);
-        assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(actual.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(actual.materialize_f64(), vec![7.0]);
     }
 
@@ -3637,7 +3640,7 @@ mod tests {
         let bag =
             object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
         let actual = tensor_property(&bag, "Counts");
-        assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(actual.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(actual.materialize_f64(), vec![wide as f64]);
     }
 
@@ -4079,7 +4082,7 @@ mod tests {
     #[test]
     fn text_analytics_lengths_preserve_typed_integers_and_validate_f64_bounds() {
         assert_eq!(
-            parse_positive_integer(&Value::Int(runmat_builtins::IntValue::U16(3)), "test").unwrap(),
+            parse_positive_integer(&Value::Int(runmat_value::IntValue::U16(3)), "test").unwrap(),
             3
         );
         assert_eq!(
@@ -4101,7 +4104,7 @@ mod tests {
         )
         .unwrap());
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
             Value::Num(1.5),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {

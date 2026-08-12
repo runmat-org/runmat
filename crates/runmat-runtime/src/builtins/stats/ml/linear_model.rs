@@ -8,10 +8,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, NumericScalar, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor,
-    Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, NumericScalar, ObjectInstance, StringArray, StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::tensor;
 use crate::builtins::stats::summary::distribution_math::{student_t_cdf_upper, student_t_inv};
@@ -2106,7 +2108,7 @@ fn has_intercept(terms: &[Vec<u32>]) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())

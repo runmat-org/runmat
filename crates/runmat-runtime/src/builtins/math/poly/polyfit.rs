@@ -6,9 +6,9 @@ use runmat_accelerate_api::ProviderPolyfitResult;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::dispatcher;
@@ -1065,7 +1065,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -1144,7 +1144,7 @@ pub(crate) mod tests {
         let eval = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
             &[],
         )
         .expect("polyfit");
@@ -1191,7 +1191,7 @@ pub(crate) mod tests {
         let eval = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("polyfit");
@@ -1222,14 +1222,14 @@ pub(crate) mod tests {
         let eval_unweighted = evaluate(
             Value::Tensor(x.clone()),
             Value::Tensor(y.clone()),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("polyfit");
         let eval_weighted = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[Value::Tensor(weights)],
         )
         .expect("polyfit");
@@ -1241,7 +1241,7 @@ pub(crate) mod tests {
     fn accepts_logical_degree_scalar() {
         let x = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
         let y = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
-        let logical = runmat_builtins::LogicalArray::new(vec![1], vec![1, 1]).unwrap();
+        let logical = runmat_value::LogicalArray::new(vec![1], vec![1, 1]).unwrap();
         let eval = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
@@ -1272,7 +1272,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject infinite weights");
@@ -1298,7 +1298,7 @@ pub(crate) mod tests {
             let eval = evaluate(
                 Value::GpuTensor(x_handle),
                 Value::GpuTensor(y_handle),
-                Value::Int(runmat_builtins::IntValue::I32(2)),
+                Value::Int(runmat_value::IntValue::I32(2)),
                 &[],
             )
             .expect("polyfit");
@@ -1334,7 +1334,7 @@ pub(crate) mod tests {
             let cpu_eval = evaluate(
                 Value::Tensor(x.clone()),
                 Value::Tensor(y.clone()),
-                Value::Int(runmat_builtins::IntValue::I32(2)),
+                Value::Int(runmat_value::IntValue::I32(2)),
                 &[Value::Tensor(weights.clone())],
             )
             .expect("cpu polyfit");
@@ -1342,7 +1342,7 @@ pub(crate) mod tests {
             let gpu_eval = evaluate(
                 Value::GpuTensor(x_handle.clone()),
                 Value::GpuTensor(y_handle.clone()),
-                Value::Int(runmat_builtins::IntValue::I32(2)),
+                Value::Int(runmat_value::IntValue::I32(2)),
                 &[Value::GpuTensor(w_handle.clone())],
             )
             .expect("gpu polyfit with weights");
@@ -1375,7 +1375,7 @@ pub(crate) mod tests {
         let cpu_eval = evaluate(
             Value::Tensor(x.clone()),
             Value::Tensor(y.clone()),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("cpu polyfit");
@@ -1395,7 +1395,7 @@ pub(crate) mod tests {
         let gpu_eval = evaluate(
             Value::GpuTensor(x_handle.clone()),
             Value::GpuTensor(y_handle.clone()),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("gpu polyfit");
@@ -1489,7 +1489,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
             &[],
         )
         .expect_err("polyfit should reject mismatched vector lengths");
@@ -1504,7 +1504,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
             &[],
         )
         .expect_err("polyfit should reject non-vector X");
@@ -1520,7 +1520,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject mismatched weights");
@@ -1536,7 +1536,7 @@ pub(crate) mod tests {
         let err = evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[Value::Tensor(weights)],
         )
         .expect_err("polyfit should reject negative weights");
@@ -1552,7 +1552,7 @@ pub(crate) mod tests {
         let eval = evaluate(
             Value::Tensor(x),
             Value::ComplexTensor(complex_values),
-            Value::Int(runmat_builtins::IntValue::I32(2)),
+            Value::Int(runmat_value::IntValue::I32(2)),
             &[],
         )
         .expect("polyfit complex");

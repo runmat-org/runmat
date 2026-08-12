@@ -273,11 +273,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::signal::blackman"
 )]
 async fn blackman_builtin(
-    n: runmat_builtins::Value,
-    varargin: Vec<runmat_builtins::Value>,
-) -> crate::BuiltinResult<runmat_builtins::Value> {
+    n: runmat_value::Value,
+    varargin: Vec<runmat_value::Value>,
+) -> crate::BuiltinResult<runmat_value::Value> {
     validate_blackman_options(&varargin)?;
-    if matches!(n, runmat_builtins::Value::Bool(_)) {
+    if matches!(n, runmat_value::Value::Bool(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &BLACKMAN_LOGICAL_LENGTH_EXTENSION,
             BUILTIN_NAME,
@@ -295,7 +295,7 @@ async fn blackman_builtin(
                     WindowOutputType::Single => runmat_accelerate_api::ProviderPrecision::F32,
                 };
                 runmat_accelerate_api::set_handle_precision(&handle, precision);
-                return Ok(runmat_builtins::Value::GpuTensor(handle));
+                return Ok(runmat_value::Value::GpuTensor(handle));
             }
         }
     }
@@ -308,7 +308,7 @@ async fn blackman_builtin(
     .map_err(blackman_map_window_error)
 }
 
-fn validate_blackman_options(args: &[runmat_builtins::Value]) -> crate::BuiltinResult<()> {
+fn validate_blackman_options(args: &[runmat_value::Value]) -> crate::BuiltinResult<()> {
     if args.len() > 2 {
         return Err(blackman_error(&BLACKMAN_ERROR_ARG_COUNT));
     }
@@ -354,7 +354,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, NumericDType, Value};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntValue, NumericDType, Value};
 
     #[test]
     fn blackman_returns_expected_values() {
@@ -428,7 +429,7 @@ mod tests {
         .expect("gather blackman rounded");
         assert_eq!(rounded.shape, vec![3, 1]);
         assert!(block_on(blackman_builtin(
-            Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             Vec::new()
         ))
         .is_err());
@@ -563,7 +564,7 @@ mod tests {
             .expect("blackman single"),
         )
         .expect("gather blackman single");
-        assert_eq!(single.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(single.numeric_dtype(), runmat_value::NumericDType::F32);
     }
 
     #[test]

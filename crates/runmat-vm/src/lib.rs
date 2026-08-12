@@ -48,16 +48,16 @@ pub use runtime::workspace::{
 
 #[doc(hidden)]
 pub fn expand_cell_indices_for_call(
-    cell: &runmat_builtins::CellArray,
-    indices: &[runmat_builtins::Value],
-) -> Result<Vec<runmat_builtins::Value>, runmat_runtime::RuntimeError> {
+    cell: &runmat_value::CellArray,
+    indices: &[runmat_value::Value],
+) -> Result<Vec<runmat_value::Value>, runmat_runtime::RuntimeError> {
     ops::cells::expand_cell_indices(cell, indices)
 }
 
 #[doc(hidden)]
 pub fn expand_all_cell_for_call(
-    cell: &runmat_builtins::CellArray,
-) -> Result<Vec<runmat_builtins::Value>, runmat_runtime::RuntimeError> {
+    cell: &runmat_value::CellArray,
+) -> Result<Vec<runmat_value::Value>, runmat_runtime::RuntimeError> {
     ops::cells::expand_all_cell_values(cell)
 }
 
@@ -71,12 +71,12 @@ pub fn reset_thread_state_for_tests() {
 }
 
 pub async fn call_method_or_member_index_named_with_outputs(
-    base: runmat_builtins::Value,
+    base: runmat_value::Value,
     name: String,
-    args: Vec<runmat_builtins::Value>,
+    args: Vec<runmat_value::Value>,
     requested_outputs: usize,
     _fallback_policy: runmat_hir::CallableFallbackPolicy,
-) -> Result<runmat_builtins::Value, runmat_runtime::RuntimeError> {
+) -> Result<runmat_value::Value, runmat_runtime::RuntimeError> {
     call::closures::call_method_or_member_index_named_with_outputs(
         base,
         name,

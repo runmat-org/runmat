@@ -5,10 +5,10 @@ use std::collections::HashSet;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
-    ResolveContext, StringArray, Type, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::identifiers::{
     is_matlab_keyword, is_valid_varname, MATLAB_NAME_LENGTH_MAX,
@@ -496,14 +496,14 @@ mod tests {
             BuiltinIntegerAuditKind::NotApplicable
         );
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(1)),
-            Value::Int(runmat_builtins::IntValue::I16(1)),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::Int(runmat_builtins::IntValue::I64(1)),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
-            Value::Int(runmat_builtins::IntValue::U16(1)),
-            Value::Int(runmat_builtins::IntValue::U32(1)),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
         ] {
             let error = block_on(genvarname_builtin(value.clone(), Vec::new()))
                 .expect_err("integer name input");

@@ -8,8 +8,8 @@ use runmat_builtins::{
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_builtins::{StructValue, Value};
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Value};
 
 use super::op_common::handles::{handle_from_integer, handle_from_scalar};
 use super::plotting_error;
@@ -275,8 +275,8 @@ pub(crate) mod tests {
 
     #[test]
     fn gca_figure_handle_arg_reads_typed_integer_storage_exactly() {
-        let tensor = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U32(vec![7]),
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U32(vec![7]),
             vec![1, 1],
         )
         .unwrap();
@@ -359,14 +359,14 @@ pub(crate) mod tests {
             Some("RunMat:compatibility:GcaStructOutputExtension")
         );
         for integer in [
-            runmat_builtins::IntValue::I8(1),
-            runmat_builtins::IntValue::I16(1),
-            runmat_builtins::IntValue::I32(1),
-            runmat_builtins::IntValue::I64(1),
-            runmat_builtins::IntValue::U8(1),
-            runmat_builtins::IntValue::U16(1),
-            runmat_builtins::IntValue::U32(1),
-            runmat_builtins::IntValue::U64(1),
+            runmat_value::IntValue::I8(1),
+            runmat_value::IntValue::I16(1),
+            runmat_value::IntValue::I32(1),
+            runmat_value::IntValue::I64(1),
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U16(1),
+            runmat_value::IntValue::U32(1),
+            runmat_value::IntValue::U64(1),
         ] {
             let error = gca_builtin(vec![Value::Int(integer)]).unwrap_err();
             assert_eq!(
@@ -385,14 +385,14 @@ pub(crate) mod tests {
     fn gca_rejects_wide_integer_figure_alias_without_lossy_lookup() {
         setup_plot_tests();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let error = gca_builtin(vec![Value::Int(runmat_builtins::IntValue::U64(
+        let error = gca_builtin(vec![Value::Int(runmat_value::IntValue::U64(
             (1_u64 << 53) + 1,
         ))])
         .expect_err("wide figure identifier is not rounded into the registry");
         assert!(error.message().contains("too large"));
 
-        let tensor = runmat_builtins::Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+        let tensor = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
             vec![1, 1],
         )
         .unwrap();

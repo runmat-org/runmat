@@ -1,5 +1,5 @@
 use nalgebra::{DMatrix, DVector};
-use runmat_builtins::{StructValue, Tensor, Value};
+use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, lookup_option, value_to_real_vector};
@@ -850,7 +850,7 @@ fn rows_to_matrix_value(name: &str, rows: &[Vec<f64>]) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
     use std::sync::Arc;
 
     #[test]

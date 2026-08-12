@@ -12,10 +12,10 @@ use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::reshape")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -286,7 +286,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
         Value::Cell(cell) => reshape_cell_array(cell, dims),
         Value::ObjectArray(array) => {
             let class_name = array.class_name().to_string();
-            runmat_builtins::ObjectArray::new(class_name, array.into_data(), dims.to_vec())
+            runmat_value::ObjectArray::new(class_name, array.into_data(), dims.to_vec())
                 .map(Value::ObjectArray)
                 .map_err(|error| reshape_error(format!("reshape: {error}")))
         }
@@ -304,7 +304,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
                 Ok(Value::Int(i))
             } else {
-                Tensor::new_integer(runmat_builtins::IntegerStorage::from_scalar(i), dims.to_vec())
+                Tensor::new_integer(runmat_value::IntegerStorage::from_scalar(i), dims.to_vec())
                     .map(Value::Tensor)
                     .map_err(|e| reshape_error(format!("reshape: {e}")))
             }
@@ -584,7 +584,7 @@ pub(crate) mod tests {
         block_on(super::reshape_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     #[test]
     fn reshape_type_infers_rank_from_size_vector() {

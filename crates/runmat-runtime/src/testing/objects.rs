@@ -1,6 +1,6 @@
-use runmat_builtins::{ObjectArray, ObjectInstance, Value};
 use runmat_test::descriptor::{FixtureDescriptor, TestDescriptor};
 use runmat_test::result::{Diagnostic, TestResult};
+use runmat_value::{ObjectArray, ObjectInstance, Value};
 
 pub const TEST_CASE_CLASS: &str = "matlab.unittest.TestCase";
 pub const FUNCTION_TEST_CASE_CLASS: &str = "matlab.unittest.FunctionTestCase";
@@ -45,7 +45,7 @@ pub fn test_suite_object(test: &TestDescriptor) -> Value {
     object.properties.insert(
         "Tags".into(),
         Value::StringArray(
-            runmat_builtins::StringArray::new(test.tags.clone(), vec![1, test.tags.len()])
+            runmat_value::StringArray::new(test.tags.clone(), vec![1, test.tags.len()])
                 .expect("test tags have a valid row shape"),
         ),
     );

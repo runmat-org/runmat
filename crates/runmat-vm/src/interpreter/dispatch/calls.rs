@@ -9,9 +9,9 @@ use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
-use runmat_builtins::{Access, MException, Value};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::RuntimeError;
+use runmat_value::{Access, MException, Value};
 
 pub enum BuiltinHandling {
     Completed,
@@ -890,7 +890,7 @@ mod tests {
     use super::{handle_builtin_outcome, normalize_requested_outputs, ExceptionRouteContext};
     use crate::call::builtins::ImportedBuiltinResolution;
     use crate::interpreter::errors::mex;
-    use runmat_builtins::Value;
+    use runmat_value::Value;
 
     #[test]
     fn normalize_requested_outputs_collapses_singleton_for_single_request() {

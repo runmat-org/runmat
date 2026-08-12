@@ -8,10 +8,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage,
     SparseTensor, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -198,7 +200,7 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
     ensure_abs_extensions(&value)?;
     match value {
         Value::Symbolic(expr) => Ok(symbolic_expr_to_value(
-            runmat_builtins::SymbolicExpr::function_call("abs", vec![expr]),
+            runmat_value::SymbolicExpr::function_call("abs", vec![expr]),
         )),
         Value::GpuTensor(handle) => abs_gpu(handle).await,
         Value::Int(value) => Ok(Value::Int(abs_integer_scalar(value))),
@@ -453,9 +455,8 @@ pub(crate) mod tests {
         .is_ok()
             && runmat_accelerate_api::provider().is_some()
     }
-    use runmat_builtins::{
-        IntValue, IntegerComplexStorage, LogicalArray, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerComplexStorage, LogicalArray, Tensor};
 
     fn abs_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::abs_builtin(value))

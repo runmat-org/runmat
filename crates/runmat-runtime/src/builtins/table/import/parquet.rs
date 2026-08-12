@@ -1,5 +1,5 @@
 use super::*;
-use runmat_builtins::{IntValue, IntegerStorage, NumericScalar};
+use runmat_value::{IntValue, IntegerStorage, NumericScalar};
 
 #[derive(Clone, Default)]
 pub(in crate::builtins::table) struct ParquetReadOptions {

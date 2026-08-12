@@ -1,11 +1,11 @@
 use glam::Vec4;
 use once_cell::sync::OnceCell;
-use runmat_builtins::Tensor;
 use runmat_plot::plots::{
     surface::ColorMap, surface::ShadingMode, AxesKind, Figure, LegendStyle, LineStyle, PlotElement,
     TextStyle,
 };
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::Tensor;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};

@@ -8,10 +8,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor, Value,
+};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -358,15 +360,15 @@ async fn diff_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     }
 }
 
-fn diff_symbolic(expr: runmat_builtins::SymbolicExpr, args: &[Value]) -> BuiltinResult<Value> {
+fn diff_symbolic(expr: runmat_value::SymbolicExpr, args: &[Value]) -> BuiltinResult<Value> {
     let (variable, order) = parse_symbolic_diff_args(&expr, args)?;
     Ok(symbolic_expr_to_value(
-        runmat_builtins::SymbolicExpr::derivative_expr(expr, variable, order),
+        runmat_value::SymbolicExpr::derivative_expr(expr, variable, order),
     ))
 }
 
 fn parse_symbolic_diff_args(
-    expr: &runmat_builtins::SymbolicExpr,
+    expr: &runmat_value::SymbolicExpr,
     args: &[Value],
 ) -> BuiltinResult<(String, u32)> {
     match args.len() {
@@ -398,7 +400,7 @@ fn parse_symbolic_diff_args(
     }
 }
 
-fn infer_symbolic_diff_variable(expr: &runmat_builtins::SymbolicExpr) -> BuiltinResult<String> {
+fn infer_symbolic_diff_variable(expr: &runmat_value::SymbolicExpr) -> BuiltinResult<String> {
     let variables = expr.variables();
     if variables.len() == 1 {
         Ok(variables.into_iter().next().unwrap_or_default())
@@ -832,7 +834,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, SymbolicExpr, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, SymbolicExpr, Tensor};
 
     fn diff_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::diff_builtin(value, rest))

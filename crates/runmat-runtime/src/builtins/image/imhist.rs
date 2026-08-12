@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LogicalArray, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, LogicalArray, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -601,7 +601,7 @@ impl IndexedInput {
                 }
                 let zero_based = matches!(
                     tensor.numeric_dtype(),
-                    runmat_builtins::NumericDType::U8 | runmat_builtins::NumericDType::U16
+                    runmat_value::NumericDType::U8 | runmat_value::NumericDType::U16
                 );
                 let storage = tensor
                     .into_numeric_storage()
@@ -1068,7 +1068,7 @@ fn plot_display_bins(counts: &Tensor, locations: &Tensor) -> BuiltinResult<PlotD
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, NumericDType};
+    use runmat_value::{IntegerStorage, NumericDType};
 
     fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));

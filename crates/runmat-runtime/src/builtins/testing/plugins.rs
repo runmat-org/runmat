@@ -1,4 +1,5 @@
-use runmat_builtins::{ObjectInstance, ResolveContext, Type, Value};
+use runmat_builtins::{ResolveContext, Type};
+use runmat_value::{ObjectInstance, Value};
 
 use crate::BuiltinResult;
 
@@ -98,7 +99,7 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
     object.properties.insert(
         "Folders".into(),
         Value::StringArray(
-            runmat_builtins::StringArray::new(folders, vec![1, count])
+            runmat_value::StringArray::new(folders, vec![1, count])
                 .expect("coverage folders form a row"),
         ),
     );

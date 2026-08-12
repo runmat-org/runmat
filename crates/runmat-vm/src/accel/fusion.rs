@@ -12,9 +12,9 @@ use runmat_accelerate::fusion_exec::{
 };
 use runmat_accelerate::InstrSpan;
 use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
-use runmat_builtins::Value;
 use runmat_runtime::builtins::common::{shape::is_scalar_shape, tensor::scalar_integer_value};
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 use std::collections::HashMap;
 
 #[inline]
@@ -1091,7 +1091,7 @@ mod tests {
     use runmat_accelerate::graph::VarBinding;
     use runmat_accelerate::VarKind;
     use runmat_accelerate_api::GpuTensorHandle;
-    use runmat_builtins::Value;
+    use runmat_value::Value;
 
     #[test]
     fn fused_reduction_domain_defers_multi_axis_and_nd_work_to_provider_paths() {

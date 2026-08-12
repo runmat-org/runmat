@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, StructValue, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, StructValue, Value};
 
 use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
 use crate::builtins::common::spec::{
@@ -714,7 +715,7 @@ pub(crate) mod tests {
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };
     use super::*;
-    use runmat_builtins::{IntegerStorage, Tensor, Value};
+    use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
     use std::thread;
     use std::time::Duration;

@@ -8,10 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LiteralValue, LogicalArray, NumericDType, Tensor, Type,
-    Value,
+    LiteralValue, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
@@ -1124,7 +1124,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor,
     };
 
@@ -1378,12 +1378,12 @@ pub(crate) mod tests {
     #[test]
     fn colon_scalar_tensors_read_typed_integer_storage_exactly() {
         let start = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
             vec![1, 1],
         )
         .unwrap();
         let stop = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_995]),
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_995]),
             vec![1, 1],
         )
         .unwrap();
@@ -1393,7 +1393,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => assert_eq!(
                 tensor.integer_storage(),
-                Some(&runmat_builtins::IntegerStorage::U64(vec![
+                Some(&runmat_value::IntegerStorage::U64(vec![
                     9_007_199_254_740_993,
                     9_007_199_254_740_994,
                     9_007_199_254_740_995,
@@ -1406,7 +1406,7 @@ pub(crate) mod tests {
     #[test]
     fn colon_double_path_scalar_tensor_reads_typed_integer_storage_exactly() {
         let start =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
         let stop = Tensor::new(vec![6.0], vec![1, 1]).unwrap();
 
         let result =

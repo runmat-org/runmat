@@ -5,7 +5,7 @@ use log::debug;
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
-use runmat_builtins::Value;
+use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
@@ -21,7 +21,7 @@ pub struct InterpreterState {
     pub pc: usize,
     pub context: ExecutionContext,
     pub try_stack: Vec<(usize, Option<usize>)>,
-    pub last_exception: Option<runmat_builtins::MException>,
+    pub last_exception: Option<runmat_value::MException>,
     pub imports: Vec<(Vec<String>, bool)>,
     pub global_aliases: HashMap<usize, String>,
     pub persistent_aliases: HashMap<usize, String>,

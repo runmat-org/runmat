@@ -6,10 +6,10 @@ mod tests {
     use once_cell::sync::Lazy;
     use runmat_accelerate::{fusion_residency, simple_provider::InProcessProvider};
     use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
-    use runmat_builtins::Value;
     use runmat_hir::{lower, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
     use runmat_runtime::RuntimeError;
+    use runmat_value::Value;
     use runmat_vm::{compile_semantic_function_registry, Bytecode};
 
     static TEST_PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);

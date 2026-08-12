@@ -13,10 +13,13 @@ use runmat_builtins::{
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
-    NumericDType, NumericScalar, NumericStorage, StringArray, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
+    NumericScalar, NumericStorage, StringArray, Tensor, Value,
+};
 
 use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
@@ -1847,7 +1850,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::IntValue;
 
     fn evaluate_sync(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<SetxorEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
@@ -1918,11 +1922,11 @@ mod tests {
     #[test]
     fn setxor_preserves_exact_integer_elements_and_rows() {
         let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0, 7]), vec![2, 1])
+        let b = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![0, 7]), vec![2, 1])
             .expect("input");
         let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("setxor")
@@ -1932,7 +1936,7 @@ mod tests {
         };
         assert_eq!(
             values.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
+            Some(&runmat_value::IntegerStorage::U64(vec![
                 7,
                 9_007_199_254_740_993,
                 u64::MAX
@@ -1944,12 +1948,12 @@ mod tests {
         assert_double(&ib, &[2.0]);
 
         let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 1]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 1]),
             vec![2, 2],
         )
         .expect("rows input");
         let b = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 4, 1, 2]),
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 4, 1, 2]),
             vec![2, 2],
         )
         .expect("rows input");
@@ -1962,12 +1966,7 @@ mod tests {
         };
         assert_eq!(
             values.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
-                4,
-                u64::MAX,
-                2,
-                0
-            ]))
+            Some(&runmat_value::IntegerStorage::U64(vec![4, u64::MAX, 2, 0]))
         );
         let ia = tensor::value_into_tensor_for("setxor", ia).expect("row indices");
         assert_double(&ia, &[1.0]);
@@ -1977,11 +1976,8 @@ mod tests {
 
     #[test]
     fn setxor_numeric_integer_and_double_preserve_exact_target_storage() {
-        let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![7, 2, 9]),
-            vec![3, 1],
-        )
-        .expect("input");
+        let a = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![7, 2, 9]), vec![3, 1])
+            .expect("input");
         let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).expect("input");
         let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("setxor")
@@ -1998,7 +1994,7 @@ mod tests {
         assert_double(&ib, &[2.0]);
 
         let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
+            runmat_value::IntegerStorage::U16(vec![1, 3, 1, 2, 4, 2]),
             vec![3, 2],
         )
         .expect("rows input");

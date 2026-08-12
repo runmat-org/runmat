@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, LogicalArray, NumericStorage, Type, Value,
+    BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, LogicalArray, NumericStorage, Value};
 
 use super::integer_number_theory::is_prime;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -198,7 +199,7 @@ fn error(descriptor: &'static BuiltinErrorDescriptor, detail: impl Into<String>)
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(isprime_builtin(value, Vec::new()))

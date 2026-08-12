@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -733,7 +733,8 @@ mod tests {
         handle_precision, provider_for_handle, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
         HostTensorView, ProviderPrecision,
     };
-    use runmat_builtins::{builtin_function_by_name, ComplexTensor};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::ComplexTensor;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     fn call(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
@@ -834,7 +835,7 @@ mod tests {
     fn compatibility_mode_rejects_integer_and_logical_extensions() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let integer = call(
-            Value::Int(runmat_builtins::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
             Value::Num(1.0),
             Value::Num(1.0),
         )
@@ -856,7 +857,7 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
             let signal = Tensor::new_integer(
-                runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_994; 4]),
+                runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_994; 4]),
                 vec![1, 4],
             )
             .expect("wide signal");

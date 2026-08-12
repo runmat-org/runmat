@@ -9,9 +9,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
@@ -598,10 +599,10 @@ fn complete_rows(
         for col in 0..left_cols {
             if matches!(
                 left.numeric_value_at(col * rows + row),
-                Some(runmat_builtins::NumericScalar::F64(value)) if value.is_nan()
+                Some(runmat_value::NumericScalar::F64(value)) if value.is_nan()
             ) || matches!(
                 left.numeric_value_at(col * rows + row),
-                Some(runmat_builtins::NumericScalar::F32(value)) if value.is_nan()
+                Some(runmat_value::NumericScalar::F32(value)) if value.is_nan()
             ) {
                 mask[row] = false;
             }
@@ -609,10 +610,10 @@ fn complete_rows(
         for col in 0..right_cols {
             if matches!(
                 right.numeric_value_at(col * rows + row),
-                Some(runmat_builtins::NumericScalar::F64(value)) if value.is_nan()
+                Some(runmat_value::NumericScalar::F64(value)) if value.is_nan()
             ) || matches!(
                 right.numeric_value_at(col * rows + row),
-                Some(runmat_builtins::NumericScalar::F32(value)) if value.is_nan()
+                Some(runmat_value::NumericScalar::F32(value)) if value.is_nan()
             ) {
                 mask[row] = false;
             }
@@ -834,7 +835,7 @@ fn tail_pvalue(cdf: f64, tail: Tail) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())

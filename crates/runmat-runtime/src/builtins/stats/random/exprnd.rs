@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
@@ -588,7 +589,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     struct MalformedRandomProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider,
@@ -858,7 +859,7 @@ mod tests {
         reset();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(exprnd_builtin(vec![Value::Int(
-            runmat_builtins::IntValue::U16(2),
+            runmat_value::IntValue::U16(2),
         )]))
         .expect_err("integer mu is gated");
         assert_eq!(
@@ -867,7 +868,7 @@ mod tests {
         );
         let error = block_on(exprnd_builtin(vec![
             Value::Num(1.0),
-            Value::Int(runmat_builtins::IntValue::U16(2)),
+            Value::Int(runmat_value::IntValue::U16(2)),
         ]))
         .expect_err("integer size is gated");
         assert_eq!(

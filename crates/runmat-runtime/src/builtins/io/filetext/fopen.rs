@@ -10,9 +10,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -990,7 +990,7 @@ fn preflight_query_fid(value: &Value) -> BuiltinResult<()> {
                 BUILTIN_NAME,
             )
         }
-        Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 => {
+        Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32 => {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FOPEN_SINGLE_ID_EXTENSION,
                 BUILTIN_NAME,
@@ -1193,8 +1193,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
-    use runmat_builtins::{IntValue, IntegerStorage};
     use runmat_time::system_time_now;
+    use runmat_value::{IntValue, IntegerStorage};
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;

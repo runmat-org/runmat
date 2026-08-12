@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -353,8 +354,8 @@ fn is_typed_integer_value(value: &Value) -> bool {
 }
 
 fn is_single_numeric_value(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32)
-        || matches!(value, Value::ComplexTensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32)
+    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
 }
 
 fn is_logical_value(value: &Value) -> bool {
@@ -370,7 +371,7 @@ fn is_resident_value(value: &Value) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
         Tensor,
     };

@@ -1,7 +1,7 @@
 use crate::object::resolve as obj_resolve;
-use runmat_builtins::Value;
 use runmat_gc::gc_record_write;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 pub async fn dispatch_object(
     instr: &crate::bytecode::Instr,

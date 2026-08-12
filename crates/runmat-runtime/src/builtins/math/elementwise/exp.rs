@@ -11,10 +11,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntegerStorage, NumericStorage, ObjectInstance,
     SparseTensor, StructValue, SymbolicFunction, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -665,7 +667,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor};
 
     fn exp_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -811,7 +814,7 @@ pub(crate) mod tests {
             let Value::Tensor(output) = exp_builtin(Value::GpuTensor(handle)).expect("exp") else {
                 panic!("expected host double output");
             };
-            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
             assert_eq!(output.materialize_f64(), &[1.0, 1.0_f64.exp()]);
         });
     }
@@ -854,7 +857,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected double tensor");
             };
-            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
         }
         for storage in [
             IntegerStorage::I64(vec![-9_007_199_254_740_993]),
@@ -1067,7 +1070,7 @@ pub(crate) mod tests {
         assert_eq!(variables.fields.len(), 2);
         assert!(matches!(
             variables.fields.get("Single"),
-            Some(Value::Tensor(tensor)) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32
+            Some(Value::Tensor(tensor)) if tensor.numeric_dtype() == runmat_value::NumericDType::F32
         ));
     }
 

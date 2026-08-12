@@ -6,9 +6,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericScalar, Tensor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericScalar, Tensor};
 
 const BUILTIN_NAME: &str = "array2table";
 
@@ -221,7 +221,7 @@ fn compatible_integer_column(values: &[Value], rows: usize) -> BuiltinResult<Opt
     if has_scalar_double
         && matches!(
             prototype,
-            runmat_builtins::IntegerStorage::I64(_) | runmat_builtins::IntegerStorage::U64(_)
+            runmat_value::IntegerStorage::I64(_) | runmat_value::IntegerStorage::U64(_)
         )
     {
         return Ok(None);
@@ -250,7 +250,7 @@ fn integer_compatible_row_width(value: &Value) -> Option<usize> {
     }
 }
 
-fn integer_row(value: &Value) -> Option<(&runmat_builtins::IntegerStorage, usize)> {
+fn integer_row(value: &Value) -> Option<(&runmat_value::IntegerStorage, usize)> {
     match value {
         Value::Int(value) => Some((integer_scalar_prototype(value), 1)),
         Value::Tensor(tensor)
@@ -264,8 +264,8 @@ fn integer_row(value: &Value) -> Option<(&runmat_builtins::IntegerStorage, usize
     }
 }
 
-fn integer_scalar_prototype(value: &IntValue) -> &'static runmat_builtins::IntegerStorage {
-    use runmat_builtins::IntegerStorage;
+fn integer_scalar_prototype(value: &IntValue) -> &'static runmat_value::IntegerStorage {
+    use runmat_value::IntegerStorage;
     static I8: IntegerStorage = IntegerStorage::I8(Vec::new());
     static I16: IntegerStorage = IntegerStorage::I16(Vec::new());
     static I32: IntegerStorage = IntegerStorage::I32(Vec::new());
@@ -442,7 +442,7 @@ pub(crate) async fn table2cell_builtin(value: Value) -> BuiltinResult<Value> {
 mod cell2table_tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn dedicated_descriptor_is_fixed_and_public() {

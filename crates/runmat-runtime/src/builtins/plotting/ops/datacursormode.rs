@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    HandleRef, IntValue, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{HandleRef, IntValue, ObjectInstance, StructValue, Tensor, Value};
 
 use super::state::{
     current_figure_handle, data_cursor_state_snapshot, figure_handle_exists, select_figure,
@@ -775,7 +775,7 @@ mod tests {
         let figure = ensure_current_figure().as_u32() as f64;
         assert!(datacursormode_builtin(vec![Value::Num(figure + 0.5)]).is_err());
         assert!(datacursormode_builtin(vec![Value::Tensor(
-            runmat_builtins::Tensor::new(vec![figure, figure], vec![1, 2]).unwrap(),
+            runmat_value::Tensor::new(vec![figure, figure], vec![1, 2]).unwrap(),
         )])
         .is_err());
 
@@ -812,7 +812,7 @@ mod tests {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         for flag in [0, 1] {
             let logical = Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(vec![flag], vec![1, 1]).unwrap(),
+                runmat_value::LogicalArray::new(vec![flag], vec![1, 1]).unwrap(),
             );
             assert!(set_data_cursor_object_properties(
                 &dcm,

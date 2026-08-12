@@ -1,11 +1,11 @@
 use crate::bytecode::FunctionRegistry;
 use crate::call::feval::forward_builtin_feval;
 use crate::call::shared::strict_callable_display_name;
-use runmat_builtins::{Closure, Value};
 use runmat_hir::{
     BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, QualifiedName, SymbolName,
 };
 use runmat_runtime::RuntimeError;
+use runmat_value::{Closure, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CallableCallKind {
@@ -585,11 +585,11 @@ mod tests {
     };
     use crate::bytecode::FunctionRegistry;
     use futures::executor::block_on;
-    use runmat_builtins::{Closure, StringArray, Tensor, Value};
     use runmat_hir::{
         BuiltinId, CallableFallbackPolicy, CallableIdentity, DefPath, DefPathSegment, FunctionId,
         MethodId, PackageName, QualifiedName, SymbolName,
     };
+    use runmat_value::{Closure, StringArray, Tensor, Value};
     use std::sync::Arc;
 
     fn imported_identity(name: &str) -> CallableIdentity {

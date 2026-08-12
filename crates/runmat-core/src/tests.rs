@@ -146,7 +146,7 @@ fn execute_path_request(
 fn outcome_has_named_upsert(
     outcome: &abi::ExecutionOutcome,
     name: &str,
-    expected: &runmat_builtins::Value,
+    expected: &runmat_value::Value,
 ) -> bool {
     outcome.workspace_delta.upserts.iter().any(|upsert| {
         let matches_name = match &upsert.key {
@@ -203,7 +203,7 @@ fn is_external_function_expand_multi(
 fn outcome_named_upsert_value<'a>(
     outcome: &'a abi::ExecutionOutcome,
     name: &str,
-) -> Option<&'a runmat_builtins::Value> {
+) -> Option<&'a runmat_value::Value> {
     outcome.workspace_delta.upserts.iter().find_map(|upsert| {
         let matches_name = match &upsert.key {
             abi::WorkspaceBindingKey::Interactive {
@@ -294,7 +294,7 @@ fn execute_outcome_exposes_workspace_upserts() {
             )
         })
         .expect("ABI workspace delta should expose assigned x");
-    assert_eq!(upsert.value, runmat_builtins::Value::Num(42.0));
+    assert_eq!(upsert.value, runmat_value::Value::Num(42.0));
 }
 
 #[test]
@@ -311,7 +311,7 @@ fn execute_text_request_accepts_function_arguments_block_syntax() {
     "#;
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(6.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(6.0)),
         "arguments block syntax should parse and execute function body"
     );
 }
@@ -330,7 +330,7 @@ fn execute_text_request_accepts_function_arguments_input_block_attribute() {
     "#;
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(6.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(6.0)),
         "arguments (Input) block syntax should parse and execute function body"
     );
 }
@@ -353,17 +353,17 @@ fn execute_text_request_enforces_function_arguments_size_and_class() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "sid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationSize".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "tid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationClass".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
     ));
 }
 
@@ -406,12 +406,12 @@ fn execute_text_request_enforces_arguments_must_be_finite_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "fid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -431,7 +431,7 @@ fn execute_text_request_treats_single_token_arguments_constraint_as_class_name()
     assert!(outcome_has_named_upsert(
         &outcome,
         "cid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationClass".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
     ));
 }
 
@@ -453,17 +453,17 @@ fn execute_text_request_must_be_finite_accepts_char_and_logical() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "zid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -486,22 +486,22 @@ fn execute_text_request_enforces_arguments_must_be_text_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "tid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -524,22 +524,22 @@ fn execute_text_request_enforces_arguments_must_be_nonempty_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid1",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid2",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -561,17 +561,17 @@ fn execute_text_request_enforces_arguments_must_be_scalar_or_empty_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -593,17 +593,17 @@ fn execute_text_request_enforces_arguments_must_be_real_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -625,17 +625,17 @@ fn execute_text_request_enforces_arguments_must_be_integer_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -657,17 +657,17 @@ fn execute_text_request_enforces_arguments_must_be_positive_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -689,17 +689,17 @@ fn execute_text_request_enforces_arguments_must_be_nonnegative_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -720,12 +720,12 @@ fn execute_text_request_enforces_arguments_must_be_nonzero_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -747,17 +747,17 @@ fn execute_text_request_enforces_arguments_must_be_nonpositive_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidp",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -779,17 +779,17 @@ fn execute_text_request_enforces_arguments_must_be_negative_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidp",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -811,17 +811,17 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_or_equal_validat
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -842,12 +842,12 @@ fn execute_text_request_enforces_arguments_must_be_less_than_or_equal_validator(
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(3.0)
+        &runmat_value::Value::Num(3.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -868,12 +868,12 @@ fn execute_text_request_arguments_validator_threshold_supports_unary_minus_liter
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(-2.0)
+        &runmat_value::Value::Num(-2.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -902,22 +902,22 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_and_less_than_va
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(2.0)
+        &runmat_value::Value::Num(2.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(4.0)
+        &runmat_value::Value::Num(4.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "e1",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "e2",
-        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
     ));
 }
 
@@ -1070,12 +1070,12 @@ fn execute_text_request_supports_arguments_default_for_omitted_input() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(8.0)
+        &runmat_value::Value::Num(8.0)
     ));
 }
 
@@ -1096,12 +1096,12 @@ fn execute_text_request_supports_arguments_signed_numeric_default_for_omitted_in
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(-6.0)
+        &runmat_value::Value::Num(-6.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(8.0)
+        &runmat_value::Value::Num(8.0)
     ));
 }
 
@@ -1144,12 +1144,12 @@ fn execute_text_request_supports_arguments_empty_array_default_for_omitted_input
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Bool(true)
+        &runmat_value::Value::Bool(true)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Bool(false)
+        &runmat_value::Value::Bool(false)
     ));
 }
 
@@ -1171,22 +1171,22 @@ fn execute_text_request_supports_multi_assign_index_cell_targets() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "d",
-        &runmat_builtins::Value::Num(11.0)
+        &runmat_value::Value::Num(11.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "e",
-        &runmat_builtins::Value::Num(12.0)
+        &runmat_value::Value::Num(12.0)
     ));
 }
 
@@ -1207,12 +1207,12 @@ fn execute_text_request_supports_cell_brace_range_assignment_from_multi_output_c
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(11.0)
+        &runmat_value::Value::Num(11.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(12.0)
+        &runmat_value::Value::Num(12.0)
     ));
 }
 
@@ -1233,12 +1233,12 @@ fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice(
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -1259,12 +1259,12 @@ fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(15.0)
+        &runmat_value::Value::Num(15.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(25.0)
+        &runmat_value::Value::Num(25.0)
     ));
 }
 
@@ -1285,12 +1285,12 @@ fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(15.0)
+        &runmat_value::Value::Num(15.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(25.0)
+        &runmat_value::Value::Num(25.0)
     ));
 }
 
@@ -1312,7 +1312,7 @@ fn execute_text_request_supports_direct_recursive_function() {
         assert!(outcome_has_named_upsert(
             &outcome,
             "y",
-            &runmat_builtins::Value::Num(120.0)
+            &runmat_value::Value::Num(120.0)
         ));
     });
 }
@@ -1344,12 +1344,12 @@ fn execute_text_request_supports_dynamic_recursive_function_routes() {
         assert!(outcome_has_named_upsert(
             &outcome,
             "a",
-            &runmat_builtins::Value::Num(120.0)
+            &runmat_value::Value::Num(120.0)
         ));
         assert!(outcome_has_named_upsert(
             &outcome,
             "b",
-            &runmat_builtins::Value::Num(120.0)
+            &runmat_value::Value::Num(120.0)
         ));
     });
 }
@@ -1404,22 +1404,22 @@ fn execute_text_request_supports_arity_check_helpers() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "ok",
-        &runmat_builtins::Value::Num(4.0)
+        &runmat_value::Value::Num(4.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_in",
-        &runmat_builtins::Value::String("RunMat:TooManyInputs".into())
+        &runmat_value::Value::String("RunMat:TooManyInputs".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_out_low",
-        &runmat_builtins::Value::String("RunMat:NotEnoughOutputs".into())
+        &runmat_value::Value::String("RunMat:NotEnoughOutputs".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_out_high",
-        &runmat_builtins::Value::String("RunMat:TooManyOutputs".into())
+        &runmat_value::Value::String("RunMat:TooManyOutputs".into())
     ));
 }
 
@@ -1459,22 +1459,22 @@ fn execute_text_request_supports_dynamic_arity_check_helpers() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "ok",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "one",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "in_eid",
-        &runmat_builtins::Value::String("RunMat:TooManyInputs".into())
+        &runmat_value::Value::String("RunMat:TooManyInputs".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "out_eid",
-        &runmat_builtins::Value::String("RunMat:TooManyOutputs".into())
+        &runmat_value::Value::String("RunMat:TooManyOutputs".into())
     ));
 }
 
@@ -1501,17 +1501,17 @@ fn execute_path_request_supports_mfilename_name_and_fullpath() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "name",
-        &runmat_builtins::Value::String("named_source".into())
+        &runmat_value::Value::String("named_source".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "fallback",
-        &runmat_builtins::Value::String("named_source".into())
+        &runmat_value::Value::String("named_source".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "full",
-        &runmat_builtins::Value::String(expected_full.to_string_lossy().to_string())
+        &runmat_value::Value::String(expected_full.to_string_lossy().to_string())
     ));
 }
 
@@ -1548,12 +1548,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "cls",
-        &runmat_builtins::Value::String("C".into())
+        &runmat_value::Value::String("C".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "outside",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_value::Value::String(String::new())
     ));
 }
 
@@ -1620,7 +1620,7 @@ roots = ["."]
     let _cwd = push_cwd(tmp.path());
     let source_root = std::env::current_dir().expect("read temp cwd");
     let outcome = execute_path_request(&mut session, "main.m").expect("exec");
-    let assert_named = |name: &str, expected: runmat_builtins::Value| {
+    let assert_named = |name: &str, expected: runmat_value::Value| {
         assert!(
             outcome_has_named_upsert(&outcome, name, &expected),
             "expected {name}={expected:?}; upserts={:?}; diagnostics={:?}",
@@ -1631,7 +1631,7 @@ roots = ["."]
     let assert_named_path = |name: &str, expected: PathBuf| {
         let actual = outcome_named_upsert_value(&outcome, name)
             .and_then(|value| {
-                if let runmat_builtins::Value::String(text) = value {
+                if let runmat_value::Value::String(text) = value {
                     Some(text.as_str())
                 } else {
                     None
@@ -1655,18 +1655,15 @@ roots = ["."]
 
     assert_named(
         "private_name",
-        runmat_builtins::Value::String("private_where".into()),
+        runmat_value::Value::String("private_where".into()),
     );
     assert_named_path("private_full", source_root.join("./private/private_where"));
     assert_named(
         "package_name",
-        runmat_builtins::Value::String("whereami".into()),
+        runmat_value::Value::String("whereami".into()),
     );
     assert_named_path("package_full", source_root.join("./+pkg/whereami"));
-    assert_named(
-        "class_name",
-        runmat_builtins::Value::String("whereami".into()),
-    );
+    assert_named("class_name", runmat_value::Value::String("whereami".into()));
     assert_named_path("class_full", source_root.join("./@C/whereami"));
 }
 
@@ -1691,22 +1688,22 @@ fn execute_text_request_supports_functions_metadata_builtin() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "text_name",
-        &runmat_builtins::Value::String("sin".into())
+        &runmat_value::Value::String("sin".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "text_type",
-        &runmat_builtins::Value::String("simple".into())
+        &runmat_value::Value::String("simple".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "local_name",
-        &runmat_builtins::Value::String("local_id".into())
+        &runmat_value::Value::String("local_id".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "anon_type",
-        &runmat_builtins::Value::String("anonymous".into())
+        &runmat_value::Value::String("anonymous".into())
     ));
 }
 
@@ -1735,32 +1732,32 @@ fn execute_text_request_supports_inputname_builtin() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "n1",
-        &runmat_builtins::Value::String("alpha".into())
+        &runmat_value::Value::String("alpha".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "n2",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_value::Value::String(String::new())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "n3",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_value::Value::String(String::new())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "n4",
-        &runmat_builtins::Value::String("beta".into())
+        &runmat_value::Value::String("beta".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "f1",
-        &runmat_builtins::Value::String("beta".into())
+        &runmat_value::Value::String("beta".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "f2",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_value::Value::String(String::new())
     ));
 }
 
@@ -1822,7 +1819,7 @@ end
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome =
         execute_path_request(&mut session, main_path.to_string_lossy().as_ref()).expect("exec");
-    let assert_named = |name: &str, expected: runmat_builtins::Value| {
+    let assert_named = |name: &str, expected: runmat_value::Value| {
         assert!(
             outcome_has_named_upsert(&outcome, name, &expected),
             "expected {name}={expected:?}; upserts={:?}; diagnostics={:?}",
@@ -1830,15 +1827,15 @@ end
             outcome.diagnostics
         );
     };
-    assert_named("s1", runmat_builtins::Value::String("alpha".into()));
-    assert_named("s2", runmat_builtins::Value::String(String::new()));
-    assert_named("s3", runmat_builtins::Value::String(String::new()));
-    assert_named("s4", runmat_builtins::Value::String("beta".into()));
-    assert_named("p1", runmat_builtins::Value::String("beta".into()));
-    assert_named("p2", runmat_builtins::Value::String(String::new()));
-    assert_named("c1", runmat_builtins::Value::String("C".into()));
-    assert_named("c2", runmat_builtins::Value::String("alpha".into()));
-    assert_named("c3", runmat_builtins::Value::String(String::new()));
+    assert_named("s1", runmat_value::Value::String("alpha".into()));
+    assert_named("s2", runmat_value::Value::String(String::new()));
+    assert_named("s3", runmat_value::Value::String(String::new()));
+    assert_named("s4", runmat_value::Value::String("beta".into()));
+    assert_named("p1", runmat_value::Value::String("beta".into()));
+    assert_named("p2", runmat_value::Value::String(String::new()));
+    assert_named("c1", runmat_value::Value::String("C".into()));
+    assert_named("c2", runmat_value::Value::String("alpha".into()));
+    assert_named("c3", runmat_value::Value::String(String::new()));
 }
 
 #[test]
@@ -1867,17 +1864,17 @@ fn execute_text_request_inputname_handles_nested_and_expanded_arguments() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "nested_name",
-        &runmat_builtins::Value::String("x".into())
+        &runmat_value::Value::String("x".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_name",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_value::Value::String(String::new())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_feval_name",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_value::Value::String(String::new())
     ));
 }
 
@@ -1902,7 +1899,7 @@ fn execute_text_request_supports_localfunctions_builtin() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "total",
-        &runmat_builtins::Value::Num(13.0)
+        &runmat_value::Value::Num(13.0)
     ));
 }
 
@@ -1932,8 +1929,8 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
             return false;
         }
         match &upsert.value {
-            runmat_builtins::Value::Bool(_) => true,
-            runmat_builtins::Value::LogicalArray(array) => array.shape == vec![1, 1],
+            runmat_value::Value::Bool(_) => true,
+            runmat_value::Value::LogicalArray(array) => array.shape == vec![1, 1],
             _ => false,
         }
     });
@@ -1981,7 +1978,7 @@ fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
                 return None;
             }
             match upsert.value {
-                runmat_builtins::Value::Num(value) => Some(value),
+                runmat_value::Value::Num(value) => Some(value),
                 _ => None,
             }
         });
@@ -2038,7 +2035,7 @@ fn execute_request_supports_warning_off_all_command_rewrite() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "ok",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
 }
 
@@ -2063,12 +2060,12 @@ fn execute_request_supports_clearvars_name_command_rewrite() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "ex",
-        &runmat_builtins::Value::Num(0.0)
+        &runmat_value::Value::Num(0.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "ey",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
 }
 
@@ -2090,7 +2087,7 @@ fn execute_request_supports_close_all_command_rewrite() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "ok",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
 }
 
@@ -2106,7 +2103,7 @@ fn execute_request_supports_bare_close_without_current_figure() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "ok",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(runmat_runtime::builtins::plotting::figure_handles().is_empty());
 }
@@ -2131,17 +2128,17 @@ fn execute_request_supports_clearvars_except_command_rewrite() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "ex",
-        &runmat_builtins::Value::Num(0.0)
+        &runmat_value::Value::Num(0.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "ey",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "ez",
-        &runmat_builtins::Value::Num(0.0)
+        &runmat_value::Value::Num(0.0)
     ));
 }
 
@@ -2249,7 +2246,7 @@ fn execute_request_supports_format_command_rewrite_through_semantic_pipeline() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "x",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
 }
 
@@ -2804,15 +2801,11 @@ end
         .expect("execute script");
 
     assert!(
-        outcome_has_named_upsert(
-            &outcome,
-            "cls",
-            &runmat_builtins::Value::String("Vec2".into())
-        ),
+        outcome_has_named_upsert(&outcome, "cls", &runmat_value::Value::String("Vec2".into())),
         "expected class() result to be Vec2"
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "m", &runmat_builtins::Value::Num(5.0)),
+        outcome_has_named_upsert(&outcome, "m", &runmat_value::Value::Num(5.0)),
         "expected method call result to be 5"
     );
 }
@@ -2852,12 +2845,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::String("geom.Point".into())
+        &runmat_value::Value::String("geom.Point".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "x",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -2922,12 +2915,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::String("geom.Point".into())
+        &runmat_value::Value::String("geom.Point".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "x",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -3010,32 +3003,32 @@ amt = c.amount;
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "cls",
-                &runmat_builtins::Value::String("Vec2".into())
+                &runmat_value::Value::String("Vec2".into())
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "isVec",
-                &runmat_builtins::Value::Bool(true)
+                &runmat_value::Value::Bool(true)
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "mag",
-                &runmat_builtins::Value::Num(5.0)
+                &runmat_value::Value::Num(5.0)
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "uxx",
-                &runmat_builtins::Value::Num(1.0)
+                &runmat_value::Value::Num(1.0)
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "isMoney",
-                &runmat_builtins::Value::Bool(true)
+                &runmat_value::Value::Bool(true)
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "amt",
-                &runmat_builtins::Value::Num(15.0)
+                &runmat_value::Value::Num(15.0)
             ));
         })
         .expect("spawn source authoring oop smoke thread");
@@ -3090,22 +3083,22 @@ ux = u.x;
     assert!(outcome_has_named_upsert(
         &outcome,
         "cls",
-        &runmat_builtins::Value::String("Vec2".into())
+        &runmat_value::Value::String("Vec2".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "isv",
-        &runmat_builtins::Value::Bool(true)
+        &runmat_value::Value::Bool(true)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "m",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "ux",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
 }
 
@@ -3151,17 +3144,17 @@ v = c.amount;
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "cls",
-                &runmat_builtins::Value::String("Money".into())
+                &runmat_value::Value::String("Money".into())
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "ism",
-                &runmat_builtins::Value::Bool(true)
+                &runmat_value::Value::Bool(true)
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "v",
-                &runmat_builtins::Value::Num(15.0)
+                &runmat_value::Value::Num(15.0)
             ));
         })
         .expect("spawn one-file operator overload plus thread");
@@ -3197,7 +3190,7 @@ end
         .expect("execute script");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "y", &runmat_builtins::Value::Num(9.0)),
+        outcome_has_named_upsert(&outcome, "y", &runmat_value::Value::Num(9.0)),
         "expected handle alias update to be visible through b.x"
     );
 }
@@ -3231,17 +3224,17 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "va",
-        &runmat_builtins::Value::Bool(false)
+        &runmat_value::Value::Bool(false)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "vb",
-        &runmat_builtins::Value::Bool(false)
+        &runmat_value::Value::Bool(false)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:getfield:InvalidHandle".into())
+        &runmat_value::Value::String("RunMat:getfield:InvalidHandle".into())
     ));
 }
 
@@ -3279,10 +3272,10 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "g",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(
-        outcome_has_named_upsert(&outcome, "v", &runmat_builtins::Value::Bool(false)),
+        outcome_has_named_upsert(&outcome, "v", &runmat_value::Value::Bool(false)),
         "delete should invalidate the original handle; outcome={outcome:?}"
     );
 }
@@ -3337,7 +3330,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::Num(0.0)
+        &runmat_value::Value::Num(0.0)
     ));
 }
 
@@ -3382,12 +3375,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "enabled",
-        &runmat_builtins::Value::Bool(true)
+        &runmat_value::Value::Bool(true)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "valid",
-        &runmat_builtins::Value::Bool(true)
+        &runmat_value::Value::Bool(true)
     ));
 }
 
@@ -3441,7 +3434,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "g",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
 }
 
@@ -3521,7 +3514,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
     ));
 }
 
@@ -3587,7 +3580,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "cls",
-        &runmat_builtins::Value::String("Color".into())
+        &runmat_value::Value::String("Color".into())
     ));
 }
 
@@ -3620,7 +3613,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -3653,7 +3646,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(11.0)
+        &runmat_value::Value::Num(11.0)
     ));
 }
 
@@ -3689,18 +3682,14 @@ end
         .expect("execute script");
 
     assert!(
-        !outcome_has_named_upsert(
-            &outcome,
-            "id",
-            &runmat_builtins::Value::String("BAD".into())
-        ),
+        !outcome_has_named_upsert(&outcome, "id", &runmat_value::Value::String("BAD".into())),
         "sealed class inheritance should fail"
     );
     assert!(
         outcome_has_named_upsert(
             &outcome,
             "id",
-            &runmat_builtins::Value::String("RunMat:ClassSealed".into())
+            &runmat_value::Value::String("RunMat:ClassSealed".into())
         ) || outcome
             .diagnostics
             .iter()
@@ -3769,11 +3758,7 @@ end
         .expect("execute script");
 
     assert!(
-        !outcome_has_named_upsert(
-            &outcome,
-            "id",
-            &runmat_builtins::Value::String("BAD".into())
-        ),
+        !outcome_has_named_upsert(&outcome, "id", &runmat_value::Value::String("BAD".into())),
         "abstract class instantiation should fail"
     );
 }
@@ -3847,18 +3832,14 @@ end
         .expect("execute script");
 
     assert!(
-        !outcome_has_named_upsert(
-            &outcome,
-            "id",
-            &runmat_builtins::Value::String("BAD".into())
-        ),
+        !outcome_has_named_upsert(&outcome, "id", &runmat_value::Value::String("BAD".into())),
         "concrete subclass missing abstract method should fail"
     );
     assert!(
         outcome_has_named_upsert(
             &outcome,
             "id",
-            &runmat_builtins::Value::String("RunMat:AbstractMethodMissing".into())
+            &runmat_value::Value::String("RunMat:AbstractMethodMissing".into())
         ) || outcome
             .diagnostics
             .iter()
@@ -3948,18 +3929,14 @@ end
         .expect("execute script");
 
     assert!(
-        !outcome_has_named_upsert(
-            &outcome,
-            "id",
-            &runmat_builtins::Value::String("BAD".into())
-        ),
+        !outcome_has_named_upsert(&outcome, "id", &runmat_value::Value::String("BAD".into())),
         "overriding sealed method should fail"
     );
     assert!(
         outcome_has_named_upsert(
             &outcome,
             "id",
-            &runmat_builtins::Value::String("RunMat:MethodSealed".into())
+            &runmat_value::Value::String("RunMat:MethodSealed".into())
         ) || outcome
             .diagnostics
             .iter()
@@ -4049,12 +4026,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::String("RunMat:MethodPrivate".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "cb",
-        &runmat_builtins::Value::String("A".into())
+        &runmat_value::Value::String("A".into())
     ));
 }
 
@@ -4102,12 +4079,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::String("RunMat:MethodPrivate".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "cb",
-        &runmat_builtins::Value::String("B".into())
+        &runmat_value::Value::String("B".into())
     ));
 }
 
@@ -4137,14 +4114,14 @@ end
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
 
-    let empty = runmat_builtins::Value::Tensor(
-        runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+    let empty = runmat_value::Value::Tensor(
+        runmat_value::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
     );
     assert!(outcome_has_named_upsert(&outcome, "a", &empty));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:PropertyReadOnly".into())
+        &runmat_value::Value::String("RunMat:PropertyReadOnly".into())
     ));
     assert!(outcome_has_named_upsert(&outcome, "b", &empty));
 }
@@ -4192,12 +4169,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(2.0)
+        &runmat_value::Value::Num(2.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -4236,17 +4213,17 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(4.0)
+        &runmat_value::Value::Num(4.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::Num(8.0)
+        &runmat_value::Value::Num(8.0)
     ));
 }
 
@@ -4283,10 +4260,10 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
-    let empty = runmat_builtins::Value::Tensor(
-        runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+    let empty = runmat_value::Value::Tensor(
+        runmat_value::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
     );
     assert!(outcome_has_named_upsert(&outcome, "b", &empty));
     assert!(outcome_has_named_upsert(&outcome, "c", &empty));
@@ -4329,12 +4306,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -4388,17 +4365,17 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "cls",
-        &runmat_builtins::Value::String("B".into())
+        &runmat_value::Value::String("B".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "isaA",
-        &runmat_builtins::Value::Bool(true)
+        &runmat_value::Value::Bool(true)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -4453,7 +4430,7 @@ y = b.x;
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(
-        outcome_has_named_upsert(&outcome, "y", &runmat_builtins::Value::Num(9.0)),
+        outcome_has_named_upsert(&outcome, "y", &runmat_value::Value::Num(9.0)),
         "qualified super constructor should initialize inherited state"
     );
 }
@@ -4548,7 +4525,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "v",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -4643,7 +4620,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "v",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -4701,22 +4678,22 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "x",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(10.0)
+        &runmat_value::Value::Num(10.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "cls",
-        &runmat_builtins::Value::String("B".to_string())
+        &runmat_value::Value::String("B".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "isaA",
-        &runmat_builtins::Value::Bool(true)
+        &runmat_value::Value::Bool(true)
     ));
 }
 
@@ -4757,12 +4734,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(12.0)
+        &runmat_value::Value::Num(12.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(12.0)
+        &runmat_value::Value::Num(12.0)
     ));
 }
 
@@ -4810,12 +4787,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::String("RunMat:MethodPrivate".into())
     ));
 }
 
@@ -4855,12 +4832,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::String("RunMat:MethodPrivate".into())
     ));
 }
 
@@ -4933,12 +4910,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::String("RunMat:MethodPrivate".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -4972,7 +4949,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -5017,17 +4994,17 @@ end
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "cls",
-                &runmat_builtins::Value::String("Money".into())
+                &runmat_value::Value::String("Money".into())
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "isaMoney",
-                &runmat_builtins::Value::Bool(true)
+                &runmat_value::Value::Bool(true)
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "v",
-                &runmat_builtins::Value::Num(15.0)
+                &runmat_value::Value::Num(15.0)
             ));
         })
         .expect("spawn operator overload plus e2e thread");
@@ -5067,12 +5044,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
     ));
 }
 
@@ -5138,7 +5115,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
 }
 
@@ -5176,12 +5153,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(13.0)
+        &runmat_value::Value::Num(13.0)
     ));
 }
 
@@ -5219,12 +5196,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -5256,7 +5233,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
 }
 
@@ -5288,7 +5265,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
 }
 
@@ -5418,12 +5395,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(8.0)
+        &runmat_value::Value::Num(8.0)
     ));
 }
 
@@ -5463,12 +5440,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::String("RunMat:MethodPrivate".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -5530,22 +5507,22 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "p",
-        &runmat_builtins::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "m",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::String("RunMat:MethodPrivate".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "z",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
 }
 
@@ -5614,17 +5591,17 @@ end
                 assert!(outcome_has_named_upsert(
                     &outcome,
                     "cls",
-                    &runmat_builtins::Value::String("C".into())
+                    &runmat_value::Value::String("C".into())
                 ));
                 assert!(outcome_has_named_upsert(
                     &outcome,
                     "isaA",
-                    &runmat_builtins::Value::Bool(true)
+                    &runmat_value::Value::Bool(true)
                 ));
                 assert!(outcome_has_named_upsert(
                     &outcome,
                     "y",
-                    &runmat_builtins::Value::Num(4.0)
+                    &runmat_value::Value::Num(4.0)
                 ));
             });
         })
@@ -5666,24 +5643,24 @@ end
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
 
-    let empty = runmat_builtins::Value::Tensor(
-        runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+    let empty = runmat_value::Value::Tensor(
+        runmat_value::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
     );
     assert!(outcome_has_named_upsert(&outcome, "a", &empty));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "d",
-        &runmat_builtins::Value::Num(12.0)
+        &runmat_value::Value::Num(12.0)
     ));
 }
 
@@ -5740,14 +5717,14 @@ end
         outcome_has_named_upsert(
             &outcome,
             "label",
-            &runmat_builtins::Value::String("sales".into())
+            &runmat_value::Value::String("sales".into())
         ),
         "class-folder method should return the constructed property; outcome={outcome:?}"
     );
     assert!(outcome_has_named_upsert(
         &outcome,
         "total",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -5795,7 +5772,7 @@ y = o(2);
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(
-        outcome_has_named_upsert(&outcome, "y", &runmat_builtins::Value::Num(30.0)),
+        outcome_has_named_upsert(&outcome, "y", &runmat_value::Value::Num(30.0)),
         "source-authored subsref(obj, S) should drive () overload dispatch"
     );
 }
@@ -5853,7 +5830,7 @@ y = o(2);
     let _cwd_guard = push_cwd(root);
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
     assert!(
-        outcome_has_named_upsert(&outcome, "y", &runmat_builtins::Value::Num(9.0)),
+        outcome_has_named_upsert(&outcome, "y", &runmat_value::Value::Num(9.0)),
         "source-authored subsasgn(obj, S, rhs) should drive () assignment overload dispatch"
     );
 }
@@ -5909,12 +5886,12 @@ d = c.data(3);
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(20.0)
+        &runmat_value::Value::Num(20.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "d",
-        &runmat_builtins::Value::Num(30.0)
+        &runmat_value::Value::Num(30.0)
     ));
 }
 
@@ -5995,24 +5972,24 @@ total = c.amount;
                 outcome_has_named_upsert(
                     &outcome,
                     "t",
-                    &runmat_builtins::Value::String("Vec2".to_string())
+                    &runmat_value::Value::String("Vec2".to_string())
                 ),
                 "class() should preserve source class identity"
             );
             assert!(
-                outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Bool(true)),
+                outcome_has_named_upsert(&outcome, "ok", &runmat_value::Value::Bool(true)),
                 "isa() should report source class membership"
             );
             assert!(
-                outcome_has_named_upsert(&outcome, "m", &runmat_builtins::Value::Num(5.0)),
+                outcome_has_named_upsert(&outcome, "m", &runmat_value::Value::Num(5.0)),
                 "dot-method dispatch should resolve source-authored instance methods"
             );
             assert!(
-                outcome_has_named_upsert(&outcome, "ux", &runmat_builtins::Value::Num(1.0)),
+                outcome_has_named_upsert(&outcome, "ux", &runmat_value::Value::Num(1.0)),
                 "static method dispatch should resolve Class.method() calls"
             );
             assert!(
-                outcome_has_named_upsert(&outcome, "total", &runmat_builtins::Value::Num(15.0)),
+                outcome_has_named_upsert(&outcome, "total", &runmat_value::Value::Num(15.0)),
                 "operator overload dispatch should resolve source-authored plus"
             );
         })
@@ -6073,20 +6050,20 @@ ux = u.x;
         outcome_has_named_upsert(
             &outcome,
             "t",
-            &runmat_builtins::Value::String("pkg.Vec2".to_string())
+            &runmat_value::Value::String("pkg.Vec2".to_string())
         ),
         "class() should preserve qualified source class identity"
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Bool(true)),
+        outcome_has_named_upsert(&outcome, "ok", &runmat_value::Value::Bool(true)),
         "isa() should report qualified source class membership"
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "m", &runmat_builtins::Value::Num(5.0)),
+        outcome_has_named_upsert(&outcome, "m", &runmat_value::Value::Num(5.0)),
         "dot-method dispatch should resolve source-authored package instance methods"
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "ux", &runmat_builtins::Value::Num(1.0)),
+        outcome_has_named_upsert(&outcome, "ux", &runmat_value::Value::Num(1.0)),
         "static method dispatch should resolve package-qualified Class.method() calls"
     );
 }
@@ -6140,22 +6117,22 @@ ok = isa(o,'pkg.sub.C');
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(14.0)
+        &runmat_value::Value::Num(14.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(3.0)
+        &runmat_value::Value::Num(3.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "cls",
-        &runmat_builtins::Value::String("pkg.sub.C".into())
+        &runmat_value::Value::String("pkg.sub.C".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "ok",
-        &runmat_builtins::Value::Bool(true)
+        &runmat_value::Value::Bool(true)
     ));
 }
 
@@ -6212,12 +6189,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(13.0)
+        &runmat_value::Value::Num(13.0)
     ));
 }
 
@@ -6267,17 +6244,17 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(10.0)
+        &runmat_value::Value::Num(10.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(11.0)
+        &runmat_value::Value::Num(11.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -6327,17 +6304,17 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(10.0)
+        &runmat_value::Value::Num(10.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(11.0)
+        &runmat_value::Value::Num(11.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -6387,17 +6364,17 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(10.0)
+        &runmat_value::Value::Num(10.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(11.0)
+        &runmat_value::Value::Num(11.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -6510,7 +6487,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -6546,7 +6523,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(11.0)
+        &runmat_value::Value::Num(11.0)
     ));
 }
 
@@ -6585,7 +6562,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -6662,7 +6639,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -6712,7 +6689,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(4.0)
+        &runmat_value::Value::Num(4.0)
     ));
 }
 
@@ -6748,7 +6725,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(43.0)
+        &runmat_value::Value::Num(43.0)
     ));
 }
 
@@ -6788,12 +6765,12 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".to_string())
+        &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
     ));
 }
 
@@ -6847,12 +6824,12 @@ end
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "y1",
-                &runmat_builtins::Value::Num(13.0)
+                &runmat_value::Value::Num(13.0)
             ));
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "id",
-                &runmat_builtins::Value::String("RunMat:MethodPrivate".to_string())
+                &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
             ));
         })
         .expect("spawn protected-getmethod-subclass test thread")
@@ -6894,7 +6871,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(15.0)
+        &runmat_value::Value::Num(15.0)
     ));
 }
 
@@ -6937,7 +6914,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(102.0)
+        &runmat_value::Value::Num(102.0)
     ));
 }
 
@@ -6972,7 +6949,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:MethodPrivate".to_string())
+        &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
     ));
 }
 
@@ -7011,17 +6988,17 @@ p = Vec2(3, 4); c = class(p); m = p.magnitude(); ok = isa(p, 'Vec2');
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::String("Vec2".to_string())
+        &runmat_value::Value::String("Vec2".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "m",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "ok",
-        &runmat_builtins::Value::Bool(true)
+        &runmat_value::Value::Bool(true)
     ));
 }
 
@@ -7043,12 +7020,12 @@ fn execute_path_request_supports_new_object_builtin_for_registered_classes() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_builtins::Value::String("Point".to_string())
+        &runmat_value::Value::String("Point".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "x",
-        &runmat_builtins::Value::Num(0.0)
+        &runmat_value::Value::Num(0.0)
     ));
 }
 
@@ -7101,12 +7078,12 @@ b = d.getx();
     assert!(outcome_has_named_upsert(
         &outcome,
         "a",
-        &runmat_builtins::Value::Num(999.0)
+        &runmat_value::Value::Num(999.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "b",
-        &runmat_builtins::Value::Num(999.0)
+        &runmat_value::Value::Num(999.0)
     ));
 }
 
@@ -7156,7 +7133,7 @@ y = d.x;
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(3.0)
+        &runmat_value::Value::Num(3.0)
     ));
 }
 
@@ -7191,7 +7168,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -7229,7 +7206,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -7262,15 +7239,15 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_builtins::Value::String("RunMat:PropertyStaticAccess".into())
+        &runmat_value::Value::String("RunMat:PropertyStaticAccess".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id2",
-        &runmat_builtins::Value::String("RunMat:PropertyStaticAccess".into())
+        &runmat_value::Value::String("RunMat:PropertyStaticAccess".into())
     ));
-    let empty = runmat_builtins::Value::Tensor(
-        runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+    let empty = runmat_value::Value::Tensor(
+        runmat_value::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
     );
     assert!(outcome_has_named_upsert(&outcome, "b", &empty));
 }
@@ -7371,7 +7348,7 @@ roots = ["."]
         outcome.diagnostics
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "expected wildcard-imported package function result binding; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -7412,7 +7389,7 @@ roots = ["."]
         outcome.diagnostics
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "expected wildcard-imported package function result binding; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -7451,7 +7428,7 @@ roots = ["."]
         outcome.diagnostics
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "expected helper function result binding; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -7494,7 +7471,7 @@ roots = ["."]
         outcome.diagnostics
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(170.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(170.0)),
         "expected private helper result binding; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -7522,7 +7499,7 @@ fn execute_path_request_resolves_private_function_without_manifest_for_parent_so
         outcome.diagnostics
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "expected private helper result binding without manifest; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -7564,7 +7541,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "direct_eid",
-            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
         ),
         "sibling source should not resolve parent private helper directly; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
@@ -7574,7 +7551,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "dyn_eid",
-            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
         ),
         "sibling source should not resolve parent private helper through str2func/feval; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
@@ -7615,7 +7592,7 @@ roots = ["."]
     let _cwd = push_cwd(tmp.path());
     let parent_outcome = execute_path_request(&mut session, "main.m").expect("parent succeeds");
     assert!(
-        outcome_has_named_upsert(&parent_outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&parent_outcome, "r", &runmat_value::Value::Num(42.0)),
         "parent source should resolve private helper; upserts={:?}",
         parent_outcome.workspace_delta.upserts
     );
@@ -7626,7 +7603,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &sibling_outcome,
             "eid",
-            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
         ),
         "sibling source should not resolve private helper through session registry; upserts={:?}, diagnostics={:?}",
         sibling_outcome.workspace_delta.upserts,
@@ -7666,7 +7643,7 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(2.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(2.0)),
         "local function should shadow same-named private helper; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
         outcome.diagnostics
@@ -7706,7 +7683,7 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "visible private helper should shadow same-named public sibling; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
         outcome.diagnostics
@@ -7756,7 +7733,7 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(84.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(84.0)),
         "private helpers should shadow wildcard-imported and builtin names; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
         outcome.diagnostics
@@ -7816,7 +7793,7 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "private helper should shadow same-named dependency-alias wildcard import; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
         outcome.diagnostics
@@ -7880,7 +7857,7 @@ right = { path = "deps/right" }
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(32.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(32.0)),
         "dependency aliases should select distinct same-named functions; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
         outcome.diagnostics
@@ -7935,7 +7912,7 @@ roots = ["."]
     let _cwd = push_cwd(tmp.path());
     let outcome = execute_path_request(&mut session, "main.m").expect("execute frozen project");
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "installed handoff should supply companion functions; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
         outcome.diagnostics
@@ -7974,7 +7951,7 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, "+pkg/main.m").expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "active package source should resolve its package private helper; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
         outcome.diagnostics
@@ -8010,7 +7987,7 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, "@C/main.m").expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "active class-folder source should resolve its class-folder private helper; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
         outcome.diagnostics
@@ -8056,7 +8033,7 @@ roots = ["."]
         let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
         assert!(
-            outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(126.0)),
+            outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(126.0)),
             "package callee should resolve its private helper through direct, handle, and feval(@handle) routes; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
             outcome.diagnostics
@@ -8065,7 +8042,7 @@ roots = ["."]
             outcome_has_named_upsert(
                 &outcome,
                 "leak_eid",
-                &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+                &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
             ),
             "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
@@ -8119,13 +8096,13 @@ roots = ["."]
         let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
         assert!(
-            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_value::Value::Num(101.0)),
             "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
             outcome.diagnostics
         );
         assert!(
-            outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(126.0)),
+            outcome_has_named_upsert(&outcome, "pkg_value", &runmat_value::Value::Num(126.0)),
             "package callee string routes should prefer package private helper; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
             outcome.diagnostics
@@ -8178,13 +8155,13 @@ roots = ["."]
         let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
         assert!(
-            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_value::Value::Num(101.0)),
             "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
             outcome.diagnostics
         );
         assert!(
-            outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(42.0)),
+            outcome_has_named_upsert(&outcome, "pkg_value", &runmat_value::Value::Num(42.0)),
             "package callee should prefer its package private helper over root private helper; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
             outcome.diagnostics
@@ -8236,13 +8213,13 @@ roots = ["."]
         let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
         assert!(
-            outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+            outcome_has_named_upsert(&outcome, "root_value", &runmat_value::Value::Num(101.0)),
             "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
             outcome.diagnostics
         );
         assert!(
-            outcome_has_named_upsert(&outcome, "class_value", &runmat_builtins::Value::Num(170.0)),
+            outcome_has_named_upsert(&outcome, "class_value", &runmat_value::Value::Num(170.0)),
             "class-folder callee should resolve its private helper through direct, handle, str2func, and feval string routes; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
             outcome.diagnostics
@@ -8284,7 +8261,7 @@ roots = ["."]
         outcome.diagnostics
     );
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
         "qualified package function should execute and bind result; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -8316,7 +8293,7 @@ fn execute_outcome_wildcard_import_resolves_from_loose_package_folder() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "value",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -8372,7 +8349,7 @@ fn execute_path_request_resolves_sibling_function_file() {
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(105.0)),
+        outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(105.0)),
         "sibling function file should resolve and execute; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -8399,7 +8376,7 @@ fn execute_path_request_resolves_sibling_function_with_arguments_block_validatio
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Num(6.0)),
+        outcome_has_named_upsert(&outcome, "ok", &runmat_value::Value::Num(6.0)),
         "typed sibling function should execute; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -8407,7 +8384,7 @@ fn execute_path_request_resolves_sibling_function_with_arguments_block_validatio
         outcome_has_named_upsert(
             &outcome,
             "eid",
-            &runmat_builtins::Value::String("RunMat:ArgumentValidationClass".to_string())
+            &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
         ),
         "typed sibling function should enforce arguments class validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8446,7 +8423,7 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Num(6.0)),
+        outcome_has_named_upsert(&outcome, "ok", &runmat_value::Value::Num(6.0)),
         "package typed function should execute; upserts={:?}",
         outcome.workspace_delta.upserts
     );
@@ -8454,7 +8431,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "sid",
-            &runmat_builtins::Value::String("RunMat:ArgumentValidationSize".to_string())
+            &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string())
         ),
         "package typed function should enforce size validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8463,7 +8440,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "fid",
-            &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+            &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
         ),
         "package typed function should enforce mustBeFinite validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8560,7 +8537,7 @@ fn execute_outcome_load_statement_assigns_workspace_bindings_with_semicolon() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -8583,7 +8560,7 @@ fn execute_outcome_load_statement_assigns_workspace_bindings_without_semicolon()
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -9470,7 +9447,7 @@ fn clear_before_indexed_for_loop_does_not_panic_on_hidden_loop_slots() {
         .durable_workspace_value()
         .expect("y should be readable from workspace");
     match value {
-        runmat_builtins::Value::Num(actual) => {
+        runmat_value::Value::Num(actual) => {
             let expected = (2.0 * std::f64::consts::PI / 3.0).sin();
             assert!((actual - expected).abs() < 1e-12);
         }
@@ -9874,12 +9851,12 @@ fn dynamic_workspace_eval_mutates_and_reads_current_workspace() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "dyn_x",
-        &runmat_builtins::Value::Num(41.0)
+        &runmat_value::Value::Num(41.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "dyn_y",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 
     let outcome = execute_text_request(&mut session, "dyn_x + dyn_y").expect("read workspace");
@@ -9900,17 +9877,17 @@ fn dynamic_workspace_evalc_captures_console_without_stream_leak() {
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     let captured =
         outcome_named_upsert_value(&outcome, "captured").expect("captured should be assigned");
-    assert_eq!(captured, &runmat_builtins::Value::String("5\n".into()));
+    assert_eq!(captured, &runmat_value::Value::String("5\n".into()));
     assert_eq!(stdout_text(&outcome), "");
     assert!(outcome_has_named_upsert(
         &outcome,
         "value",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "after",
-        &runmat_builtins::Value::Num(12.0)
+        &runmat_value::Value::Num(12.0)
     ));
 
     let outcome = execute_text_request(&mut session, "evalc_x").expect("read evalc workspace var");
@@ -9918,7 +9895,7 @@ fn dynamic_workspace_evalc_captures_console_without_stream_leak() {
         .flow
         .durable_workspace_value()
         .expect("evalc assignment should persist");
-    assert_eq!(*value, runmat_builtins::Value::Num(5.0));
+    assert_eq!(*value, runmat_value::Value::Num(5.0));
 }
 
 #[test]
@@ -9929,7 +9906,7 @@ fn dynamic_workspace_evalc_returns_empty_capture_for_silent_source() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "captured",
-        &runmat_builtins::Value::String(String::new())
+        &runmat_value::Value::String(String::new())
     ));
 
     let outcome = execute_text_request(&mut session, "silent_x").expect("read workspace");
@@ -9937,7 +9914,7 @@ fn dynamic_workspace_evalc_returns_empty_capture_for_silent_source() {
         .flow
         .durable_workspace_value()
         .expect("silent evalc assignment should persist");
-    assert_eq!(*value, runmat_builtins::Value::Num(9.0));
+    assert_eq!(*value, runmat_value::Value::Num(9.0));
 }
 
 #[test]
@@ -9948,7 +9925,7 @@ fn dynamic_workspace_evalc_captures_implicit_expression_display() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "captured",
-        &runmat_builtins::Value::String("5\n".into())
+        &runmat_value::Value::String("5\n".into())
     ));
     assert_eq!(stdout_text(&outcome), "");
 }
@@ -9984,27 +9961,27 @@ fn runtests_runs_script_test_file_and_restores_workspace() {
 
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::Object(obj) = results else {
+    let runmat_value::Value::Object(obj) = results else {
         panic!("expected scalar TestResult object, got {results:?}");
     };
     assert!(obj.is_class("matlab.unittest.TestResult"));
     assert_eq!(
         obj.properties.get("Passed"),
-        Some(&runmat_builtins::Value::Bool(true))
+        Some(&runmat_value::Value::Bool(true))
     );
     assert_eq!(
         obj.properties.get("Failed"),
-        Some(&runmat_builtins::Value::Bool(false))
+        Some(&runmat_value::Value::Bool(false))
     );
     assert!(outcome_has_named_upsert(
         &outcome,
         "leakVisible",
-        &runmat_builtins::Value::Num(0.0)
+        &runmat_value::Value::Num(0.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "after",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -10026,16 +10003,16 @@ fn runtests_records_failing_script_test_as_result() {
 
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::Object(obj) = results else {
+    let runmat_value::Value::Object(obj) = results else {
         panic!("expected scalar TestResult object, got {results:?}");
     };
     assert_eq!(
         obj.properties.get("Passed"),
-        Some(&runmat_builtins::Value::Bool(false))
+        Some(&runmat_value::Value::Bool(false))
     );
     assert_eq!(
         obj.properties.get("Failed"),
-        Some(&runmat_builtins::Value::Bool(true))
+        Some(&runmat_value::Value::Bool(true))
     );
     let details = obj.properties.get("Details").expect("details").to_string();
     assert!(details.contains("boom"), "details were {details:?}");
@@ -10060,18 +10037,18 @@ fn runtests_discovers_subfolder_tests_when_requested() {
 
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::ObjectArray(array) = results else {
+    let runmat_value::Value::ObjectArray(array) = results else {
         panic!("expected TestResult object array, got {results:?}");
     };
     assert_eq!(array.shape(), &[1, 2]);
     assert_eq!(array.class_name(), "matlab.unittest.TestResult");
     for value in array.data() {
-        let runmat_builtins::Value::Object(obj) = value else {
+        let runmat_value::Value::Object(obj) = value else {
             panic!("expected TestResult object, got {value:?}");
         };
         assert_eq!(
             obj.properties.get("Passed"),
-            Some(&runmat_builtins::Value::Bool(true))
+            Some(&runmat_value::Value::Bool(true))
         );
     }
 }
@@ -10095,12 +10072,12 @@ fn runtests_no_arg_discovers_current_folder_without_recursing() {
 
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::Object(obj) = results else {
+    let runmat_value::Value::Object(obj) = results else {
         panic!("expected only root TestResult object, got {results:?}");
     };
     assert_eq!(
         obj.properties.get("Passed"),
-        Some(&runmat_builtins::Value::Bool(true))
+        Some(&runmat_value::Value::Bool(true))
     );
 }
 
@@ -10122,12 +10099,12 @@ fn runtests_basefolder_constrains_relative_target_resolution() {
     .expect("basefolder runtests succeeds");
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::Object(obj) = results else {
+    let runmat_value::Value::Object(obj) = results else {
         panic!("expected suite TestResult object, got {results:?}");
     };
     assert_eq!(
         obj.properties.get("Passed"),
-        Some(&runmat_builtins::Value::Bool(true))
+        Some(&runmat_value::Value::Bool(true))
     );
     let test_file = obj
         .properties
@@ -10185,18 +10162,18 @@ end
         .expect("exec succeeds");
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::ObjectArray(array) = results else {
+    let runmat_value::Value::ObjectArray(array) = results else {
         panic!("expected function TestResult object array, got {results:?}");
     };
     assert_eq!(array.shape(), &[1, 2]);
     assert_eq!(array.class_name(), "matlab.unittest.TestResult");
     for value in array.data() {
-        let runmat_builtins::Value::Object(obj) = value else {
+        let runmat_value::Value::Object(obj) = value else {
             panic!("expected TestResult object, got {value:?}");
         };
         assert_eq!(
             obj.properties.get("Passed"),
-            Some(&runmat_builtins::Value::Bool(true))
+            Some(&runmat_value::Value::Bool(true))
         );
     }
 }
@@ -10236,21 +10213,21 @@ end
         outcome.diagnostics
     );
     let suite = outcome_named_upsert_value(&outcome, "suite").expect("suite should be assigned");
-    let runmat_builtins::Value::Object(suite) = suite else {
+    let runmat_value::Value::Object(suite) = suite else {
         panic!("expected selected scalar TestSuite, got {suite:?}");
     };
     assert_eq!(
         suite.properties.get("ProcedureName"),
-        Some(&runmat_builtins::Value::String("testBeta".into()))
+        Some(&runmat_value::Value::String("testBeta".into()))
     );
     let results =
         outcome_named_upsert_value(&outcome, "results").expect("results should be assigned");
-    let runmat_builtins::Value::Object(result) = results else {
+    let runmat_value::Value::Object(result) = results else {
         panic!("expected selected scalar TestResult, got {results:?}");
     };
     assert_eq!(
         result.properties.get("Passed"),
-        Some(&runmat_builtins::Value::Bool(true))
+        Some(&runmat_value::Value::Bool(true))
     );
 }
 
@@ -10289,22 +10266,22 @@ fn timer_constructs_finds_starts_and_deletes_through_vm() {
 
     assert_eq!(
         outcome_named_upsert_value(&outcome, "foundName"),
-        Some(&runmat_builtins::Value::String("clientTimer".into()))
+        Some(&runmat_value::Value::String("clientTimer".into()))
     );
     assert!(outcome_has_named_upsert(
         &outcome,
         "tasks",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "running",
-        &runmat_builtins::Value::String("off".into())
+        &runmat_value::Value::String("off".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "validAfterDelete",
-        &runmat_builtins::Value::Bool(false)
+        &runmat_value::Value::Bool(false)
     ));
 }
 
@@ -10328,12 +10305,12 @@ fn timer_member_method_start_works_through_vm() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "tasks",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "running",
-        &runmat_builtins::Value::String("off".into())
+        &runmat_value::Value::String("off".into())
     ));
 }
 
@@ -10378,12 +10355,12 @@ fn dynamic_workspace_eval_error_does_not_commit_partial_mutations() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_builtins::Value::String("RunMat:eval:boom".into())
+        &runmat_value::Value::String("RunMat:eval:boom".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "after",
-        &runmat_builtins::Value::Num(6.0)
+        &runmat_value::Value::Num(6.0)
     ));
     assert!(
         !outcome_has_upsert_name(&outcome, "partial"),
@@ -10409,12 +10386,12 @@ fn dynamic_workspace_evalin_base_and_assignin_update_base_workspace() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "base_x",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "base_y",
-        &runmat_builtins::Value::Num(8.0)
+        &runmat_value::Value::Num(8.0)
     ));
 
     let outcome = execute_text_request(&mut session, "base_x + base_y").expect("read workspace");
@@ -10441,43 +10418,34 @@ fn dynamic_workspace_assignin_session_delta_preserves_all_integer_classes() {
     "#;
     let outcome = execute_text_request(&mut session, source).expect("assign exact integer values");
     for (name, expected) in [
-        (
-            "ai_i8",
-            runmat_builtins::IntegerStorage::I8(vec![-128, 127]),
-        ),
+        ("ai_i8", runmat_value::IntegerStorage::I8(vec![-128, 127])),
         (
             "ai_i16",
-            runmat_builtins::IntegerStorage::I16(vec![-32768, 32767]),
+            runmat_value::IntegerStorage::I16(vec![-32768, 32767]),
         ),
         (
             "ai_i32",
-            runmat_builtins::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            runmat_value::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
         ),
-        ("ai_i64", runmat_builtins::IntegerStorage::I64(vec![-7, 9])),
-        (
-            "ai_u8",
-            runmat_builtins::IntegerStorage::U8(vec![0, u8::MAX]),
-        ),
+        ("ai_i64", runmat_value::IntegerStorage::I64(vec![-7, 9])),
+        ("ai_u8", runmat_value::IntegerStorage::U8(vec![0, u8::MAX])),
         (
             "ai_u16",
-            runmat_builtins::IntegerStorage::U16(vec![0, u16::MAX]),
+            runmat_value::IntegerStorage::U16(vec![0, u16::MAX]),
         ),
         (
             "ai_u32",
-            runmat_builtins::IntegerStorage::U32(vec![0, u32::MAX]),
+            runmat_value::IntegerStorage::U32(vec![0, u32::MAX]),
         ),
         (
             "ai_u64",
-            runmat_builtins::IntegerStorage::U64(vec![
-                9_007_199_254_740_993,
-                9_007_199_254_740_994,
-            ]),
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
         ),
     ] {
         assert!(
             matches!(
                 outcome_named_upsert_value(&outcome, name),
-                Some(runmat_builtins::Value::Tensor(tensor))
+                Some(runmat_value::Value::Tensor(tensor))
                     if tensor.integer_storage() == Some(&expected)
             ),
             "missing exact session upsert {name}={expected:?}"
@@ -10501,12 +10469,12 @@ fn dynamic_workspace_evalin_caller_from_function_targets_script_workspace() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "caller_z",
-        &runmat_builtins::Value::Num(11.0)
+        &runmat_value::Value::Num(11.0)
     ));
 
     let outcome = execute_text_request(&mut session, "caller_z + y").expect("read workspace");
@@ -10539,7 +10507,7 @@ fn dynamic_workspace_evalin_caller_from_nested_function_targets_parent_function_
         assert!(outcome_has_named_upsert(
             &outcome,
             "outer_y",
-            &runmat_builtins::Value::Num(23.0)
+            &runmat_value::Value::Num(23.0)
         ));
     });
 }
@@ -10568,12 +10536,12 @@ fn dynamic_workspace_evalin_base_and_assignin_base_work_from_path_source_functio
     assert!(outcome_has_named_upsert(
         &outcome,
         "path_base",
-        &runmat_builtins::Value::Num(19.0)
+        &runmat_value::Value::Num(19.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "path_result",
-        &runmat_builtins::Value::Num(21.0)
+        &runmat_value::Value::Num(21.0)
     ));
 }
 
@@ -10598,7 +10566,7 @@ fn dynamic_workspace_eval_preserves_source_context_in_path_source() {
         outcome_has_named_upsert(
             &outcome,
             "eval_name",
-            &runmat_builtins::Value::String("dynamic_workspace_mfilename".into())
+            &runmat_value::Value::String("dynamic_workspace_mfilename".into())
         ),
         "eval should inherit the active file identity; outcome={outcome:?}"
     );
@@ -10606,7 +10574,7 @@ fn dynamic_workspace_eval_preserves_source_context_in_path_source() {
     let assert_named_path = |name: &str, expected: PathBuf| {
         let actual = outcome_named_upsert_value(&outcome, name)
             .and_then(|value| {
-                if let runmat_builtins::Value::String(text) = value {
+                if let runmat_value::Value::String(text) = value {
                     Some(text.as_str())
                 } else {
                     None
@@ -10678,22 +10646,22 @@ fn dynamic_workspace_eval_resolves_active_registry_functions() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "local_value",
-        &runmat_builtins::Value::Num(13.0)
+        &runmat_value::Value::Num(13.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "sibling_value",
-        &runmat_builtins::Value::Num(25.0)
+        &runmat_value::Value::Num(25.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "private_value",
-        &runmat_builtins::Value::Num(37.0)
+        &runmat_value::Value::Num(37.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "package_value",
-        &runmat_builtins::Value::Num(49.0)
+        &runmat_value::Value::Num(49.0)
     ));
 }
 
@@ -10728,7 +10696,7 @@ fn dynamic_workspace_eval_does_not_discover_files_outside_active_registry() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_builtins::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
     ));
     assert!(
         !outcome_has_upsert_name(&outcome, "hidden_value"),
@@ -10784,7 +10752,7 @@ fn dynamic_workspace_execute_request_dynamic_eval_policy_does_not_block_assignin
     assert!(outcome_has_named_upsert(
         &outcome,
         "policy_assign",
-        &runmat_builtins::Value::Num(12.0)
+        &runmat_value::Value::Num(12.0)
     ));
 }
 
@@ -10803,7 +10771,7 @@ fn dynamic_workspace_evalin_invalid_selector_is_catchable() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_builtins::Value::String("RunMat:DynamicWorkspaceSelector".into())
+        &runmat_value::Value::String("RunMat:DynamicWorkspaceSelector".into())
     ));
 }
 
@@ -10837,12 +10805,12 @@ fn run_executes_script_file_in_current_workspace() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "generated",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "after_run",
-        &runmat_builtins::Value::Num(43.0)
+        &runmat_value::Value::Num(43.0)
     ));
 }
 
@@ -10882,40 +10850,40 @@ fn run_exposes_script_variables_to_following_call_syntax() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "second_value",
-        &runmat_builtins::Value::Num(22.0)
+        &runmat_value::Value::Num(22.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "shadowed_builtin_value",
-        &runmat_builtins::Value::Num(8.0)
+        &runmat_value::Value::Num(8.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "builtin_fallback_value",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "constant_fallback_value",
-        &runmat_builtins::Value::Num(std::f64::consts::PI)
+        &runmat_value::Value::Num(std::f64::consts::PI)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "shadowed_bare_builtin_value",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
     assert!(matches!(
         outcome_named_upsert_value(&outcome, "bare_builtin_fallback_value"),
-        Some(runmat_builtins::Value::Num(value)) if value.is_finite()
+        Some(runmat_value::Value::Num(value)) if value.is_finite()
     ));
     assert!(matches!(
         outcome_named_upsert_value(&outcome, "loaded_function_handle_call"),
-        Some(runmat_builtins::Value::Num(value)) if value.is_finite()
+        Some(runmat_value::Value::Num(value)) if value.is_finite()
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "after_standalone_call",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 
@@ -10938,7 +10906,7 @@ fn run_script_variables_shadow_builtin_constants() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "shadowed_constant_value",
-        &runmat_builtins::Value::Num(4.0)
+        &runmat_value::Value::Num(4.0)
     ));
 }
 
@@ -10980,7 +10948,7 @@ shadowed_static_value = runStaticShadowValue;
     assert!(outcome_has_named_upsert(
         &outcome,
         "shadowed_static_value",
-        &runmat_builtins::Value::Num(9.0)
+        &runmat_value::Value::Num(9.0)
     ));
 }
 
@@ -11019,7 +10987,7 @@ fallback_static_value = runStaticFallbackValue;
     assert!(outcome_has_named_upsert(
         &outcome,
         "fallback_static_value",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -11050,7 +11018,7 @@ fn run_replays_script_stdout_to_request_streams() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "display_worker_value",
-        &runmat_builtins::Value::Num(4.0)
+        &runmat_value::Value::Num(4.0)
     ));
 }
 
@@ -11078,12 +11046,12 @@ fn run_command_syntax_resolves_scripts_on_search_path() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "path_after",
-        &runmat_builtins::Value::Num(20.0)
+        &runmat_value::Value::Num(20.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "path_after_string",
-        &runmat_builtins::Value::Num(21.0)
+        &runmat_value::Value::Num(21.0)
     ));
 }
 
@@ -11115,7 +11083,7 @@ fn addpath_command_syntax_resolves_scripts_on_search_path() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "path_command_after",
-        &runmat_builtins::Value::Num(31.0)
+        &runmat_value::Value::Num(31.0)
     ));
 }
 
@@ -11143,12 +11111,12 @@ fn addpath_makes_function_callable_in_same_execution() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
     let located = outcome_named_upsert_value(&outcome, "located")
         .and_then(|value| match value {
-            runmat_builtins::Value::String(value) => Some(value.clone()),
-            runmat_builtins::Value::CharArray(value) => value.row_string(),
+            runmat_value::Value::String(value) => Some(value.clone()),
+            runmat_value::Value::CharArray(value) => value.row_string(),
             _ => None,
         })
         .expect("which result");
@@ -11177,7 +11145,7 @@ fn addpath_persists_for_later_repl_executions() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
 }
 
@@ -11204,7 +11172,7 @@ fn path_function_resolution_supports_feval_and_function_handles() {
 
     for (name, expected) in [("a", 41.0), ("b", 42.0), ("c", 41.0), ("d", 42.0)] {
         assert!(
-            outcome_has_named_upsert(&outcome, name, &runmat_builtins::Value::Num(expected)),
+            outcome_has_named_upsert(&outcome, name, &runmat_value::Value::Num(expected)),
             "{name} did not equal {expected}; upserts: {:?}",
             outcome.workspace_delta.upserts
         );
@@ -11259,7 +11227,7 @@ fn genpath_package_private_and_callback_resolution_share_the_runtime_path() {
         let outcome =
             execute_text_request(&mut session, source).expect("runtime path invocation succeeds");
         assert!(
-            outcome_has_named_upsert(&outcome, name, &runmat_builtins::Value::Num(expected)),
+            outcome_has_named_upsert(&outcome, name, &runmat_value::Value::Num(expected)),
             "{name} did not equal {expected}; upserts: {:?}",
             outcome.workspace_delta.upserts
         );
@@ -11296,12 +11264,12 @@ fn path_precedence_and_rmpath_reselect_callable_source() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "before",
-        &runmat_builtins::Value::Num(2.0)
+        &runmat_value::Value::Num(2.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "after",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
 }
 
@@ -11328,7 +11296,7 @@ fn path_function_cache_recompiles_changed_source() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(2.0)
+        &runmat_value::Value::Num(2.0)
     ));
 }
 
@@ -11369,7 +11337,7 @@ roots = ["src"]
     assert!(outcome_has_named_upsert(
         &outcome,
         "y",
-        &runmat_builtins::Value::Num(2.0)
+        &runmat_value::Value::Num(2.0)
     ));
 }
 
@@ -11406,12 +11374,12 @@ fn addpath_state_is_isolated_between_sessions() {
     assert!(outcome_has_named_upsert(
         &first_outcome,
         "y",
-        &runmat_builtins::Value::Num(1.0)
+        &runmat_value::Value::Num(1.0)
     ));
     assert!(outcome_has_named_upsert(
         &second_outcome,
         "y",
-        &runmat_builtins::Value::Num(2.0)
+        &runmat_value::Value::Num(2.0)
     ));
 }
 
@@ -11443,7 +11411,7 @@ fn filesystem_command_syntax_executes_path_word_builtins() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "filesystem_command_after",
-        &runmat_builtins::Value::Num(42.0)
+        &runmat_value::Value::Num(42.0)
     ));
     assert!(
         !temp.path().join("workspace").exists(),
@@ -11472,12 +11440,12 @@ fn run_preserves_script_source_context() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "run_name",
-        &runmat_builtins::Value::String("context_worker".into())
+        &runmat_value::Value::String("context_worker".into())
     ));
 
     let actual = outcome_named_upsert_value(&outcome, "run_full")
         .and_then(|value| {
-            if let runmat_builtins::Value::String(text) = value {
+            if let runmat_value::Value::String(text) = value {
                 Some(text.as_str())
             } else {
                 None
@@ -11527,17 +11495,17 @@ fn run_error_commits_script_mutations_before_the_error() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "run_err",
-        &runmat_builtins::Value::String("RunMat:run:testBoom".into())
+        &runmat_value::Value::String("RunMat:run:testBoom".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "after_failure",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "partial_run_value",
-        &runmat_builtins::Value::Num(99.0)
+        &runmat_value::Value::Num(99.0)
     ));
 }
 
@@ -11581,17 +11549,17 @@ fn run_missing_file_and_output_errors_are_catchable() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "missing_err",
-        &runmat_builtins::Value::String("RunMat:run:FileNotFound".into())
+        &runmat_value::Value::String("RunMat:run:FileNotFound".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "output_err",
-        &runmat_builtins::Value::String("RunMat:run:TooManyOutputs".into())
+        &runmat_value::Value::String("RunMat:run:TooManyOutputs".into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "missing_after_run_err",
-        &runmat_builtins::Value::String("RunMat:UndefinedVariable".into())
+        &runmat_value::Value::String("RunMat:UndefinedVariable".into())
     ));
     assert!(
         !outcome_has_upsert_name(&outcome, "ok_value"),
@@ -11770,8 +11738,8 @@ fn null_row_reduction_builtin_uses_semantic_vm() {
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
-    let expected = runmat_builtins::Value::Tensor(
-        runmat_builtins::Tensor::new(vec![-2.0, 1.0, 0.0, -3.0, 0.0, 1.0], vec![3, 2])
+    let expected = runmat_value::Value::Tensor(
+        runmat_value::Tensor::new(vec![-2.0, 1.0, 0.0, -3.0, 0.0, 1.0], vec![3, 2])
             .expect("expected null basis"),
     );
     assert!(outcome_has_named_upsert(&outcome, "Z", &expected));
@@ -13141,19 +13109,19 @@ fn expression_statement_persisted_function_arity_survives_local_function_id_coll
     assert!(
         matches!(
             outcome.flow,
-            abi::RuntimeFlow::Single(runmat_builtins::Value::Num(value)) if value == 3.0
+            abi::RuntimeFlow::Single(runmat_value::Value::Num(value)) if value == 3.0
         ),
         "persisted function call should return 3; outcome={outcome:?}"
     );
     assert_eq!(outcome.display_events.len(), 1);
     assert_eq!(
         outcome.display_events[0].value,
-        runmat_builtins::Value::Num(3.0)
+        runmat_value::Value::Num(3.0)
     );
     assert!(outcome_has_named_upsert(
         &outcome,
         "ans",
-        &runmat_builtins::Value::Num(3.0)
+        &runmat_value::Value::Num(3.0)
     ));
 }
 
@@ -13204,7 +13172,7 @@ fn dynamic_eval_persisted_function_handle_survives_eval_local_function_id_collis
         assert!(outcome_has_named_upsert(
             &outcome,
             "y",
-            &runmat_builtins::Value::Num(3.0)
+            &runmat_value::Value::Num(3.0)
         ));
     });
 }
@@ -13266,12 +13234,12 @@ fn expression_statement_shadowed_zero_output_function_name_indexes_variable() {
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(matches!(
         outcome.flow,
-        abi::RuntimeFlow::Single(runmat_builtins::Value::Num(value)) if value == 20.0
+        abi::RuntimeFlow::Single(runmat_value::Value::Num(value)) if value == 20.0
     ));
     assert_eq!(outcome.display_events.len(), 1);
     assert_eq!(
         outcome.display_events[0].value,
-        runmat_builtins::Value::Num(20.0)
+        runmat_value::Value::Num(20.0)
     );
     assert_eq!(stdout_text(&outcome), "ans = 20\n");
 }
@@ -13296,17 +13264,17 @@ fn expression_statement_one_output_function_keeps_ans_display() {
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(matches!(
         outcome.flow,
-        abi::RuntimeFlow::Single(runmat_builtins::Value::Num(value)) if value == 3.0
+        abi::RuntimeFlow::Single(runmat_value::Value::Num(value)) if value == 3.0
     ));
     assert_eq!(outcome.display_events.len(), 1);
     assert_eq!(
         outcome.display_events[0].value,
-        runmat_builtins::Value::Num(3.0)
+        runmat_value::Value::Num(3.0)
     );
     assert!(outcome_has_named_upsert(
         &outcome,
         "ans",
-        &runmat_builtins::Value::Num(3.0)
+        &runmat_value::Value::Num(3.0)
     ));
 }
 
@@ -13331,17 +13299,17 @@ fn expression_statement_varargout_function_keeps_ans_display() {
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(matches!(
         outcome.flow,
-        abi::RuntimeFlow::Single(runmat_builtins::Value::Num(value)) if value == 5.0
+        abi::RuntimeFlow::Single(runmat_value::Value::Num(value)) if value == 5.0
     ));
     assert_eq!(outcome.display_events.len(), 1);
     assert_eq!(
         outcome.display_events[0].value,
-        runmat_builtins::Value::Num(5.0)
+        runmat_value::Value::Num(5.0)
     );
     assert!(outcome_has_named_upsert(
         &outcome,
         "ans",
-        &runmat_builtins::Value::Num(5.0)
+        &runmat_value::Value::Num(5.0)
     ));
 }
 
@@ -13479,7 +13447,7 @@ fn session_function_handle_uses_semantic_registry() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "name",
-        &runmat_builtins::Value::String("inc".to_string())
+        &runmat_value::Value::String("inc".to_string())
     ));
 }
 
@@ -13516,27 +13484,27 @@ fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "n",
-        &runmat_builtins::Value::Num(4.0)
+        &runmat_value::Value::Num(4.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "first_name",
-        &runmat_builtins::Value::String("Name".to_string())
+        &runmat_value::Value::String("Name".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "first_value",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "second_name",
-        &runmat_builtins::Value::String("Mode".to_string())
+        &runmat_value::Value::String("Mode".to_string())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "second_value",
-        &runmat_builtins::Value::String("fast".to_string())
+        &runmat_value::Value::String("fast".to_string())
     ));
 }
 
@@ -13567,7 +13535,7 @@ fn one_output_function_handle_name_value_call_uses_dynamic_dispatch() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "n",
-        &runmat_builtins::Value::Num(2.0)
+        &runmat_value::Value::Num(2.0)
     ));
 }
 
@@ -13599,12 +13567,12 @@ fn name_value_brace_value_executes_as_single_value_argument() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "n",
-        &runmat_builtins::Value::Num(2.0)
+        &runmat_value::Value::Num(2.0)
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "value",
-        &runmat_builtins::Value::Num(7.0)
+        &runmat_value::Value::Num(7.0)
     ));
 }
 

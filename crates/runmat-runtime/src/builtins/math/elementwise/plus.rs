@@ -4,9 +4,11 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
+};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -1035,9 +1037,10 @@ pub(crate) mod tests {
             && runmat_accelerate_api::provider().is_some()
     }
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
-        ResolveContext, SparseTensor, Tensor, Type,
+        SparseTensor, Tensor,
     };
 
     const EPS: f64 = 1e-12;

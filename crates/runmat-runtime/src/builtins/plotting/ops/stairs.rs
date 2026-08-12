@@ -5,7 +5,6 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::line::{
@@ -14,6 +13,7 @@ use runmat_plot::gpu::line::{
 use runmat_plot::gpu::stairs::{StairsGpuInputs, StairsGpuParams};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{LineMarkerAppearance, LineStyle, StairsPlot};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -622,8 +622,8 @@ pub(crate) mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
-    use runmat_builtins::IntegerStorage;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::IntegerStorage;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

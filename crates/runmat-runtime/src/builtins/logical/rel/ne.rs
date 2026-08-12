@@ -4,9 +4,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::spec::{
@@ -610,9 +610,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{
-        ComplexTensor, HandleRef, IntegerComplexStorage, IntegerStorage, Listener,
-    };
+    use runmat_value::{ComplexTensor, HandleRef, IntegerComplexStorage, IntegerStorage, Listener};
 
     fn run_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ne_builtin(lhs, rhs))

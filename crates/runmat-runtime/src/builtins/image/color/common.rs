@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
-use runmat_builtins::{NumericDType, NumericScalar, Tensor, Type, Value};
+use runmat_builtins::Type;
+use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -218,7 +219,7 @@ pub(crate) fn same_shape_type(args: &[Type]) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     #[test]
     fn image_scalar_collapse_reads_authoritative_storage() {

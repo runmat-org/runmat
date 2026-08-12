@@ -8,10 +8,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::broadcast as matlab_broadcast;
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -2103,7 +2105,7 @@ async fn bounded_pattern(
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, IntValue, IntegerStorage, NumericDType};
+    use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType};
 
     #[test]
     fn text_broadcast_helpers_append_trailing_singletons() {
@@ -2123,7 +2125,7 @@ mod tests {
     #[test]
     fn mat2str_preserves_exact_uint64_scalar_text() {
         assert_eq!(
-            mat2str_value(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)), None),
+            mat2str_value(&Value::Int(runmat_value::IntValue::U64(u64::MAX)), None),
             "18446744073709551615"
         );
         let tensor = Tensor::new_integer(

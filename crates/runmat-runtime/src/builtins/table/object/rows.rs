@@ -111,33 +111,29 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 shape[0] = rows.len();
             }
             let storage = match tensor.complex_storage() {
-                runmat_builtins::ComplexStorage::F64(values) => {
-                    runmat_builtins::ComplexStorage::F64(
-                        indices
-                            .iter()
-                            .map(|&index| {
-                                values.get(index).copied().ok_or_else(|| {
-                                    invalid_index("table: complex variable row index out of bounds")
-                                })
+                runmat_value::ComplexStorage::F64(values) => runmat_value::ComplexStorage::F64(
+                    indices
+                        .iter()
+                        .map(|&index| {
+                            values.get(index).copied().ok_or_else(|| {
+                                invalid_index("table: complex variable row index out of bounds")
                             })
-                            .collect::<BuiltinResult<Vec<_>>>()?,
-                    )
-                }
-                runmat_builtins::ComplexStorage::F32(values) => {
-                    runmat_builtins::ComplexStorage::F32(
-                        indices
-                            .iter()
-                            .map(|&index| {
-                                values.get(index).copied().ok_or_else(|| {
-                                    invalid_index("table: complex variable row index out of bounds")
-                                })
+                        })
+                        .collect::<BuiltinResult<Vec<_>>>()?,
+                ),
+                runmat_value::ComplexStorage::F32(values) => runmat_value::ComplexStorage::F32(
+                    indices
+                        .iter()
+                        .map(|&index| {
+                            values.get(index).copied().ok_or_else(|| {
+                                invalid_index("table: complex variable row index out of bounds")
                             })
-                            .collect::<BuiltinResult<Vec<_>>>()?,
-                    )
-                }
-                runmat_builtins::ComplexStorage::Integer(storage) => {
-                    runmat_builtins::ComplexStorage::Integer(
-                        runmat_builtins::IntegerComplexStorage::new(
+                        })
+                        .collect::<BuiltinResult<Vec<_>>>()?,
+                ),
+                runmat_value::ComplexStorage::Integer(storage) => {
+                    runmat_value::ComplexStorage::Integer(
+                        runmat_value::IntegerComplexStorage::new(
                             storage
                                 .real
                                 .reorder(|values| {
@@ -383,7 +379,7 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerStorage, NumericStorage};
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     #[test]
     fn select_rows_preserves_native_single_storage() {
@@ -421,7 +417,7 @@ mod tests {
         let large = 9_007_199_254_740_993_i64;
         let value = Value::ComplexTensor(
             ComplexTensor::new_integer(
-                runmat_builtins::IntegerComplexStorage::new(
+                runmat_value::IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![large, i64::MIN]),
                     IntegerStorage::I64(vec![0, 7]),
                 )
@@ -438,7 +434,7 @@ mod tests {
         assert_eq!(
             selected.integer_storage().cloned(),
             Some(
-                runmat_builtins::IntegerComplexStorage::new(
+                runmat_value::IntegerComplexStorage::new(
                     IntegerStorage::I64(vec![i64::MIN, large]),
                     IntegerStorage::I64(vec![7, 0]),
                 )
@@ -491,7 +487,7 @@ mod tests {
         };
         assert_eq!(
             result.into_numeric_storage().expect("single storage"),
-            runmat_builtins::NumericStorage::F32(vec![1.25, 2.0])
+            runmat_value::NumericStorage::F32(vec![1.25, 2.0])
         );
     }
 

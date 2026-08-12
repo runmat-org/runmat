@@ -13,9 +13,9 @@ use crate::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, LogicalArray, StringArray, StructValue, Tensor, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::structfun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -691,9 +691,7 @@ fn structfun_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor,
-    };
+    use runmat_value::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
     use std::sync::Arc;
 
     fn call(func: Value, st: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -716,8 +714,8 @@ mod tests {
 
     #[test]
     fn uniform_output_boolean_uses_exact_integer_zero_test() {
-        assert!(parse_bool_option(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))).unwrap());
-        assert!(!parse_bool_option(&Value::Int(runmat_builtins::IntValue::I64(0))).unwrap());
+        assert!(parse_bool_option(&Value::Int(runmat_value::IntValue::U64(u64::MAX))).unwrap());
+        assert!(!parse_bool_option(&Value::Int(runmat_value::IntValue::I64(0))).unwrap());
     }
 
     #[test]

@@ -9,10 +9,12 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, ResolveContext, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Value,
+};
 
 use crate::builtins::array::type_resolvers::{
     is_scalar_type, logical_type_from_rank, rank_from_dims_args, tensor_type_from_rank,
@@ -694,11 +696,11 @@ fn template_from_fill_value(value: &Value, fill: &FillScalar) -> OutputTemplate 
             OutputTemplate::Like(value.clone())
         }
         Value::ComplexTensor(tensor)
-            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 =>
+            if tensor.numeric_dtype() == runmat_value::NumericDType::F32 =>
         {
             OutputTemplate::Like(value.clone())
         }
-        Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 => {
+        Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32 => {
             OutputTemplate::Single
         }
         _ => match fill {
@@ -839,7 +841,7 @@ fn fill_double(fill: &FillScalar, shape: &[usize]) -> Result<Value, String> {
 fn fill_single(fill: &FillScalar, shape: &[usize]) -> Result<Value, String> {
     let value = fill.as_real()?;
     let tensor = Tensor::from_numeric_storage(
-        runmat_builtins::NumericStorage::F32(vec![value as f32; tensor::element_count(shape)]),
+        runmat_value::NumericStorage::F32(vec![value as f32; tensor::element_count(shape)]),
         shape.to_vec(),
     )
     .map_err(|err| format!("createArray: {err}"))?;
@@ -872,7 +874,7 @@ fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value,
         Value::LogicalArray(_) | Value::Bool(_) => fill_logical(fill, shape),
         Value::ComplexTensor(tensor) => match tensor.integer_storage() {
             Some(storage) => fill_complex_integer_like(fill, shape, storage),
-            None if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 => {
+            None if tensor.numeric_dtype() == runmat_value::NumericDType::F32 => {
                 fill_complex_single(fill, shape)
             }
             None => fill_complex(fill, shape),
@@ -887,12 +889,12 @@ fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value,
             }
             Some(storage) => fill_integer_like(fill, shape, storage),
             None if fill.is_complex()
-                && tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 =>
+                && tensor.numeric_dtype() == runmat_value::NumericDType::F32 =>
             {
                 fill_complex_single(fill, shape)
             }
             None if fill.is_complex() => fill_complex(fill, shape),
-            None if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 => {
+            None if tensor.numeric_dtype() == runmat_value::NumericDType::F32 => {
                 fill_single(fill, shape)
             }
             None => fill_double(fill, shape),
@@ -1237,7 +1239,7 @@ pub(crate) mod tests {
     fn fill_logical_option_reads_wide_uint64_truth_exactly() {
         let wide = u64::MAX;
         let result = block_on(fill_builtin(
-            Value::Int(runmat_builtins::IntValue::U64(wide)),
+            Value::Int(runmat_value::IntValue::U64(wide)),
             vec![Value::Num(1.0), Value::Num(3.0), Value::from("logical")],
         ))
         .expect("scalar uint64 logical fill");
@@ -1319,7 +1321,7 @@ pub(crate) mod tests {
             assert_eq!(output.integer_storage(), Some(&expected));
         }
 
-        let scalar = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+        let scalar = Value::Int(runmat_value::IntValue::U64(u64::MAX));
         let result = block_on(fill_builtin(
             Value::Num(1.0),
             vec![Value::Num(2.0), Value::from("like"), scalar],
@@ -1347,7 +1349,7 @@ pub(crate) mod tests {
 
         for (class_name, expected) in cases {
             let result = block_on(fill_builtin(
-                Value::Int(runmat_builtins::IntValue::I32(3)),
+                Value::Int(runmat_value::IntValue::I32(3)),
                 vec![Value::Num(2.0), Value::Num(3.0), Value::from(class_name)],
             ))
             .expect("fill integer class");
@@ -1361,7 +1363,7 @@ pub(crate) mod tests {
     fn fill_uint64_class_string_preserves_wide_integer_fill_value() {
         let wide = (1_u64 << 53) + 1;
         let result = block_on(fill_builtin(
-            Value::Int(runmat_builtins::IntValue::U64(wide)),
+            Value::Int(runmat_value::IntValue::U64(wide)),
             vec![Value::Num(1.0), Value::Num(3.0), Value::from("uint64")],
         ))
         .expect("fill uint64");
@@ -1379,7 +1381,7 @@ pub(crate) mod tests {
         let prototype = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
             .expect("uint64 prototype");
         let result = block_on(fill_builtin(
-            Value::Int(runmat_builtins::IntValue::U64(wide)),
+            Value::Int(runmat_value::IntValue::U64(wide)),
             vec![
                 Value::Num(1.0),
                 Value::Num(3.0),
@@ -1428,7 +1430,7 @@ pub(crate) mod tests {
                 .expect("upload uint64 prototype");
 
             let result = block_on(fill_builtin(
-                Value::Int(runmat_builtins::IntValue::U64(wide)),
+                Value::Int(runmat_value::IntValue::U64(wide)),
                 vec![
                     Value::Num(2.0),
                     Value::from("like"),
@@ -1479,7 +1481,7 @@ pub(crate) mod tests {
 
     #[test]
     fn fill_complex_scalar_reads_typed_integer_storage_exactly() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I16(vec![3]),
             IntegerStorage::I16(vec![-2]),
         )
@@ -1520,7 +1522,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(tensor) = result else {
             panic!("expected complex tensor");
         };
-        assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![(1.0, 1.0); 4]);
     }
@@ -1750,7 +1752,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(tensor) = result else {
             panic!("expected complex double tensor");
         };
-        assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0); 4]);
     }
@@ -1769,7 +1771,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(tensor) = result else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(tensor.materialize_f64(), vec![(1.25, -2.5); 4]);
     }
 

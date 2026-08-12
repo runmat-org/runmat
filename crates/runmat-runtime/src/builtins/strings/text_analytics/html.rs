@@ -6,10 +6,10 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, ObjectInstance, ResolveContext, StringArray,
-    StructValue, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, ObjectInstance, StringArray, StructValue, Value};
 
 use crate::builtins::strings::core::compat::{scalar_text, text_items};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
@@ -2364,9 +2364,7 @@ mod tests {
         .expect("tree");
         let attr = Value::Cell(
             CellArray::new(
-                vec![Value::CharArray(runmat_builtins::CharArray::new_row(
-                    "href",
-                ))],
+                vec![Value::CharArray(runmat_value::CharArray::new_row("href"))],
                 1,
                 1,
             )
@@ -2509,14 +2507,14 @@ mod tests {
             BuiltinIntegerAuditKind::NotApplicable
         );
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(1)),
-            Value::Int(runmat_builtins::IntValue::I16(1)),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::Int(runmat_builtins::IntValue::I64(1)),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
-            Value::Int(runmat_builtins::IntValue::U16(1)),
-            Value::Int(runmat_builtins::IntValue::U32(1)),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
         ] {
             let error = futures::executor::block_on(find_element_builtin(vec![
                 value,
@@ -2545,14 +2543,14 @@ mod tests {
             BuiltinIntegerAuditKind::NotApplicable
         );
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(1)),
-            Value::Int(runmat_builtins::IntValue::I16(1)),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::Int(runmat_builtins::IntValue::I64(1)),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
-            Value::Int(runmat_builtins::IntValue::U16(1)),
-            Value::Int(runmat_builtins::IntValue::U32(1)),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
         ] {
             let error = futures::executor::block_on(get_attribute_builtin(vec![
                 value.clone(),
@@ -2619,14 +2617,14 @@ mod tests {
     #[test]
     fn extract_html_text_rejects_integer_and_resident_numeric_input_before_gather() {
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(1)),
-            Value::Int(runmat_builtins::IntValue::I16(1)),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
-            Value::Int(runmat_builtins::IntValue::I64(1)),
-            Value::Int(runmat_builtins::IntValue::U8(1)),
-            Value::Int(runmat_builtins::IntValue::U16(1)),
-            Value::Int(runmat_builtins::IntValue::U32(1)),
-            Value::Int(runmat_builtins::IntValue::U64(1)),
+            Value::Int(runmat_value::IntValue::I8(1)),
+            Value::Int(runmat_value::IntValue::I16(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I64(1)),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+            Value::Int(runmat_value::IntValue::U64(1)),
         ] {
             let error = futures::executor::block_on(extract_html_text_builtin(vec![value]))
                 .expect_err("integer HTML input");
@@ -2645,9 +2643,8 @@ mod tests {
     #[test]
     fn extract_html_text_strict_mode_gates_broad_text_containers() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let matrix = Value::CharArray(
-            runmat_builtins::CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap(),
-        );
+        let matrix =
+            Value::CharArray(runmat_value::CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap());
         let error = futures::executor::block_on(extract_html_text_builtin(vec![matrix]))
             .expect_err("strict char matrix gate");
         assert_eq!(

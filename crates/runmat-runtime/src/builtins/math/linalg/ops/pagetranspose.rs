@@ -15,9 +15,9 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, Value};
 
 const NAME: &str = "pagetranspose";
 
@@ -235,13 +235,11 @@ fn pagetranspose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
     CellArray::new(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
-fn pagetranspose_char_array(
-    ca: runmat_builtins::CharArray,
-) -> BuiltinResult<runmat_builtins::CharArray> {
+fn pagetranspose_char_array(ca: runmat_value::CharArray) -> BuiltinResult<runmat_value::CharArray> {
     let rows = ca.rows;
     let cols = ca.cols;
     if ca.data.is_empty() {
-        return runmat_builtins::CharArray::new(Vec::new(), cols, rows)
+        return runmat_value::CharArray::new(Vec::new(), cols, rows)
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
     let mut out = vec!['\0'; ca.data.len()];
@@ -254,7 +252,7 @@ fn pagetranspose_char_array(
             }
         }
     }
-    runmat_builtins::CharArray::new(out, cols, rows)
+    runmat_value::CharArray::new(out, cols, rows)
         .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
@@ -324,9 +322,10 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        ResolveContext, SparseTensor, StringArray, StructValue, Tensor, Type,
+        SparseTensor, StringArray, StructValue, Tensor,
     };
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {

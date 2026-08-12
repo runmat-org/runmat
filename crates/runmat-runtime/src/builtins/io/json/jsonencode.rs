@@ -6,10 +6,12 @@ use std::fmt::Write as FmtWrite;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ObjectInstance,
     StringArray, StructValue, SymbolicArray, Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1046,7 +1048,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, SymbolicArray,
         SymbolicExpr, Tensor,
     };
@@ -1090,7 +1092,7 @@ pub(crate) mod tests {
     fn jsonencode_symbolic_value_as_text() {
         let expr = SymbolicExpr::div_expr(
             SymbolicExpr::function(
-                runmat_builtins::symbolic::SymbolicFunction::Sin,
+                runmat_value::SymbolicFunction::Sin,
                 SymbolicExpr::variable("x"),
             ),
             SymbolicExpr::variable("x"),
@@ -1355,7 +1357,7 @@ pub(crate) mod tests {
         ];
 
         for (class, real, imag, expected) in cases {
-            let storage = runmat_builtins::IntegerComplexStorage::new(real, imag)
+            let storage = runmat_value::IntegerComplexStorage::new(real, imag)
                 .expect("matching integer components");
             let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
             let encoded = block_on(jsonencode_builtin(Value::ComplexTensor(tensor), Vec::new()))

@@ -1,4 +1,4 @@
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use super::tensor;
 
@@ -273,7 +273,7 @@ pub(crate) fn singular_value_rcond(singular_values: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn parse_tolerance_arg_reads_typed_integer_tensor_storage() {

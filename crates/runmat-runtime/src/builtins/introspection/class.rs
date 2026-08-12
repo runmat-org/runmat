@@ -11,9 +11,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::class")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -153,7 +154,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
         IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, StringArray,
         StructValue, SymbolicExpr, Tensor,
@@ -180,7 +181,7 @@ pub(crate) mod tests {
     #[test]
     fn class_reports_exact_integer_tensor_storage_type() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
             vec![1, 1],
         )
         .expect("uint64 tensor");
@@ -190,7 +191,7 @@ pub(crate) mod tests {
 
     #[test]
     fn class_reports_exact_integer_sparse_storage_type() {
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             2,
             1,
             vec![0, 1],

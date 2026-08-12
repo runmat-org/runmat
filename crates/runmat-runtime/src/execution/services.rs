@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use runmat_builtins::Value;
 use runmat_execution::{
     CancellationReason, ExecutionScopeId, FutureHandle, FutureId, JobHandle, OutputContract,
     TaskHandle, TaskId,
 };
+use runmat_value::Value;
 
 use super::ExecutionServiceError;
 

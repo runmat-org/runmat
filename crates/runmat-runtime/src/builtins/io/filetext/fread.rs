@@ -11,10 +11,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericScalar, NumericStorage,
     Tensor, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -2492,9 +2494,8 @@ pub(crate) mod tests {
         ])
         .expect("open");
         let fid = open.as_open().expect("open result").fid as i32;
-        let unsupported = Value::Cell(
-            runmat_builtins::CellArray::new(vec![Value::Num(0.0)], 1, 1).expect("cell"),
-        );
+        let unsupported =
+            Value::Cell(runmat_value::CellArray::new(vec![Value::Num(0.0)], 1, 1).expect("cell"));
         let error = run_evaluate(
             &Value::Num(fid as f64),
             &[

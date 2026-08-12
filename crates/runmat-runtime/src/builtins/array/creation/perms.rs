@@ -3,10 +3,12 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, NumericStorage, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, LogicalArray, NumericStorage, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::{
     gpu_helpers,
@@ -403,7 +405,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, NumericDType};
+    use runmat_value::{IntValue, IntegerStorage, NumericDType};
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(super::perms_builtin(value, Vec::new()))
@@ -661,7 +663,7 @@ mod tests {
         let err = call(Value::Tensor(matrix)).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
 
-        let sparse = Value::SparseTensor(runmat_builtins::SparseTensor::zeros(1, 1));
+        let sparse = Value::SparseTensor(runmat_value::SparseTensor::zeros(1, 1));
         let err = call(sparse).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
     }

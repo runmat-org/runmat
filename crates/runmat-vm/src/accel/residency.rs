@@ -1,6 +1,6 @@
 #[cfg(feature = "native-accel")]
 use runmat_accelerate_api::{handle_identity, GpuHandleIdentity};
-use runmat_builtins::Value;
+use runmat_value::Value;
 #[cfg(feature = "native-accel")]
 use std::collections::HashSet;
 
@@ -251,7 +251,7 @@ mod tests {
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorHandle, HostTensorView, ThreadProviderGuard,
     };
-    use runmat_builtins::{CellArray, Closure, HandleRef, StructValue, Value};
+    use runmat_value::{CellArray, Closure, HandleRef, StructValue, Value};
 
     static TEST_PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
 

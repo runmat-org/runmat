@@ -11,9 +11,10 @@ use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
     get_class, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isa")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -267,8 +268,9 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
     };
-    use runmat_builtins::{
-        CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
+    use runmat_builtins::ClassDef;
+    use runmat_value::{
+        CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
         IntegerStorage, Listener, LogicalArray, ObjectInstance, SparseTensor, StringArray,
         StructValue, Tensor,
     };

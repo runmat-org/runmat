@@ -7,9 +7,11 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, StructValue, Tensor, Value,
+};
 
 use crate::builtins::cells::type_resolvers::cell_type;
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
@@ -690,21 +692,19 @@ pub(crate) mod tests {
 
     #[test]
     fn cell_size_tensor_preserves_typed_integer_bounds() {
-        let dims =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![2, 3]), vec![1, 2])
-                .expect("dims");
+        let dims = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+            .expect("dims");
         assert_eq!(parse_size_tensor(&dims).unwrap(), vec![2, 3]);
 
-        let scalar = Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![4]), vec![1, 1])
+        let scalar = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![4]), vec![1, 1])
             .expect("scalar");
         assert_eq!(
             parse_size_scalar(&Value::Tensor(scalar), "cell").unwrap(),
             4
         );
 
-        let negative =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
-                .expect("negative");
+        let negative = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative");
         assert_eq!(parse_size_tensor(&negative).unwrap(), vec![0, 0]);
 
         assert!(parse_size_scalar(&Value::Num(usize::MAX as f64), "cell").is_err());
@@ -848,7 +848,7 @@ pub(crate) mod tests {
 
     #[test]
     fn cell_accepts_all_eight_integer_size_classes_exactly() {
-        use runmat_builtins::IntegerStorage;
+        use runmat_value::IntegerStorage;
 
         let storages = [
             IntegerStorage::I8(vec![2, 3]),

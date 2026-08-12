@@ -11,10 +11,12 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage,
-    ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, Tensor, Value,
+};
 
 use crate::builtins::math::elementwise::integer_arithmetic::{
     integer_binary_scalar, IntegerBinaryOp,
@@ -737,7 +739,8 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor, Type};
+    use runmat_builtins::Type;
+    use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
     #[test]
     fn kron_type_logical_returns_logical() {

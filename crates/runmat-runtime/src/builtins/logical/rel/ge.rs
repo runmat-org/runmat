@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, LogicalArray, StringArray, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::spec::{
@@ -596,7 +597,7 @@ pub(crate) mod tests {
     #[test]
     fn scalar_numeric_value_reads_typed_integer_tensor_storage_exactly() {
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]),
             vec![1, 1],
         )
         .expect("integer tensor");
@@ -610,12 +611,12 @@ pub(crate) mod tests {
     #[test]
     fn ge_dense_integer_arrays_read_exact_storage_without_mirror() {
         let lhs = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]),
+            runmat_value::IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]),
             vec![2, 1],
         )
         .expect("lhs");
         let rhs = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![0, 1, i64::MAX]),
+            runmat_value::IntegerStorage::I64(vec![0, 1, i64::MAX]),
             vec![1, 3],
         )
         .expect("rhs");
@@ -656,7 +657,7 @@ pub(crate) mod tests {
     fn ge_gpu_wide_integer_scalar_fallback_is_exact_owner_resident_logical() {
         test_support::with_test_provider(|provider| {
             let lhs = Tensor::new_integer(
-                runmat_builtins::IntegerStorage::U64(vec![
+                runmat_value::IntegerStorage::U64(vec![
                     9_007_199_254_740_992,
                     9_007_199_254_740_993,
                 ]),
@@ -666,7 +667,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &lhs).expect("upload exact lhs");
             let result = run_ge(
                 Value::GpuTensor(handle),
-                Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993)),
+                Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
             )
             .expect("resident exact ge");
             let Value::GpuTensor(result_handle) = &result else {

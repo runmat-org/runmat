@@ -10,11 +10,11 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, IntValue, NumericScalar, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle, MarkerStyle, ScatterPlot};
+use runmat_value::{CellArray, CharArray, IntValue, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::{random_args::keyword_of, tensor};
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -1685,7 +1685,8 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::{clone_figure, current_figure_handle};
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntegerStorage, LogicalArray};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntegerStorage, LogicalArray};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).expect("tensor"))

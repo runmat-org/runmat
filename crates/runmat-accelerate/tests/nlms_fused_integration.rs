@@ -13,7 +13,8 @@ use runmat_accelerate::graph::{
 };
 use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{Type, Value};
+use runmat_builtins::Type;
+use runmat_value::Value;
 use std::collections::HashMap;
 
 fn upload(

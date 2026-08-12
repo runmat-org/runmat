@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 use std::sync::OnceLock;
 
 use crate::build_runtime_error;
@@ -848,7 +848,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{random, test_support};
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     fn reset_rng_clean() -> impl Drop {
         let guard = random::test_guard();
@@ -1009,7 +1009,7 @@ pub(crate) mod tests {
     fn rand_legacy_seed_char_array_resets_sequence() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let seed_keyword = Value::CharArray(runmat_builtins::CharArray::new_row("seed"));
+        let seed_keyword = Value::CharArray(runmat_value::CharArray::new_row("seed"));
         block_on(rand_builtin(vec![seed_keyword.clone(), Value::Num(17.0)]))
             .expect("rand char seed");
         let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");

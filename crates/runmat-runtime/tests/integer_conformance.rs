@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
-use runmat_builtins::{
+use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor,
     Tensor, Value,
 };
@@ -38,7 +38,7 @@ fn expect_double_numeric(value: &Value) {
     match value {
         Value::Num(_) => {}
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.numeric_dtype(), runmat_builtins::NumericDType::F64)
+            assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64)
         }
         other => panic!("expected double numeric result, got {other:?}"),
     }

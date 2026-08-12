@@ -4,8 +4,8 @@ use crate::indexing::read_slice::{
     read_tensor_slice_from_plan,
 };
 use crate::indexing::selectors::SliceSelector;
-use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 /// Reads scalar paren indices without converting selector values through `f64`.
 ///
@@ -51,7 +51,7 @@ pub async fn generic_index(base: &Value, indices: &[usize]) -> Result<Value, Run
 mod tests {
     use super::generic_index;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, SparseTensor, Tensor, Value,
     };
 

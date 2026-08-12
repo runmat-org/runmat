@@ -2,7 +2,6 @@
 
 use std::collections::BTreeSet;
 
-use runmat_builtins::Value;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -12,6 +11,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::figure_actions::{parse_clf_action, FigureAction};
 use super::state::{clear_figure, clear_figure_with_builtin, figure_handles, FigureHandle};
@@ -235,7 +235,8 @@ fn is_reset_selector(value: &Value) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

@@ -7,9 +7,9 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Tensor, Value};
 use rustfft::FftPlanner;
 
 use crate::builtins::common::spec::{
@@ -494,7 +494,7 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
 }
 
 fn complex_tensor_to_signal_columns(
-    tensor: runmat_builtins::ComplexTensor,
+    tensor: runmat_value::ComplexTensor,
 ) -> BuiltinResult<SignalColumns> {
     if tensor.shape.len() > 2 {
         return Err(periodogram_error_with_detail(
@@ -954,7 +954,8 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::IntegerStorage;
 
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
@@ -1152,7 +1153,7 @@ mod tests {
         let data = (0..5)
             .map(|idx| (idx as f64, if idx == 0 { 0.0 } else { 0.25 }))
             .collect::<Vec<_>>();
-        let x = runmat_builtins::ComplexTensor::new(data, vec![1, 5]).unwrap();
+        let x = runmat_value::ComplexTensor::new(data, vec![1, 5]).unwrap();
         let out = call(
             Value::ComplexTensor(x),
             &[
@@ -1341,7 +1342,7 @@ mod tests {
 
     #[test]
     fn periodogram_rejects_onesided_complex_input() {
-        let x = runmat_builtins::ComplexTensor::new(vec![(1.0, 1.0); 8], vec![1, 8]).unwrap();
+        let x = runmat_value::ComplexTensor::new(vec![(1.0, 1.0); 8], vec![1, 8]).unwrap();
         let err = call(
             Value::ComplexTensor(x),
             &[

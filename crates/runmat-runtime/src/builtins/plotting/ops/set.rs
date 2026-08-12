@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::properties::{resolve_plot_handle, set_properties};
 use crate::builtins::plotting::type_resolvers::set_type;
@@ -126,8 +127,8 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::title::title_builtin;
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
-    use runmat_builtins::Value;
     use runmat_plot::plots::{Figure, LinePlot};
+    use runmat_value::Value;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -290,9 +291,7 @@ mod tests {
         set_builtin(vec![
             Value::Num(ax),
             Value::String("YLim".into()),
-            Value::Tensor(
-                runmat_builtins::Tensor::new(vec![2.0, 8.0], vec![1, 2]).expect("y limits"),
-            ),
+            Value::Tensor(runmat_value::Tensor::new(vec![2.0, 8.0], vec![1, 2]).expect("y limits")),
             Value::String("Colorbar".into()),
             Value::Bool(true),
             Value::String("Colormap".into()),
@@ -462,7 +461,7 @@ mod tests {
     fn set_updates_stem_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![Value::Tensor(
-            runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
+            runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
         )])
         .unwrap();
         set_builtin(vec![

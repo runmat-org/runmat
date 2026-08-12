@@ -7,10 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
+use runmat_value::{Tensor, Value};
 
 use super::op_common::surface_inputs::{
     axis_sources_to_host, image_axis_sources_from_xy_values, parse_image_call_args,
@@ -419,8 +419,8 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::Tensor;
     use runmat_plot::plots::PlotElement;
+    use runmat_value::Tensor;
 
     fn grid_tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
         Tensor::new(data, vec![rows, cols]).expect("imagesc test grid")
@@ -510,7 +510,7 @@ mod tests {
 
         futures::executor::block_on(imagesc_builtin(vec![
             Value::Tensor(
-                Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0, 1]), vec![1, 2])
+                Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![0, 1]), vec![1, 2])
                     .unwrap(),
             ),
             Value::String("CDataMapping".into()),
@@ -567,7 +567,7 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         let source = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U8(vec![255, 0, 0, 255, 0, 0]),
+            runmat_value::IntegerStorage::U8(vec![255, 0, 0, 255, 0, 0]),
             vec![1, 2, 3],
         )
         .unwrap();

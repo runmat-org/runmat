@@ -7,10 +7,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -905,11 +906,8 @@ mod tests {
     }
 
     fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(values),
-            vec![rows, cols],
-        )
-        .expect("integer matrix")
+        Tensor::new_integer(runmat_value::IntegerStorage::I16(values), vec![rows, cols])
+            .expect("integer matrix")
     }
 
     fn double_values(tensor: &Tensor) -> &[f64] {
@@ -919,7 +917,7 @@ mod tests {
     #[test]
     fn histogram2_option_scalar_reads_typed_integer_storage_exactly() {
         let tensor =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
 
         assert_eq!(
             option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
@@ -930,14 +928,14 @@ mod tests {
     #[test]
     fn histogram2_boolean_option_reads_all_integer_storage_classes_exactly() {
         let storages = [
-            runmat_builtins::IntegerStorage::I8(vec![1]),
-            runmat_builtins::IntegerStorage::I16(vec![1]),
-            runmat_builtins::IntegerStorage::I32(vec![1]),
-            runmat_builtins::IntegerStorage::I64(vec![1]),
-            runmat_builtins::IntegerStorage::U8(vec![1]),
-            runmat_builtins::IntegerStorage::U16(vec![1]),
-            runmat_builtins::IntegerStorage::U32(vec![1]),
-            runmat_builtins::IntegerStorage::U64(vec![1]),
+            runmat_value::IntegerStorage::I8(vec![1]),
+            runmat_value::IntegerStorage::I16(vec![1]),
+            runmat_value::IntegerStorage::I32(vec![1]),
+            runmat_value::IntegerStorage::I64(vec![1]),
+            runmat_value::IntegerStorage::U8(vec![1]),
+            runmat_value::IntegerStorage::U16(vec![1]),
+            runmat_value::IntegerStorage::U32(vec![1]),
+            runmat_value::IntegerStorage::U64(vec![1]),
         ];
 
         for storage in storages {

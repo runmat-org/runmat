@@ -17,12 +17,12 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, HandleRef, IntValue, MethodDef, ObjectInstance, PropertyDef, StructValue,
-    Value,
+    ClassDef, MethodDef, PropertyDef,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, CellArray, HandleRef, IntValue, ObjectInstance, StructValue, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1262,7 +1262,7 @@ pub(crate) fn reset_timer_state_for_tests() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntegerStorage, Tensor};
+    use runmat_value::{CharArray, IntegerStorage, Tensor};
     use std::sync::{Arc, Mutex};
 
     #[test]

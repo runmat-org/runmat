@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use runmat_builtins::Value;
+use runmat_value::Value;
 
 use super::op_common::figure_actions::{parse_close_action, FigureAction};
 use super::state::{close_figure, close_figure_with_builtin, figure_handles, FigureHandle};
@@ -53,7 +53,8 @@ pub(crate) mod tests {
         figure::figure_builtin, lock_plot_test_context, reset_hold_state_for_run, reset_plot_state,
         tests::ensure_plot_test_env, PlotTestLockGuard,
     };
-    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_test_context();

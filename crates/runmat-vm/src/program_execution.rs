@@ -140,7 +140,7 @@ async fn execute_script_request(request: ProgramExecutionRequest) -> ProgramExec
         Ok(values) => {
             let value = result_slot
                 .and_then(|slot| values.get(slot).cloned())
-                .unwrap_or(runmat_builtins::Value::Num(0.0));
+                .unwrap_or(runmat_value::Value::Num(0.0));
             match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
                 Ok(value) => ProgramExecutionResponse::Success { value },
                 Err(error) => ProgramExecutionResponse::Failure {

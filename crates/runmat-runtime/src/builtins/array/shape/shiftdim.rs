@@ -14,10 +14,12 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LiteralValue, LogicalArray, NumericScalar, ResolveContext,
-    StringArray, Type, Value,
+    LiteralValue, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, LogicalArray, NumericScalar, StringArray, Value,
+};
 
 const NAME: &str = "shiftdim";
 
@@ -627,7 +629,7 @@ fn reshape_gpu(handle: GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexStorage, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Tensor,
     };
 
@@ -709,7 +711,7 @@ mod tests {
     #[test]
     fn negative_shift_and_default_shift_only_change_shape_metadata() {
         let input = Tensor::from_numeric_storage(
-            runmat_builtins::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0]),
+            runmat_value::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0]),
             vec![1, 1, 2, 2],
         )
         .unwrap();

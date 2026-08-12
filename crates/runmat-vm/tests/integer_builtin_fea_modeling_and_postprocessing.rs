@@ -1,9 +1,8 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::{
-    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerClass, Value,
-};
+use runmat_builtins::{BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerClass};
+use runmat_value::Value;
 use test_helpers::execute_source;
 
 const INTEGER_CONSTRUCTORS: [&str; 8] = [

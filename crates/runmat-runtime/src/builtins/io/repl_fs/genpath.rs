@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::fs::{compare_names, expand_user_path, path_to_string};
 use crate::builtins::common::spec::{
@@ -555,7 +555,7 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use crate::builtins::common::path_state::PATH_LIST_SEPARATOR;
-    use runmat_builtins::{CharArray, StringArray, Tensor};
+    use runmat_value::{CharArray, StringArray, Tensor};
     use std::convert::TryFrom;
     use std::fs;
     use tempfile::tempdir;

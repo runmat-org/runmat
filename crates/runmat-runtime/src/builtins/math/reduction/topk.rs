@@ -9,10 +9,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar, ResolveContext, Tensor,
-    Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value,
+};
 
 use crate::builtins::common::arg_tokens::{tokens_from_context, ArgToken};
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -1134,7 +1136,7 @@ fn topk_internal(kind: TopKKind, detail: impl AsRef<str>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericStorage};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, NumericStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -1419,7 +1421,7 @@ mod tests {
         };
         assert_eq!(
             values.into_complex_storage(),
-            runmat_builtins::ComplexStorage::F32(vec![(3.0, -1.0), (2.0, 0.0)])
+            runmat_value::ComplexStorage::F32(vec![(3.0, -1.0), (2.0, 0.0)])
         );
 
         let logical = Value::LogicalArray(

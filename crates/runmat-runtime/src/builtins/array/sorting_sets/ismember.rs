@@ -10,10 +10,13 @@ use runmat_builtins::{
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray,
-    NumericDType, NumericStorage, StringArray, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericDType, NumericStorage,
+    StringArray, Tensor, Value,
+};
 
 use super::{float_order::SetFloat, type_resolvers::logical_output_type};
 use crate::build_runtime_error;
@@ -1131,7 +1134,8 @@ fn logical_array_into_value(logical: LogicalArray) -> Value {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -1222,12 +1226,12 @@ pub(crate) mod tests {
     #[test]
     fn integer_membership_uses_exact_values_for_elements_and_rows() {
         let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
         let b = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![0, u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![0, u64::MAX]),
             vec![2, 1],
         )
         .expect("input");
@@ -1236,12 +1240,12 @@ pub(crate) mod tests {
         assert_eq!(eval.loc.materialize_f64(), vec![2.0, 1.0, 0.0]);
 
         let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![i64::MAX, i64::MIN, 1, 2]),
+            runmat_value::IntegerStorage::I64(vec![i64::MAX, i64::MIN, 1, 2]),
             vec![2, 2],
         )
         .expect("input");
         let b = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, 7, 2, 8]),
+            runmat_value::IntegerStorage::I64(vec![i64::MIN, 7, 2, 8]),
             vec![2, 2],
         )
         .expect("input");
@@ -1254,11 +1258,11 @@ pub(crate) mod tests {
     #[test]
     fn mixed_integer_membership_rejects_nondouble_class_mismatch() {
         let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![7, 2, 9, 7]),
+            runmat_value::IntegerStorage::U16(vec![7, 2, 9, 7]),
             vec![4, 1],
         )
         .expect("input");
-        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
+        let b = Tensor::new_integer(runmat_value::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
             .expect("input");
 
         let error = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
@@ -1273,12 +1277,12 @@ pub(crate) mod tests {
     fn resident_integer_set_functions_use_exact_runtime_fallback_and_class_rules() {
         test_support::with_test_provider(|provider| {
             let left = Tensor::new_integer(
-                runmat_builtins::IntegerStorage::I32(vec![7, 2, 9, 7]),
+                runmat_value::IntegerStorage::I32(vec![7, 2, 9, 7]),
                 vec![4, 1],
             )
             .unwrap();
             let right =
-                Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
+                Tensor::new_integer(runmat_value::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
                     .unwrap();
             let left =
                 Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
@@ -1340,7 +1344,7 @@ pub(crate) mod tests {
             }
 
             let mismatched =
-                Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![2, 7]), vec![2, 1])
+                Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![2, 7]), vec![2, 1])
                     .unwrap();
             let mismatched =
                 Value::GpuTensor(gpu_helpers::upload_tensor(provider, &mismatched).unwrap());
@@ -1407,13 +1411,12 @@ pub(crate) mod tests {
             return;
         };
         let left = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I32(vec![7, 2, 9, 7]),
+            runmat_value::IntegerStorage::I32(vec![7, 2, 9, 7]),
             vec![4, 1],
         )
         .unwrap();
         let right =
-            Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 7]), vec![2, 1])
-                .unwrap();
+            Tensor::new_integer(runmat_value::IntegerStorage::I32(vec![2, 7]), vec![2, 1]).unwrap();
         let left =
             Value::GpuTensor(gpu_helpers::upload_tensor(provider, &left).expect("upload left"));
         let right =

@@ -1,7 +1,7 @@
-use runmat_builtins::{ObjectInstance, Value};
 use runmat_test::context::TestCommand;
 use runmat_test::lifecycle::ExecutionPhase;
 use runmat_test::result::{Diagnostic, DiagnosticSeverity};
+use runmat_value::{ObjectInstance, Value};
 
 use crate::BuiltinResult;
 
@@ -142,7 +142,7 @@ fn diagnostic_message(value: Value) -> BuiltinResult<String> {
 }
 
 fn empty_value() -> BuiltinResult<Value> {
-    runmat_builtins::Tensor::new(Vec::new(), vec![0, 0])
+    runmat_value::Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
         .map_err(|error| testing_diagnostic_error(error))
 }

@@ -4,9 +4,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 const BUILTIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "varargout",
@@ -180,7 +181,7 @@ pub async fn builtin_builtin(name: String, rest: Vec<Value>) -> crate::BuiltinRe
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor};
 
     fn call(name: &str, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(builtin_builtin(name.to_string(), rest))
@@ -291,7 +292,7 @@ mod tests {
         assert_eq!(outputs.len(), 2);
         assert!(outputs
             .iter()
-            .all(|value| matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64)));
+            .all(|value| matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F64)));
     }
 
     #[cfg(feature = "wgpu")]

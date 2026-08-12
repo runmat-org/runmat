@@ -9,9 +9,9 @@ use runmat_accelerate_api::{handle_is_logical, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{StructValue, Value};
 
 use crate::builtins::common::shape::value_dimensions;
 use crate::builtins::common::spec::{
@@ -253,7 +253,7 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 #[derive(Debug)]
 struct WhosRecord {
     name: String,
-    size: runmat_builtins::Tensor,
+    size: runmat_value::Tensor,
     bytes: usize,
     class_name: String,
     is_global: bool,
@@ -528,7 +528,7 @@ fn value_to_string_scalar(value: &Value) -> Option<String> {
     }
 }
 
-fn char_array_rows_as_strings(ca: &runmat_builtins::CharArray) -> Vec<String> {
+fn char_array_rows_as_strings(ca: &runmat_value::CharArray) -> Vec<String> {
     let mut rows = Vec::with_capacity(ca.rows);
     for r in 0..ca.rows {
         let mut row = String::with_capacity(ca.cols);
@@ -541,13 +541,13 @@ fn char_array_rows_as_strings(ca: &runmat_builtins::CharArray) -> Vec<String> {
     rows
 }
 
-fn dims_to_tensor(dims: &[usize]) -> BuiltinResult<runmat_builtins::Tensor> {
+fn dims_to_tensor(dims: &[usize]) -> BuiltinResult<runmat_value::Tensor> {
     let mut normalized = dims.to_vec();
     if normalized.is_empty() {
         normalized = vec![1, 1];
     }
     let data: Vec<f64> = normalized.iter().map(|dim| *dim as f64).collect();
-    runmat_builtins::Tensor::new(data, vec![1, normalized.len()]).map_err(|err| {
+    runmat_value::Tensor::new(data, vec![1, normalized.len()]).map_err(|err| {
         build_runtime_error(format!("whos: failed to materialize size vector: {err}"))
             .with_builtin("whos")
             .build()
@@ -558,10 +558,10 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
     let bytes = match value {
         Value::Num(_) => 8,
         Value::Int(i) => match i {
-            runmat_builtins::IntValue::I8(_) | runmat_builtins::IntValue::U8(_) => 1,
-            runmat_builtins::IntValue::I16(_) | runmat_builtins::IntValue::U16(_) => 2,
-            runmat_builtins::IntValue::I32(_) | runmat_builtins::IntValue::U32(_) => 4,
-            runmat_builtins::IntValue::I64(_) | runmat_builtins::IntValue::U64(_) => 8,
+            runmat_value::IntValue::I8(_) | runmat_value::IntValue::U8(_) => 1,
+            runmat_value::IntValue::I16(_) | runmat_value::IntValue::U16(_) => 2,
+            runmat_value::IntValue::I32(_) | runmat_value::IntValue::U32(_) => 4,
+            runmat_value::IntValue::I64(_) | runmat_value::IntValue::U64(_) => 8,
         },
         Value::Bool(_) => 1,
         Value::LogicalArray(la) => la.data.len(),
@@ -728,11 +728,11 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_thread_local::runmat_thread_local;
+    use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
         StructValue as TestStruct, Tensor,
     };
-    use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
     use tempfile::tempdir;
@@ -1288,7 +1288,7 @@ pub(crate) mod tests {
 
     #[test]
     fn whos_memory_bytes_use_native_width_for_typed_sparse_integer_values() {
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             4,
             2,
             vec![0, 1, 2],

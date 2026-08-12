@@ -1,6 +1,6 @@
 use crate::backend::wgpu::provider::host_tensor_from_value;
 use anyhow::{anyhow, Result};
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 fn invert_upper_triangular(data: &[f64], n: usize) -> Result<Vec<f64>> {
     let mut inv = vec![0.0f64; n * n];

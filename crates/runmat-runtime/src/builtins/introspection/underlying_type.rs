@@ -14,9 +14,10 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::introspection::underlying_type"
@@ -251,7 +252,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
         LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor,
     };
@@ -289,7 +290,7 @@ pub(crate) mod tests {
 
     #[test]
     fn underlying_type_reports_typed_sparse_integer_class() {
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             2,
             1,
             vec![0, 1],

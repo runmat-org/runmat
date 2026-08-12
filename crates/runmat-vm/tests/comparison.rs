@@ -1,4 +1,4 @@
-use runmat_builtins::{IntValue, LogicalArray, Value};
+use runmat_value::{IntValue, LogicalArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -128,7 +128,7 @@ fn vm_integer_power_rejects_invalid_exponents_across_lowerings() {
         value,
         Value::Tensor(tensor)
             if tensor.integer_storage()
-                == Some(&runmat_builtins::IntegerStorage::I16(vec![-8, 1]))
+                == Some(&runmat_value::IntegerStorage::I16(vec![-8, 1]))
     )));
 }
 
@@ -179,7 +179,7 @@ fn vm_integer_scalar_mtimes_is_exact_and_rejects_matrix_forms() {
                 value,
                 Value::Tensor(tensor)
                     if tensor.integer_storage()
-                        == Some(&runmat_builtins::IntegerStorage::U64(vec![
+                        == Some(&runmat_value::IntegerStorage::U64(vec![
                             18_014_398_509_481_986,
                             18_014_398_509_481_984,
                         ]))
@@ -191,7 +191,7 @@ fn vm_integer_scalar_mtimes_is_exact_and_rejects_matrix_forms() {
         value,
         Value::Tensor(tensor)
             if tensor.integer_storage()
-                == Some(&runmat_builtins::IntegerStorage::I8(vec![127, -128, 4]))
+                == Some(&runmat_value::IntegerStorage::I8(vec![127, -128, 4]))
     )));
 
     for source in [

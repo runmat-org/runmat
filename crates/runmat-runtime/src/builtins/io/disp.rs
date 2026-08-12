@@ -6,10 +6,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage,
-    LogicalArray, StringArray, StructValue, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, StringArray,
+    StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -898,7 +901,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::make_cell;
-    use runmat_builtins::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
+    use runmat_value::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
 
     #[test]
     fn disp_descriptor_signatures_cover_core_forms() {
@@ -1113,7 +1116,7 @@ pub(crate) mod tests {
     #[test]
     fn native_single_tensor_nested_summary_preserves_class() {
         let tensor = Tensor::from_numeric_storage(
-            runmat_builtins::NumericStorage::F32(vec![1.0, 2.0]),
+            runmat_value::NumericStorage::F32(vec![1.0, 2.0]),
             vec![1, 2],
         )
         .expect("single tensor");
@@ -1128,7 +1131,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integer_sparse_cell_summary_preserves_class() {
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             2,
             2,
             vec![0, 1, 2],
@@ -1154,7 +1157,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn typed_complex_integer_display_uses_exact_components_and_class() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
             IntegerStorage::U64(vec![7, 0]),
         )

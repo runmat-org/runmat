@@ -9,10 +9,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericScalar,
     NumericStorage, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use super::{float_order::SetFloat, integer_order, type_resolvers::bool_output_type};
 use crate::build_runtime_error;
@@ -866,7 +868,7 @@ fn is_vector(shape: &[usize]) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, IntValue, StringArray, Tensor};
+    use runmat_value::{CellArray, IntValue, StringArray, Tensor};
 
     fn builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(issortedrows_builtin(value, rest))

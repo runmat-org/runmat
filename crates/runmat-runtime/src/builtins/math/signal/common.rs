@@ -1,6 +1,6 @@
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
-use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -461,7 +461,7 @@ fn string_keyword(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn first_unrepresentable_usize_double() -> f64 {
         if usize::BITS == 64 {
@@ -587,7 +587,7 @@ mod tests {
             return;
         }
         let error = parse_window_options(
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             &[Value::from("periodic")],
             true,
         )

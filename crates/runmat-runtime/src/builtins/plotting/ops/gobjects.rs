@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, IntValue, NumericDType, NumericScalar, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericDType, NumericScalar, Tensor, Value};
 
 const GOBJECTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -348,7 +349,7 @@ mod tests {
     #[test]
     fn gobjects_requires_row_vector_geometry_for_vector_sizes() {
         let row = Tensor::from_numeric_storage(
-            runmat_builtins::NumericStorage::F32(vec![2.0, 3.0]),
+            runmat_value::NumericStorage::F32(vec![2.0, 3.0]),
             vec![1, 2],
         )
         .expect("row");
@@ -372,7 +373,7 @@ mod tests {
         for value in [
             Value::Bool(true),
             Value::LogicalArray(
-                runmat_builtins::LogicalArray::new(vec![1], vec![1, 1]).expect("logical"),
+                runmat_value::LogicalArray::new(vec![1], vec![1, 1]).expect("logical"),
             ),
             Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
                 shape: vec![1, 1],

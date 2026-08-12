@@ -16,9 +16,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexTensor, ResolveContext, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Value};
 
 const LR_DIM: [usize; 1] = [2];
 const BUILTIN_NAME: &str = "fliplr";
@@ -272,9 +273,10 @@ pub(crate) mod tests {
     use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
+    use runmat_builtins::Type;
+    use runmat_value::{
         CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,
-        Tensor, Type, Value,
+        Tensor, Value,
     };
 
     #[test]

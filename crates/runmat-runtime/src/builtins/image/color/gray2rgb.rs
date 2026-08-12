@@ -7,9 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{LogicalArray, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -221,7 +221,7 @@ fn gray2rgb_numeric(gathered: Value) -> BuiltinResult<Value> {
         .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?
         .gather(&indices)
         .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?;
-    let out = runmat_builtins::Tensor::from_numeric_storage(storage, vec![rows, cols, 3])
+    let out = runmat_value::Tensor::from_numeric_storage(storage, vec![rows, cols, 3])
         .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?;
     Ok(common::image_value_from_tensor(out))
 }
@@ -230,7 +230,7 @@ fn gray2rgb_numeric(gathered: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
+    use runmat_value::{IntegerStorage, NumericDType, Tensor};
 
     fn call(value: Value) -> BuiltinResult<Value> {
         let _guard = crate::compatibility::push_runmat_extensions_enabled(true);

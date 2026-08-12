@@ -7,10 +7,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CharArray, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, Value};
 use url::Url;
 
 use super::transport::{self, HttpMethod, HttpRequest};
@@ -324,7 +325,7 @@ fn parse_websave_rest(
 }
 
 fn apply_websave_options(
-    options: &runmat_builtins::StructValue,
+    options: &runmat_value::StructValue,
     headers: &mut Vec<(String, String)>,
     timeout: &mut Duration,
     user_agent: &mut String,
@@ -613,10 +614,10 @@ mod tests {
         let mut headers = Vec::new();
         let mut timeout = DEFAULT_TIMEOUT;
         let mut user_agent = USER_AGENT.to_string();
-        let mut options = runmat_builtins::StructValue::new();
+        let mut options = runmat_value::StructValue::new();
         options.insert("Timeout", Value::Num(7.0));
         options.insert("UserAgent", Value::String("agent".to_string()));
-        let mut header_struct = runmat_builtins::StructValue::new();
+        let mut header_struct = runmat_value::StructValue::new();
         header_struct.insert("XRunMat", Value::String("yes".to_string()));
         options.insert("HeaderFields", Value::Struct(header_struct));
 

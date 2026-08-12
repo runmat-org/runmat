@@ -16,8 +16,8 @@ pub struct ActiveTestContext {
 #[derive(Clone, Debug)]
 pub struct RuntimeTeardownInvocation {
     pub semantic_path: String,
-    pub callback: runmat_builtins::Value,
-    pub arguments: Vec<runmat_builtins::Value>,
+    pub callback: runmat_value::Value,
+    pub arguments: Vec<runmat_value::Value>,
 }
 
 #[derive(Debug)]
@@ -96,8 +96,8 @@ pub fn install_test_context(active: ActiveTestContext, limits: ProtocolLimits) -
 }
 
 pub fn record_runtime_teardown(
-    callback: runmat_builtins::Value,
-    arguments: Vec<runmat_builtins::Value>,
+    callback: runmat_value::Value,
+    arguments: Vec<runmat_value::Value>,
 ) -> Result<(), &'static str> {
     TEST_CONTEXT_STACK.with(|stack| {
         let state = stack
@@ -113,11 +113,11 @@ pub fn record_runtime_teardown(
             return Err("testing command limit exceeded");
         }
         let callback_name = match &callback {
-            runmat_builtins::Value::FunctionHandle(name)
-            | runmat_builtins::Value::ExternalFunctionHandle(name)
-            | runmat_builtins::Value::MethodFunctionHandle(name) => name.clone(),
-            runmat_builtins::Value::BoundFunctionHandle { name, .. } => name.clone(),
-            runmat_builtins::Value::Closure(closure) => closure.function_name.clone(),
+            runmat_value::Value::FunctionHandle(name)
+            | runmat_value::Value::ExternalFunctionHandle(name)
+            | runmat_value::Value::MethodFunctionHandle(name) => name.clone(),
+            runmat_value::Value::BoundFunctionHandle { name, .. } => name.clone(),
+            runmat_value::Value::Closure(closure) => closure.function_name.clone(),
             _ => return Err("addTeardown callback must be a function handle"),
         };
         let semantic_path = format!(

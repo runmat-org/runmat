@@ -1,8 +1,8 @@
 //! Global constants registered into the runtime (variables, not functions).
 //! This replaces legacy registrations in `src/constants.rs`.
 
-use runmat_builtins::Value;
 use runmat_macros::register_constant;
+use runmat_value::Value;
 
 // Numeric constants
 register_constant!(

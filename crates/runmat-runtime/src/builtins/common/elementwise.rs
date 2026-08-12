@@ -6,7 +6,7 @@
 use crate::builtins::common::matrix::matrix_power;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
-use runmat_builtins::{
+use runmat_value::{
     ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
 };
 
@@ -96,7 +96,7 @@ impl PromotedComplexTensorValues<'_> {
 }
 
 fn promoted_complex_tensor_values(
-    tensor: &runmat_builtins::ComplexTensor,
+    tensor: &runmat_value::ComplexTensor,
 ) -> PromotedComplexTensorValues<'_> {
     if let Some(values) = tensor.as_f64_slice() {
         PromotedComplexTensorValues::Raw(values)
@@ -1208,13 +1208,13 @@ mod tests {
 
     #[test]
     fn scalar_power_reads_typed_complex_integer_storage_exactly() {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I16(vec![3]),
             IntegerStorage::I16(vec![4]),
         )
         .expect("complex integer storage");
-        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 1])
-            .expect("complex tensor");
+        let tensor =
+            runmat_value::ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
 
         let result = scalar_power_value(&Value::ComplexTensor(tensor), &Value::Num(1.0))
             .expect("scalar power");
@@ -1231,14 +1231,14 @@ mod tests {
         real: Vec<i16>,
         imag: Vec<i16>,
         shape: Vec<usize>,
-    ) -> runmat_builtins::ComplexTensor {
-        let storage = runmat_builtins::IntegerComplexStorage::new(
+    ) -> runmat_value::ComplexTensor {
+        let storage = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I16(real),
             IntegerStorage::I16(imag),
         )
         .expect("complex integer storage");
 
-        runmat_builtins::ComplexTensor::new_integer(storage, shape).expect("complex tensor")
+        runmat_value::ComplexTensor::new_integer(storage, shape).expect("complex tensor")
     }
 
     #[test]
@@ -1456,11 +1456,11 @@ mod tests {
         );
         assert_eq!(
             block_on(elementwise_mul(
-                &Value::Int(runmat_builtins::IntValue::I32(3)),
+                &Value::Int(runmat_value::IntValue::I32(3)),
                 &Value::Num(4.5)
             ))
             .unwrap(),
-            Value::Int(runmat_builtins::IntValue::I32(14))
+            Value::Int(runmat_value::IntValue::I32(14))
         );
     }
 

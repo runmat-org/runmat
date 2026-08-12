@@ -7,11 +7,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::introspection::type_resolvers::ismethod_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    lookup_method, Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    lookup_method, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Listener, MException, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, Listener, MException, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::ismethod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -169,10 +170,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        register_class, Access, CharArray, ClassDef, HandleRef, MethodDef, ObjectInstance,
-        StringArray, Tensor,
-    };
+    use runmat_builtins::{register_class, ClassDef, MethodDef};
+    use runmat_value::{Access, CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
     use std::collections::HashMap;
 
     fn unique_class_name(label: &str) -> String {

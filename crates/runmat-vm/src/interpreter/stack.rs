@@ -1,6 +1,6 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_value::Value;
 
 #[inline]
 pub fn pop_value(stack: &mut Vec<Value>) -> Result<Value, RuntimeError> {

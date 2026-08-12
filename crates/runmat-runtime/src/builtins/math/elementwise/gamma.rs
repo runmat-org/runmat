@@ -8,9 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, NumericStorage, ResolveContext, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -205,7 +206,7 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         let dtype = output.numeric_dtype();
         let handle = gpu_helpers::upload_tensor(provider, &output)
             .map_err(|detail| gamma_error_with_detail(&GAMMA_ERROR_INTERNAL, detail))?;
-        if dtype == runmat_builtins::NumericDType::F32 {
+        if dtype == runmat_value::NumericDType::F32 {
             runmat_accelerate_api::set_handle_precision(
                 &handle,
                 runmat_accelerate_api::ProviderPrecision::F32,
@@ -378,7 +379,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
-    use runmat_builtins::{
+    use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
     };
 

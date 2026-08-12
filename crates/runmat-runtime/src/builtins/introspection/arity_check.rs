@@ -1,9 +1,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_hir::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::Value;
 use std::cell::RefCell;
 
 use crate::builtins::common::tensor;
@@ -363,7 +364,7 @@ pub fn nargoutchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn narginchk_uses_runtime_call_count_context() {

@@ -151,7 +151,7 @@ mod compute_binding_count_tests {
 #[cfg(test)]
 mod float_result_materialization_tests {
     use super::host_tensor_from_value;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+    use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     #[test]
     fn rejects_wide_and_poisoned_native_integers() {

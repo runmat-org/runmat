@@ -1052,7 +1052,6 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "native-accel")]
     use runmat_accelerate::fusion::prepare_fusion_plan;
-    use runmat_builtins::Value;
     use runmat_hir::{
         lower, AssignmentCreationPolicy, BuiltinId, CallableFallbackPolicy, CallableIdentity,
         DefPath, DefPathSegment, FunctionId, IndexResultContext, LoweringContext, MethodId,
@@ -1063,6 +1062,7 @@ mod tests {
         MirAggregateKind, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan, MirOperand,
         MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
     };
+    use runmat_value::Value;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};

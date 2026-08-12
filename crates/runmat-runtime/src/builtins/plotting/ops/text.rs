@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::op_common::{map_figure_error, value_as_text_string};
 use crate::builtins::plotting::properties::parse_text_style_pairs;
@@ -371,7 +372,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::Tensor;
+    use runmat_value::Tensor;
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();

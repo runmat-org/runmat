@@ -6190,6 +6190,7 @@ dependencies = [
  "runmat-test-runner-execution",
  "runmat-test-runner-native",
  "runmat-time",
+ "runmat-value",
  "runmat-vm",
  "rustyline",
  "serde",
@@ -6229,6 +6230,7 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-time",
+ "runmat-value",
  "runmat-vm",
  "rustfft",
  "serde",
@@ -6291,18 +6293,12 @@ dependencies = [
 name = "runmat-builtins"
 version = "0.6.1"
 dependencies = [
- "indexmap 1.9.3",
  "inventory",
- "num-bigint",
- "num-integer",
- "num-traits",
  "once_cell",
- "runmat-accelerate-api",
  "runmat-async",
- "runmat-execution",
  "runmat-gc-api",
  "runmat-macros",
- "runmat-thread-local",
+ "runmat-value",
  "serde",
  "sha2 0.10.9",
 ]
@@ -6352,6 +6348,7 @@ dependencies = [
  "runmat-test",
  "runmat-time",
  "runmat-turbine",
+ "runmat-value",
  "runmat-vm",
  "serde_json",
  "sha2 0.10.9",
@@ -6428,6 +6425,7 @@ dependencies = [
  "runmat-test",
  "runmat-test-runner",
  "runmat-test-runner-execution",
+ "runmat-value",
  "runmat-vm",
  "serde",
  "serde_json",
@@ -6505,6 +6503,7 @@ dependencies = [
  "runmat-mir",
  "runmat-parser",
  "runmat-time",
+ "runmat-value",
  "runmat-vm",
  "serde",
  "thiserror 1.0.69",
@@ -6520,6 +6519,7 @@ version = "0.6.1"
 dependencies = [
  "runmat-builtins",
  "runmat-gc",
+ "runmat-value",
 ]
 
 [[package]]
@@ -6565,6 +6565,7 @@ dependencies = [
  "runmat-execution",
  "runmat-parser",
  "runmat-test",
+ "runmat-value",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6636,6 +6637,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "runmat-builtins",
+ "runmat-value",
  "syn 1.0.109",
  "trybuild",
 ]
@@ -6871,6 +6873,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-thread-local",
  "runmat-time",
+ "runmat-value",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -6960,6 +6963,7 @@ dependencies = [
  "runmat-test",
  "runmat-thread-local",
  "runmat-time",
+ "runmat-value",
  "rustfft",
  "serde",
  "serde_json",
@@ -6990,6 +6994,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-macros",
  "runmat-runtime",
+ "runmat-value",
 ]
 
 [[package]]
@@ -7136,11 +7141,27 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-time",
+ "runmat-value",
  "runmat-vm",
  "stacker",
  "target-lexicon",
  "thiserror 1.0.69",
  "tracing",
+]
+
+[[package]]
+name = "runmat-value"
+version = "0.6.1"
+dependencies = [
+ "indexmap 1.9.3",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "runmat-accelerate-api",
+ "runmat-execution",
+ "runmat-gc-api",
+ "runmat-thread-local",
+ "serde",
 ]
 
 [[package]]
@@ -7164,6 +7185,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-thread-local",
  "runmat-time",
+ "runmat-value",
  "serde",
  "serde_json",
  "stacker",
@@ -7205,6 +7227,7 @@ dependencies = [
  "runmat-test-runner",
  "runmat-test-runner-execution",
  "runmat-thread-local",
+ "runmat-value",
  "runmat-vm",
  "serde",
  "serde-wasm-bindgen",

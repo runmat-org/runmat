@@ -13,9 +13,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::spec::{
@@ -527,10 +528,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor,
-        Type,
-    };
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, Tensor};
 
     fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::mod_builtin(lhs, rhs))
@@ -546,7 +545,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             output.into_numeric_storage().unwrap(),
-            runmat_builtins::NumericStorage::F32(vec![1.5, 0.5])
+            runmat_value::NumericStorage::F32(vec![1.5, 0.5])
         );
 
         let lhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
@@ -556,7 +555,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             output.into_numeric_storage().unwrap(),
-            runmat_builtins::NumericStorage::F32(Vec::new())
+            runmat_value::NumericStorage::F32(Vec::new())
         );
     }
 
@@ -699,7 +698,7 @@ pub(crate) mod tests {
     #[test]
     fn mod_complex_scalar_helpers_read_typed_integer_complex_storage_without_mirror() {
         let complex = ComplexTensor::new_integer(
-            runmat_builtins::IntegerComplexStorage::new(
+            runmat_value::IntegerComplexStorage::new(
                 IntegerStorage::I16(vec![9]),
                 IntegerStorage::I16(vec![-2]),
             )

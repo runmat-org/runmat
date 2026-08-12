@@ -1,6 +1,6 @@
 use std::ops::{Add, Mul};
 
-use runmat_builtins::{NumericStorage, Tensor};
+use runmat_value::{NumericStorage, Tensor};
 
 #[derive(Debug, Clone, Copy)]
 pub enum CumulativeDirection {

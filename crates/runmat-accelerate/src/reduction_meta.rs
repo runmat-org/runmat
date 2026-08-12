@@ -1,5 +1,6 @@
 use crate::graph::{AccelGraph, AccelNode, AccelOpCategory, ValueId};
-use runmat_builtins::{IntValue, NumericScalar, Tensor, Type, Value};
+use runmat_builtins::Type;
+use runmat_value::{IntValue, NumericScalar, Tensor, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReductionBehavior {
@@ -188,7 +189,7 @@ fn parse_tensor_dims(tensor: &Tensor) -> Option<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn reduction_dimension_preserves_representable_uint64_values() {

@@ -16,10 +16,12 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, NumericScalar, ResolveContext, StructValue, Tensor,
-    Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, NumericDType, NumericScalar, StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1663,9 +1665,8 @@ fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{
-        builtin_function_by_name, CharArray, IntegerComplexStorage, IntegerStorage, SparseTensor,
-    };
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{CharArray, IntegerComplexStorage, IntegerStorage, SparseTensor};
 
     fn real_matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new_2d(data, rows, cols).unwrap())
@@ -1720,7 +1721,7 @@ mod tests {
             Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("single vectors"),
         );
         let selected = tensor(select_columns(&matrix, &[1]).expect("selected column"));
-        assert_eq!(selected.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(selected.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(selected.shape, vec![2, 1]);
         assert_eq!(selected.materialize_f64(), vec![3.0, 4.0]);
     }

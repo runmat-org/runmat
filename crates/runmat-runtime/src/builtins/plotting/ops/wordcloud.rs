@@ -4,10 +4,10 @@ use glam::{Vec3, Vec4};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{Figure, TextStyle};
+use runmat_value::{IntValue, ObjectInstance, StringArray, StructValue, Tensor, Value};
 use std::collections::HashMap;
 
 use crate::builtins::common::tensor as tensor_utils;
@@ -1512,7 +1512,7 @@ mod tests {
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
-    use runmat_builtins::CellArray;
+    use runmat_value::CellArray;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -1536,16 +1536,16 @@ mod tests {
         Value::Tensor(Tensor::new(values, shape).unwrap())
     }
 
-    fn integer_scalar_storages(value: u64) -> [runmat_builtins::IntegerStorage; 8] {
+    fn integer_scalar_storages(value: u64) -> [runmat_value::IntegerStorage; 8] {
         [
-            runmat_builtins::IntegerStorage::I8(vec![value as i8]),
-            runmat_builtins::IntegerStorage::I16(vec![value as i16]),
-            runmat_builtins::IntegerStorage::I32(vec![value as i32]),
-            runmat_builtins::IntegerStorage::I64(vec![value as i64]),
-            runmat_builtins::IntegerStorage::U8(vec![value as u8]),
-            runmat_builtins::IntegerStorage::U16(vec![value as u16]),
-            runmat_builtins::IntegerStorage::U32(vec![value as u32]),
-            runmat_builtins::IntegerStorage::U64(vec![value]),
+            runmat_value::IntegerStorage::I8(vec![value as i8]),
+            runmat_value::IntegerStorage::I16(vec![value as i16]),
+            runmat_value::IntegerStorage::I32(vec![value as i32]),
+            runmat_value::IntegerStorage::I64(vec![value as i64]),
+            runmat_value::IntegerStorage::U8(vec![value as u8]),
+            runmat_value::IntegerStorage::U16(vec![value as u16]),
+            runmat_value::IntegerStorage::U32(vec![value as u32]),
+            runmat_value::IntegerStorage::U64(vec![value]),
         ]
     }
 
@@ -1576,11 +1576,9 @@ mod tests {
 
     #[test]
     fn wordcloud_numeric_vector_reads_typed_integer_storage_exactly() {
-        let sizes = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![2, 4, 8]),
-            vec![1, 3],
-        )
-        .expect("typed size vector");
+        let sizes =
+            Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2, 4, 8]), vec![1, 3])
+                .expect("typed size vector");
 
         assert_eq!(
             numeric_vector(&Value::Tensor(sizes), "SizeData").expect("numeric vector"),
@@ -1590,11 +1588,9 @@ mod tests {
 
     #[test]
     fn wordcloud_color_reads_typed_integer_storage_exactly() {
-        let color = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1, 0, 0]),
-            vec![1, 3],
-        )
-        .expect("typed color vector");
+        let color =
+            Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![1, 0, 0]), vec![1, 3])
+                .expect("typed color vector");
 
         assert_eq!(
             color_list(&Value::Tensor(color), "Color", None).expect("color list"),
@@ -1605,7 +1601,7 @@ mod tests {
     #[test]
     fn wordcloud_color_matrix_reads_typed_integer_storage_exactly() {
         let color = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U16(vec![1, 0, 0, 1, 0, 0]),
+            runmat_value::IntegerStorage::U16(vec![1, 0, 0, 1, 0, 0]),
             vec![2, 3],
         )
         .expect("typed color matrix");

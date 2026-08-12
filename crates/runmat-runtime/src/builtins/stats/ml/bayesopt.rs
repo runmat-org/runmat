@@ -7,10 +7,12 @@ use std::time::Instant;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor,
-    Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CellArray, LogicalArray, ObjectInstance, StringArray, StructValue, Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -1670,7 +1672,7 @@ fn is_callable(value: &Value) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
     use std::sync::Arc;
 
     fn variable(name: &str, range: Vec<f64>, var_type: Option<&str>) -> Value {

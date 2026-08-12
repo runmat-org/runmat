@@ -7,9 +7,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, SparseTensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{SparseTensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -254,9 +255,8 @@ pub(crate) mod tests {
         AccelProvider as _, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
         HostTensorView,
     };
-    use runmat_builtins::{
-        BuiltinIntegerInputAvailability, CellArray, IntegerStorage, SparseTensor, Tensor, Value,
-    };
+    use runmat_builtins::BuiltinIntegerInputAvailability;
+    use runmat_value::{CellArray, IntegerStorage, SparseTensor, Tensor, Value};
 
     fn run_full(value: Value) -> BuiltinResult<Value> {
         block_on(super::full_builtin(value))
@@ -445,19 +445,14 @@ pub(crate) mod tests {
             2,
             vec![0, 1, 2],
             vec![1, 0],
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 7]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 7]),
         )
         .expect("uint64 sparse");
 
         let dense = expect_tensor(run_full(Value::SparseTensor(sparse)).expect("full sparse"));
         assert_eq!(
             dense.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
-                0,
-                u64::MAX,
-                7,
-                0
-            ]))
+            Some(&runmat_value::IntegerStorage::U64(vec![0, u64::MAX, 7, 0]))
         );
     }
 

@@ -2,14 +2,16 @@
 
 use std::path::{Path, PathBuf};
 
-#[cfg(not(target_arch = "wasm32"))]
-use runmat_builtins::NumericStorage;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, IntegerStorage, LogicalArray, NumericScalar, StringArray, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_value::NumericStorage;
+use runmat_value::{
+    IntValue, IntegerStorage, LogicalArray, NumericScalar, StringArray, Tensor, Value,
+};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -1055,7 +1057,7 @@ mod imp {
 
     use hdf5::types::{FloatSize, IntSize, TypeDescriptor, VarLenAscii, VarLenUnicode};
     use hdf5::{Attribute, Dataset, File, Group, Hyperslab, Location, SliceOrIndex};
-    use runmat_builtins::{CharArray, StructValue};
+    use runmat_value::{CharArray, StructValue};
 
     use super::*;
 
@@ -2275,7 +2277,7 @@ mod imp {
 #[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage};
     use tempfile::tempdir;
 
     use super::imp::type_name;

@@ -8,12 +8,13 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, ClassDef,
-    HandleRef, MethodDef, ObjectInstance, PropertyDef, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ClassDef, MethodDef,
+    PropertyDef,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{Access, CellArray, HandleRef, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -394,7 +395,7 @@ mod tests {
             let counter = Arc::clone(&counter);
             Box::pin(async move {
                 *counter.lock().unwrap() += 1;
-                Ok(Value::Tensor(runmat_builtins::Tensor::zeros(vec![0, 0])))
+                Ok(Value::Tensor(runmat_value::Tensor::zeros(vec![0, 0])))
             })
         })
     }
@@ -469,15 +470,12 @@ mod tests {
     #[test]
     fn rejects_numeric_and_non_function_handle_callbacks() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
-        for callback in [
-            Value::Num(1.0),
-            Value::Int(runmat_builtins::IntValue::I64(1)),
-        ] {
+        for callback in [Value::Num(1.0), Value::Int(runmat_value::IntValue::I64(1))] {
             let err = block_on(on_cleanup_builtin(callback)).expect_err("expected error");
             assert_eq!(err.identifier(), Some("RunMat:onCleanup:InvalidCallback"));
         }
         let err = block_on(on_cleanup_cancel_builtin(Value::Int(
-            runmat_builtins::IntValue::U64(1),
+            runmat_value::IntValue::U64(1),
         )))
         .expect_err("integer is not an onCleanup handle");
         assert_eq!(err.identifier(), Some("RunMat:onCleanup:InvalidObject"));
@@ -527,7 +525,7 @@ mod tests {
         }))
         .expect("create cleanup c");
 
-        let mut struct_value = runmat_builtins::StructValue::new();
+        let mut struct_value = runmat_value::StructValue::new();
         struct_value.insert("cleanup", cleanup_a);
         let mut object = ObjectInstance::new("CleanupHolder".to_string());
         object.properties.insert("cleanup".to_string(), cleanup_b);

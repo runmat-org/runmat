@@ -5,8 +5,8 @@
 //! safe memory management.
 
 use cranelift::prelude::*;
-use runmat_builtins::{CellArray, Value};
 use runmat_gc::{gc_allocate_rooted, ExplicitRoot};
+use runmat_value::{CellArray, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};

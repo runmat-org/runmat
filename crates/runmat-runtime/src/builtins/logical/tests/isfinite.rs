@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, LogicalArray, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -249,7 +249,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     #[test]
     fn isfinite_type_returns_logical() {
@@ -259,7 +260,7 @@ pub(crate) mod tests {
         );
         assert_eq!(out, Type::logical());
     }
-    use runmat_builtins::{CharArray, IntValue, StringArray};
+    use runmat_value::{CharArray, IntValue, StringArray};
 
     fn run_isfinite(value: Value) -> BuiltinResult<Value> {
         block_on(super::isfinite_builtin(value))

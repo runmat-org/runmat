@@ -4,10 +4,11 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CellArray, NumericDType, StructValue, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_thread_local::runmat_thread_local;
+use runmat_value::{CellArray, NumericDType, StructValue, Tensor, Value};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -920,8 +921,8 @@ fn getcallinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage};
     use runmat_hir::SourceId;
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn cell_len(value: &Value) -> usize {
         let Value::Cell(cell) = value else {

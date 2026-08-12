@@ -9,10 +9,10 @@ use futures::lock::Mutex as AsyncMutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, IntValue, Value,
 };
 use runmat_filesystem::{File, OpenOptions};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, IntValue, Value};
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::spec::{
@@ -756,9 +756,7 @@ fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
     }
 }
 
-pub(super) fn scalar_tensor_cell_value(
-    tensor: &runmat_builtins::Tensor,
-) -> BuiltinResult<CellValue> {
+pub(super) fn scalar_tensor_cell_value(tensor: &runmat_value::Tensor) -> BuiltinResult<CellValue> {
     if let Some(storage) = tensor.integer_storage() {
         let value = storage.value_at(0).expect("one-element integer storage");
         Ok(CellValue::Integer(value))
@@ -1437,7 +1435,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::time::Duration;
 
-    use runmat_builtins::{CharArray, IntValue, IntegerStorage, LogicalArray, Tensor};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, LogicalArray, Tensor};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 

@@ -1,11 +1,11 @@
 use crate::indexing::plan::total_len_from_shape;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{IntValue, LogicalArray, NumericScalar, Tensor, Value};
 use runmat_runtime::{
     builtins::common::{shape::is_scalar_shape, tensor},
     dispatcher::gather_if_needed_async,
     RuntimeError,
 };
+use runmat_value::{IntValue, LogicalArray, NumericScalar, Tensor, Value};
 
 pub type VmResult<T> = Result<T, RuntimeError>;
 
@@ -411,7 +411,7 @@ mod tests {
         build_cell_scalar_selectors, build_slice_selectors, indices_from_value_linear,
         selector_from_value_dim, SliceSelector,
     };
-    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]
     fn selector_from_value_dim_rejects_fractional_numeric_indices() {

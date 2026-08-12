@@ -6,10 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerClass, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Type, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -308,7 +308,7 @@ fn ensure_histc_input_extensions(value: &Value) -> BuiltinResult<()> {
     }
     let wide = matches!(
         value,
-        Value::Int(runmat_builtins::IntValue::I64(_) | runmat_builtins::IntValue::U64(_))
+        Value::Int(runmat_value::IntValue::I64(_) | runmat_value::IntValue::U64(_))
     ) || matches!(value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::I64 | NumericDType::U64));
     if wide {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -649,7 +649,8 @@ fn descriptor_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage, ResolveContext};
+    use runmat_builtins::ResolveContext;
+    use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())

@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, Value,
 };
 use runmat_filesystem::{OpenFileDialogRequest, OpenFileDialogSelection};
 use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, CharArray, Value};
 
 use super::file_dialog::{
     default_filters, ensure_same_directory, parse_filter_spec, scalar_text, selected_path_parts,
@@ -478,8 +478,8 @@ fn selected_outputs(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use runmat_builtins::Tensor;
     use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
+    use runmat_value::Tensor;
     use std::io::{self, ErrorKind};
     use std::path::Path;
     use std::sync::{Arc, Mutex};

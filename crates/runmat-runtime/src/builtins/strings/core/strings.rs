@@ -3,9 +3,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::random_args::{keyword_of, shape_from_value};
@@ -508,7 +508,8 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntegerStorage, NumericStorage, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, NumericStorage};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strings_builtin(rest))
@@ -548,10 +549,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strings_rectangular_multiple_args() {
-        let args = vec![
-            Value::Int(runmat_builtins::IntValue::I32(2)),
-            Value::Num(3.0),
-        ];
+        let args = vec![Value::Int(runmat_value::IntValue::I32(2)), Value::Num(3.0)];
         let result = strings_builtin(args).expect("strings");
         match result {
             Value::StringArray(array) => {
@@ -650,7 +648,7 @@ pub(crate) mod tests {
     fn strings_preserves_trailing_singletons() {
         let args = vec![
             Value::Num(3.0),
-            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_value::IntValue::I32(1)),
             Value::Num(1.0),
             Value::Bool(true),
         ];
@@ -810,7 +808,7 @@ pub(crate) mod tests {
         let result = strings_builtin(vec![
             Value::String("like".into()),
             Value::Tensor(tensor),
-            Value::Int(runmat_builtins::IntValue::I32(3)),
+            Value::Int(runmat_value::IntValue::I32(3)),
         ])
         .expect("strings");
         match result {

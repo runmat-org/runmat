@@ -1,10 +1,10 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, Tensor,
-    Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
 
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
@@ -384,7 +384,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_plot_state};
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, IntValue, IntegerStorage, Tensor, Value};
+    use runmat_value::{CellArray, IntValue, IntegerStorage, Tensor, Value};
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();

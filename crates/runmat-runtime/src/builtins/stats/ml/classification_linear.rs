@@ -9,10 +9,13 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, ResolveContext, StringArray,
-    StructValue, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, StructValue,
+    Tensor, Value,
+};
 
 use crate::builtins::common::tensor;
 use crate::builtins::table::{
@@ -2294,7 +2297,7 @@ fn sigmoid(value: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::builtins::table::table_from_columns;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())

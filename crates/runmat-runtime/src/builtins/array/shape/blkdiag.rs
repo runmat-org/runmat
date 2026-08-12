@@ -11,10 +11,13 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-    NumericDType, NumericScalar, NumericStorage, ResolveContext, SparseTensor, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    NumericDType, NumericScalar, NumericStorage, SparseTensor, Tensor, Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -1443,7 +1446,8 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, Type};
+    use runmat_builtins::{builtin_function_by_name, Type};
+    use runmat_value::IntValue;
 
     use crate::builtins::common::test_support;
 

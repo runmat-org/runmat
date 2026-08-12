@@ -6,9 +6,9 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderNormOrder};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, IntValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -788,7 +788,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{CharArray, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -1028,7 +1029,7 @@ pub(crate) mod tests {
     #[test]
     fn norm_order_logical_scalar_tensor() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let logical = runmat_builtins::LogicalArray::new(vec![1], vec![1]).expect("logical scalar");
+        let logical = runmat_value::LogicalArray::new(vec![1], vec![1]).expect("logical scalar");
         let value =
             norm_builtin(Value::Tensor(tensor), vec![Value::LogicalArray(logical)]).expect("norm");
         match value {

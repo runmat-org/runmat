@@ -1,5 +1,5 @@
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_vector};
@@ -152,11 +152,8 @@ mod tests {
     }
 
     fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
-        Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I16(values),
-            vec![rows, cols],
-        )
-        .expect("integer matrix")
+        Tensor::new_integer(runmat_value::IntegerStorage::I16(values), vec![rows, cols])
+            .expect("integer matrix")
     }
 
     #[test]

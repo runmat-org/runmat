@@ -8,9 +8,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericScalar, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{IntValue, NumericScalar, StructValue, Value};
 
 use crate::builtins::acceleration::gpu::type_resolvers::gpudevice_type;
 use crate::builtins::common::spec::{
@@ -433,7 +433,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, NumericStorage, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntegerStorage, NumericStorage, Tensor};
 
     fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -477,8 +478,8 @@ pub(crate) mod tests {
     fn gpu_device_accepts_current_index() {
         test_support::with_test_provider(|_| {
             let tensor_scalar =
-                runmat_builtins::Tensor::new(vec![1.0], vec![1, 1]).expect("scalar tensor");
-            let logical_scalar = runmat_builtins::LogicalArray::new(vec![1u8], vec![1]).unwrap();
+                runmat_value::Tensor::new(vec![1.0], vec![1, 1]).expect("scalar tensor");
+            let logical_scalar = runmat_value::LogicalArray::new(vec![1u8], vec![1]).unwrap();
             let cases = vec![
                 Value::Int(IntValue::I32(1)),
                 Value::Num(1.0),
@@ -577,7 +578,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_reset_char_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
-            let chars = runmat_builtins::CharArray::new("reset".chars().collect(), 1, 5).unwrap();
+            let chars = runmat_value::CharArray::new("reset".chars().collect(), 1, 5).unwrap();
             let err = call(vec![Value::CharArray(chars)]).unwrap_err();
             assert_eq!(
                 err.to_string(),
@@ -594,7 +595,7 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_empty_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
-            let empty = runmat_builtins::Tensor::zeros(vec![0, 0]);
+            let empty = runmat_value::Tensor::zeros(vec![0, 0]);
             let err = call(vec![Value::Tensor(empty)]).unwrap_err();
             assert_eq!(
                 err.to_string(),
@@ -617,10 +618,8 @@ pub(crate) mod tests {
                 Value::Num(-1.0),
                 Value::Num(1.5),
                 Value::Bool(false),
-                Value::LogicalArray(
-                    runmat_builtins::LogicalArray::new(vec![0u8], vec![1]).unwrap(),
-                ),
-                Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::LogicalArray(runmat_value::LogicalArray::new(vec![0u8], vec![1]).unwrap()),
+                Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             ];
             for case in cases {
                 let err = call(vec![case]).unwrap_err().to_string();

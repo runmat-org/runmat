@@ -4,10 +4,10 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, NumericStorage,
-    Tensor, Value,
+    BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -382,9 +382,8 @@ mod tests {
         AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorOwned,
         HostTensorView,
     };
-    use runmat_builtins::{
-        builtin_function_by_name, AccelTag, CharArray, IntValue, ResolveContext, Type,
-    };
+    use runmat_builtins::{builtin_function_by_name, AccelTag, ResolveContext, Type};
+    use runmat_value::{CharArray, IntValue};
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(sinc_builtin(value))

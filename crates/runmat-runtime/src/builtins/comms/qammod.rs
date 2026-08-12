@@ -10,10 +10,12 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
-    NumericDType, ResolveContext, Tensor, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
+};
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -1413,12 +1415,12 @@ mod tests {
     #[test]
     fn qammod_integer_scalars_preserve_exact_symbol_bounds() {
         assert_eq!(
-            parse_modulation_order(&Value::Int(runmat_builtins::IntValue::U16(4))).unwrap(),
+            parse_modulation_order(&Value::Int(runmat_value::IntValue::U16(4))).unwrap(),
             4
         );
         assert_eq!(
             SymbolInput::from_value(
-                Value::Int(runmat_builtins::IntValue::U16(3)),
+                Value::Int(runmat_value::IntValue::U16(3)),
                 4,
                 InputType::Integer,
             )
@@ -1427,8 +1429,8 @@ mod tests {
             vec![3]
         );
         for value in [
-            Value::Int(runmat_builtins::IntValue::I8(-1)),
-            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            Value::Int(runmat_value::IntValue::I8(-1)),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             Value::Num(usize::MAX as f64 + 1.0),
         ] {
             assert!(parse_modulation_order(&value).is_err());

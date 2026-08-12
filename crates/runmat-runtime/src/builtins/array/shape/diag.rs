@@ -20,10 +20,13 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LiteralValue, LogicalArray,
-    NumericDType, NumericScalar, NumericStorage, ResolveContext, Tensor, Type, Value,
+    LiteralValue, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType,
+    NumericScalar, NumericStorage, Tensor, Value,
+};
 
 const BUILTIN_NAME: &str = "diag";
 
@@ -710,8 +713,8 @@ fn integer_target_from_storage(storage: &IntegerStorage) -> IntegerTarget {
     }
 }
 
-fn integer_target_from_int(value: &runmat_builtins::IntValue) -> IntegerTarget {
-    use runmat_builtins::IntValue;
+fn integer_target_from_int(value: &runmat_value::IntValue) -> IntegerTarget {
+    use runmat_value::IntValue;
     match value {
         IntValue::I8(_) => IntegerTarget::I8,
         IntValue::I16(_) => IntegerTarget::I16,
@@ -2051,7 +2054,7 @@ fn complex_tensor_from_value_with_dtype(
 }
 
 fn ensure_integer_exact_for_complex_float(value: &Value, dtype: NumericDType) -> BuiltinResult<()> {
-    let exact = |integer: &runmat_builtins::IntValue| integer_exact_for_float(integer, dtype);
+    let exact = |integer: &runmat_value::IntValue| integer_exact_for_float(integer, dtype);
     let valid = match value {
         Value::Int(integer) => exact(integer),
         Value::Tensor(tensor) => tensor
@@ -2080,7 +2083,7 @@ fn ensure_integer_exact_for_complex_float(value: &Value, dtype: NumericDType) ->
     }
 }
 
-fn integer_exact_for_float(value: &runmat_builtins::IntValue, dtype: NumericDType) -> bool {
+fn integer_exact_for_float(value: &runmat_value::IntValue, dtype: NumericDType) -> bool {
     if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
         return false;
     }
@@ -2103,7 +2106,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, IntegerComplexStorage};
+    use runmat_value::{IntValue, IntegerComplexStorage};
 
     fn run_diag(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(diag_builtin(value, rest))

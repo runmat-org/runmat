@@ -1,6 +1,5 @@
 //! MATLAB-compatible `axes` builtin.
 
-use runmat_builtins::Value;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
@@ -10,6 +9,7 @@ use runmat_builtins::{
     BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::plotting_error;
 use super::properties::{map_figure_error, resolve_plot_handle, set_properties, PlotHandle};
@@ -289,7 +289,7 @@ mod tests {
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{current_figure_handle, reset_plot_state};
-    use runmat_builtins::{IntegerStorage, Tensor};
+    use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
     fn axes_descriptor_signatures_cover_core_forms() {
@@ -311,9 +311,7 @@ mod tests {
 
         let handle = axes_builtin(vec![
             Value::String("Position".into()),
-            Value::Tensor(
-                runmat_builtins::Tensor::new(vec![0.1, 0.2, 0.3, 0.4], vec![1, 4]).unwrap(),
-            ),
+            Value::Tensor(runmat_value::Tensor::new(vec![0.1, 0.2, 0.3, 0.4], vec![1, 4]).unwrap()),
             Value::String("Units".into()),
             Value::String("normalized".into()),
         ])

@@ -10,9 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use super::complex_cumulative_extrema;
 use super::floating_cumulative_extrema::{
@@ -592,7 +593,7 @@ fn cummax_host_floating(
 }
 
 fn integer_cummax(
-    storage: &runmat_builtins::IntegerStorage,
+    storage: &runmat_value::IntegerStorage,
     shape: Vec<usize>,
     dim: usize,
     direction: CummaxDirection,
@@ -792,7 +793,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage, NumericStorage};
+    use runmat_value::{IntValue, IntegerStorage, NumericStorage};
 
     #[test]
     fn cummax_type_keeps_shape() {
@@ -869,7 +870,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.complex_storage(),
-            &runmat_builtins::ComplexStorage::F32(vec![(3.0, 0.0), (3.0, 0.0), (3.0, 0.0)])
+            &runmat_value::ComplexStorage::F32(vec![(3.0, 0.0), (3.0, 0.0), (3.0, 0.0)])
         );
     }
 
@@ -907,7 +908,7 @@ pub(crate) mod tests {
     #[test]
     fn cummax_integer_storage_and_reverse_indices_remain_exact() {
         let input = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -4, -5, -3]),
+            runmat_value::IntegerStorage::I64(vec![i64::MIN, -4, -5, -3]),
             vec![2, 2],
         )
         .unwrap();
@@ -918,7 +919,7 @@ pub(crate) mod tests {
             values,
             Value::Tensor(
                 Tensor::new_integer(
-                    runmat_builtins::IntegerStorage::I64(vec![-4, -4, -3, -3]),
+                    runmat_value::IntegerStorage::I64(vec![-4, -4, -3, -3]),
                     vec![2, 2]
                 )
                 .unwrap()

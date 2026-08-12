@@ -1,8 +1,9 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, StructValue, Value,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+use runmat_value::{StructValue, Value};
 
 const FUNCTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "info",
@@ -120,7 +121,7 @@ pub fn functions_builtin_registered(handle: Value) -> crate::BuiltinResult<Value
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
         let Value::Struct(info) = value else {
@@ -187,7 +188,7 @@ mod tests {
 
     #[test]
     fn functions_reports_anonymous_closure_metadata() {
-        let value = dispatch_functions(Value::Closure(runmat_builtins::Closure {
+        let value = dispatch_functions(Value::Closure(runmat_value::Closure {
             function_name: "@anon0".to_string(),
             bound_function: None,
             captures: Vec::new(),

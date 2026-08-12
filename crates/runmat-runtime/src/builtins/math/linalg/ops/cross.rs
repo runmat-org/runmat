@@ -13,9 +13,9 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexStorage, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -770,9 +770,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
-    use runmat_builtins::{
-        ComplexStorage, IntValue, IntegerStorage, LiteralValue, LogicalArray, ResolveContext, Type,
-    };
+    use runmat_builtins::{LiteralValue, ResolveContext, Type};
+    use runmat_value::{ComplexStorage, IntValue, IntegerStorage, LogicalArray};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -961,7 +960,7 @@ pub(crate) mod tests {
             else {
                 panic!("tensor")
             };
-            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
             assert_eq!(output.materialize_f64(), vec![0.0, 0.0, 1.0]);
         }
     }
@@ -1074,23 +1073,23 @@ pub(crate) mod tests {
     #[test]
     fn cross_typed_complex_integer_returns_complex_double() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let lhs = runmat_builtins::IntegerComplexStorage::new(
+        let lhs = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::I16(vec![1, 0, 0]),
             IntegerStorage::I16(vec![1, 0, 0]),
         )
         .unwrap();
-        let rhs = runmat_builtins::IntegerComplexStorage::new(
+        let rhs = runmat_value::IntegerComplexStorage::new(
             IntegerStorage::U16(vec![0, 1, 0]),
             IntegerStorage::U16(vec![0, 1, 0]),
         )
         .unwrap();
         let lhs = ComplexTensor::from_complex_storage(
-            runmat_builtins::ComplexStorage::Integer(lhs),
+            runmat_value::ComplexStorage::Integer(lhs),
             vec![1, 3],
         )
         .unwrap();
         let rhs = ComplexTensor::from_complex_storage(
-            runmat_builtins::ComplexStorage::Integer(rhs),
+            runmat_value::ComplexStorage::Integer(rhs),
             vec![1, 3],
         )
         .unwrap();
@@ -1102,7 +1101,7 @@ pub(crate) mod tests {
         .expect("complex integer cross") else {
             panic!("complex tensor")
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(output.materialize_f64()[2], (0.0, 2.0));
     }
 
@@ -1121,7 +1120,7 @@ pub(crate) mod tests {
             };
             assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
             let gathered = test_support::gather(Value::GpuTensor(output)).unwrap();
-            assert_eq!(gathered.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F64);
             assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 1.0]);
         });
     }
@@ -1185,7 +1184,7 @@ pub(crate) mod tests {
         .unwrap() else {
             panic!("explicitly complex tensor")
         };
-        assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(
             output.materialize_f64(),
             vec![(0.0, 0.0), (0.0, 0.0), (1.0, 0.0)]
@@ -1281,7 +1280,7 @@ pub(crate) mod tests {
             else {
                 panic!("class-preserving host fallback")
             };
-            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F32);
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
             assert_eq!(output.materialize_f64(), vec![0.0, 0.0, 1.0]);
         });
     }

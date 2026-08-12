@@ -250,7 +250,7 @@ fn numeric_sample_rate(value: &Value) -> BuiltinResult<f64> {
     }
 }
 
-fn positive_integer_sample_rate(value: &runmat_builtins::IntValue) -> BuiltinResult<f64> {
+fn positive_integer_sample_rate(value: &runmat_value::IntValue) -> BuiltinResult<f64> {
     if value.try_to_u64().is_some_and(|value| value > 0) {
         Ok(value.to_f64())
     } else {

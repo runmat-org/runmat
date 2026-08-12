@@ -31,7 +31,7 @@ pub mod uigetfile;
 pub mod uiputfile;
 pub mod xml;
 use once_cell::sync::Lazy;
-use runmat_builtins::Tensor;
+use runmat_value::Tensor;
 
 use crate::builtins::common::tensor;
 use std::path::Path;
@@ -75,7 +75,7 @@ pub(crate) fn tensor_char_codes_to_string(value: &Tensor) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntegerStorage;
+    use runmat_value::IntegerStorage;
 
     #[test]
     fn tensor_char_codes_to_string_reads_typed_integer_storage_exactly() {

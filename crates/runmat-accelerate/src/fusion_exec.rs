@@ -12,10 +12,10 @@ use runmat_accelerate_api::{
     provider, AccelProvider, CovRows, CovarianceOptions, GpuTensorHandle, HostTensorView,
     ImageNormalizeDescriptor, PowerStepEpilogue, ProviderPrecision, ReductionFlavor,
 };
-use runmat_builtins::{NumericDType, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::gather_if_needed;
 use runmat_time::Instant;
+use runmat_value::{NumericDType, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -1253,7 +1253,7 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::IntValue;
+    use runmat_value::IntValue;
 
     #[test]
     fn fusion_output_inherits_explicit_intent_or_remains_automatic() {
@@ -1338,7 +1338,7 @@ mod tests {
     fn runtime_broadcast_appends_missing_singletons_and_enforces_zero_rules() {
         let tensor = |shape: Vec<usize>| {
             Value::Tensor(
-                runmat_builtins::Tensor::new(vec![0.0; shape.iter().product()], shape)
+                runmat_value::Tensor::new(vec![0.0; shape.iter().product()], shape)
                     .expect("test tensor"),
             )
         };

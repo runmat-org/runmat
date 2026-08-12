@@ -6,10 +6,13 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, NumericStorage, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericStorage,
+    Tensor, Value,
+};
 
 use crate::builtins::cells::type_resolvers::cell2mat_type;
 use crate::builtins::common::spec::{
@@ -215,7 +218,7 @@ impl CellEntry {
     }
 }
 
-async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value> {
+async fn cell_array_to_matrix(ca: &runmat_value::CellArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         // Mirror MATLAB's behaviour: empty cell array -> 0x0 double matrix.
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| {
@@ -902,7 +905,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage};
 
     fn cell2mat_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::cell2mat_builtin(value))

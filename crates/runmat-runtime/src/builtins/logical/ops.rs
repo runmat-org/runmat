@@ -5,9 +5,10 @@ use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::{
     gpu_helpers,
@@ -197,7 +198,7 @@ fn logical_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     logical_buffer_to_host(buffer)
 }
 
-fn logical_from_sparse_tensor(sparse: runmat_builtins::SparseTensor) -> BuiltinResult<Value> {
+fn logical_from_sparse_tensor(sparse: runmat_value::SparseTensor) -> BuiltinResult<Value> {
     if sparse.is_logical() {
         return Ok(Value::SparseTensor(sparse));
     }
@@ -216,7 +217,7 @@ fn logical_from_sparse_tensor(sparse: runmat_builtins::SparseTensor) -> BuiltinR
         }
         col_ptrs.push(row_indices.len());
     }
-    runmat_builtins::SparseTensor::new_logical(sparse.rows, sparse.cols, col_ptrs, row_indices)
+    runmat_value::SparseTensor::new_logical(sparse.rows, sparse.cols, col_ptrs, row_indices)
         .map(Value::SparseTensor)
         .map_err(|err| {
             logical_error_with_message(
@@ -428,7 +429,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
+    use runmat_value::{
         CellArray, IntValue, IntegerComplexStorage, IntegerStorage, MException, ObjectInstance,
         SparseTensor, StructValue, SymbolicExpr,
     };

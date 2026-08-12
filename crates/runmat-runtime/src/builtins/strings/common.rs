@@ -1,5 +1,5 @@
 //! Shared helpers for string builtins.
-use runmat_builtins::CharArray;
+use runmat_value::CharArray;
 
 /// Canonical display for missing string scalars in MATLAB-compatible output.
 const MISSING_SENTINEL: &str = "<missing>";

@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type, Value,
+    BuiltinSignatureDescriptor, ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::{gpu_helpers, tensor};
@@ -267,7 +268,7 @@ fn map_bounds_reduction_error(label: &str, err: RuntimeError) -> RuntimeError {
 }
 
 fn empty_placeholder() -> Value {
-    Value::Tensor(runmat_builtins::Tensor::new(Vec::new(), vec![0, 0]).unwrap())
+    Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap())
 }
 
 fn bounds_error(
@@ -293,7 +294,7 @@ fn bounds_internal(detail: impl AsRef<str>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())

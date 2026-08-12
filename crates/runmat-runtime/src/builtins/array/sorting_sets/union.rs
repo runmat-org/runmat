@@ -14,10 +14,13 @@ use runmat_builtins::{
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage,
-    NumericDType, NumericStorage, StringArray, Tensor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
+    NumericStorage, StringArray, Tensor, Value,
+};
 
 use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
 use crate::build_runtime_error;
@@ -2051,7 +2054,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, Tensor, Value};
 
     fn evaluate_sync(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<UnionEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
@@ -2207,11 +2211,11 @@ pub(crate) mod tests {
     #[test]
     fn union_preserves_exact_integer_elements_and_rows() {
         let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
             vec![3, 1],
         )
         .expect("input");
-        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![0, 7]), vec![2, 1])
+        let b = Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![0, 7]), vec![2, 1])
             .expect("input");
         let (values, ia, ib) = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect("union")
@@ -2221,7 +2225,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
+            Some(&runmat_value::IntegerStorage::U64(vec![
                 0,
                 7,
                 9_007_199_254_740_993,
@@ -2234,12 +2238,12 @@ pub(crate) mod tests {
         assert_eq!(ib.materialize_f64(), vec![2.0]);
 
         let a = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 1]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 0, 1]),
             vec![2, 2],
         )
         .expect("rows input");
         let b = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, 4, 1, 2]),
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 4, 1, 2]),
             vec![2, 2],
         )
         .expect("rows input");
@@ -2252,7 +2256,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
+            Some(&runmat_value::IntegerStorage::U64(vec![
                 4,
                 9_007_199_254_740_993,
                 u64::MAX,
@@ -2269,9 +2273,9 @@ pub(crate) mod tests {
 
     #[test]
     fn union_rejects_mixed_nondouble_integer_classes() {
-        let a = Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![7, 2]), vec![2, 1])
+        let a = Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![7, 2]), vec![2, 1])
             .expect("input");
-        let b = Tensor::new_integer(runmat_builtins::IntegerStorage::I32(vec![2, 9]), vec![2, 1])
+        let b = Tensor::new_integer(runmat_value::IntegerStorage::I32(vec![2, 9]), vec![2, 1])
             .expect("input");
         let error = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[])
             .expect_err("mixed integer classes must reject");
@@ -2284,14 +2288,14 @@ pub(crate) mod tests {
     #[test]
     fn union_preserves_every_exact_integer_class() {
         let cases = [
-            runmat_builtins::IntegerStorage::I8(vec![i8::MAX, 0]),
-            runmat_builtins::IntegerStorage::I16(vec![i16::MAX, 0]),
-            runmat_builtins::IntegerStorage::I32(vec![i32::MAX, 0]),
-            runmat_builtins::IntegerStorage::I64(vec![i64::MAX, 0]),
-            runmat_builtins::IntegerStorage::U8(vec![u8::MAX, 0]),
-            runmat_builtins::IntegerStorage::U16(vec![u16::MAX, 0]),
-            runmat_builtins::IntegerStorage::U32(vec![u32::MAX, 0]),
-            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 0]),
+            runmat_value::IntegerStorage::I8(vec![i8::MAX, 0]),
+            runmat_value::IntegerStorage::I16(vec![i16::MAX, 0]),
+            runmat_value::IntegerStorage::I32(vec![i32::MAX, 0]),
+            runmat_value::IntegerStorage::I64(vec![i64::MAX, 0]),
+            runmat_value::IntegerStorage::U8(vec![u8::MAX, 0]),
+            runmat_value::IntegerStorage::U16(vec![u16::MAX, 0]),
+            runmat_value::IntegerStorage::U32(vec![u32::MAX, 0]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 0]),
         ];
         for storage in cases {
             let expected = storage.clone();

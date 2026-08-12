@@ -17,6 +17,7 @@ opencl = []
 wgpu = ["dep:wgpu", "dep:pollster", "runmat-accelerate-api/wgpu"]
 
 [dependencies]
+runmat-value = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

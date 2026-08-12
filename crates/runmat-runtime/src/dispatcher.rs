@@ -2,9 +2,9 @@ use crate::{build_runtime_error, create_class_object, make_cell_with_shape, Runt
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostTensorOwned,
 };
-use runmat_builtins::{
-    builtin_functions, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType,
-    Tensor, Value,
+use runmat_builtins::builtin_functions;
+use runmat_value::{
+    ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
 use std::cell::RefCell;
 
@@ -508,9 +508,9 @@ pub(crate) async fn try_call_registered_instance_method(
     }
     let caller_class = current_class_access_context();
     let access_allowed = match method.access {
-        runmat_builtins::Access::Public => true,
-        runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
-        runmat_builtins::Access::Protected => caller_class
+        runmat_value::Access::Public => true,
+        runmat_value::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_value::Access::Protected => caller_class
             .as_deref()
             .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
     };
@@ -596,7 +596,7 @@ async fn try_call_registered_static_method(
     let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) else {
         return Ok(None);
     };
-    if !method.is_static || method.access != runmat_builtins::Access::Public {
+    if !method.is_static || method.access != runmat_value::Access::Public {
         return Ok(None);
     }
     if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
@@ -653,9 +653,9 @@ async fn call_registered_class_constructor(
     let owner_qualified = format!("{owner}.{constructor_method_name}");
     let caller_class = current_class_access_context();
     let ctor_access_allowed = match ctor.access {
-        runmat_builtins::Access::Public => true,
-        runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
-        runmat_builtins::Access::Protected => caller_class
+        runmat_value::Access::Public => true,
+        runmat_value::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
+        runmat_value::Access::Protected => caller_class
             .as_deref()
             .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
     };
@@ -871,9 +871,8 @@ mod tests {
         call_builtin, gather_if_needed_async, should_retry_with_gpu_gather, value_contains_gpu,
     };
     use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
-    use runmat_builtins::{
-        register_class, Access, ClassDef, Closure, MethodDef, StructValue, Value,
-    };
+    use runmat_builtins::{register_class, ClassDef, MethodDef};
+    use runmat_value::{Access, Closure, StructValue, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 

@@ -6,9 +6,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Value,
+    BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -222,8 +223,9 @@ mod tests {
     use super::*;
     use crate::console::{reset_thread_buffer, take_thread_buffer};
     use futures::executor::block_on;
-    use runmat_builtins::{Access, ClassDef, IntValue, MethodDef, ObjectInstance, Tensor};
+    use runmat_builtins::{ClassDef, MethodDef};
     use runmat_hir::{SourceId, Span};
+    use runmat_value::{Access, IntValue, ObjectInstance, Tensor};
     use std::collections::HashMap;
     use std::sync::Arc;
 

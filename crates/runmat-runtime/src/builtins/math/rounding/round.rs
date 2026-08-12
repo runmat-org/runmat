@@ -4,9 +4,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::{CharArray, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
@@ -468,7 +468,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
+    use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::{IntValue, Tensor};
 
     fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::round_builtin(value, rest))
@@ -578,7 +579,7 @@ pub(crate) mod tests {
         assert_eq!(scalar.identifier(), ROUND_ERROR_INVALID_INPUT.identifier);
 
         let tensor = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::I64(vec![1, i64::MAX]),
+            runmat_value::IntegerStorage::I64(vec![1, i64::MAX]),
             vec![1, 2],
         )
         .expect("integer tensor");
@@ -604,7 +605,7 @@ pub(crate) mod tests {
         );
 
         let integer = Tensor::new_integer(
-            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
             vec![1, 2],
         )
         .unwrap();
@@ -615,7 +616,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             integer.integer_storage(),
-            Some(&runmat_builtins::IntegerStorage::U64(vec![
+            Some(&runmat_value::IntegerStorage::U64(vec![
                 9_007_199_254_740_993,
                 u64::MAX,
             ]))

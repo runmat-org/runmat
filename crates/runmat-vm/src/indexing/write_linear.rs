@@ -6,15 +6,15 @@ use crate::indexing::write_slice::{
     real_tensor_to_complex, upload_tensor_to_gpu,
 };
 use crate::interpreter::errors::mex;
-use runmat_builtins::{
-    ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage,
-    SparseTensor, Tensor, Value,
-};
 use runmat_runtime::builtins::common::tensor::{
     complex_tensor_element_len, complex_tensor_value_complex64, is_scalar_tensor,
     tensor_element_len, tensor_value_f64,
 };
 use runmat_runtime::RuntimeError;
+use runmat_value::{
+    ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage,
+    SparseTensor, Tensor, Value,
+};
 
 fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     mex("ShapeMismatch", &format!("assignment: {err}"))
@@ -692,7 +692,7 @@ async fn assign_typed_complex_integer_scalar(
         tensor.rows * tensor.cols,
         &rhs.imag,
     );
-    runmat_builtins::IntegerComplexStorage::new(real, imag)
+    runmat_value::IntegerComplexStorage::new(real, imag)
         .and_then(|storage| ComplexTensor::new_integer(storage, tensor.shape))
         .map(Value::ComplexTensor)
         .map_err(map_assignment_shape_error)
@@ -744,7 +744,7 @@ mod tests {
         map_assignment_shape_error,
     };
     use futures::executor::block_on;
-    use runmat_builtins::{
+    use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType,
         NumericStorage, Tensor, Value,
     };
@@ -999,7 +999,7 @@ mod tests {
     #[test]
     fn sparse_integer_assignment_preserves_exact_uint64_and_elides_zero() {
         let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             2,
             2,
             vec![0, 0, 0],
@@ -1041,7 +1041,7 @@ mod tests {
 
     #[test]
     fn sparse_single_scalar_assignment_preserves_class_and_growth() {
-        let sparse = runmat_builtins::SparseTensor::zeros_f32(1, 1);
+        let sparse = runmat_value::SparseTensor::zeros_f32(1, 1);
         let Value::SparseTensor(updated) = block_on(assign_sparse_scalar(
             sparse,
             &[2, 2],
@@ -1060,7 +1060,7 @@ mod tests {
 
     #[test]
     fn sparse_logical_scalar_assignment_preserves_class_and_growth() {
-        let sparse = runmat_builtins::SparseTensor::zeros_logical(1, 1);
+        let sparse = runmat_value::SparseTensor::zeros_logical(1, 1);
         let Value::SparseTensor(updated) = block_on(assign_sparse_scalar(
             sparse,
             &[2, 2],
@@ -1091,9 +1091,8 @@ mod tests {
         ];
 
         for (storage, value) in cases {
-            let sparse =
-                runmat_builtins::SparseTensor::new_integer(1, 1, vec![0, 0], vec![], storage)
-                    .expect("sparse");
+            let sparse = runmat_value::SparseTensor::new_integer(1, 1, vec![0, 0], vec![], storage)
+                .expect("sparse");
             let Value::SparseTensor(updated) = block_on(assign_sparse_scalar(
                 sparse,
                 &[1, 1],
@@ -1110,7 +1109,7 @@ mod tests {
     #[test]
     fn sparse_integer_assignment_rounds_and_saturates_numeric_rhs() {
         let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             1,
             2,
             vec![0, 0, 0],
@@ -1144,7 +1143,7 @@ mod tests {
 
     #[test]
     fn sparse_scalar_assignment_reports_stable_negative_path_errors() {
-        let sparse = runmat_builtins::SparseTensor::zeros(1, 1);
+        let sparse = runmat_value::SparseTensor::zeros(1, 1);
         let out_of_bounds = block_on(assign_sparse_scalar(
             sparse.clone(),
             &[0],
@@ -1167,7 +1166,7 @@ mod tests {
         );
 
         let deletion = block_on(assign_sparse_scalar(
-            runmat_builtins::SparseTensor::zeros(2, 2),
+            runmat_value::SparseTensor::zeros(2, 2),
             &[1],
             &Value::Tensor(Tensor::zeros(vec![0, 0])),
             true,
@@ -1199,7 +1198,7 @@ mod tests {
 
     #[test]
     fn matlab_mode_rejects_sparse_integer_indexed_assignment() {
-        let sparse = runmat_builtins::SparseTensor::new_integer(
+        let sparse = runmat_value::SparseTensor::new_integer(
             1,
             1,
             vec![0, 1],

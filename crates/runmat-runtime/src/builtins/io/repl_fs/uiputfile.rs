@@ -4,10 +4,11 @@ use std::path::PathBuf;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_filesystem::{SaveFileDialogRequest, SaveFileDialogSelection};
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
 use super::file_dialog::{default_filters, parse_filter_spec, scalar_text, selected_path_parts};
 use crate::builtins::common::spec::{
@@ -360,8 +361,8 @@ fn selected_outputs(
 
     let selected = selected_path_parts(&selection.path, invalid_selection)?;
     Ok(vec![
-        Value::CharArray(runmat_builtins::CharArray::new_row(&selected.file_name)),
-        Value::CharArray(runmat_builtins::CharArray::new_row(&selected.directory)),
+        Value::CharArray(runmat_value::CharArray::new_row(&selected.file_name)),
+        Value::CharArray(runmat_value::CharArray::new_row(&selected.directory)),
         Value::Num(filter_index as f64),
     ])
 }
@@ -370,8 +371,8 @@ fn selected_outputs(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use runmat_builtins::{CharArray, Tensor};
     use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
+    use runmat_value::{CharArray, Tensor};
     use std::io::{self, ErrorKind};
     use std::path::Path;
     use std::sync::{Arc, Mutex};

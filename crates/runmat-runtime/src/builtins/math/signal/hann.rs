@@ -271,11 +271,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::signal::hann"
 )]
 async fn hann_builtin(
-    n: runmat_builtins::Value,
-    varargin: Vec<runmat_builtins::Value>,
-) -> crate::BuiltinResult<runmat_builtins::Value> {
+    n: runmat_value::Value,
+    varargin: Vec<runmat_value::Value>,
+) -> crate::BuiltinResult<runmat_value::Value> {
     validate_hann_options(&varargin)?;
-    if matches!(n, runmat_builtins::Value::Bool(_)) {
+    if matches!(n, runmat_value::Value::Bool(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &HANN_LOGICAL_LENGTH_EXTENSION,
             BUILTIN_NAME,
@@ -293,7 +293,7 @@ async fn hann_builtin(
                     WindowOutputType::Single => runmat_accelerate_api::ProviderPrecision::F32,
                 };
                 if valid_provider_window(&handle, provider, options.len, precision) {
-                    return Ok(runmat_builtins::Value::GpuTensor(handle));
+                    return Ok(runmat_value::Value::GpuTensor(handle));
                 }
                 free_rejected_provider_window(&handle);
             }
@@ -306,7 +306,7 @@ async fn hann_builtin(
     .map_err(hann_map_window_error)
 }
 
-fn validate_hann_options(args: &[runmat_builtins::Value]) -> crate::BuiltinResult<()> {
+fn validate_hann_options(args: &[runmat_value::Value]) -> crate::BuiltinResult<()> {
     if args.len() > 2 {
         return Err(hann_error(&HANN_ERROR_ARG_COUNT));
     }
@@ -377,7 +377,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, ResolveContext, Type, Value};
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_value::{IntValue, Value};
 
     #[test]
     fn hann_type_uses_literal_length() {
@@ -502,7 +503,7 @@ mod tests {
         .expect("gather hann rounded");
         assert_eq!(rounded.shape, vec![3, 1]);
         assert!(block_on(hann_builtin(
-            Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             Vec::new()
         ))
         .is_err());
@@ -524,7 +525,7 @@ mod tests {
                 .expect("hann single"),
         )
         .expect("gather hann single");
-        assert_eq!(single.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(single.numeric_dtype(), runmat_value::NumericDType::F32);
     }
 
     #[test]
