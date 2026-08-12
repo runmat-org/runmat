@@ -5,9 +5,13 @@ use std::mem::size_of;
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderHilbertRequest};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -134,6 +138,98 @@ const HILBERT_ERRORS: [BuiltinErrorDescriptor; 4] = [
     HILBERT_ERROR_INTERNAL,
 ];
 
+const HILBERT_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hilbert-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hilbert with integer signal data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HilbertIntegerDataExtension"),
+};
+const HILBERT_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hilbert-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hilbert with logical signal data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HilbertLogicalDataExtension"),
+};
+const HILBERT_TYPED_LENGTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hilbert-typed-integer-length",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hilbert with a typed-integer FFT length is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HilbertTypedIntegerLengthExtension"),
+};
+const HILBERT_LOGICAL_LENGTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hilbert-logical-length",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hilbert with a logical FFT length is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HilbertLogicalLengthExtension"),
+};
+const HILBERT_ZERO_LENGTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hilbert-zero-length",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hilbert with a zero FFT length is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HilbertZeroLengthExtension"),
+};
+const HILBERT_EMPTY_LENGTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hilbert-empty-length",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hilbert with an empty FFT length is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HilbertEmptyLengthExtension"),
+};
+const HILBERT_ND_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hilbert-nd-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hilbert with N-D input beyond a matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HilbertNdInputExtension"),
+};
+const HILBERT_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
+    HILBERT_INTEGER_DATA_EXTENSION,
+    HILBERT_LOGICAL_DATA_EXTENSION,
+    HILBERT_TYPED_LENGTH_EXTENSION,
+    HILBERT_LOGICAL_LENGTH_EXTENSION,
+    HILBERT_ZERO_LENGTH_EXTENSION,
+    HILBERT_EMPTY_LENGTH_EXTENSION,
+    HILBERT_ND_INPUT_EXTENSION,
+];
+
+const HILBERT_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "xr",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight real integer classes are admitted only in RunMat extension mode and must cross the binary64 transform boundary exactly.",
+    }];
+const HILBERT_INTEGER_LENGTH_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "Typed-integer n is a RunMat-only structural control parsed exactly before allocation.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "x = hilbert(integer_xr[, n])",
+        inputs: &HILBERT_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat validates exact binary64 conversion before the FFT-domain analytic-signal computation; resident input gathers through and restores to its owning provider when binary64 is supported.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "x = hilbert(xr, integer_n)",
+        inputs: &HILBERT_INTEGER_LENGTH_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed n preserves exact integer control semantics; ordinary output class follows the floating signal input.",
+    },
+];
+
 pub const HILBERT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &HILBERT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -166,6 +262,19 @@ fn hilbert_error_with_source(
     builder.build()
 }
 
+fn hilbert_terminal_error(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn hilbert_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -184,17 +293,27 @@ fn hilbert_error_with_message(
     keywords = "hilbert,analytic signal,signal processing,fft,complex",
     type_resolver(fft_type),
     descriptor(crate::builtins::math::signal::hilbert::HILBERT_DESCRIPTOR),
+    extensions(HILBERT_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::hilbert::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::hilbert"
 )]
 async fn hilbert_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_hilbert_extensions(&value, &rest)?;
     let length = parse_arguments(&rest)?;
     match value {
         Value::GpuTensor(handle) => hilbert_gpu_tensor(handle, length).await,
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(hilbert_error_with_detail(
-            &HILBERT_ERROR_INVALID_INPUT,
-            "input must be real-valued",
-        )),
+        Value::Complex(re, _) => hilbert_tensor(
+            Tensor::new(vec![re], vec![1, 1]).map_err(|source| {
+                hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, source.to_string())
+            })?,
+            length,
+        ),
+        Value::ComplexTensor(tensor) => hilbert_tensor(real_part_tensor(tensor)?, length),
         other => {
+            crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
+                &other,
+                BUILTIN_NAME,
+            )?;
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other).map_err(|detail| {
                 hilbert_error_with_detail(&HILBERT_ERROR_INVALID_INPUT, detail)
             })?;
@@ -207,12 +326,16 @@ async fn hilbert_gpu_tensor(
     handle: GpuTensorHandle,
     length: Option<usize>,
 ) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
-        return Err(hilbert_error_with_detail(
-            &HILBERT_ERROR_INVALID_INPUT,
-            "input must be real-valued",
-        ));
-    }
+    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+        hilbert_terminal_error(
+            &HILBERT_ERROR_INTERNAL,
+            "GPU provider unavailable for input",
+        )
+    })?;
+    let complex_input =
+        runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
+    let integer_input = runmat_accelerate_api::handle_integer_type(&handle).is_some();
+    let logical_input = runmat_accelerate_api::handle_is_logical(&handle);
 
     let mut shape = handle.shape.clone();
     if crate::builtins::common::shape::is_scalar_shape(&shape) {
@@ -224,38 +347,326 @@ async fn hilbert_gpu_tensor(
 
     let current_len = shape.get(dim_index).copied().unwrap_or(1);
     let target_len = length.unwrap_or(current_len);
-    if target_len != 0 {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-            let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-            match provider
-                .signal_hilbert(&ProviderHilbertRequest {
-                    input: &handle,
-                    length,
-                    dim: dim_index,
-                })
-                .await
+    if target_len != 0 && !complex_input && !integer_input && !logical_input {
+        let input_metadata = hilbert_input_metadata(&handle);
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        match provider
+            .signal_hilbert(&ProviderHilbertRequest {
+                input: &handle,
+                length,
+                dim: dim_index,
+            })
+            .await
+        {
+            Ok(out)
+                if valid_hilbert_gpu_output(
+                    &out,
+                    &handle,
+                    provider,
+                    &logical_shape_for_hilbert(&shape, dim_index, target_len),
+                    runmat_accelerate_api::handle_precision(&handle)
+                        .unwrap_or_else(|| provider.precision()),
+                ) =>
             {
-                Ok(out) => return Ok(gpu_helpers::complex_gpu_value(out)),
-                Err(err) => {
-                    let message = err.to_string();
-                    if !message.contains("not supported") {
-                        return Err(hilbert_error_with_source(
-                            &HILBERT_ERROR_INTERNAL,
-                            "gpu hilbert failed",
-                            build_runtime_error(message).build(),
-                        ));
-                    }
+                return Ok(gpu_helpers::complex_gpu_value(out));
+            }
+            Ok(out) => {
+                if hilbert_gpu_handles_alias(&out, &handle) {
+                    restore_hilbert_input_metadata(&handle, input_metadata);
+                }
+                free_rejected_hilbert_output(&out, &handle);
+                return Err(hilbert_terminal_error(
+                    &HILBERT_ERROR_INTERNAL,
+                    "provider signal_hilbert returned malformed output",
+                ));
+            }
+            Err(err) => {
+                if !hilbert_provider_operation_unsupported(&err, "signal_hilbert") {
+                    return Err(hilbert_terminal_error(
+                        &HILBERT_ERROR_INTERNAL,
+                        format!("provider signal_hilbert failed: {err}"),
+                    ));
                 }
             }
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle)
         .await
         .map_err(|source| {
             hilbert_error_with_source(&HILBERT_ERROR_INVALID_INPUT, "gpu gather failed", source)
         })?;
-    hilbert_tensor(tensor, length)
+    crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
+        &gathered,
+        BUILTIN_NAME,
+    )?;
+    let host = match gathered {
+        Value::ComplexTensor(tensor) => {
+            hilbert_tensor(real_part_tensor_with_precision(tensor, &handle)?, length)?
+        }
+        Value::Complex(re, _) => hilbert_tensor(
+            Tensor::new(vec![re], shape.clone()).map_err(|source| {
+                hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, source.to_string())
+            })?,
+            length,
+        )?,
+        other => {
+            let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other).map_err(|detail| {
+                hilbert_error_with_detail(&HILBERT_ERROR_INVALID_INPUT, detail)
+            })?;
+            hilbert_tensor(tensor, length)?
+        }
+    };
+    restore_hilbert_gpu_output(provider, &handle, host)
+}
+
+fn hilbert_provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string() == format!("{operation} not supported by provider"))
+}
+
+fn ensure_hilbert_extensions(value: &Value, args: &[Value]) -> BuiltinResult<()> {
+    let integer_data = matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some());
+    if integer_data {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HILBERT_INTEGER_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let logical_data = matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle));
+    if logical_data {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HILBERT_LOGICAL_DATA_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let rank = match value {
+        Value::Tensor(tensor) => tensor.shape.len(),
+        Value::ComplexTensor(tensor) => tensor.shape.len(),
+        Value::LogicalArray(array) => array.shape.len(),
+        Value::GpuTensor(handle) => handle.shape.len(),
+        _ => 2,
+    };
+    if rank > 2 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HILBERT_ND_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if let [length] = args {
+        let typed_integer = matches!(length, Value::Int(_))
+            || matches!(length, Value::Tensor(tensor) if tensor.integer_storage().is_some());
+        if typed_integer {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &HILBERT_TYPED_LENGTH_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if matches!(length, Value::Bool(_) | Value::LogicalArray(_)) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &HILBERT_LOGICAL_LENGTH_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if hilbert_length_is_empty(length) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &HILBERT_EMPTY_LENGTH_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        } else if hilbert_length_is_zero(length) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &HILBERT_ZERO_LENGTH_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn hilbert_length_is_empty(value: &Value) -> bool {
+    matches!(value, Value::Tensor(tensor) if tensor.is_empty())
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.is_empty())
+}
+
+fn hilbert_length_is_zero(value: &Value) -> bool {
+    match value {
+        Value::Num(value) => *value == 0.0,
+        Value::Int(value) => value.try_to_usize() == Some(0),
+        Value::Bool(value) => !*value,
+        Value::LogicalArray(array) if array.data.len() == 1 => array.data[0] == 0,
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor::tensor_value_f64(tensor, 0) == 0.0,
+        _ => false,
+    }
+}
+
+fn real_part_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::Integer(_) => {
+            return Err(hilbert_error_with_detail(
+                &HILBERT_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ));
+        }
+    };
+    Tensor::from_numeric_storage(storage, shape)
+        .map_err(|source| hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, source.to_string()))
+}
+
+fn real_part_tensor_with_precision(
+    tensor: ComplexTensor,
+    input: &GpuTensorHandle,
+) -> BuiltinResult<Tensor> {
+    if runmat_accelerate_api::handle_precision(input)
+        != Some(runmat_accelerate_api::ProviderPrecision::F32)
+    {
+        return real_part_tensor(tensor);
+    }
+    let shape = tensor.shape.clone();
+    let values = tensor
+        .materialize_f64()
+        .iter()
+        .map(|(real, _)| *real as f32)
+        .collect();
+    Tensor::from_f32(values, shape)
+        .map_err(|source| hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, source.to_string()))
+}
+
+fn logical_shape_for_hilbert(shape: &[usize], dim: usize, length: usize) -> Vec<usize> {
+    let mut output = shape.to_vec();
+    while output.len() <= dim {
+        output.push(1);
+    }
+    output[dim] = length;
+    output
+}
+
+fn restore_hilbert_gpu_output(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let tensor = match value {
+        Value::ComplexTensor(tensor) => tensor,
+        Value::Complex(real, imag) => {
+            ComplexTensor::new(vec![(real, imag)], vec![1, 1]).map_err(|source| {
+                hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, source.to_string())
+            })?
+        }
+        other => {
+            return Err(hilbert_terminal_error(
+                &HILBERT_ERROR_INTERNAL,
+                format!("unexpected host fallback result {other:?}"),
+            ));
+        }
+    };
+    let expected_precision = match tensor.numeric_dtype() {
+        runmat_builtins::NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+        _ => runmat_accelerate_api::ProviderPrecision::F64,
+    };
+    if provider.precision() != expected_precision {
+        return Ok(Value::ComplexTensor(tensor));
+    }
+    let expected_shape = tensor.shape.clone();
+    let input_metadata = hilbert_input_metadata(input);
+    let output = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|source| {
+        hilbert_terminal_error(
+            &HILBERT_ERROR_INTERNAL,
+            format!("failed to restore fallback result to input provider: {source}"),
+        )
+    })?;
+    if !valid_hilbert_gpu_output(
+        &output,
+        input,
+        provider,
+        &expected_shape,
+        expected_precision,
+    ) {
+        if hilbert_gpu_handles_alias(&output, input) {
+            restore_hilbert_input_metadata(input, input_metadata);
+        }
+        free_rejected_hilbert_output(&output, input);
+        return Err(hilbert_terminal_error(
+            &HILBERT_ERROR_INTERNAL,
+            "provider upload returned malformed fallback output",
+        ));
+    }
+    Ok(gpu_helpers::complex_gpu_value(output))
+}
+
+fn valid_hilbert_gpu_output(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    expected_shape: &[usize],
+    expected_precision: runmat_accelerate_api::ProviderPrecision,
+) -> bool {
+    output.shape == expected_shape
+        && output.device_id == input.device_id
+        && !hilbert_gpu_handles_alias(output, input)
+        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::ComplexInterleaved
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+type HilbertGpuMetadata = (
+    GpuTensorStorage,
+    Option<runmat_accelerate_api::ProviderPrecision>,
+    Option<runmat_accelerate_api::IntegerElementType>,
+    bool,
+);
+
+fn hilbert_input_metadata(handle: &GpuTensorHandle) -> HilbertGpuMetadata {
+    (
+        runmat_accelerate_api::handle_storage(handle),
+        runmat_accelerate_api::handle_precision(handle),
+        runmat_accelerate_api::handle_integer_type(handle),
+        runmat_accelerate_api::handle_is_logical(handle),
+    )
+}
+
+fn restore_hilbert_input_metadata(handle: &GpuTensorHandle, metadata: HilbertGpuMetadata) {
+    runmat_accelerate_api::set_handle_storage(handle, metadata.0);
+    if let Some(precision) = metadata.1 {
+        runmat_accelerate_api::set_handle_precision(handle, precision);
+    } else {
+        runmat_accelerate_api::clear_handle_precision(handle);
+    }
+    if let Some(integer) = metadata.2 {
+        runmat_accelerate_api::set_handle_integer_type(handle, integer);
+    } else {
+        runmat_accelerate_api::clear_handle_integer_type(handle);
+    }
+    runmat_accelerate_api::set_handle_logical(handle, metadata.3);
+}
+
+fn hilbert_gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn free_rejected_hilbert_output(output: &GpuTensorHandle, input: &GpuTensorHandle) {
+    if hilbert_gpu_handles_alias(output, input) {
+        return;
+    }
+    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output) {
+        if owner.free(output).is_ok() {
+            runmat_accelerate_api::clear_residency(output);
+        }
+    }
 }
 
 fn parse_arguments(args: &[Value]) -> BuiltinResult<Option<usize>> {
@@ -433,6 +844,13 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(tensor) => tensor,
             Value::Complex(re, im) => HostComplexTensor::new(vec![(re, im)], vec![1, 1]).unwrap(),
+            Value::GpuTensor(handle) => block_on(
+                crate::builtins::math::fft::common::gather_gpu_complex_tensor(
+                    &handle,
+                    BUILTIN_NAME,
+                ),
+            )
+            .expect("gather complex gpu output"),
             other => panic!("expected complex output, got {other:?}"),
         }
     }
@@ -523,6 +941,7 @@ pub(crate) mod tests {
 
     #[test]
     fn hilbert_zero_length_returns_empty_along_transform_axis() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
         let out = as_complex_tensor(
             hilbert_call(Value::Tensor(input), vec![Value::Int(IntValue::I32(0))]).unwrap(),
@@ -533,16 +952,50 @@ pub(crate) mod tests {
 
     #[test]
     fn hilbert_accepts_logical_input_as_real_signal() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = LogicalArray::new(vec![1, 0, 1, 0], vec![1, 4]).unwrap();
         let out = as_complex_tensor(hilbert_call(Value::LogicalArray(input), Vec::new()).unwrap());
         assert_eq!(out.shape, vec![1, 4]);
     }
 
     #[test]
-    fn hilbert_rejects_complex_input() {
-        let input = HostComplexTensor::new(vec![(1.0, 1.0)], vec![1, 1]).unwrap();
-        let err = hilbert_call(Value::ComplexTensor(input), Vec::new()).unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:hilbert:InvalidInput"));
+    fn hilbert_ignores_complex_input_imaginary_part() {
+        let input = HostComplexTensor::new(
+            vec![(1.0, 9.0), (0.0, -4.0), (-1.0, 2.0), (0.0, 7.0)],
+            vec![1, 4],
+        )
+        .unwrap();
+        let output =
+            as_complex_tensor(hilbert_call(Value::ComplexTensor(input), Vec::new()).unwrap());
+        let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+        for (actual, expected) in output.materialize_f64().iter().copied().zip(expected) {
+            assert_complex_close(actual, expected);
+        }
+    }
+
+    #[test]
+    fn hilbert_runmat_extensions_follow_compatibility_mode() {
+        let input = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
+        let cases = [
+            (
+                Value::Int(IntValue::I32(2)),
+                "RunMat:compatibility:HilbertTypedIntegerLengthExtension",
+            ),
+            (
+                Value::Bool(true),
+                "RunMat:compatibility:HilbertLogicalLengthExtension",
+            ),
+            (
+                Value::Num(0.0),
+                "RunMat:compatibility:HilbertZeroLengthExtension",
+            ),
+        ];
+        for (length, identifier) in cases {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let err = hilbert_call(Value::Tensor(input.clone()), vec![length])
+                .expect_err("strict mode rejects extension");
+            assert_eq!(err.identifier(), Some(identifier));
+        }
     }
 
     #[test]
@@ -560,7 +1013,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn hilbert_gpu_input_gathers_and_computes_analytic_signal() {
+    fn hilbert_gpu_input_returns_owner_resident_analytic_signal() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
@@ -568,8 +1021,12 @@ pub(crate) mod tests {
                 shape: &input.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let out =
-                as_complex_tensor(hilbert_call(Value::GpuTensor(handle), Vec::new()).unwrap());
+            let metadata = hilbert_input_metadata(&handle);
+            let out = as_complex_tensor(
+                hilbert_call(Value::GpuTensor(handle.clone()), Vec::new()).unwrap(),
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
+            assert_eq!(hilbert_input_metadata(&handle), metadata);
             assert_eq!(out.shape, vec![1, 4]);
             let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
             for (actual, expected) in out.materialize_f64().iter().copied().zip(expected) {

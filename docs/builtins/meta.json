@@ -66238,6 +66238,49 @@
           "identifier": "RunMat:hann:InternalError",
           "when": "Window materialization fails internally.",
           "message": "hann: internal error"
+        },
+        {
+          "code": "RM.HANN.ARG_COUNT",
+          "identifier": "RunMat:hann:ArgumentCount",
+          "when": "More than a sampling option and an output-type option are supplied.",
+          "message": "hann: too many input arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "hann-logical-length",
+          "mode": "RunMatOnly",
+          "description": "hann with a logical scalar length is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HannLogicalLengthExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "w = hann(L[, sflag][, typeName])",
+          "inputs": [
+            {
+              "name": "L",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "L accepts every built-in integer class as a nonnegative scalar length; floating L is rounded to the nearest integer."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default and sampling-only forms return a double column vector; typeName selects double or single. L is a host structural scalar with no interactive gpuArray overload; RunMat may materialize the new floating output on its active provider as an internal acceleration choice."
         }
       ]
     },
@@ -66647,6 +66690,61 @@
           "identifier": "RunMat:heaviside:Internal",
           "when": "Internal gather/provider/tensor construction failed.",
           "message": "heaviside: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "heaviside-integer-input",
+          "mode": "RunMatOnly",
+          "description": "heaviside with an integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HeavisideIntegerInputExtension"
+        },
+        {
+          "id": "heaviside-logical-input",
+          "mode": "RunMatOnly",
+          "description": "heaviside with a logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HeavisideLogicalInputExtension"
+        },
+        {
+          "id": "heaviside-character-input",
+          "mode": "RunMatOnly",
+          "description": "heaviside with a character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HeavisideCharacterInputExtension"
+        },
+        {
+          "id": "heaviside-gpu-input",
+          "mode": "RunMatOnly",
+          "description": "heaviside with a gpuArray input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HeavisideGpuInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = heaviside(integer_X)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "RunMat extension mode accepts all eight real integer classes and classifies sign and zero directly from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "Integer sign classification is exact and returns double values 0, 0.5, or 1. Resident integer input is gated before exact owner gather and never reaches a floating provider hook."
         }
       ]
     },
@@ -67089,6 +67187,106 @@
           "identifier": "RunMat:hilbert:Internal",
           "when": "FFT execution or tensor shaping fails internally.",
           "message": "hilbert: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "hilbert-integer-data",
+          "mode": "RunMatOnly",
+          "description": "hilbert with integer signal data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HilbertIntegerDataExtension"
+        },
+        {
+          "id": "hilbert-logical-data",
+          "mode": "RunMatOnly",
+          "description": "hilbert with logical signal data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HilbertLogicalDataExtension"
+        },
+        {
+          "id": "hilbert-typed-integer-length",
+          "mode": "RunMatOnly",
+          "description": "hilbert with a typed-integer FFT length is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HilbertTypedIntegerLengthExtension"
+        },
+        {
+          "id": "hilbert-logical-length",
+          "mode": "RunMatOnly",
+          "description": "hilbert with a logical FFT length is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HilbertLogicalLengthExtension"
+        },
+        {
+          "id": "hilbert-zero-length",
+          "mode": "RunMatOnly",
+          "description": "hilbert with a zero FFT length is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HilbertZeroLengthExtension"
+        },
+        {
+          "id": "hilbert-empty-length",
+          "mode": "RunMatOnly",
+          "description": "hilbert with an empty FFT length is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HilbertEmptyLengthExtension"
+        },
+        {
+          "id": "hilbert-nd-input",
+          "mode": "RunMatOnly",
+          "description": "hilbert with N-D input beyond a matrix is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HilbertNdInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "x = hilbert(integer_xr[, n])",
+          "inputs": [
+            {
+              "name": "xr",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight real integer classes are admitted only in RunMat extension mode and must cross the binary64 transform boundary exactly."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "FunctionSpecific",
+          "notes": "RunMat validates exact binary64 conversion before the FFT-domain analytic-signal computation; resident input gathers through and restores to its owning provider when binary64 is supported."
+        },
+        {
+          "form": "x = hilbert(xr, integer_n)",
+          "inputs": [
+            {
+              "name": "n",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Typed-integer n is a RunMat-only structural control parsed exactly before allocation."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "Typed n preserves exact integer control semantics; ordinary output class follows the floating signal input."
         }
       ]
     },
@@ -69147,6 +69345,71 @@
           "when": "Internal gather/provider/tensor construction failed.",
           "message": "hypot: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "hypot-integer-input",
+          "mode": "RunMatOnly",
+          "description": "hypot with integer input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HypotIntegerInputExtension"
+        },
+        {
+          "id": "hypot-logical-input",
+          "mode": "RunMatOnly",
+          "description": "hypot with logical input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HypotLogicalInputExtension"
+        },
+        {
+          "id": "hypot-character-input",
+          "mode": "RunMatOnly",
+          "description": "hypot with character input is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HypotCharacterInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "R = hypot(integer_X, Y) or hypot(X, integer_Y)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are accepted only in RunMat extension mode after exact binary64 validation."
+            },
+            {
+              "name": "Y",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are accepted only in RunMat extension mode after exact binary64 validation."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Each admitted integer operand crosses an exact binary64 boundary before stable hypot evaluation. Resident integers gather exactly through their owners and never reach floating provider hooks."
+        }
       ]
     },
     {
@@ -70102,6 +70365,114 @@
           "identifier": "RunMat:ifft:Internal",
           "when": "IFFT execution or tensor shaping fails.",
           "message": "ifft: internal error"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "ifft-wide-integer-data",
+          "mode": "RunMatOnly",
+          "description": "ifft with host int64 or uint64 data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IfftWideIntegerDataExtension"
+        },
+        {
+          "id": "ifft-wide-integer-controls",
+          "mode": "RunMatOnly",
+          "description": "ifft with int64 or uint64 N or DIM controls is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:IfftWideIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "Y = ifft(integer_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Documented integer data enters the floating inverse-FFT domain and produces double output."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "Documented integer data crosses once into double; symmetric output is real and nonsymmetric output is complex."
+        },
+        {
+          "form": "Y = ifft(X, integer_N, integer_DIM, ...)",
+          "inputs": [
+            {
+              "name": "N or DIM",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Uint8",
+                "Uint16",
+                "Uint32"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "N and DIM are parsed as exact structural controls."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "Documented controls are exact and are classified before provider access."
+        },
+        {
+          "form": "Y = ifft(int64_or_uint64_X, ...)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "Host wide integers are gated and must be exactly representable as double; resident wide integers reject before gather."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GpuRestricted",
+          "overload": "Multiple",
+          "notes": "RunMat-only wide data cannot silently round at the double boundary."
+        },
+        {
+          "form": "Y = ifft(X, int64_or_uint64_N_or_DIM, ...)",
+          "inputs": [
+            {
+              "name": "N or DIM",
+              "classes": [
+                "Int64",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "AllowedExceptWith64BitInteger",
+              "notes": "Wide structural controls are independently gated and decoded from authoritative integer storage."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostAndGpu",
+          "overload": "StructuralParameter",
+          "notes": "RunMat-only wide controls are independently gated and parsed exactly."
         }
       ]
     },

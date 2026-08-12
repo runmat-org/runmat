@@ -4,16 +4,21 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::math::signal::common::{
-    parse_window_options, provider_precision_matches, window_tensor, WindowArgError,
+    keyword, parse_window_options, provider_precision_matches, window_tensor, WindowArgError,
     WindowOutputType, WindowSampling,
 };
 use crate::builtins::math::signal::type_resolvers::window_vector_type;
+use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
 const BUILTIN_NAME: &str = "hann";
 
@@ -142,12 +147,50 @@ const HANN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "hann: internal error",
 };
 
-const HANN_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const HANN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HANN.ARG_COUNT",
+    identifier: Some("RunMat:hann:ArgumentCount"),
+    when: "More than a sampling option and an output-type option are supplied.",
+    message: "hann: too many input arguments",
+};
+
+const HANN_ERRORS: [BuiltinErrorDescriptor; 5] = [
     HANN_ERROR_INVALID_LENGTH,
     HANN_ERROR_INVALID_OPTION,
     HANN_ERROR_UNKNOWN_OPTION,
     HANN_ERROR_INTERNAL,
+    HANN_ERROR_ARG_COUNT,
 ];
+
+const HANN_LOGICAL_LENGTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hann-logical-length",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hann with a logical scalar length is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HannLogicalLengthExtension"),
+};
+
+const HANN_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [HANN_LOGICAL_LENGTH_EXTENSION];
+
+const HANN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "L",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "L accepts every built-in integer class as a nonnegative scalar length; floating L is rounded to the nearest integer.",
+    }];
+
+pub const HANN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "w = hann(L[, sflag][, typeName])",
+        inputs: &HANN_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The default and sampling-only forms return a double column vector; typeName selects double or single. L is a host structural scalar with no interactive gpuArray overload; RunMat may materialize the new floating output on its active provider as an internal acceleration choice.",
+    }];
 
 pub const HANN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &HANN_SIGNATURES,
@@ -223,12 +266,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "hann,window,signal processing,dsp,fft",
     type_resolver(window_vector_type),
     descriptor(crate::builtins::math::signal::hann::HANN_DESCRIPTOR),
+    extensions(HANN_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::hann::HANN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::hann"
 )]
 async fn hann_builtin(
     n: runmat_builtins::Value,
     varargin: Vec<runmat_builtins::Value>,
 ) -> crate::BuiltinResult<runmat_builtins::Value> {
+    validate_hann_options(&varargin)?;
+    if matches!(n, runmat_builtins::Value::Bool(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HANN_LOGICAL_LENGTH_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let options = parse_window_options(n, &varargin, true).map_err(hann_map_window_error)?;
     if options.len > 1 && provider_precision_matches(options.output_type) {
         if let Some(provider) = runmat_accelerate_api::provider() {
@@ -240,17 +292,84 @@ async fn hann_builtin(
                     WindowOutputType::Double => runmat_accelerate_api::ProviderPrecision::F64,
                     WindowOutputType::Single => runmat_accelerate_api::ProviderPrecision::F32,
                 };
-                runmat_accelerate_api::set_handle_precision(&handle, precision);
-                return Ok(runmat_builtins::Value::GpuTensor(handle));
+                if valid_provider_window(&handle, provider, options.len, precision) {
+                    return Ok(runmat_builtins::Value::GpuTensor(handle));
+                }
+                free_rejected_provider_window(&handle);
             }
         }
     }
     window_tensor(options, |idx, total| {
         let denom = (total - 1) as f64;
-        let phase = 2.0 * std::f64::consts::PI * idx as f64 / denom;
-        0.5 - 0.5 * phase.cos()
+        0.5 - 0.5 * cospi_real(2.0 * idx as f64 / denom)
     })
     .map_err(hann_map_window_error)
+}
+
+fn validate_hann_options(args: &[runmat_builtins::Value]) -> crate::BuiltinResult<()> {
+    if args.len() > 2 {
+        return Err(hann_error(&HANN_ERROR_ARG_COUNT));
+    }
+    let keywords = args
+        .iter()
+        .map(|arg| keyword(arg).ok_or_else(|| hann_error(&HANN_ERROR_INVALID_OPTION)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let valid = match keywords.as_slice() {
+        [] => true,
+        [option] => matches!(
+            option.as_str(),
+            "symmetric" | "periodic" | "double" | "single"
+        ),
+        [sampling, output_type] => {
+            matches!(sampling.as_str(), "symmetric" | "periodic")
+                && matches!(output_type.as_str(), "double" | "single")
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        let option = keywords
+            .iter()
+            .find(|option| {
+                !matches!(
+                    option.as_str(),
+                    "symmetric" | "periodic" | "double" | "single"
+                )
+            })
+            .or_else(|| keywords.first())
+            .map(String::as_str)
+            .unwrap_or_default();
+        Err(hann_error_with_detail(
+            &HANN_ERROR_UNKNOWN_OPTION,
+            format!("'{option}'"),
+        ))
+    }
+}
+
+fn valid_provider_window(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    len: usize,
+    precision: runmat_accelerate_api::ProviderPrecision,
+) -> bool {
+    handle.shape == [len, 1]
+        && handle.device_id == provider.device_id()
+        && runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(handle) == Some(precision)
+        && runmat_accelerate_api::handle_integer_type(handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(handle)
+        && runmat_accelerate_api::provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn free_rejected_provider_window(handle: &runmat_accelerate_api::GpuTensorHandle) {
+    if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) {
+        if owner.free(handle).is_ok() {
+            runmat_accelerate_api::clear_residency(handle);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -258,7 +377,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type, Value};
+    use runmat_builtins::{builtin_function_by_name, IntValue, ResolveContext, Type, Value};
 
     #[test]
     fn hann_type_uses_literal_length() {
@@ -287,6 +406,49 @@ mod tests {
             .errors
             .iter()
             .any(|err| err.code == "RM.HANN.INVALID_LENGTH"));
+    }
+
+    #[test]
+    fn hann_integer_metadata_and_logical_extension_are_registered() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("hann builtin");
+        assert_eq!(builtin.integer_capabilities.len(), 1);
+        assert_eq!(builtin.extensions.len(), 1);
+
+        let integer = block_on(super::hann_builtin(
+            Value::Int(IntValue::U64(4)),
+            Vec::new(),
+        ))
+        .expect("documented integer length");
+        assert_eq!(test_support::gather(integer).unwrap().shape, vec![4, 1]);
+
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(super::hann_builtin(Value::Bool(true), Vec::new()))
+            .expect_err("strict mode rejects logical length");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:HannLogicalLengthExtension")
+        );
+    }
+
+    #[test]
+    fn hann_rejects_extra_or_misordered_options() {
+        let extra = block_on(super::hann_builtin(
+            Value::Num(4.0),
+            vec![
+                Value::from("periodic"),
+                Value::from("single"),
+                Value::from("double"),
+            ],
+        ))
+        .expect_err("too many options");
+        assert_eq!(extra.identifier(), Some("RunMat:hann:ArgumentCount"));
+
+        let misordered = block_on(super::hann_builtin(
+            Value::Num(4.0),
+            vec![Value::from("single"), Value::from("periodic")],
+        ))
+        .expect_err("sampling must precede output type");
+        assert_eq!(misordered.identifier(), Some("RunMat:hann:UnknownOption"));
     }
 
     #[test]
