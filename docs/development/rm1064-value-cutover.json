@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "stage": "structural-baseline",
+  "source": {
+    "integer_commit": "f24908ddc2296dc5640a0a15e3cbb8ff9f7dee53",
+    "qualified_merge": "2e7bd5ed1543d57872c8be9426b4d09ab5feac0d",
+    "current_owner": "crates/runmat-builtins",
+    "target_owner": "crates/runmat-value"
+  },
+  "declarations": [
+    { "symbol": "Value", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/value.rs", "family": "value" },
+    { "symbol": "IntValue", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/numeric/scalar.rs", "family": "numeric" },
+    { "symbol": "NumericDType", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/numeric/dtype.rs", "family": "numeric" },
+    { "symbol": "IntegerStorage", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/numeric/integer.rs", "family": "numeric" },
+    { "symbol": "NumericStorage", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/numeric/storage.rs", "family": "numeric" },
+    { "symbol": "NumericScalar", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/numeric/scalar.rs", "family": "numeric" },
+    { "symbol": "NumericStorageView", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/numeric/view.rs", "family": "numeric" },
+    { "symbol": "NumericStorageViewMut", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/numeric/view.rs", "family": "numeric" },
+    { "symbol": "Tensor", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/dense.rs", "family": "array" },
+    { "symbol": "TensorStorage", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/dense.rs", "family": "array" },
+    { "symbol": "SparseTensor", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/sparse.rs", "family": "array" },
+    { "symbol": "SparseValueStorage", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/sparse.rs", "family": "array" },
+    { "symbol": "SparseCscParts", "kind": "type", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/sparse.rs", "family": "array" },
+    { "symbol": "ComplexTensor", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/complex.rs", "family": "array" },
+    { "symbol": "ComplexStorage", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/complex.rs", "family": "array" },
+    { "symbol": "IntegerComplexStorage", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/complex.rs", "family": "array" },
+    { "symbol": "LogicalArray", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/logical.rs", "family": "array" },
+    { "symbol": "CharArray", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/character.rs", "family": "array" },
+    { "symbol": "StringArray", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/string.rs", "family": "array" },
+    { "symbol": "SymbolicArray", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/array/symbolic.rs", "family": "symbolic" },
+    { "symbol": "SymbolicFunction", "kind": "enum", "source": "crates/runmat-builtins/src/symbolic.rs", "target": "crates/runmat-value/src/symbolic/function.rs", "family": "symbolic" },
+    { "symbol": "SymbolicExpr", "kind": "enum", "source": "crates/runmat-builtins/src/symbolic.rs", "target": "crates/runmat-value/src/symbolic/expression.rs", "family": "symbolic" },
+    { "symbol": "StructValue", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/aggregate/structure.rs", "family": "aggregate" },
+    { "symbol": "CellArray", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/aggregate/cell.rs", "family": "aggregate" },
+    { "symbol": "ObjectArray", "kind": "struct", "source": "crates/runmat-builtins/src/object_array.rs", "target": "crates/runmat-value/src/object/array.rs", "family": "object" },
+    { "symbol": "ObjectInstance", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/object/instance.rs", "family": "object" },
+    { "symbol": "HandleRef", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/object/handle.rs", "family": "object" },
+    { "symbol": "Listener", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/object/listener.rs", "family": "object" },
+    { "symbol": "DynamicPropertyDef", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/object/dynamic_property.rs", "family": "object" },
+    { "symbol": "Access", "kind": "enum", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/object/dynamic_property.rs", "family": "object" },
+    { "symbol": "Closure", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/callable/closure.rs", "family": "callable" },
+    { "symbol": "MException", "kind": "struct", "source": "crates/runmat-builtins/src/lib.rs", "target": "crates/runmat-value/src/exception.rs", "family": "exception" }
+  ],
+  "non_value_relocations": [
+    { "source": "crates/runmat-builtins/src/lib.rs", "symbols": ["Type", "ResolveContext", "LiteralValue", "TypeResolver", "TypeResolverWithContext", "TypeResolverKind"], "target": "crates/runmat-types", "slice": "R04-R06", "rule": "Static facts and resolver contracts never move into runmat-value." },
+    { "source": "crates/runmat-builtins/src/lib.rs", "symbols": ["BuiltinFunction", "BuiltinFuture", "BuiltinControlFlow"], "target": "crates/runmat-runtime/src/builtin", "slice": "R06", "rule": "Executable pointers and live Value adaptation remain outside the static catalog." },
+    { "source": "crates/runmat-builtins/src/lib.rs", "symbols": ["PropertyDef", "MethodDef", "ClassDef"], "target": "crates/runmat-types/src/declaration", "slice": "R04", "rule": "Immutable declarations move below HIR/runtime and never own session values." },
+    { "source": "crates/runmat-builtins/src/lib.rs", "symbols": ["CLASS_REGISTRY", "STATIC_VALUES", "ENUMERATION_REGISTRY"], "target": "crates/runmat-runtime/src/class", "slice": "R04-R09", "rule": "Mutable registries and static values are session runtime state." },
+    { "source": "crates/runmat-builtins/src/lib.rs", "symbols": ["FormatMode", "set_display_format", "get_display_format", "format_number"], "target": "crates/runmat-runtime/src/presentation", "slice": "R03-R09", "rule": "Session presentation policy does not enter runmat-value; intrinsic inspection remains dependency-light." },
+    { "source": "crates/runmat-builtins/src/symbolic.rs", "symbols": ["SymbolicDeclaration", "SymbolicDeclarationError", "parse_symbolic_declaration", "symbolic_declaration_tokens"], "target": "crates/runmat-runtime/src/builtins/math/symbolic", "slice": "R03", "rule": "The syms command parser is executable builtin behavior, not intrinsic symbolic value representation." },
+    { "source": "crates/runmat-builtins/src/lib.rs", "symbols": ["Trace for Value", "Trace for CellArray", "Trace for StructValue", "Trace for Closure", "Trace for ObjectInstance", "Trace for HandleRef", "Trace for Listener"], "target": "crates/runmat-value/src/trace.rs", "slice": "R03", "rule": "Value-owned tracing depends only on runmat-gc-api; collector/session ownership stays outside." }
+  ],
+  "representative_pilots": [
+    { "identity": "zeros", "seams": ["dense-integer", "class", "shape", "provider-residency"] },
+    { "identity": "full", "seams": ["sparse", "exact-integer", "storage-transition"] },
+    { "identity": "abs", "seams": ["complex", "numeric-fact", "provider"] },
+    { "identity": "gather", "seams": ["provider-handle", "provenance", "materialization"] },
+    { "identity": "struct", "seams": ["aggregate", "recursive-fact", "gc", "codec"] },
+    { "identity": "feval", "seams": ["dynamic-callable", "effects", "semantic-slow-path"] }
+  ]
+}

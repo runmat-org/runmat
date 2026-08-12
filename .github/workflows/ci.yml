@@ -200,6 +200,9 @@ jobs:
       - name: Validate RM-1064 authority inventory
         run: scripts/development/check-rm1064-inventory.sh
 
+      - name: Validate RM-1064 value cutover ownership
+        run: scripts/development/check-rm1064-value-cutover.sh
+
       - name: Validate public FEA field ids
         run: python3 scripts/fea/governance/validate_public_field_ids.py
 
