@@ -4,15 +4,21 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::math::signal::common::{
-    parse_window_options, provider_precision_matches, window_tensor, WindowArgError, WindowSampling,
+    keyword, parse_window_options, provider_precision_matches, window_tensor, WindowArgError,
+    WindowOutputType, WindowSampling,
 };
 use crate::builtins::math::signal::type_resolvers::window_vector_type;
+use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
 const BUILTIN_NAME: &str = "hamming";
 
@@ -49,7 +55,48 @@ const HAMMING_SIG_SAMPLING_INPUTS: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const HAMMING_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const HAMMING_SIG_TYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Window length.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Output precision: \"double\" or \"single\".",
+    },
+];
+
+const HAMMING_SIG_FULL_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Window length.",
+    },
+    BuiltinParamDescriptor {
+        name: "sampling",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"symmetric\""),
+        description: "Sampling mode: \"symmetric\" or \"periodic\".",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Output precision: \"double\" or \"single\".",
+    },
+];
+
+const HAMMING_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "w = hamming(n)",
         inputs: &HAMMING_SIG_N_INPUTS,
@@ -58,6 +105,16 @@ const HAMMING_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "w = hamming(n, sampling)",
         inputs: &HAMMING_SIG_SAMPLING_INPUTS,
+        outputs: &HAMMING_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "w = hamming(n, precision)",
+        inputs: &HAMMING_SIG_TYPE_INPUTS,
+        outputs: &HAMMING_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "w = hamming(n, sampling, precision)",
+        inputs: &HAMMING_SIG_FULL_INPUTS,
         outputs: &HAMMING_OUTPUT,
     },
 ];
@@ -90,12 +147,50 @@ const HAMMING_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "hamming: internal error",
 };
 
-const HAMMING_ERRORS: [BuiltinErrorDescriptor; 4] = [
+const HAMMING_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HAMMING.ARG_COUNT",
+    identifier: Some("RunMat:hamming:ArgumentCount"),
+    when: "More than a sampling option and an output-type option are supplied.",
+    message: "hamming: too many input arguments",
+};
+
+const HAMMING_ERRORS: [BuiltinErrorDescriptor; 5] = [
     HAMMING_ERROR_INVALID_LENGTH,
     HAMMING_ERROR_INVALID_OPTION,
     HAMMING_ERROR_UNKNOWN_OPTION,
     HAMMING_ERROR_INTERNAL,
+    HAMMING_ERROR_ARG_COUNT,
 ];
+
+const HAMMING_LOGICAL_LENGTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "hamming-logical-length",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "hamming with a logical scalar length is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:HammingLogicalLengthExtension"),
+};
+
+const HAMMING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [HAMMING_LOGICAL_LENGTH_EXTENSION];
+
+const HAMMING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "L",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "L accepts every built-in integer class as a nonnegative scalar length; floating L is rounded to the nearest integer.",
+    }];
+
+pub const HAMMING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "w = hamming(L[, sflag][, typeName])",
+        inputs: &HAMMING_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The default and sampling-only forms return a double column vector; typeName selects double or single. L is a host structural scalar with no interactive gpuArray overload; RunMat may materialize the new floating output on its active provider as an internal acceleration choice.",
+    }];
 
 pub const HAMMING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &HAMMING_SIGNATURES,
@@ -173,29 +268,110 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "hamming,window,signal processing,dsp,fft",
     type_resolver(window_vector_type),
     descriptor(crate::builtins::math::signal::hamming::HAMMING_DESCRIPTOR),
+    extensions(HAMMING_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::signal::hamming::HAMMING_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::hamming"
 )]
 async fn hamming_builtin(
     n: runmat_builtins::Value,
     varargin: Vec<runmat_builtins::Value>,
 ) -> crate::BuiltinResult<runmat_builtins::Value> {
-    let options = parse_window_options(n, &varargin, false).map_err(hamming_map_window_error)?;
+    validate_hamming_options(&varargin)?;
+    if matches!(n, runmat_builtins::Value::Bool(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HAMMING_LOGICAL_LENGTH_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let options = parse_window_options(n, &varargin, true).map_err(hamming_map_window_error)?;
     if options.len > 1 && provider_precision_matches(options.output_type) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.hamming_window(
                 options.len,
                 matches!(options.sampling, WindowSampling::Periodic),
             ) {
-                return Ok(runmat_builtins::Value::GpuTensor(handle));
+                let precision = match options.output_type {
+                    WindowOutputType::Double => runmat_accelerate_api::ProviderPrecision::F64,
+                    WindowOutputType::Single => runmat_accelerate_api::ProviderPrecision::F32,
+                };
+                if valid_provider_window(&handle, provider, options.len, precision) {
+                    return Ok(runmat_builtins::Value::GpuTensor(handle));
+                }
+                free_rejected_provider_window(&handle, provider);
             }
         }
     }
     window_tensor(options, |idx, total| {
         let denom = (total - 1) as f64;
-        let phase = 2.0 * std::f64::consts::PI * idx as f64 / denom;
-        0.54 - 0.46 * phase.cos()
+        0.54 - 0.46 * cospi_real(2.0 * idx as f64 / denom)
     })
     .map_err(hamming_map_window_error)
+}
+
+fn validate_hamming_options(args: &[runmat_builtins::Value]) -> crate::BuiltinResult<()> {
+    if args.len() > 2 {
+        return Err(hamming_error(&HAMMING_ERROR_ARG_COUNT));
+    }
+    let keywords = args
+        .iter()
+        .map(|arg| keyword(arg).ok_or_else(|| hamming_error(&HAMMING_ERROR_INVALID_OPTION)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let valid = match keywords.as_slice() {
+        [] => true,
+        [option] => matches!(
+            option.as_str(),
+            "symmetric" | "periodic" | "double" | "single"
+        ),
+        [sampling, output_type] => {
+            matches!(sampling.as_str(), "symmetric" | "periodic")
+                && matches!(output_type.as_str(), "double" | "single")
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        let option = keywords
+            .iter()
+            .find(|option| {
+                !matches!(
+                    option.as_str(),
+                    "symmetric" | "periodic" | "double" | "single"
+                )
+            })
+            .or_else(|| keywords.first())
+            .map(String::as_str)
+            .unwrap_or_default();
+        Err(hamming_error_with_detail(
+            &HAMMING_ERROR_UNKNOWN_OPTION,
+            format!("'{option}'"),
+        ))
+    }
+}
+
+fn valid_provider_window(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    len: usize,
+    precision: runmat_accelerate_api::ProviderPrecision,
+) -> bool {
+    handle.shape == [len, 1]
+        && handle.device_id == provider.device_id()
+        && runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(handle) == Some(precision)
+        && runmat_accelerate_api::handle_integer_type(handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(handle)
+        && runmat_accelerate_api::provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn free_rejected_provider_window(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) {
+    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
+    let _ = owner.free(handle);
 }
 
 #[cfg(test)]
@@ -203,7 +379,9 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, Value};
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider as _;
+    use runmat_builtins::{builtin_function_by_name, IntValue, NumericDType, Value};
 
     #[test]
     fn hamming_returns_expected_values() {
@@ -235,10 +413,18 @@ mod tests {
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"w = hamming(n)"));
         assert!(labels.contains(&"w = hamming(n, sampling)"));
+        assert!(labels.contains(&"w = hamming(n, precision)"));
+        assert!(labels.contains(&"w = hamming(n, sampling, precision)"));
         assert!(descriptor
             .errors
             .iter()
             .any(|err| err.code == "RM.HAMMING.INVALID_LENGTH"));
+        assert_eq!(HAMMING_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            HAMMING_INTEGER_CAPABILITIES[0].inputs[0].classes,
+            crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+        );
+        assert_eq!(HAMMING_EXTENSIONS, [HAMMING_LOGICAL_LENGTH_EXTENSION]);
     }
 
     #[test]
@@ -291,6 +477,136 @@ mod tests {
     }
 
     #[test]
+    fn hamming_accepts_every_integer_length_class_and_selects_output_precision() {
+        let _guard = test_support::accel_test_lock();
+        for length in [
+            IntValue::I8(5),
+            IntValue::I16(5),
+            IntValue::I32(5),
+            IntValue::I64(5),
+            IntValue::U8(5),
+            IntValue::U16(5),
+            IntValue::U32(5),
+            IntValue::U64(5),
+        ] {
+            let output = test_support::gather(
+                block_on(hamming_builtin(Value::Int(length.clone()), Vec::new()))
+                    .expect("integer length"),
+            )
+            .expect("gather default output");
+            assert_eq!(output.shape, vec![5, 1]);
+            assert_eq!(output.numeric_dtype(), NumericDType::F64);
+
+            let single = test_support::gather(
+                block_on(hamming_builtin(
+                    Value::Int(length),
+                    vec![Value::from("single")],
+                ))
+                .expect("integer length with single output"),
+            )
+            .expect("gather single output");
+            assert_eq!(single.shape, vec![5, 1]);
+            assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        }
+    }
+
+    #[test]
+    fn hamming_logical_length_is_mode_gated_and_argument_count_precedes_the_gate() {
+        let _guard = test_support::accel_test_lock();
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(hamming_builtin(Value::Bool(true), Vec::new()))
+                .expect_err("logical length must be gated");
+            assert_eq!(
+                error.identifier(),
+                HAMMING_LOGICAL_LENGTH_EXTENSION.error_identifier
+            );
+            let error = block_on(hamming_builtin(
+                Value::Bool(true),
+                vec![
+                    Value::from("symmetric"),
+                    Value::from("double"),
+                    Value::from("single"),
+                ],
+            ))
+            .expect_err("argument count must reject first");
+            assert_eq!(error.identifier(), HAMMING_ERROR_ARG_COUNT.identifier);
+        }
+
+        {
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let output = test_support::gather(
+                block_on(hamming_builtin(Value::Bool(true), Vec::new()))
+                    .expect("RunMat mode accepts logical length"),
+            )
+            .expect("gather logical-length output");
+            assert_eq!(output.shape, vec![1, 1]);
+            assert_eq!(output.numeric_dtype(), NumericDType::F64);
+        }
+    }
+
+    #[test]
+    fn hamming_rejects_reversed_duplicate_and_excess_options() {
+        let _guard = test_support::accel_test_lock();
+        for options in [
+            vec![Value::from("single"), Value::from("periodic")],
+            vec![Value::from("periodic"), Value::from("periodic")],
+        ] {
+            let error = block_on(hamming_builtin(Value::Num(5.0), options))
+                .expect_err("invalid option order");
+            assert_eq!(error.identifier(), HAMMING_ERROR_UNKNOWN_OPTION.identifier);
+        }
+        let error = block_on(hamming_builtin(
+            Value::Num(5.0),
+            vec![
+                Value::from("symmetric"),
+                Value::from("double"),
+                Value::from("single"),
+            ],
+        ))
+        .expect_err("too many options");
+        assert_eq!(error.identifier(), HAMMING_ERROR_ARG_COUNT.identifier);
+    }
+
+    #[test]
+    fn hamming_uses_cospi_coefficient_accuracy() {
+        let _guard = test_support::accel_test_lock();
+        let output = test_support::gather(
+            block_on(hamming_builtin(Value::Int(IntValue::U8(4)), Vec::new()))
+                .expect("four-point window"),
+        )
+        .expect("gather four-point window");
+        let improved = 0.54 - 0.46 * cospi_real(4.0 / 3.0);
+        let legacy = 0.54 - 0.46 * (4.0 * std::f64::consts::PI / 3.0).cos();
+        assert_ne!(improved.to_bits(), legacy.to_bits());
+        assert_eq!(output.materialize_f64()[2].to_bits(), improved.to_bits());
+    }
+
+    #[test]
+    fn hamming_rejects_negative_huge_complex_and_resident_lengths() {
+        {
+            let _guard = test_support::accel_test_lock();
+            assert!(block_on(hamming_builtin(Value::Int(IntValue::I64(-1)), Vec::new())).is_err());
+            assert!(block_on(hamming_builtin(
+                Value::Int(IntValue::U64(u64::MAX)),
+                vec![Value::from("periodic")],
+            ))
+            .is_err());
+            assert!(block_on(hamming_builtin(Value::Complex(4.0, 0.0), Vec::new())).is_err());
+        }
+        test_support::with_test_provider(|provider| {
+            let length = runmat_builtins::Tensor::new_integer(
+                runmat_builtins::IntegerStorage::U16(vec![4]),
+                vec![1, 1],
+            )
+            .expect("length");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &length)
+                .expect("upload resident length");
+            assert!(block_on(hamming_builtin(Value::GpuTensor(handle), Vec::new())).is_err());
+        });
+    }
+
+    #[test]
     fn hamming_gpu_matches_cpu() {
         test_support::with_test_provider(|_| {
             let value =
@@ -307,5 +623,34 @@ mod tests {
             let periodic_one = test_support::gather(periodic_one).expect("gather periodic len1");
             assert_eq!(periodic_one.materialize_f64(), vec![1.0]);
         });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn hamming_integer_length_generates_current_window_on_wgpu() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+        let output_type = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => "double",
+            runmat_accelerate_api::ProviderPrecision::F32 => "single",
+        };
+        let result = block_on(hamming_builtin(
+            Value::Int(IntValue::U16(4)),
+            vec![Value::from("periodic"), Value::from(output_type)],
+        ))
+        .expect("WGPU Hamming window");
+        assert!(matches!(result, Value::GpuTensor(_)));
+        let output = test_support::gather(result).expect("gather WGPU window");
+        assert_eq!(output.shape, vec![4, 1]);
+        let expected = 0.54 - 0.46 * cospi_real(0.5);
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-14,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-6,
+        };
+        assert!((output.materialize_f64()[1] - expected).abs() < tolerance);
     }
 }

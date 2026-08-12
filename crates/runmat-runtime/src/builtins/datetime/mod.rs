@@ -1460,7 +1460,9 @@ fn calendar_duration_tensor_for_object(obj: &ObjectInstance, field: &str) -> Bui
     }
 }
 
-fn calendar_duration_tensors_from_value(value: &Value) -> BuiltinResult<(Tensor, Tensor)> {
+pub(crate) fn calendar_duration_tensors_from_value(
+    value: &Value,
+) -> BuiltinResult<(Tensor, Tensor)> {
     match value {
         Value::Object(obj) if obj.is_class(CALENDAR_DURATION_CLASS) => Ok((
             calendar_duration_tensor_for_object(obj, CALENDAR_MONTHS_FIELD)?,

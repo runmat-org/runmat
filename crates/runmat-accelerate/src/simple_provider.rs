@@ -1044,19 +1044,24 @@ enum WindowKind {
     Blackman,
 }
 
-fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64> {
-    match len {
+fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Result<Vec<f64>> {
+    Ok(match len {
         0 => Vec::new(),
         1 => vec![1.0],
         _ => {
-            let effective_len = if periodic { len + 1 } else { len };
+            let effective_len = if periodic {
+                len.checked_add(1)
+                    .ok_or_else(|| anyhow::anyhow!("window length exceeds supported range"))?
+            } else {
+                len
+            };
             let denom = (effective_len - 1) as f64;
             let mut data = (0..effective_len)
                 .map(|idx| {
                     let phase = 2.0 * std::f64::consts::PI * idx as f64 / denom;
                     match kind {
                         WindowKind::Hann => 0.5 - 0.5 * phase.cos(),
-                        WindowKind::Hamming => 0.54 - 0.46 * phase.cos(),
+                        WindowKind::Hamming => 0.54 - 0.46 * window_cospi(2.0 * idx as f64 / denom),
                         WindowKind::Blackman => {
                             let first = 2.0 * idx as f64 / denom;
                             let second = 4.0 * idx as f64 / denom;
@@ -1070,7 +1075,7 @@ fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64
             }
             data
         }
-    }
+    })
 }
 
 fn window_cospi(value: f64) -> f64 {
@@ -7877,21 +7882,21 @@ impl AccelProvider for InProcessProvider {
 
     fn hann_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
         Ok(self.allocate_tensor(
-            generate_window_data(WindowKind::Hann, len, periodic),
+            generate_window_data(WindowKind::Hann, len, periodic)?,
             vec![len, 1],
         ))
     }
 
     fn hamming_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
         Ok(self.allocate_tensor(
-            generate_window_data(WindowKind::Hamming, len, periodic),
+            generate_window_data(WindowKind::Hamming, len, periodic)?,
             vec![len, 1],
         ))
     }
 
     fn blackman_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
         Ok(self.allocate_tensor(
-            generate_window_data(WindowKind::Blackman, len, periodic),
+            generate_window_data(WindowKind::Blackman, len, periodic)?,
             vec![len, 1],
         ))
     }

@@ -64620,6 +64620,88 @@
           "when": "Gradient execution fails due to gather, conversion, allocation, or indexing operations.",
           "message": "gradient: internal failure"
         }
+      ],
+      "extensions": [
+        {
+          "id": "gradient-integer-data",
+          "mode": "RunMatOnly",
+          "description": "gradient with typed-integer data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GradientIntegerDataExtension"
+        },
+        {
+          "id": "gradient-logical-data",
+          "mode": "RunMatOnly",
+          "description": "gradient with logical data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GradientLogicalDataExtension"
+        },
+        {
+          "id": "gradient-integer-spacing",
+          "mode": "RunMatOnly",
+          "description": "gradient with typed-integer spacing is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GradientIntegerSpacingExtension"
+        },
+        {
+          "id": "gradient-logical-spacing",
+          "mode": "RunMatOnly",
+          "description": "gradient with logical spacing is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GradientLogicalSpacingExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "G = gradient(integer_F, ...)",
+          "inputs": [
+            {
+              "name": "F",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes must be exactly representable at the binary64 finite-difference boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer data crosses one checked binary64 boundary and produces ordinary double gradient components; resident integer buffers never enter floating provider kernels."
+        },
+        {
+          "form": "G = gradient(F, integer_h_or_h_i, ...)",
+          "inputs": [
+            {
+              "name": "h or h_i",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "Allowed",
+              "notes": "Scalar and coordinate-vector integer spacing must be exactly representable at the binary64 finite-difference boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "GatherFallback",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer spacing crosses one checked binary64 boundary; output precision continues to follow the ordinary floating data path."
+        }
       ]
     },
     {
@@ -64667,6 +64749,43 @@
           "identifier": "RunMat:gray2rgb:Internal",
           "when": "RGB output tensor construction fails internally.",
           "message": "gray2rgb: internal conversion failure"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "gray2rgb-callable",
+          "mode": "RunMatOnly",
+          "description": "gray2rgb is a RunMat-provided image helper rather than an R2026a MATLAB product API",
+          "error_identifier": "RunMat:compatibility:Gray2rgbCallExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "RGB = gray2rgb(integer_I)",
+          "inputs": [
+            {
+              "name": "I",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are replicated directly from authoritative storage without entering a floating compatibility mirror."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "PreserveInput",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "ElementwiseShapePreserving",
+          "notes": "The entire callable is RunMat-only. Integer images retain their class and exact values while a third RGB plane dimension is appended; resident input gathers through its owner and returns the host helper result."
         }
       ]
     },
@@ -64883,6 +65002,109 @@
           "when": "Object construction, property access, or interpolation output construction fails.",
           "message": "griddedInterpolant: internal error"
         }
+      ],
+      "extensions": [
+        {
+          "id": "griddedinterpolant-integer-grid",
+          "mode": "RunMatOnly",
+          "description": "griddedInterpolant with typed-integer sample grids is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GriddedInterpolantIntegerGridExtension"
+        },
+        {
+          "id": "griddedinterpolant-integer-values",
+          "mode": "RunMatOnly",
+          "description": "griddedInterpolant with typed-integer sample values is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GriddedInterpolantIntegerValuesExtension"
+        },
+        {
+          "id": "griddedinterpolant-integer-query",
+          "mode": "RunMatOnly",
+          "description": "griddedInterpolant with typed-integer query coordinates is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GriddedInterpolantIntegerQueryExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "F = griddedInterpolant(integer_grid, V, ...)",
+          "inputs": [
+            {
+              "name": "x, X_i, or gridVecs",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes must be exactly representable at the binary64 interpolation-coordinate boundary."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer sample grids cross one checked binary64 boundary; the constructor returns an interpolant object whose GridVectors are floating arrays."
+        },
+        {
+          "form": "F = griddedInterpolant(grid, integer_V, ...)",
+          "inputs": [
+            {
+              "name": "v, V, or Values",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes must be exactly representable before the object stores ordinary double Values."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer sample values cross one checked binary64 boundary, are stored as double Values, and produce double evaluations."
+        },
+        {
+          "form": "Vq = F(integer_query)",
+          "inputs": [
+            {
+              "name": "Xq, Xq_i, or query grid vectors",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "All query syntaxes admit the same eight integer classes only when every coordinate is exactly representable as binary64."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer query coordinates cross one checked binary64 boundary; output precision continues to follow the interpolant Values class."
+        }
       ]
     },
     {
@@ -64951,6 +65173,70 @@
           "identifier": "RunMat:grouping:TooLarge",
           "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
           "message": "grouping builtin: output is too large"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "groupcounts-resident-input",
+          "mode": "RunMatOnly",
+          "description": "groupcounts on interactive resident GPU data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GroupcountsResidentInputExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[B,BG,BP] = groupcounts(integer_A)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer numeric grouping columns are compared exactly and their unique group labels preserve class."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Unbinned grouping and BG are exact and BG preserves A's class; B and BP are double count and percentage outputs. [integer-audit-open] Documented integer groupbins remain unresolved and keep this name in the quantitative audit queue."
+        },
+        {
+          "form": "G = groupcounts(T,groupvars) with integer grouping variables",
+          "inputs": [
+            {
+              "name": "integer grouping table variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer-valued table grouping variables retain exact class and values in the output table."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "For the unbinned form, output grouping variables preserve exact integer class while GroupCount and Percent are double. [integer-audit-open] Documented integer groupbins remain unresolved and keep this name in the quantitative audit queue."
         }
       ]
     },
@@ -65033,6 +65319,76 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "groupsummary-resident-input",
+          "mode": "RunMatOnly",
+          "description": "groupsummary on interactive resident GPU data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GroupsummaryResidentInputExtension"
+        },
+        {
+          "id": "groupsummary-integer-control",
+          "mode": "RunMatOnly",
+          "description": "groupsummary with a native-class integer name-value control is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GroupsummaryIntegerControlExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "G = groupsummary(T,groupvars,method,___) with integer grouping variables",
+          "inputs": [
+            {
+              "name": "integer grouping variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer table grouping variables are compared exactly and preserve class in the output table."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Grouping is exact; output grouping columns preserve class while GroupCount and summaries are function-specific."
+        },
+        {
+          "form": "G = groupsummary(T,groupvars,method,integer_datavars) for implemented methods",
+          "inputs": [
+            {
+              "name": "integer data variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Integer table data variables are numeric and are valid data-variable selections; exact-class extrema and explicit floating statistics preserve the documented method contract."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Documented integer table data uses exact native-class min/max and explicit floating computation for mean, sum, median, and counts. [integer-audit-open] Documented integer groupbins remain unresolved and keep this name in the quantitative audit queue; empty-group expansion, additional named methods, and function handles are general coverage gaps."
+        }
       ]
     },
     {
@@ -65080,6 +65436,35 @@
           "identifier": "RunMat:grouping:TooLarge",
           "when": "The requested dense or combinatorial output exceeds RunMat's materialization limit.",
           "message": "grouping builtin: output is too large"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "[g,gN,gL] = grp2idx(integer_s)",
+          "inputs": [
+            {
+              "name": "s",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "All eight integer classes are documented grouping-vector inputs and are compared from authoritative storage."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "SameSizeOrScalar",
+          "notes": "g is a double group-index column, gN is cellstr, and gL preserves s's exact integer class. Documented resident inputs currently use the runtime gather fallback."
         }
       ]
     },
@@ -65246,6 +65631,115 @@
           "when": "readtable receives a file type outside the text or spreadsheet import backends.",
           "message": "readtable: unsupported file type"
         }
+      ],
+      "extensions": [
+        {
+          "id": "grpstats-resident-input",
+          "mode": "RunMatOnly",
+          "description": "grpstats on interactive resident GPU data is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GrpstatsResidentInputExtension"
+        },
+        {
+          "id": "grpstats-integer-data",
+          "mode": "RunMatOnly",
+          "description": "grpstats with a native-class integer matrix X is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GrpstatsIntegerDataExtension"
+        },
+        {
+          "id": "grpstats-integer-alpha",
+          "mode": "RunMatOnly",
+          "description": "grpstats with a native-class integer Alpha value is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GrpstatsIntegerAlphaExtension"
+        },
+        {
+          "id": "grpstats-integer-selector",
+          "mode": "RunMatOnly",
+          "description": "grpstats with a native-class integer table selector is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:GrpstatsIntegerSelectorExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "stats = grpstats(X,integer_group,___)",
+          "inputs": [
+            {
+              "name": "group",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Statistics grouping variables explicitly admit signed and unsigned integer classes and are compared exactly."
+            }
+          ],
+          "computation_domain": "ExactInteger",
+          "output_class": "FunctionSpecific",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Integer grouping keys remain exact, including above flintmax; summary output is governed by X and whichstats."
+        },
+        {
+          "form": "stats = grpstats(integer_X,group,___)",
+          "inputs": [
+            {
+              "name": "X",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "RunMatOnly",
+              "scalar_double": "NotApplicable",
+              "notes": "The documented matrix X datatype list excludes signed and unsigned integer data; RunMat admission is independently mode-gated."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "Double",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "RunMat-only integer matrix data crosses a checked binary64 boundary after its compatibility gate; values that cannot be represented exactly reject rather than silently rounding."
+        },
+        {
+          "form": "tblstats = grpstats(tbl,groupvars,___) with integer DataVars",
+          "inputs": [
+            {
+              "name": "integer table data variables",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "Table variables may be numeric, so selected native integer variables use the documented table form."
+            }
+          ],
+          "computation_domain": "FunctionSpecific",
+          "output_class": "FunctionSpecific",
+          "overflow": "FunctionSpecific",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Selected integer table variables are documented numeric data; extrema retain exact integer values while floating statistics enter their explicit computation domain."
+        }
       ]
     },
     {
@@ -65294,12 +65788,51 @@
           "identifier": "RunMat:gt:SizeMismatch",
           "when": "Operands are not broadcast-compatible.",
           "message": "gt: array sizes are not compatible for broadcasting"
-        },
+        }
+      ],
+      "integer_capabilities": [
         {
-          "code": "RM.GT.COMPLEX_UNSUPPORTED",
-          "identifier": "RunMat:gt:ComplexNotSupported",
-          "when": "At least one operand is complex.",
-          "message": "gt: complex numbers are not supported"
+          "form": "tf = gt(integer_A,integer_or_numeric_B)",
+          "inputs": [
+            {
+              "name": "A",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "All eight integer classes compare exactly against integer, logical, single, and double operands."
+            },
+            {
+              "name": "B",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Mixed signed/unsigned and integer/double comparisons do not convert authoritative integer storage to f64."
+            }
+          ],
+          "computation_domain": "Predicate",
+          "output_class": "Logical",
+          "overflow": "NotApplicable",
+          "backend": "GatherFallback",
+          "overload": "BroadcastCompatible",
+          "notes": "Compatible implicit expansion is supported; correctness-first GPU fallback restores a logical result to the owning provider."
         }
       ]
     },
@@ -65428,6 +65961,69 @@
               "description": "Hamming window column vector."
             }
           ]
+        },
+        {
+          "label": "w = hamming(n, precision)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length."
+            },
+            {
+              "name": "precision",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"double\"",
+              "description": "Output precision: \"double\" or \"single\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hamming window column vector."
+            }
+          ]
+        },
+        {
+          "label": "w = hamming(n, sampling, precision)",
+          "inputs": [
+            {
+              "name": "n",
+              "ty": "SizeArg",
+              "arity": "Required",
+              "default": null,
+              "description": "Window length."
+            },
+            {
+              "name": "sampling",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"symmetric\"",
+              "description": "Sampling mode: \"symmetric\" or \"periodic\"."
+            },
+            {
+              "name": "precision",
+              "ty": "StringScalar",
+              "arity": "Optional",
+              "default": "\"double\"",
+              "description": "Output precision: \"double\" or \"single\"."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "w",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Hamming window column vector."
+            }
+          ]
         }
       ],
       "errors": [
@@ -65454,6 +66050,49 @@
           "identifier": "RunMat:hamming:InternalError",
           "when": "Window materialization fails internally.",
           "message": "hamming: internal error"
+        },
+        {
+          "code": "RM.HAMMING.ARG_COUNT",
+          "identifier": "RunMat:hamming:ArgumentCount",
+          "when": "More than a sampling option and an output-type option are supplied.",
+          "message": "hamming: too many input arguments"
+        }
+      ],
+      "extensions": [
+        {
+          "id": "hamming-logical-length",
+          "mode": "RunMatOnly",
+          "description": "hamming with a logical scalar length is a RunMat extension",
+          "error_identifier": "RunMat:compatibility:HammingLogicalLengthExtension"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "w = hamming(L[, sflag][, typeName])",
+          "inputs": [
+            {
+              "name": "L",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "NotApplicable",
+              "notes": "L accepts every built-in integer class as a nonnegative scalar length; floating L is rounded to the nearest integer."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "OptionDependent",
+          "overflow": "NotApplicable",
+          "backend": "FunctionSpecific",
+          "overload": "StructuralParameter",
+          "notes": "The default and sampling-only forms return a double column vector; typeName selects double or single. L is a host structural scalar with no interactive gpuArray overload; RunMat may materialize the new floating output on its active provider as an internal acceleration choice."
         }
       ]
     },

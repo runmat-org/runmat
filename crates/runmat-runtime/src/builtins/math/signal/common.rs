@@ -384,7 +384,7 @@ pub(crate) fn window_tensor(
     }
     let effective_len = match options.sampling {
         WindowSampling::Symmetric => len,
-        WindowSampling::Periodic => len + 1,
+        WindowSampling::Periodic => len.checked_add(1).ok_or(WindowArgError::InvalidLength)?,
     };
     let mut data = (0..effective_len)
         .map(|idx| coeff(idx, effective_len))
@@ -416,6 +416,9 @@ pub(crate) fn parse_window_options(
             "single" if allow_type_name => output_type = WindowOutputType::Single,
             _ => return Err(WindowArgError::UnknownOption(keyword)),
         }
+    }
+    if matches!(sampling, WindowSampling::Periodic) && len.checked_add(1).is_none() {
+        return Err(WindowArgError::InvalidLength);
     }
     Ok(WindowOptions {
         len,
@@ -576,6 +579,21 @@ mod tests {
         let len = scalar_length_arg(Value::Num(4.0)).expect("valid length");
 
         assert_eq!(len, 4);
+    }
+
+    #[test]
+    fn periodic_window_rejects_length_increment_overflow() {
+        if usize::BITS != 64 {
+            return;
+        }
+        let error = parse_window_options(
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            &[Value::from("periodic")],
+            true,
+        )
+        .expect_err("periodic effective length must not overflow");
+
+        assert_eq!(error, WindowArgError::InvalidLength);
     }
 
     #[test]

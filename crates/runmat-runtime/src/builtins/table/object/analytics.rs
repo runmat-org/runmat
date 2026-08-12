@@ -145,11 +145,11 @@ pub(in crate::builtins::table) enum GroupAtom {
 impl GroupAtom {
     fn rank(&self) -> u8 {
         match self {
-            Self::Missing => 0,
-            Self::Logical(_) => 1,
-            Self::Number(_) => 2,
-            Self::Integer(_) => 3,
-            Self::Text(_) => 4,
+            Self::Logical(_) => 0,
+            Self::Number(_) => 1,
+            Self::Integer(_) => 2,
+            Self::Text(_) => 3,
+            Self::Missing => 4,
         }
     }
 }
@@ -182,6 +182,16 @@ impl Ord for GroupAtom {
             (Self::Text(a), Self::Text(b)) => a.cmp(b),
             _ => Ordering::Equal,
         }
+    }
+}
+
+pub(in crate::builtins::table) fn group_atom_is_missing(atom: &GroupAtom) -> bool {
+    match atom {
+        GroupAtom::Missing => true,
+        GroupAtom::Number(value) => value.is_nan(),
+        GroupAtom::Integer(_) => false,
+        GroupAtom::Text(value) => value.is_empty(),
+        GroupAtom::Logical(_) => false,
     }
 }
 
@@ -220,14 +230,14 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
             }
             tensor
                 .get2(row, 0)
-                .map(GroupAtom::Number)
+                .map(number_group_atom)
                 .unwrap_or(GroupAtom::Missing)
         }
         Value::StringArray(array) => array
             .data
             .get(row)
             .cloned()
-            .map(GroupAtom::Text)
+            .map(text_group_atom)
             .unwrap_or(GroupAtom::Missing),
         Value::LogicalArray(array) => array
             .data
@@ -238,10 +248,53 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))
-                .map(GroupAtom::Number)
+                .map(number_group_atom)
                 .unwrap_or(GroupAtom::Missing)
         }
-        other => GroupAtom::Text(cell_key_string(other, row)),
+        Value::Object(obj) if obj.is_class("duration") => {
+            crate::builtins::duration::duration_tensor_from_duration_value(value)
+                .ok()
+                .and_then(|tensor| double_value_at(&tensor, row))
+                .map(number_group_atom)
+                .unwrap_or(GroupAtom::Missing)
+        }
+        Value::Object(obj) if obj.is_class("calendarDuration") => {
+            crate::builtins::datetime::calendar_duration_tensors_from_value(value)
+                .ok()
+                .and_then(|(months, days)| {
+                    let months = double_value_at(&months, row)?;
+                    let days = double_value_at(&days, row)?;
+                    if months.is_nan() || days.is_nan() {
+                        None
+                    } else {
+                        Some(text_group_atom(format!("{months}:{days}")))
+                    }
+                })
+                .unwrap_or(GroupAtom::Missing)
+        }
+        Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => {
+            match categorical_label_at(obj, row) {
+                Some(label) if label != "<undefined>" => text_group_atom(label),
+                _ => GroupAtom::Missing,
+            }
+        }
+        other => text_group_atom(cell_key_string(other, row)),
+    }
+}
+
+fn number_group_atom(value: f64) -> GroupAtom {
+    if value.is_nan() {
+        GroupAtom::Missing
+    } else {
+        GroupAtom::Number(value)
+    }
+}
+
+fn text_group_atom(value: String) -> GroupAtom {
+    if value.is_empty() {
+        GroupAtom::Missing
+    } else {
+        GroupAtom::Text(value)
     }
 }
 
@@ -439,7 +492,43 @@ pub(in crate::builtins::table) fn groupsummary_impl(
             "groupsummary: method list must not be empty",
         ));
     }
-    let data_names = if let Some(value) = rest.first() {
+    let mut include_missing = true;
+    let mut rest_index = 0usize;
+    let data_selector = rest.first().filter(|value| {
+        scalar_text(value, "groupsummary argument")
+            .map(|name| {
+                !name.eq_ignore_ascii_case("IncludeMissingGroups")
+                    && !name.eq_ignore_ascii_case("IncludeEmptyGroups")
+            })
+            .unwrap_or(true)
+    });
+    if data_selector.is_some() {
+        rest_index = 1;
+    }
+    while rest_index < rest.len() {
+        if rest_index + 1 >= rest.len() {
+            return Err(invalid_argument(
+                "groupsummary: name-value options must be provided in pairs",
+            ));
+        }
+        let name = scalar_text(&rest[rest_index], "groupsummary option name")?;
+        let value = &rest[rest_index + 1];
+        if name.eq_ignore_ascii_case("IncludeMissingGroups") {
+            include_missing = zero_one_bool_scalar(value, "IncludeMissingGroups")?;
+        } else if name.eq_ignore_ascii_case("IncludeEmptyGroups") {
+            if zero_one_bool_scalar(value, "IncludeEmptyGroups")? {
+                return Err(invalid_argument(
+                    "groupsummary: IncludeEmptyGroups=true is not supported until categorical level expansion is implemented",
+                ));
+            }
+        } else {
+            return Err(invalid_argument(format!(
+                "groupsummary: unsupported option '{name}'"
+            )));
+        }
+        rest_index += 2;
+    }
+    let data_names = if let Some(value) = data_selector {
         parse_variable_selector_for_object(Some(value), &object, &names)?
     } else {
         names
@@ -469,7 +558,11 @@ pub(in crate::builtins::table) fn groupsummary_impl(
                     .unwrap_or(GroupAtom::Missing)
             })
             .collect::<Vec<_>>();
-        groups.entry(key).or_default().push(row);
+        if include_missing && key.iter().any(group_atom_is_missing) {
+            groups.entry(key).or_default().push(row);
+        } else if !key.iter().any(group_atom_is_missing) {
+            groups.entry(key).or_default().push(row);
+        }
     }
     let group_rows = groups
         .values()
@@ -492,19 +585,118 @@ pub(in crate::builtins::table) fn groupsummary_impl(
         )
         .map_err(invalid_variable)?,
     ));
+    let grouped_rows = groups.values().collect::<Vec<_>>();
     for method in &methods {
         for name in &data_names {
             let value = variables.fields.get(name).ok_or_else(|| {
                 invalid_variable(format!("groupsummary: missing data variable '{name}'"))
             })?;
-            let values = summarize_groups(value, groups.values(), method)?;
+            let summary = summarize_groups_value(value, &grouped_rows, method)?;
             out_names.push(format!("{}_{}", method.to_ascii_lowercase(), name));
-            out_columns.push(Value::Tensor(
-                Tensor::new(values, vec![groups.len(), 1]).map_err(invalid_variable)?,
-            ));
+            out_columns.push(summary);
         }
     }
     table_from_columns(out_names, out_columns)
+}
+
+fn summarize_groups_value(
+    value: &Value,
+    groups: &[&Vec<usize>],
+    method: &str,
+) -> BuiltinResult<Value> {
+    let Value::Tensor(tensor) = value else {
+        return Err(invalid_variable(
+            "groupsummary: summary data variables must be numeric column vectors",
+        ));
+    };
+    if tensor.cols() != 1 {
+        return Err(invalid_variable(
+            "groupsummary: summary data variables must be numeric column vectors",
+        ));
+    }
+    let Some(storage) = tensor.integer_storage() else {
+        let values = summarize_groups(value, groups.iter().copied(), method)?;
+        return Tensor::new(values, vec![groups.len(), 1])
+            .map(Value::Tensor)
+            .map_err(invalid_variable);
+    };
+    let method = method.to_ascii_lowercase();
+    if method == "min" || method == "max" {
+        let mut extrema = Vec::with_capacity(groups.len());
+        for rows in groups {
+            let mut values = rows.iter().map(|row| {
+                storage
+                    .value_at(*row)
+                    .ok_or_else(|| invalid_index("groupsummary: integer row out of bounds"))
+            });
+            let mut selected = values.next().transpose()?.ok_or_else(|| {
+                invalid_argument("groupsummary: observed integer groups cannot be empty")
+            })?;
+            for value in values {
+                let value = value?;
+                let ordering = compare_integer_values(&value, &selected);
+                if (method == "min" && ordering == Ordering::Less)
+                    || (method == "max" && ordering == Ordering::Greater)
+                {
+                    selected = value;
+                }
+            }
+            extrema.push(selected);
+        }
+        let output = storage
+            .from_exact_values_like(extrema)
+            .map_err(invalid_variable)?;
+        return Tensor::new_integer(output, vec![groups.len(), 1])
+            .map(Value::Tensor)
+            .map_err(invalid_variable);
+    }
+    if method == "count" || method == "numel" {
+        return Tensor::new(
+            groups.iter().map(|rows| rows.len() as f64).collect(),
+            vec![groups.len(), 1],
+        )
+        .map(Value::Tensor)
+        .map_err(invalid_variable);
+    }
+    let mut output = Vec::with_capacity(groups.len());
+    for rows in groups {
+        let mut values = rows
+            .iter()
+            .map(|row| {
+                let value = storage
+                    .value_at(*row)
+                    .ok_or_else(|| invalid_index("groupsummary: integer row out of bounds"))?;
+                if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+                    return Err(invalid_argument(
+                        "groupsummary: integer data must be exactly representable as double for floating summary methods",
+                    ));
+                }
+                Ok(value.to_f64())
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        let value = match method.as_str() {
+            "mean" => values.iter().sum::<f64>() / values.len() as f64,
+            "sum" => values.iter().sum(),
+            "median" => {
+                values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+                let mid = values.len() / 2;
+                if values.len().is_multiple_of(2) {
+                    (values[mid - 1] + values[mid]) / 2.0
+                } else {
+                    values[mid]
+                }
+            }
+            other => {
+                return Err(invalid_argument(format!(
+                    "groupsummary: unsupported method '{other}'"
+                )))
+            }
+        };
+        output.push(value);
+    }
+    Tensor::new(output, vec![groups.len(), 1])
+        .map(Value::Tensor)
+        .map_err(invalid_variable)
 }
 
 pub(in crate::builtins::table) fn summarize_groups<'a>(

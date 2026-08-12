@@ -9,10 +9,14 @@ use std::cell::Cell as LocalCell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, MethodDef, NumericDType, ObjectInstance, PropertyDef, ResolveContext,
-    Tensor, Type, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, ClassDef, IntValue, IntegerStorage, MethodDef,
+    NumericDType, ObjectInstance, PropertyDef, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -257,6 +261,93 @@ pub const GRIDDED_INTERPOLANT_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDes
     errors: &ERRORS,
 };
 
+const GRIDDED_INTEGER_GRID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "griddedinterpolant-integer-grid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "griddedInterpolant with typed-integer sample grids is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GriddedInterpolantIntegerGridExtension"),
+};
+
+const GRIDDED_INTEGER_VALUES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "griddedinterpolant-integer-values",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "griddedInterpolant with typed-integer sample values is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GriddedInterpolantIntegerValuesExtension"),
+};
+
+const GRIDDED_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "griddedinterpolant-integer-query",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "griddedInterpolant with typed-integer query coordinates is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GriddedInterpolantIntegerQueryExtension"),
+};
+
+pub const GRIDDED_INTERPOLANT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    GRIDDED_INTEGER_GRID_EXTENSION,
+    GRIDDED_INTEGER_VALUES_EXTENSION,
+    GRIDDED_INTEGER_QUERY_EXTENSION,
+];
+
+const GRIDDED_INTEGER_GRID_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "x, X_i, or gridVecs",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes must be exactly representable at the binary64 interpolation-coordinate boundary.",
+    }];
+
+const GRIDDED_INTEGER_VALUES_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "v, V, or Values",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes must be exactly representable before the object stores ordinary double Values.",
+    }];
+
+const GRIDDED_INTEGER_QUERY_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Xq, Xq_i, or query grid vectors",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All query syntaxes admit the same eight integer classes only when every coordinate is exactly representable as binary64.",
+    }];
+
+pub const GRIDDED_INTERPOLANT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "F = griddedInterpolant(integer_grid, V, ...)",
+        inputs: &GRIDDED_INTEGER_GRID_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer sample grids cross one checked binary64 boundary; the constructor returns an interpolant object whose GridVectors are floating arrays.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "F = griddedInterpolant(grid, integer_V, ...)",
+        inputs: &GRIDDED_INTEGER_VALUES_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer sample values cross one checked binary64 boundary, are stored as double Values, and produce double evaluations.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Vq = F(integer_query)",
+        inputs: &GRIDDED_INTEGER_QUERY_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer query coordinates cross one checked binary64 boundary; output precision continues to follow the interpolant Values class.",
+    },
+];
+
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
@@ -368,9 +459,17 @@ fn ensure_gridded_interpolant_class_registered() {
     descriptor(
         crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_DESCRIPTOR
     ),
+    extensions(
+        crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_EXTENSIONS
+    ),
+    integer_capabilities(
+        crate::builtins::math::interpolation::gridded_interpolant::GRIDDED_INTERPOLANT_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
 async fn gridded_interpolant_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_constructor_integer_extensions(&args)?;
+    let args = gather_values(args).await?;
     ensure_gridded_interpolant_class_registered();
     let spec = parse_constructor(args)?;
     Ok(Value::Object(spec_to_object(spec)?))
@@ -394,9 +493,103 @@ async fn gridded_interpolant_subsref(
         OBJECT_INDEX_PAREN => {
             let spec = object_to_spec(&obj)?;
             let query_args = payload_to_args(payload)?;
+            ensure_query_integer_extensions(&query_args)?;
+            let query_args = gather_values(query_args).await?;
             evaluate_interpolant(&spec, query_args)
         }
         other => Err(invalid(format!("unsupported indexing kind '{other}'"))),
+    }
+}
+
+async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+    let mut gathered = Vec::with_capacity(values.len());
+    for value in values {
+        gathered.push(crate::dispatcher::gather_if_needed_async(&value).await?);
+    }
+    Ok(gathered)
+}
+
+fn ensure_constructor_integer_extensions(args: &[Value]) -> BuiltinResult<()> {
+    let mut numeric_len = args.len();
+    let mut methods = 0usize;
+    while numeric_len > 0 && methods < 2 {
+        let Some(name) = text_from_value(&args[numeric_len - 1]) else {
+            break;
+        };
+        if !is_method_name(&name) {
+            break;
+        }
+        numeric_len -= 1;
+        methods += 1;
+    }
+    match numeric_len {
+        0 => Ok(()),
+        1 => ensure_integer_extension(&args[0], &GRIDDED_INTEGER_VALUES_EXTENSION, "sample values"),
+        2 => {
+            ensure_integer_extension(&args[0], &GRIDDED_INTEGER_GRID_EXTENSION, "sample grid")?;
+            ensure_integer_extension(&args[1], &GRIDDED_INTEGER_VALUES_EXTENSION, "sample values")
+        }
+        _ => {
+            for grid in &args[..numeric_len - 1] {
+                ensure_integer_extension(grid, &GRIDDED_INTEGER_GRID_EXTENSION, "sample grid")?;
+            }
+            ensure_integer_extension(
+                &args[numeric_len - 1],
+                &GRIDDED_INTEGER_VALUES_EXTENSION,
+                "sample values",
+            )
+        }
+    }
+}
+
+fn ensure_query_integer_extensions(args: &[Value]) -> BuiltinResult<()> {
+    for query in args {
+        ensure_integer_extension(query, &GRIDDED_INTEGER_QUERY_EXTENSION, "query coordinates")?;
+    }
+    Ok(())
+}
+
+fn ensure_integer_extension(
+    value: &Value,
+    extension: &BuiltinExtensionDescriptor,
+    role: &str,
+) -> BuiltinResult<()> {
+    if value_contains_typed_integer(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, CLASS_NAME)?;
+        ensure_exact_integer_value(value, role)?;
+    }
+    Ok(())
+}
+
+fn value_contains_typed_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        Value::Cell(cell) => cell.data.iter().any(value_contains_typed_integer),
+        _ => false,
+    }
+}
+
+fn ensure_exact_integer_value(value: &Value, role: &str) -> BuiltinResult<()> {
+    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let valid = match value {
+        Value::Int(value) => exact(value),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .is_none_or(|storage| storage.exact_values().iter().all(exact)),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .all(|value| ensure_exact_integer_value(value, role).is_ok()),
+        _ => true,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "integer {role} must be exactly representable as double"
+        )))
     }
 }
 
@@ -551,10 +744,20 @@ fn text_from_value(value: &Value) -> Option<String> {
 fn numeric_tensor(value: Value, name: &str) -> BuiltinResult<Tensor> {
     match value {
         Value::Num(x) => Tensor::new(vec![x], vec![1, 1]).map_err(internal),
+        Value::Int(value) => {
+            ensure_exact_integer_scalar(&value, name)?;
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(internal)?;
+            tensor_utils::integer_tensor_to_f64(tensor)
+                .map_err(|err| invalid(format!("{name}: {err}")))
+        }
         Value::Tensor(tensor) => match tensor.numeric_dtype() {
             NumericDType::F64 | NumericDType::F32 => Ok(tensor),
-            _ => tensor_utils::integer_tensor_to_f64(tensor)
-                .map_err(|err| invalid(format!("{name}: {err}"))),
+            _ => {
+                ensure_exact_integer_tensor(&tensor, name)?;
+                tensor_utils::integer_tensor_to_f64(tensor)
+                    .map_err(|err| invalid(format!("{name}: {err}")))
+            }
         },
         other => Err(invalid(format!(
             "{name} must be a real numeric array, got {other:?}"
@@ -565,14 +768,43 @@ fn numeric_tensor(value: Value, name: &str) -> BuiltinResult<Tensor> {
 fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(x) => Ok(vec![x]),
+        Value::Int(value) => {
+            ensure_exact_integer_scalar(&value, name)?;
+            Ok(vec![value.to_f64()])
+        }
         Value::Tensor(tensor) if is_vector_shape(&tensor.shape) => {
             // Grid coordinates are evaluated in the interpolator's f64 domain.
+            ensure_exact_integer_tensor(&tensor, name)?;
             Ok(tensor_utils::tensor_into_values_f64(tensor))
         }
         Value::Tensor(_) => Err(invalid(format!("{name} must be a vector"))),
         other => Err(invalid(format!(
             "{name} must be a real numeric vector, got {other:?}"
         ))),
+    }
+}
+
+fn ensure_exact_integer_scalar(value: &IntValue, name: &str) -> BuiltinResult<()> {
+    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "{name}: integer value must be exactly representable as double"
+        )))
+    }
+}
+
+fn ensure_exact_integer_tensor(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+    let Some(storage) = tensor.integer_storage() else {
+        return Ok(());
+    };
+    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    if storage.exact_values().iter().all(exact) {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "{name}: integer values must be exactly representable as double"
+        )))
     }
 }
 
@@ -824,16 +1056,26 @@ fn object_to_spec(value: &Value) -> BuiltinResult<InterpolantSpec> {
         return Err(invalid("receiver must be a griddedInterpolant object"));
     }
     let grid_vectors = match object.properties.get(GRID_VECTORS) {
-        Some(Value::Cell(cell)) => cell
-            .data
-            .iter()
-            .cloned()
-            .map(|value| numeric_vector(value, GRID_VECTORS))
-            .collect::<BuiltinResult<Vec<_>>>()?,
+        Some(Value::Cell(cell)) => {
+            ensure_integer_extension(
+                &Value::Cell(cell.clone()),
+                &GRIDDED_INTEGER_GRID_EXTENSION,
+                "sample grid",
+            )?;
+            cell.data
+                .iter()
+                .cloned()
+                .map(|value| numeric_vector(value, GRID_VECTORS))
+                .collect::<BuiltinResult<Vec<_>>>()?
+        }
         _ => return Err(internal("object is missing GridVectors")),
     };
     let values = match object.properties.get(VALUES) {
-        Some(Value::Tensor(tensor)) => tensor.clone(),
+        Some(Value::Tensor(tensor)) => {
+            let value = Value::Tensor(tensor.clone());
+            ensure_integer_extension(&value, &GRIDDED_INTEGER_VALUES_EXTENSION, "sample values")?;
+            numeric_tensor(value, VALUES)?
+        }
         _ => return Err(internal("object is missing Values")),
     };
     let method = match object.properties.get(METHOD).and_then(text_from_value) {
@@ -891,6 +1133,7 @@ fn evaluate_interpolant(spec: &InterpolantSpec, args: Vec<Value>) -> BuiltinResu
         spec.method,
         spec.extrapolation,
     )?;
+    ensure_query_integer_extensions(&args)?;
     let plan = parse_query_plan(&spec.grid_vectors, args)?;
     let grid_rank = spec.grid_vectors.len();
     let grid_size = spec
@@ -1084,16 +1327,15 @@ fn parse_query_plan(grid_vectors: &[Vec<f64>], args: Vec<Value>) -> BuiltinResul
 fn numeric_query_values(value: Value, name: &str) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
     match value {
         Value::Num(x) => Ok((vec![x], vec![1, 1])),
-        Value::Tensor(tensor)
-            if matches!(
-                tensor.numeric_dtype(),
-                NumericDType::F64 | NumericDType::F32
-            ) =>
-        {
+        Value::Int(value) => {
+            ensure_exact_integer_scalar(&value, name)?;
+            Ok((vec![value.to_f64()], vec![1, 1]))
+        }
+        Value::Tensor(tensor) => {
+            ensure_exact_integer_tensor(&tensor, name)?;
             let shape = tensor.shape.clone();
             Ok((tensor_utils::tensor_into_values_f64(tensor), shape))
         }
-        Value::Tensor(_) => Err(invalid(format!("{name} must be single or double"))),
         other => Err(invalid(format!("{name} must be numeric, got {other:?}"))),
     }
 }
@@ -1428,10 +1670,12 @@ mod tests {
     }
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(gridded_interpolant_builtin(args))
     }
 
     fn subsref(obj: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         let len = args.len();
         let payload = Value::Cell(CellArray::new_with_shape(args, vec![1, len]).unwrap());
         block_on(gridded_interpolant_subsref(
@@ -1439,6 +1683,77 @@ mod tests {
             OBJECT_INDEX_PAREN.to_string(),
             payload,
         ))
+    }
+
+    #[test]
+    fn gridded_integer_extensions_and_capabilities_are_declared() {
+        assert_eq!(GRIDDED_INTERPOLANT_EXTENSIONS.len(), 3);
+        assert_eq!(GRIDDED_INTERPOLANT_INTEGER_CAPABILITIES.len(), 3);
+    }
+
+    #[test]
+    fn gridded_strict_mode_rejects_integer_values() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
+        let values = int_col(IntegerStorage::I16(vec![1, 4, 9]));
+        let error = block_on(gridded_interpolant_builtin(vec![values]))
+            .expect_err("integer values are an extension");
+        assert_eq!(
+            error.identifier(),
+            GRIDDED_INTEGER_VALUES_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn gridded_rejects_inexact_integer_grid_values_and_queries() {
+        let inexact = 9_007_199_254_740_993_u64;
+        let error = call(vec![
+            int_col(IntegerStorage::U64(vec![inexact, inexact + 2])),
+            col(&[1.0, 2.0]),
+        ])
+        .expect_err("inexact grid must reject");
+        assert!(error.message().contains("exactly representable as double"));
+
+        let error = call(vec![int_col(IntegerStorage::U64(vec![
+            inexact,
+            inexact + 2,
+        ]))])
+        .expect_err("inexact values must reject");
+        assert!(error.message().contains("exactly representable as double"));
+
+        let obj = call(vec![col(&[0.0, 1.0]), col(&[0.0, 1.0])]).expect("interpolant");
+        let error = subsref(obj, vec![int_col(IntegerStorage::U64(vec![inexact]))])
+            .expect_err("inexact query must reject");
+        assert!(error.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn gridded_integer_query_syntaxes_are_consistent() {
+        let one_d = call(vec![col(&[0.0, 1.0, 2.0]), col(&[0.0, 10.0, 20.0])])
+            .expect("one-dimensional interpolant");
+        match subsref(one_d, vec![int_col(IntegerStorage::I16(vec![0, 2]))])
+            .expect("integer vector query")
+        {
+            Value::Tensor(output) => assert_eq!(output.materialize_f64(), vec![0.0, 20.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        let grid = CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2])
+            .expect("grid");
+        let values = Tensor::new(vec![0.0, 10.0, 20.0, 30.0], vec![2, 2]).expect("values");
+        let two_d = call(vec![Value::Cell(grid), Value::Tensor(values)])
+            .expect("two-dimensional interpolant");
+        match subsref(
+            two_d,
+            vec![
+                int_col(IntegerStorage::I16(vec![0, 1])),
+                int_col(IntegerStorage::U16(vec![0, 2])),
+            ],
+        )
+        .expect("per-dimension integer query")
+        {
+            Value::Tensor(output) => assert_eq!(output.materialize_f64(), vec![0.0, 30.0]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
     }
 
     #[test]

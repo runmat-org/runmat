@@ -1476,6 +1476,202 @@ fn groupsummary_orders_numeric_groups_numerically() {
 }
 
 #[test]
+fn groupsummary_preserves_exact_integer_groups_and_extrema() {
+    let large = 9_007_199_254_740_992_u64;
+    let group = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![large + 1, large, large + 1]),
+            vec![3, 1],
+        )
+        .unwrap(),
+    );
+    let values = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, large + 1, large + 2]),
+            vec![3, 1],
+        )
+        .unwrap(),
+    );
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("min"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let Value::Tensor(groups) = table_member_get(&summary, &Value::from("G")).unwrap() else {
+        panic!("expected integer grouping column");
+    };
+    assert_eq!(
+        groups.integer_storage(),
+        Some(&IntegerStorage::U64(vec![large, large + 1]))
+    );
+    let Value::Tensor(minima) = table_member_get(&summary, &Value::from("min_X")).unwrap() else {
+        panic!("expected integer minima");
+    };
+    assert_eq!(
+        minima.integer_storage(),
+        Some(&IntegerStorage::U64(vec![large + 1, large + 2]))
+    );
+}
+
+#[test]
+fn groupsummary_rejects_lossy_integer_floating_summaries() {
+    let large = 9_007_199_254_740_993_u64;
+    let group = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap());
+    let values = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![large, large + 2]), vec![2, 1]).unwrap(),
+    );
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let error = groupsummary_impl(
+        table,
+        Value::from("G"),
+        Value::from("mean"),
+        vec![Value::from("X")],
+    )
+    .expect_err("lossy integer mean must reject");
+    assert!(error.message.contains("exactly representable as double"));
+}
+
+#[test]
+fn groupsummary_missing_controls_default_true_and_require_zero_or_one() {
+    let group = Value::Tensor(Tensor::new(vec![f64::NAN, 1.0, f64::NAN], vec![3, 1]).unwrap());
+    let values = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
+    let table = table_from_columns(
+        vec!["G".into(), "X".into()],
+        vec![group.clone(), values.clone()],
+    )
+    .unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let Value::Tensor(counts) = table_member_get(&summary, &Value::from("GroupCount")).unwrap()
+    else {
+        panic!("expected counts");
+    };
+    assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
+
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let error = groupsummary_impl(
+        table,
+        Value::from("G"),
+        Value::from("sum"),
+        vec![
+            Value::from("X"),
+            Value::from("IncludeMissingGroups"),
+            Value::Int(runmat_builtins::IntValue::U8(2)),
+        ],
+    )
+    .expect_err("nonbinary control must reject");
+    assert!(error.message.contains("0 or 1"));
+}
+
+#[test]
+fn groupsummary_canonicalizes_distinct_nan_payloads_and_empty_strings_as_missing_last() {
+    let nan_a = f64::from_bits(0x7ff8_0000_0000_0001);
+    let nan_b = f64::from_bits(0x7ff8_0000_0000_0002);
+    let numeric_group = Value::Tensor(Tensor::new(vec![nan_a, 1.0, nan_b], vec![3, 1]).unwrap());
+    let values = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
+    let table = table_from_columns(
+        vec!["G".into(), "X".into()],
+        vec![numeric_group, values.clone()],
+    )
+    .unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let Value::Tensor(counts) = table_member_get(&summary, &Value::from("GroupCount")).unwrap()
+    else {
+        panic!("expected counts");
+    };
+    assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
+
+    let text_group = Value::StringArray(
+        StringArray::new(vec!["".into(), "a".into(), "".into()], vec![3, 1]).unwrap(),
+    );
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![text_group, values]).unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let Value::Tensor(counts) = table_member_get(&summary, &Value::from("GroupCount")).unwrap()
+    else {
+        panic!("expected counts");
+    };
+    assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
+}
+
+#[test]
+fn groupsummary_places_undefined_categorical_and_nan_duration_groups_last() {
+    let categorical = categorical_from_args(vec![
+        Value::StringArray(
+            StringArray::new(vec!["b".into(), "missing".into(), "a".into()], vec![3, 1]).unwrap(),
+        ),
+        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+    ])
+    .unwrap();
+    let values = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+    let table = table_from_columns(
+        vec!["G".into(), "X".into()],
+        vec![categorical, values.clone()],
+    )
+    .unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let categorical_groups = table_member_get(&summary, &Value::from("G")).unwrap();
+    assert_eq!(cell_key_string(&categorical_groups, 0), "a");
+    assert_eq!(cell_key_string(&categorical_groups, 1), "b");
+    assert_eq!(cell_key_string(&categorical_groups, 2), "<undefined>");
+
+    let duration = crate::builtins::duration::duration_object_from_days_tensor(
+        Tensor::new(vec![2.0, f64::NAN, 1.0], vec![3, 1]).unwrap(),
+        "dd:hh:mm:ss",
+    )
+    .unwrap();
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![duration, values]).unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let duration_groups = table_member_get(&summary, &Value::from("G")).unwrap();
+    assert_eq!(cell_key_string(&duration_groups, 0), "1");
+    assert_eq!(cell_key_string(&duration_groups, 1), "2");
+    assert_eq!(cell_key_string(&duration_groups, 2), "NaN");
+}
+
+#[test]
 fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
     let x = Value::Tensor(
         Tensor::new(vec![1.0, 3.0, 2.0, 4.0, 10.0, 30.0, 20.0, 40.0], vec![4, 2]).unwrap(),
@@ -1707,6 +1903,61 @@ fn grpstats_table_supports_empty_group_and_interval_stats() {
         }
         other => panic!("expected interval tensor, got {other:?}"),
     }
+}
+
+#[test]
+fn grpstats_table_preserves_wide_integer_extrema_and_checks_floating_boundary() {
+    let base = (1_u64 << 53) + 1;
+    let group = Value::Tensor(Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).unwrap());
+    let values = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![base + 1, base, u64::MAX]),
+            vec![3, 1],
+        )
+        .unwrap(),
+    );
+    let table = table_from_columns(
+        vec!["G".into(), "X".into()],
+        vec![group.clone(), values.clone()],
+    )
+    .unwrap();
+    let stats =
+        Value::StringArray(StringArray::new(vec!["min".into(), "max".into()], vec![1, 2]).unwrap());
+    let summary = object(grpstats_impl(table, Value::from("G"), vec![stats]).unwrap());
+    let Value::Tensor(minima) = table_member_get(&summary, &Value::from("min_X")).unwrap() else {
+        panic!("expected exact minima");
+    };
+    assert_eq!(
+        minima.integer_storage(),
+        Some(&IntegerStorage::U64(vec![base, u64::MAX]))
+    );
+    let Value::Tensor(maxima) = table_member_get(&summary, &Value::from("max_X")).unwrap() else {
+        panic!("expected exact maxima");
+    };
+    assert_eq!(
+        maxima.integer_storage(),
+        Some(&IntegerStorage::U64(vec![base + 1, u64::MAX]))
+    );
+
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let error = grpstats_impl(table, Value::from("G"), vec![Value::from("mean")])
+        .expect_err("lossy integer table mean must reject");
+    assert!(error.message.contains("exactly representable as double"));
+}
+
+#[test]
+fn grpstats_table_ignores_lossy_integer_values_in_rows_excluded_by_missing_groups() {
+    let group = Value::Tensor(Tensor::new(vec![1.0, f64::NAN], vec![2, 1]).unwrap());
+    let values = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![4, (1_u64 << 53) + 1]), vec![2, 1]).unwrap(),
+    );
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let summary =
+        object(grpstats_impl(table, Value::from("G"), vec![Value::from("mean")]).unwrap());
+    let Value::Tensor(means) = table_member_get(&summary, &Value::from("mean_X")).unwrap() else {
+        panic!("expected mean tensor");
+    };
+    assert_eq!(means.materialize_f64(), vec![4.0]);
 }
 
 #[test]
