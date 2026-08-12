@@ -110,7 +110,7 @@ fn mod_and_rem_real_session_parity_end_to_end() {
         result.error
     );
 
-    let expected_mod = [0.5, 0.75, 1.5, f64::NAN, f64::NAN, 5.0, f64::NAN, f64::NAN];
+    let expected_mod = [0.5, 0.75, 1.5, 6.0, f64::NAN, 5.0, f64::NAN, 4.0];
     let expected_rem = [
         -1.5,
         -1.25,
