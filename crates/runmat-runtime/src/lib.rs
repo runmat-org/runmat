@@ -348,7 +348,7 @@ pub async fn call_feval_async_with_outputs(
 
 pub use runtime_error::{
     build_runtime_error, replay_error, replay_error_with_source, CallFrame, ErrorContext,
-    ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
+    GpuGatherRetry, ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
 };
 
 pub mod debug_context;

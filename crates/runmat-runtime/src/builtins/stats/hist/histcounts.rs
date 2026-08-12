@@ -326,9 +326,12 @@ async fn histcounts_gpu(
         runmat_accelerate_api::handle_integer_type(&handle),
         Some(IntegerElementType::I64 | IntegerElementType::U64)
     ) {
-        return Err(builtin_error(
+        return Err(build_runtime_error(
             "histcounts: 64-bit integer gpuArray inputs are not supported",
-        ));
+        )
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     histcounts_from_tensor(tensor, options)
@@ -1593,6 +1596,38 @@ pub(crate) mod tests {
                     .message()
                     .contains("64-bit integer gpuArray inputs are not supported"));
             }
+        });
+    }
+
+    #[test]
+    fn public_dispatch_preserves_64_bit_integer_gpu_rejection() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3]), vec![3, 1])
+                .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let error = crate::dispatcher::call_builtin("histcounts", &[Value::GpuTensor(handle)])
+                .expect_err("public dispatch must not gather an unsupported 64-bit GPU form");
+            assert!(error
+                .message()
+                .contains("64-bit integer gpuArray inputs are not supported"));
+        });
+    }
+
+    #[test]
+    fn public_dispatch_still_gathers_resident_bin_specifications() {
+        test_support::with_test_provider(|provider| {
+            let bins = Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("bin edges");
+            let bins = gpu_helpers::upload_tensor(provider, &bins).expect("resident bin edges");
+            let data = Value::Tensor(
+                Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).expect("histogram data"),
+            );
+            let value =
+                crate::dispatcher::call_builtin("histcounts", &[data, Value::GpuTensor(bins)])
+                    .expect("legacy dispatcher fallback gathers resident bin edges");
+            let Value::Tensor(counts) = value else {
+                panic!("expected count tensor");
+            };
+            assert_eq!(counts.materialize_f64(), vec![2.0, 1.0]);
         });
     }
 

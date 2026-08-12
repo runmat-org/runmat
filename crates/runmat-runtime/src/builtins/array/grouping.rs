@@ -4307,6 +4307,37 @@ mod tests {
     }
 
     #[test]
+    fn groupcounts_public_dispatch_preserves_resident_compatibility_gate_before_gather() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[7, 7, 9]),
+                    shape: &[3, 1],
+                })
+                .expect("resident grouping data");
+            let resident = Value::GpuTensor(handle.clone());
+
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = crate::dispatcher::call_builtin("groupcounts", &[resident.clone()])
+                    .expect_err("public dispatch must not gather away compatibility provenance");
+                assert_eq!(
+                    error.identifier(),
+                    GROUPCOUNTS_RESIDENT_INPUT_EXTENSION.error_identifier
+                );
+            }
+
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let counted = crate::dispatcher::call_builtin("groupcounts", &[resident])
+                .expect("RunMat mode retains exact gather fallback");
+            let Value::Tensor(counted) = counted else {
+                panic!("expected count tensor");
+            };
+            assert_eq!(counted.materialize_f64(), vec![2.0, 1.0]);
+        });
+    }
+
+    #[test]
     fn groupcounts_multiple_grouping_vectors_return_one_bg_cell_and_bp_third() {
         let first = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![9, 9, 7]), vec![3, 1]).unwrap(),

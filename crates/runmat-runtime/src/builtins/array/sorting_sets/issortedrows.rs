@@ -1084,4 +1084,21 @@ mod tests {
             }
         });
     }
+
+    #[test]
+    fn public_dispatch_does_not_gather_away_issortedrows_resident_gate() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+                vec![3, 1],
+            )
+            .unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                crate::dispatcher::call_builtin("issortedrows", &[Value::GpuTensor(handle)])
+                    .expect_err("public dispatch must preserve the resident compatibility gate");
+            assert_eq!(error.identifier(), GPU_INPUT_EXTENSION.error_identifier);
+        });
+    }
 }

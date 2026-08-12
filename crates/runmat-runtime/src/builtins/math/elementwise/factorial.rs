@@ -194,6 +194,12 @@ fn factorial_error_with_detail(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
+    if matches!(
+        error.identifier,
+        Some("RunMat:factorial:GpuUnsupported" | "RunMat:factorial:InvalidInput")
+    ) {
+        builder = builder.with_gpu_gather_retry(crate::GpuGatherRetry::Never);
+    }
     builder.build()
 }
 
@@ -748,7 +754,21 @@ pub(crate) mod tests {
             let err = factorial_builtin(Value::GpuTensor(handle), Vec::new())
                 .expect_err("uint64 GPU factorial must reject");
             assert_eq!(err.identifier(), FACTORIAL_ERROR_INVALID_INPUT.identifier);
+            assert_eq!(err.gpu_gather_retry(), crate::GpuGatherRetry::Never);
             assert!(err.message().contains("64-bit integer GPU"));
+        });
+    }
+
+    #[test]
+    fn public_dispatch_preserves_64_bit_integer_gpu_factorial_rejection() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![5, 20]), vec![1, 2])
+                .expect("integer tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let error = crate::dispatcher::call_builtin("factorial", &[Value::GpuTensor(handle)])
+                .expect_err("public dispatch must not gather unsupported uint64 GPU input");
+            assert_eq!(error.identifier(), FACTORIAL_ERROR_INVALID_INPUT.identifier);
+            assert!(error.message().contains("64-bit integer GPU"));
         });
     }
 

@@ -43,7 +43,8 @@ pub fn ensure_builtin_extension_enabled(
     let mut builder = build_runtime_error(format!(
         "{context}: {}; enable runmat compatibility mode to use it",
         extension.description
-    ));
+    ))
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = extension.error_identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -901,6 +902,22 @@ mod tests {
                 ("var", "var-typed-integer-control"),
             ])
         );
+    }
+
+    #[test]
+    fn every_builtin_extension_has_a_structured_compatibility_identifier() {
+        for builtin in runmat_builtins::builtin_functions() {
+            for extension in builtin.extensions {
+                assert!(
+                    extension.error_identifier.is_some_and(|identifier| {
+                        identifier.starts_with("RunMat:compatibility:")
+                    }),
+                    "{} extension {} must use the compatibility identifier namespace",
+                    builtin.name,
+                    extension.id
+                );
+            }
+        }
     }
 
     #[test]

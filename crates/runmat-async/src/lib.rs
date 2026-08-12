@@ -1,6 +1,6 @@
 pub mod runtime_error;
 pub use runtime_error::{
-    runtime_error, CallFrame, ErrorContext, RuntimeError, RuntimeErrorBuilder,
+    runtime_error, CallFrame, ErrorContext, GpuGatherRetry, RuntimeError, RuntimeErrorBuilder,
 };
 
 /// Narrow set of interaction kinds used for host I/O hooks.

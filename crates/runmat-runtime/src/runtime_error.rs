@@ -1,5 +1,5 @@
 pub use runmat_async::{
-    runtime_error as build_runtime_error, CallFrame, ErrorContext, RuntimeError,
+    runtime_error as build_runtime_error, CallFrame, ErrorContext, GpuGatherRetry, RuntimeError,
     RuntimeErrorBuilder,
 };
 
