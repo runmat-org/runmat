@@ -1,9 +1,12 @@
 //! MATLAB-compatible `im2uint8` image class conversion.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, NumericStorage, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerClass, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -35,16 +38,40 @@ const IM2UINT8_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Image data to convert.",
 }];
 
-const IM2UINT8_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "J = im2uint8(I)",
-    inputs: &IM2UINT8_INPUTS,
-    outputs: &IM2UINT8_OUTPUT,
-}];
+const IM2UINT8_INDEXED_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "I",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexed image data to convert.",
+    },
+    BuiltinParamDescriptor {
+        name: "indexed",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "The literal \"indexed\", selecting indexed-image offset semantics.",
+    },
+];
+
+const IM2UINT8_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "J = im2uint8(I)",
+        inputs: &IM2UINT8_INPUTS,
+        outputs: &IM2UINT8_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "J = im2uint8(I, \"indexed\")",
+        inputs: &IM2UINT8_INDEXED_INPUTS,
+        outputs: &IM2UINT8_OUTPUT,
+    },
+];
 
 const IM2UINT8_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.IM2UINT8.TOO_MANY_INPUTS",
     identifier: Some("RunMat:im2uint8:TooManyInputs"),
-    when: "More than one input argument is supplied.",
+    when: "More than two input arguments are supplied.",
     message: "im2uint8: too many input arguments",
 };
 
@@ -82,6 +109,75 @@ pub const IM2UINT8_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &IM2UINT8_ERRORS,
 };
+
+const IM2UINT8_DOCUMENTED_INTEGER_CLASSES: [BuiltinIntegerClass; 3] = [
+    BuiltinIntegerClass::Int16,
+    BuiltinIntegerClass::Uint8,
+    BuiltinIntegerClass::Uint16,
+];
+const IM2UINT8_REJECTED_INTEGER_CLASSES: [BuiltinIntegerClass; 5] = [
+    BuiltinIntegerClass::Int8,
+    BuiltinIntegerClass::Int32,
+    BuiltinIntegerClass::Int64,
+    BuiltinIntegerClass::Uint32,
+    BuiltinIntegerClass::Uint64,
+];
+const IM2UINT8_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "I",
+        classes: &IM2UINT8_DOCUMENTED_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Intensity and truecolor uint8, uint16, and int16 inputs quantize into the uint8 image range.",
+    }];
+const IM2UINT8_INDEXED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "I",
+        classes: &[BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16],
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Indexed uint8 values are retained; indexed uint16 values must not exceed 255 and narrow without intensity scaling.",
+    }];
+const IM2UINT8_REJECTED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "I",
+        classes: &IM2UINT8_REJECTED_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "These integer image classes are outside the documented im2uint8 input surface and reject before conversion.",
+    }];
+pub const IM2UINT8_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "J = im2uint8(integer_I)",
+        inputs: &IM2UINT8_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "uint16 and offset int16 inputs quantize at the documented half-byte boundaries; output is exact uint8 storage.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "J = im2uint8(integer_I, \"indexed\")",
+        inputs: &IM2UINT8_INDEXED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Indexed conversion preserves zero-based integer indices and errors when a uint16 index cannot fit in uint8.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "im2uint8(unsupported_integer_I, ...)",
+        inputs: &IM2UINT8_REJECTED_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Unsupported integer dtype metadata is rejected consistently for host and resident inputs.",
+    },
+];
 
 fn im2uint8_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     im2uint8_error_with_message(error.message, error)
@@ -151,84 +247,206 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(same_shape_type),
     descriptor(crate::builtins::image::color::im2uint8::IM2UINT8_DESCRIPTOR),
+    integer_capabilities(crate::builtins::image::color::im2uint8::IM2UINT8_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::color::im2uint8"
 )]
 async fn im2uint8_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    if !rest.is_empty() {
+    if rest.len() > 1 {
         return Err(im2uint8_error(&IM2UINT8_ERROR_TOO_MANY_INPUTS));
     }
+    let indexed = parse_indexed_mode(&rest)?;
+    ensure_resident_integer_class_supported(&value, indexed)?;
+    let resident_source = match &value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    };
     let value = common::gather_value(NAME, &value)
         .await
         .map_err(|err| im2uint8_map_error(err, &IM2UINT8_ERROR_INVALID_INPUT))?;
-    match value {
+    let result = match value {
         Value::Tensor(tensor) => Ok(common::image_value_from_tensor(
-            im2uint8_tensor(tensor)
+            im2uint8_tensor(tensor, indexed)
                 .map_err(|err| im2uint8_map_error(err, &IM2UINT8_ERROR_INTERNAL))?,
         )),
         Value::LogicalArray(array) => {
-            let tensor = tensor::logical_to_tensor(&array)
-                .map_err(|err| im2uint8_error_with_detail(&IM2UINT8_ERROR_INTERNAL, err))?;
-            Ok(common::image_value_from_tensor(
-                im2uint8_tensor(tensor)
-                    .map_err(|err| im2uint8_map_error(err, &IM2UINT8_ERROR_INTERNAL))?,
-            ))
+            if indexed {
+                let shape = array.shape.clone();
+                let tensor = Tensor::from_numeric_storage(NumericStorage::U8(array.data), shape)
+                    .map_err(|err| im2uint8_error_with_detail(&IM2UINT8_ERROR_INTERNAL, err))?;
+                Ok(common::image_value_from_tensor(tensor))
+            } else {
+                let tensor = tensor::logical_to_tensor(&array)
+                    .map_err(|err| im2uint8_error_with_detail(&IM2UINT8_ERROR_INTERNAL, err))?;
+                Ok(common::image_value_from_tensor(
+                    im2uint8_tensor(tensor, false)
+                        .map_err(|err| im2uint8_map_error(err, &IM2UINT8_ERROR_INTERNAL))?,
+                ))
+            }
         }
         Value::Int(IntValue::U8(v)) => Ok(Value::Int(IntValue::U8(v))),
-        Value::Int(IntValue::U16(v)) => Ok(Value::Int(IntValue::U8(common::clamp_round(
-            v as f64 * 255.0 / 65535.0,
-            255.0,
-        ) as u8))),
-        Value::Int(IntValue::I16(v)) => Ok(Value::Int(IntValue::U8(common::clamp_round(
-            f64::from(i32::from(v) - i32::from(i16::MIN)) / 257.0,
-            255.0,
-        ) as u8))),
+        Value::Int(IntValue::U16(v)) if indexed && v <= u8::MAX.into() => {
+            Ok(Value::Int(IntValue::U8(v as u8)))
+        }
+        Value::Int(IntValue::U16(_)) if indexed => Err(im2uint8_error_with_detail(
+            &IM2UINT8_ERROR_INVALID_INPUT,
+            "indexed uint16 values must not exceed 255",
+        )),
+        Value::Int(IntValue::U16(v)) => Ok(Value::Int(IntValue::U8(quantize_u16_to_u8(v)))),
+        Value::Int(IntValue::I16(v)) if indexed => Err(im2uint8_error_with_detail(
+            &IM2UINT8_ERROR_UNSUPPORTED_INPUT_TYPE,
+            format!("class {} for indexed image", IntValue::I16(v).class_name()),
+        )),
+        Value::Int(IntValue::I16(v)) => Ok(Value::Int(IntValue::U8(quantize_u16_to_u8(
+            (i32::from(v) - i32::from(i16::MIN)) as u16,
+        )))),
         Value::Int(v) => Err(im2uint8_error_with_detail(
             &IM2UINT8_ERROR_UNSUPPORTED_INPUT_TYPE,
             format!("class {}", v.class_name()),
+        )),
+        Value::Num(v) if indexed && v <= 256.0 => Ok(Value::Int(IntValue::U8(
+            common::clamp_round(v - 1.0, 255.0) as u8,
+        ))),
+        Value::Num(_) if indexed => Err(im2uint8_error_with_detail(
+            &IM2UINT8_ERROR_INVALID_INPUT,
+            "indexed double values must not exceed 256",
         )),
         Value::Num(v) => Ok(Value::Int(IntValue::U8(common::unit_to_dtype(
             common::clamp01(v),
             NumericDType::U8,
         ) as u8))),
-        Value::Bool(v) => Ok(Value::Int(IntValue::U8(if v { 255 } else { 0 }))),
+        Value::Bool(v) => Ok(Value::Int(IntValue::U8(if indexed {
+            u8::from(v)
+        } else if v {
+            255
+        } else {
+            0
+        }))),
         other => Err(im2uint8_error_with_detail(
             &IM2UINT8_ERROR_UNSUPPORTED_INPUT_TYPE,
             format!("type {}", class_name_for_value(&other)),
         )),
+    }?;
+    common::restore_resident_numeric_result(resident_source.as_ref(), result, NAME)
+}
+
+fn ensure_resident_integer_class_supported(value: &Value, indexed: bool) -> BuiltinResult<()> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(());
+    };
+    let Some(dtype) = runmat_accelerate_api::handle_integer_type(handle) else {
+        return Ok(());
+    };
+    let supported = if indexed {
+        matches!(
+            dtype,
+            runmat_accelerate_api::IntegerElementType::U8
+                | runmat_accelerate_api::IntegerElementType::U16
+        )
+    } else {
+        matches!(
+            dtype,
+            runmat_accelerate_api::IntegerElementType::I16
+                | runmat_accelerate_api::IntegerElementType::U8
+                | runmat_accelerate_api::IntegerElementType::U16
+        )
+    };
+    if supported {
+        Ok(())
+    } else {
+        Err(im2uint8_error_with_detail(
+            &IM2UINT8_ERROR_UNSUPPORTED_INPUT_TYPE,
+            format!(
+                "unsupported{} resident integer image class {dtype:?}",
+                if indexed { " indexed" } else { "" }
+            ),
+        ))
     }
 }
 
-fn im2uint8_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+fn parse_indexed_mode(rest: &[Value]) -> BuiltinResult<bool> {
+    let Some(mode) = rest.first() else {
+        return Ok(false);
+    };
+    let text = match mode {
+        Value::String(text) => text.clone(),
+        Value::CharArray(chars) => chars.data.iter().collect(),
+        _ => {
+            return Err(im2uint8_error_with_detail(
+                &IM2UINT8_ERROR_INVALID_INPUT,
+                "second input must be the text \"indexed\"",
+            ));
+        }
+    };
+    if text.trim().eq_ignore_ascii_case("indexed") {
+        Ok(true)
+    } else {
+        Err(im2uint8_error_with_detail(
+            &IM2UINT8_ERROR_INVALID_INPUT,
+            "second input must be the text \"indexed\"",
+        ))
+    }
+}
+
+fn quantize_u16_to_u8(value: u16) -> u8 {
+    ((u32::from(value) + 128) >> 8).min(u32::from(u8::MAX)) as u8
+}
+
+fn im2uint8_tensor(tensor: Tensor, indexed: bool) -> BuiltinResult<Tensor> {
     let shape = tensor.shape.clone();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| im2uint8_error_with_detail(&IM2UINT8_ERROR_INTERNAL, err))?;
-    let data = match storage {
-        NumericStorage::U8(values) => values,
-        NumericStorage::I16(values) => values
+    let data = match (storage, indexed) {
+        (NumericStorage::U8(values), true) => values,
+        (NumericStorage::U16(values), true) => {
+            if values.iter().any(|value| *value > u16::from(u8::MAX)) {
+                return Err(im2uint8_error_with_detail(
+                    &IM2UINT8_ERROR_INVALID_INPUT,
+                    "indexed uint16 values must not exceed 255",
+                ));
+            }
+            values.into_iter().map(|value| value as u8).collect()
+        }
+        (NumericStorage::F64(values), true) => {
+            if values.iter().any(|value| *value > 256.0) {
+                return Err(im2uint8_error_with_detail(
+                    &IM2UINT8_ERROR_INVALID_INPUT,
+                    "indexed double values must not exceed 256",
+                ));
+            }
+            values
+                .into_iter()
+                .map(|value| common::clamp_round(value - 1.0, 255.0) as u8)
+                .collect()
+        }
+        (unsupported, true) => {
+            return Err(im2uint8_error_with_detail(
+                &IM2UINT8_ERROR_UNSUPPORTED_INPUT_TYPE,
+                format!(
+                    "unsupported indexed image class {}",
+                    unsupported.class_name()
+                ),
+            ));
+        }
+        (NumericStorage::U8(values), false) => values,
+        (NumericStorage::I16(values), false) => values
             .into_iter()
-            .map(|value| {
-                common::clamp_round(
-                    f64::from(i32::from(value) - i32::from(i16::MIN)) / 257.0,
-                    255.0,
-                ) as u8
-            })
+            .map(|value| quantize_u16_to_u8((i32::from(value) - i32::from(i16::MIN)) as u16))
             .collect(),
-        NumericStorage::U16(values) => values
-            .into_iter()
-            .map(|value| common::clamp_round(f64::from(value) * 255.0 / 65535.0, 255.0) as u8)
-            .collect(),
-        NumericStorage::F32(values) => values
+        (NumericStorage::U16(values), false) => {
+            values.into_iter().map(quantize_u16_to_u8).collect()
+        }
+        (NumericStorage::F32(values), false) => values
             .into_iter()
             .map(|value| {
                 common::unit_to_dtype(common::clamp01(f64::from(value)), NumericDType::U8) as u8
             })
             .collect(),
-        NumericStorage::F64(values) => values
+        (NumericStorage::F64(values), false) => values
             .into_iter()
             .map(|value| common::unit_to_dtype(common::clamp01(value), NumericDType::U8) as u8)
             .collect(),
-        unsupported => {
+        (unsupported, false) => {
             return Err(im2uint8_error_with_detail(
                 &IM2UINT8_ERROR_UNSUPPORTED_INPUT_TYPE,
                 format!("unsupported image class {}", unsupported.class_name()),
@@ -242,7 +460,9 @@ fn im2uint8_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{HostIntegerDataOwned, HostTensorView, IntegerElementType};
     use runmat_builtins::{IntegerStorage, LogicalArray};
 
     fn call(value: Value) -> Value {
@@ -282,6 +502,22 @@ mod tests {
         assert_eq!(
             out.integer_storage(),
             Some(&IntegerStorage::U8(vec![0, 255]))
+        );
+    }
+
+    #[test]
+    fn uint16_quantization_uses_documented_byte_boundaries() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U16(vec![0, 127, 128, 255, 256, 383, 384, u16::MAX]),
+            vec![1, 8],
+        )
+        .unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 0, 1, 1, 1, 1, 2, 255]))
         );
     }
 
@@ -360,7 +596,66 @@ mod tests {
             .iter()
             .map(|signature| signature.label)
             .collect();
-        assert_eq!(labels, vec!["J = im2uint8(I)"]);
+        assert_eq!(
+            labels,
+            vec!["J = im2uint8(I)", "J = im2uint8(I, \"indexed\")"]
+        );
+    }
+
+    #[test]
+    fn indexed_mode_offsets_double_and_preserves_integer_indices() {
+        let Value::Tensor(double_out) = block_on(im2uint8_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 256.0], vec![1, 3]).unwrap()),
+            vec![Value::String("indexed".into())],
+        ))
+        .expect("indexed double") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            double_out.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 1, 255]))
+        );
+
+        let Value::Tensor(uint16_out) = block_on(im2uint8_builtin(
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 255]), vec![1, 3]).unwrap(),
+            ),
+            vec![Value::String("indexed".into())],
+        ))
+        .expect("indexed uint16") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            uint16_out.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 1, 255]))
+        );
+    }
+
+    #[test]
+    fn indexed_mode_maps_logical_to_zero_and_one_and_checks_range() {
+        let Value::Tensor(logical_out) = block_on(im2uint8_builtin(
+            Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap()),
+            vec![Value::String("indexed".into())],
+        ))
+        .expect("indexed logical") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            logical_out.integer_storage(),
+            Some(&IntegerStorage::U8(vec![0, 1]))
+        );
+
+        for input in [
+            Tensor::new_integer(IntegerStorage::U16(vec![256]), vec![1, 1]).unwrap(),
+            Tensor::new(vec![257.0], vec![1, 1]).unwrap(),
+        ] {
+            let err = block_on(im2uint8_builtin(
+                Value::Tensor(input),
+                vec![Value::String("indexed".into())],
+            ))
+            .expect_err("out-of-range indexed image");
+            assert_eq!(err.identifier(), IM2UINT8_ERROR_INVALID_INPUT.identifier);
+        }
     }
 
     #[test]
@@ -378,8 +673,40 @@ mod tests {
 
     #[test]
     fn im2uint8_too_many_args_uses_stable_identifier() {
-        let err = block_on(im2uint8_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
-            .expect_err("expected argument error");
+        let err = block_on(im2uint8_builtin(
+            Value::Num(1.0),
+            vec![Value::from("indexed"), Value::Num(2.0)],
+        ))
+        .expect_err("expected argument error");
         assert_eq!(err.identifier(), IM2UINT8_ERROR_TOO_MANY_INPUTS.identifier);
+    }
+
+    #[test]
+    fn im2uint8_resident_double_input_restores_exact_integer_output_to_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 0.5, 1.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload double image");
+            let Value::GpuTensor(output) =
+                block_on(im2uint8_builtin(Value::GpuTensor(input), Vec::new()))
+                    .expect("resident im2uint8")
+            else {
+                panic!("expected resident uint8 output");
+            };
+            assert_eq!(output.device_id, provider.device_id());
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(IntegerElementType::U8)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&output))
+                    .expect("download uint8 image")
+                    .data,
+                HostIntegerDataOwned::U8(vec![0, 128, 255])
+            );
+        });
     }
 }

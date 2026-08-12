@@ -1578,14 +1578,15 @@ impl FusionGroupPlan {
         // hypot is not a WGSL builtin; define it explicitly.
         // Use the scaling form max*sqrt(1+(min/max)²) to avoid overflow when
         // a² or b² exceeds the representable range.
-        // Guard against Inf inputs: Inf/Inf = NaN, so return hi early when
-        // it is already infinite (IEEE 754 requires hypot(Inf,*) = Inf).
+        // Match MATLAB's NaN precedence before guarding against Inf/Inf in the
+        // scaled formula.
         if scalar_ty == "f32" {
             shader.push_str("fn isNan(x: f32) -> bool { let bits = bitcast<u32>(x); return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u; }\n");
             shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
             shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n");
             shader.push_str(concat!(
                 "fn hypot(a: f32, b: f32) -> f32 {\n",
+                "    if isNan(a) || isNan(b) { return a + b; }\n",
                 "    let lo = min(abs(a), abs(b));\n",
                 "    let hi = max(abs(a), abs(b));\n",
                 "    if hi == 0.0 { return 0.0; }\n",
@@ -1600,6 +1601,7 @@ impl FusionGroupPlan {
             shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n");
             shader.push_str(concat!(
                 "fn hypot(a: f64, b: f64) -> f64 {\n",
+                "    if isNan(a) || isNan(b) { return a + b; }\n",
                 "    let lo = min(abs(a), abs(b));\n",
                 "    let hi = max(abs(a), abs(b));\n",
                 "    if hi == f64(0.0) { return f64(0.0); }\n",

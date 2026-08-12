@@ -61,77 +61,117 @@ pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
 pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let cols = tensor.cols();
-            if let Some(storage) = tensor.integer_storage() {
-                let mut values = Vec::with_capacity(rows.len() * cols);
-                for col in 0..cols {
-                    for &row in rows {
-                        values.push(storage.value_at(row + col * tensor.rows()).ok_or_else(
-                            || invalid_index("table: numeric variable row index out of bounds"),
-                        )?);
-                    }
-                }
-                return Tensor::new_integer(
-                    storage
-                        .from_exact_values_like(values)
-                        .map_err(invalid_variable)?,
-                    vec![rows.len(), cols],
-                )
-                .map(Value::Tensor)
-                .map_err(invalid_variable);
-            }
-            let mut data = Vec::with_capacity(rows.len() * cols);
-            for col in 0..cols {
+            let source_rows = tensor.shape.first().copied().unwrap_or(1);
+            let lanes = tensor.len().checked_div(source_rows).unwrap_or(0);
+            let mut indices = Vec::with_capacity(rows.len() * lanes);
+            for lane in 0..lanes {
                 for &row in rows {
-                    data.push(tensor.get2(row, col).map_err(invalid_index)?);
+                    if row >= source_rows {
+                        return Err(invalid_index(
+                            "table: numeric variable row index out of bounds",
+                        ));
+                    }
+                    indices.push(row + lane * source_rows);
                 }
             }
-            Tensor::new_with_dtype(data, vec![rows.len(), cols], tensor.numeric_dtype())
+            let mut shape = tensor.shape.clone();
+            if shape.is_empty() {
+                shape = vec![rows.len(), 1];
+            } else {
+                shape[0] = rows.len();
+            }
+            let storage = tensor
+                .clone()
+                .into_numeric_storage()
+                .map_err(invalid_variable)?
+                .gather(&indices)
+                .map_err(invalid_variable)?;
+            Tensor::from_numeric_storage(storage, shape)
                 .map(Value::Tensor)
                 .map_err(invalid_variable)
         }
         Value::ComplexTensor(tensor) => {
-            if let Some(storage) = &tensor.integer_storage() {
-                let mut real = Vec::with_capacity(rows.len() * tensor.cols);
-                let mut imag = Vec::with_capacity(rows.len() * tensor.cols);
-                for col in 0..tensor.cols {
-                    for &row in rows {
-                        let index = row + col * tensor.rows;
-                        real.push(storage.real.value_at(index).ok_or_else(|| {
-                            invalid_index("table: complex variable row index out of bounds")
-                        })?);
-                        imag.push(storage.imag.value_at(index).ok_or_else(|| {
-                            invalid_index("table: complex variable row index out of bounds")
-                        })?);
-                    }
-                }
-                return ComplexTensor::new_integer(
-                    runmat_builtins::IntegerComplexStorage::new(
-                        storage
-                            .real
-                            .from_exact_values_like(real)
-                            .map_err(invalid_variable)?,
-                        storage
-                            .imag
-                            .from_exact_values_like(imag)
-                            .map_err(invalid_variable)?,
-                    )
-                    .map_err(invalid_variable)?,
-                    vec![rows.len(), tensor.cols],
-                )
-                .map(Value::ComplexTensor)
-                .map_err(invalid_variable);
-            }
-            let mut data = Vec::with_capacity(rows.len() * tensor.cols);
-            for col in 0..tensor.cols {
+            let source_rows = tensor.shape.first().copied().unwrap_or(1);
+            let lanes = tensor.len().checked_div(source_rows).unwrap_or(0);
+            let mut indices = Vec::with_capacity(rows.len() * lanes);
+            for lane in 0..lanes {
                 for &row in rows {
-                    let idx = row + col * tensor.rows;
-                    data.push(*tensor.materialize_f64().get(idx).ok_or_else(|| {
-                        invalid_index("table: complex variable row index out of bounds")
-                    })?);
+                    if row >= source_rows {
+                        return Err(invalid_index(
+                            "table: complex variable row index out of bounds",
+                        ));
+                    }
+                    indices.push(row + lane * source_rows);
                 }
             }
-            ComplexTensor::new(data, vec![rows.len(), tensor.cols])
+            let mut shape = tensor.shape.clone();
+            if shape.is_empty() {
+                shape = vec![rows.len(), 1];
+            } else {
+                shape[0] = rows.len();
+            }
+            let storage = match tensor.complex_storage() {
+                runmat_builtins::ComplexStorage::F64(values) => {
+                    runmat_builtins::ComplexStorage::F64(
+                        indices
+                            .iter()
+                            .map(|&index| {
+                                values.get(index).copied().ok_or_else(|| {
+                                    invalid_index("table: complex variable row index out of bounds")
+                                })
+                            })
+                            .collect::<BuiltinResult<Vec<_>>>()?,
+                    )
+                }
+                runmat_builtins::ComplexStorage::F32(values) => {
+                    runmat_builtins::ComplexStorage::F32(
+                        indices
+                            .iter()
+                            .map(|&index| {
+                                values.get(index).copied().ok_or_else(|| {
+                                    invalid_index("table: complex variable row index out of bounds")
+                                })
+                            })
+                            .collect::<BuiltinResult<Vec<_>>>()?,
+                    )
+                }
+                runmat_builtins::ComplexStorage::Integer(storage) => {
+                    runmat_builtins::ComplexStorage::Integer(
+                        runmat_builtins::IntegerComplexStorage::new(
+                            storage
+                                .real
+                                .reorder(|values| {
+                                    indices
+                                        .iter()
+                                        .map(|&index| {
+                                            values.get(index).cloned().ok_or_else(|| {
+                                                "table: complex variable row index out of bounds"
+                                                    .to_string()
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .map_err(invalid_variable)?,
+                            storage
+                                .imag
+                                .reorder(|values| {
+                                    indices
+                                        .iter()
+                                        .map(|&index| {
+                                            values.get(index).cloned().ok_or_else(|| {
+                                                "table: complex variable row index out of bounds"
+                                                    .to_string()
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .map_err(invalid_variable)?,
+                        )
+                        .map_err(invalid_variable)?,
+                    )
+                }
+            };
+            ComplexTensor::from_complex_storage(storage, shape)
                 .map(Value::ComplexTensor)
                 .map_err(invalid_variable)
         }
@@ -167,17 +207,23 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
         }
         Value::LogicalArray(array) => {
             let source_rows = array.shape.first().copied().unwrap_or(array.data.len());
-            let cols = array.shape.get(1).copied().unwrap_or(1);
-            let mut data = Vec::with_capacity(rows.len() * cols);
-            for col in 0..cols {
+            let lanes = array.data.len().checked_div(source_rows).unwrap_or(0);
+            let mut data = Vec::with_capacity(rows.len() * lanes);
+            for lane in 0..lanes {
                 for &row in rows {
-                    let idx = row + col * source_rows;
+                    let idx = row + lane * source_rows;
                     data.push(*array.data.get(idx).ok_or_else(|| {
                         invalid_index("table: logical variable row index out of bounds")
                     })?);
                 }
             }
-            LogicalArray::new(data, vec![rows.len(), cols])
+            let mut shape = array.shape.clone();
+            if shape.is_empty() {
+                shape = vec![rows.len(), 1];
+            } else {
+                shape[0] = rows.len();
+            }
+            LogicalArray::new(data, shape)
                 .map(Value::LogicalArray)
                 .map_err(invalid_variable)
         }

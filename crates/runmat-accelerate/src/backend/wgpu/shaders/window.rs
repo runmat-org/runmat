@@ -41,7 +41,10 @@ fn coeff(kind: u32, idx: u32, total: u32) -> f64 {
     let phase = 2.0 * 3.141592653589793 * f64(idx) / f64(total - 1u);
     switch kind {
         case 0u: { return 0.5 - 0.5 * cos(phase); }
-        case 1u: { return 0.54 - 0.46 * cos(phase); }
+        case 1u: {
+            let turns = 2.0 * f64(idx) / f64(total - 1u);
+            return 0.54 - 0.46 * cospi_window(turns);
+        }
         default: {
             let first = 2.0 * f64(idx) / f64(total - 1u);
             let second = 4.0 * f64(idx) / f64(total - 1u);
@@ -110,7 +113,10 @@ fn coeff(kind: u32, idx: u32, total: u32) -> f32 {
     let phase = 2.0 * 3.1415927 * f32(idx) / f32(total - 1u);
     switch kind {
         case 0u: { return 0.5 - 0.5 * cos(phase); }
-        case 1u: { return 0.54 - 0.46 * cos(phase); }
+        case 1u: {
+            let turns = 2.0 * f32(idx) / f32(total - 1u);
+            return 0.54 - 0.46 * cospi_window(turns);
+        }
         default: {
             let first = 2.0 * f32(idx) / f32(total - 1u);
             let second = 4.0 * f32(idx) / f32(total - 1u);

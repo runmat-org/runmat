@@ -1476,6 +1476,202 @@ fn groupsummary_orders_numeric_groups_numerically() {
 }
 
 #[test]
+fn groupsummary_preserves_exact_integer_groups_and_extrema() {
+    let large = 9_007_199_254_740_992_u64;
+    let group = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![large + 1, large, large + 1]),
+            vec![3, 1],
+        )
+        .unwrap(),
+    );
+    let values = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, large + 1, large + 2]),
+            vec![3, 1],
+        )
+        .unwrap(),
+    );
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("min"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let Value::Tensor(groups) = table_member_get(&summary, &Value::from("G")).unwrap() else {
+        panic!("expected integer grouping column");
+    };
+    assert_eq!(
+        groups.integer_storage(),
+        Some(&IntegerStorage::U64(vec![large, large + 1]))
+    );
+    let Value::Tensor(minima) = table_member_get(&summary, &Value::from("min_X")).unwrap() else {
+        panic!("expected integer minima");
+    };
+    assert_eq!(
+        minima.integer_storage(),
+        Some(&IntegerStorage::U64(vec![large + 1, large + 2]))
+    );
+}
+
+#[test]
+fn groupsummary_rejects_lossy_integer_floating_summaries() {
+    let large = 9_007_199_254_740_993_u64;
+    let group = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap());
+    let values = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![large, large + 2]), vec![2, 1]).unwrap(),
+    );
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let error = groupsummary_impl(
+        table,
+        Value::from("G"),
+        Value::from("mean"),
+        vec![Value::from("X")],
+    )
+    .expect_err("lossy integer mean must reject");
+    assert!(error.message.contains("exactly representable as double"));
+}
+
+#[test]
+fn groupsummary_missing_controls_default_true_and_require_zero_or_one() {
+    let group = Value::Tensor(Tensor::new(vec![f64::NAN, 1.0, f64::NAN], vec![3, 1]).unwrap());
+    let values = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
+    let table = table_from_columns(
+        vec!["G".into(), "X".into()],
+        vec![group.clone(), values.clone()],
+    )
+    .unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let Value::Tensor(counts) = table_member_get(&summary, &Value::from("GroupCount")).unwrap()
+    else {
+        panic!("expected counts");
+    };
+    assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
+
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let error = groupsummary_impl(
+        table,
+        Value::from("G"),
+        Value::from("sum"),
+        vec![
+            Value::from("X"),
+            Value::from("IncludeMissingGroups"),
+            Value::Int(runmat_builtins::IntValue::U8(2)),
+        ],
+    )
+    .expect_err("nonbinary control must reject");
+    assert!(error.message.contains("0 or 1"));
+}
+
+#[test]
+fn groupsummary_canonicalizes_distinct_nan_payloads_and_empty_strings_as_missing_last() {
+    let nan_a = f64::from_bits(0x7ff8_0000_0000_0001);
+    let nan_b = f64::from_bits(0x7ff8_0000_0000_0002);
+    let numeric_group = Value::Tensor(Tensor::new(vec![nan_a, 1.0, nan_b], vec![3, 1]).unwrap());
+    let values = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
+    let table = table_from_columns(
+        vec!["G".into(), "X".into()],
+        vec![numeric_group, values.clone()],
+    )
+    .unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let Value::Tensor(counts) = table_member_get(&summary, &Value::from("GroupCount")).unwrap()
+    else {
+        panic!("expected counts");
+    };
+    assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
+
+    let text_group = Value::StringArray(
+        StringArray::new(vec!["".into(), "a".into(), "".into()], vec![3, 1]).unwrap(),
+    );
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![text_group, values]).unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let Value::Tensor(counts) = table_member_get(&summary, &Value::from("GroupCount")).unwrap()
+    else {
+        panic!("expected counts");
+    };
+    assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
+}
+
+#[test]
+fn groupsummary_places_undefined_categorical_and_nan_duration_groups_last() {
+    let categorical = categorical_from_args(vec![
+        Value::StringArray(
+            StringArray::new(vec!["b".into(), "missing".into(), "a".into()], vec![3, 1]).unwrap(),
+        ),
+        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+    ])
+    .unwrap();
+    let values = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+    let table = table_from_columns(
+        vec!["G".into(), "X".into()],
+        vec![categorical, values.clone()],
+    )
+    .unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let categorical_groups = table_member_get(&summary, &Value::from("G")).unwrap();
+    assert_eq!(cell_key_string(&categorical_groups, 0), "a");
+    assert_eq!(cell_key_string(&categorical_groups, 1), "b");
+    assert_eq!(cell_key_string(&categorical_groups, 2), "<undefined>");
+
+    let duration = crate::builtins::duration::duration_object_from_days_tensor(
+        Tensor::new(vec![2.0, f64::NAN, 1.0], vec![3, 1]).unwrap(),
+        "dd:hh:mm:ss",
+    )
+    .unwrap();
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![duration, values]).unwrap();
+    let summary = object(
+        groupsummary_impl(
+            table,
+            Value::from("G"),
+            Value::from("sum"),
+            vec![Value::from("X")],
+        )
+        .unwrap(),
+    );
+    let duration_groups = table_member_get(&summary, &Value::from("G")).unwrap();
+    assert_eq!(cell_key_string(&duration_groups, 0), "1");
+    assert_eq!(cell_key_string(&duration_groups, 1), "2");
+    assert_eq!(cell_key_string(&duration_groups, 2), "NaN");
+}
+
+#[test]
 fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
     let x = Value::Tensor(
         Tensor::new(vec![1.0, 3.0, 2.0, 4.0, 10.0, 30.0, 20.0, 40.0], vec![4, 2]).unwrap(),
@@ -1707,6 +1903,61 @@ fn grpstats_table_supports_empty_group_and_interval_stats() {
         }
         other => panic!("expected interval tensor, got {other:?}"),
     }
+}
+
+#[test]
+fn grpstats_table_preserves_wide_integer_extrema_and_checks_floating_boundary() {
+    let base = (1_u64 << 53) + 1;
+    let group = Value::Tensor(Tensor::new(vec![1.0, 1.0, 2.0], vec![3, 1]).unwrap());
+    let values = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![base + 1, base, u64::MAX]),
+            vec![3, 1],
+        )
+        .unwrap(),
+    );
+    let table = table_from_columns(
+        vec!["G".into(), "X".into()],
+        vec![group.clone(), values.clone()],
+    )
+    .unwrap();
+    let stats =
+        Value::StringArray(StringArray::new(vec!["min".into(), "max".into()], vec![1, 2]).unwrap());
+    let summary = object(grpstats_impl(table, Value::from("G"), vec![stats]).unwrap());
+    let Value::Tensor(minima) = table_member_get(&summary, &Value::from("min_X")).unwrap() else {
+        panic!("expected exact minima");
+    };
+    assert_eq!(
+        minima.integer_storage(),
+        Some(&IntegerStorage::U64(vec![base, u64::MAX]))
+    );
+    let Value::Tensor(maxima) = table_member_get(&summary, &Value::from("max_X")).unwrap() else {
+        panic!("expected exact maxima");
+    };
+    assert_eq!(
+        maxima.integer_storage(),
+        Some(&IntegerStorage::U64(vec![base + 1, u64::MAX]))
+    );
+
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let error = grpstats_impl(table, Value::from("G"), vec![Value::from("mean")])
+        .expect_err("lossy integer table mean must reject");
+    assert!(error.message.contains("exactly representable as double"));
+}
+
+#[test]
+fn grpstats_table_ignores_lossy_integer_values_in_rows_excluded_by_missing_groups() {
+    let group = Value::Tensor(Tensor::new(vec![1.0, f64::NAN], vec![2, 1]).unwrap());
+    let values = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U64(vec![4, (1_u64 << 53) + 1]), vec![2, 1]).unwrap(),
+    );
+    let table = table_from_columns(vec!["G".into(), "X".into()], vec![group, values]).unwrap();
+    let summary =
+        object(grpstats_impl(table, Value::from("G"), vec![Value::from("mean")]).unwrap());
+    let Value::Tensor(means) = table_member_get(&summary, &Value::from("mean_X")).unwrap() else {
+        panic!("expected mean tensor");
+    };
+    assert_eq!(means.materialize_f64(), vec![4.0]);
 }
 
 #[test]
@@ -2344,6 +2595,297 @@ fn timetable_conversion_predicates_and_head_work() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]),
         other => panic!("expected retained Time variable, got {other:?}"),
     }
+}
+
+#[test]
+fn head_preserves_exact_integer_rows_and_requires_positive_count() {
+    assert_eq!(HEAD_INTEGER_CAPABILITIES.len(), 2);
+    let source = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 5, 7, 9]),
+            vec![2, 2],
+        )
+        .unwrap(),
+    );
+    let selected = block_on(head_builtin(
+        source,
+        vec![Value::Int(runmat_builtins::IntValue::U8(1))],
+    ))
+    .unwrap();
+    let Value::Tensor(selected) = selected else {
+        panic!("expected exact integer tensor")
+    };
+    assert_eq!(selected.shape, vec![1, 2]);
+    assert_eq!(
+        selected.into_numeric_storage().unwrap(),
+        runmat_builtins::NumericStorage::U64(vec![9_007_199_254_740_993, 7])
+    );
+
+    for controls in [
+        vec![Value::Num(0.0)],
+        vec![Value::Num(1.0), Value::Num(2.0)],
+    ] {
+        assert!(block_on(head_builtin(Value::Num(1.0), controls)).is_err());
+    }
+}
+
+#[test]
+fn head_host_preserves_every_integer_class() {
+    for storage in [
+        IntegerStorage::I8(vec![-8, 8, 1, 2]),
+        IntegerStorage::I16(vec![-16, 16, 1, 2]),
+        IntegerStorage::I32(vec![-32, 32, 1, 2]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX, 1, 2]),
+        IntegerStorage::U8(vec![0, u8::MAX, 1, 2]),
+        IntegerStorage::U16(vec![0, u16::MAX, 1, 2]),
+        IntegerStorage::U32(vec![0, u32::MAX, 1, 2]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX, 1, 2]),
+    ] {
+        let source = Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap();
+        let Value::Tensor(selected) =
+            block_on(head_builtin(Value::Tensor(source), vec![Value::Num(1.0)])).unwrap()
+        else {
+            panic!("expected exact integer tensor")
+        };
+        assert_eq!(selected.shape, vec![1, 2]);
+        let expected = storage
+            .from_exact_values_like(vec![
+                storage.value_at(0).unwrap(),
+                storage.value_at(2).unwrap(),
+            ])
+            .unwrap();
+        assert_eq!(selected.integer_storage(), Some(&expected));
+    }
+}
+
+#[test]
+fn head_preserves_nd_real_complex_and_logical_pages() {
+    let real_f64 = Tensor::new((1..=12).map(f64::from).collect(), vec![2, 2, 3]).unwrap();
+    let Value::Tensor(real_f64) =
+        block_on(head_builtin(Value::Tensor(real_f64), vec![Value::Num(1.0)])).unwrap()
+    else {
+        panic!("expected double tensor")
+    };
+    assert_eq!(real_f64.shape, vec![1, 2, 3]);
+    assert_eq!(
+        real_f64.materialize_f64(),
+        vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0]
+    );
+
+    let real = Tensor::from_f32((1..=12).map(|value| value as f32).collect(), vec![2, 2, 3])
+        .expect("single pages");
+    let Value::Tensor(real) =
+        block_on(head_builtin(Value::Tensor(real), vec![Value::Num(1.0)])).unwrap()
+    else {
+        panic!("expected single tensor");
+    };
+    assert_eq!(real.shape, vec![1, 2, 3]);
+    assert_eq!(real.numeric_dtype(), runmat_builtins::NumericDType::F32);
+    assert_eq!(real.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0]);
+
+    let complex = ComplexTensor::from_f32(
+        (1..=12)
+            .map(|value| (value as f32, -(value as f32)))
+            .collect(),
+        vec![2, 2, 3],
+    )
+    .expect("complex pages");
+    let Value::ComplexTensor(complex) = block_on(head_builtin(
+        Value::ComplexTensor(complex),
+        vec![Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("expected complex tensor");
+    };
+    assert_eq!(complex.shape, vec![1, 2, 3]);
+    assert_eq!(complex.numeric_dtype(), runmat_builtins::NumericDType::F32);
+    assert_eq!(
+        complex.materialize_f64(),
+        vec![
+            (1.0, -1.0),
+            (3.0, -3.0),
+            (5.0, -5.0),
+            (7.0, -7.0),
+            (9.0, -9.0),
+            (11.0, -11.0)
+        ]
+    );
+
+    let complex_f64 = ComplexTensor::new(
+        (1..=12)
+            .map(|value| (f64::from(value), -f64::from(value)))
+            .collect(),
+        vec![2, 2, 3],
+    )
+    .unwrap();
+    let Value::ComplexTensor(complex_f64) = block_on(head_builtin(
+        Value::ComplexTensor(complex_f64),
+        vec![Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("expected double complex tensor")
+    };
+    assert_eq!(complex_f64.shape, vec![1, 2, 3]);
+
+    let integer_complex = ComplexTensor::new_integer(
+        runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I64((1..=12).collect()),
+            IntegerStorage::I64((-12..=-1).collect()),
+        )
+        .unwrap(),
+        vec![2, 2, 3],
+    )
+    .unwrap();
+    let Value::ComplexTensor(integer_complex) = block_on(head_builtin(
+        Value::ComplexTensor(integer_complex),
+        vec![Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("expected integer complex tensor")
+    };
+    assert_eq!(integer_complex.shape, vec![1, 2, 3]);
+    assert!(integer_complex.integer_storage().is_some());
+
+    let logical = LogicalArray::new(
+        (0..12).map(|index| u8::from(index % 2 == 0)).collect(),
+        vec![2, 2, 3],
+    )
+    .expect("logical pages");
+    let Value::LogicalArray(logical) = block_on(head_builtin(
+        Value::LogicalArray(logical),
+        vec![Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("expected logical array");
+    };
+    assert_eq!(logical.shape, vec![1, 2, 3]);
+    assert_eq!(logical.data, vec![1, 1, 1, 1, 1, 1]);
+}
+
+#[test]
+fn head_strict_gpu_row_count_extension_rejects_before_provider_access() {
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![2, 2],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+    });
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let count_error = block_on(head_builtin(Value::Num(1.0), vec![resident]))
+        .expect_err("resident row count must be gated");
+    assert_eq!(
+        count_error.identifier(),
+        HEAD_EXTENSIONS[0].error_identifier
+    );
+}
+
+#[test]
+fn head_preserves_resident_integer_class_owner_and_source() {
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let source = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 5, 7, 9]),
+            vec![2, 2],
+        )
+        .unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+            .expect("upload exact integer source");
+        let result = block_on(head_builtin(
+            crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone()),
+            vec![Value::Num(1.0)],
+        ))
+        .expect("resident head");
+        let Value::GpuTensor(result) = result else {
+            panic!("expected resident result")
+        };
+        assert_ne!(result.buffer_id, handle.buffer_id);
+        assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
+        assert!(runmat_accelerate_api::provider_for_handle(&result)
+            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&result),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        let downloaded = block_on(provider.download_integer(&result)).expect("download result");
+        assert_eq!(downloaded.shape, vec![1, 2]);
+        assert_eq!(
+            downloaded.data,
+            runmat_accelerate_api::HostIntegerDataOwned::U64(vec![9_007_199_254_740_993, 7])
+        );
+        for output in [&result, &handle] {
+            provider.free(output).ok();
+            runmat_accelerate_api::clear_residency(output);
+        }
+    });
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn head_wgpu_preserves_every_integer_class_exactly() {
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let _guard = crate::builtins::common::test_support::accel_test_lock();
+    if !register_wgpu_provider_available() {
+        return;
+    }
+    let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+    for storage in [
+        IntegerStorage::I8(vec![i8::MIN, i8::MAX, 1, 2]),
+        IntegerStorage::I16(vec![i16::MIN, i16::MAX, 1, 2]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX, 1, 2]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX, 1, 2]),
+        IntegerStorage::U8(vec![0, u8::MAX, 1, 2]),
+        IntegerStorage::U16(vec![0, u16::MAX, 1, 2]),
+        IntegerStorage::U32(vec![0, u32::MAX, 1, 2]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX, 1, 2]),
+    ] {
+        let source = Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap();
+        let handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &source).unwrap();
+        let output = block_on(head_builtin(
+            crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone()),
+            vec![Value::Num(1.0)],
+        ))
+        .expect("resident integer head");
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident integer output")
+        };
+        let downloaded = block_on(provider.download_integer(&output)).expect("download head");
+        let expected = storage
+            .from_exact_values_like(vec![
+                storage.value_at(0).unwrap(),
+                storage.value_at(2).unwrap(),
+            ])
+            .unwrap();
+        let actual = match downloaded.data {
+            runmat_accelerate_api::HostIntegerDataOwned::I8(values) => IntegerStorage::I8(values),
+            runmat_accelerate_api::HostIntegerDataOwned::I16(values) => IntegerStorage::I16(values),
+            runmat_accelerate_api::HostIntegerDataOwned::I32(values) => IntegerStorage::I32(values),
+            runmat_accelerate_api::HostIntegerDataOwned::I64(values) => IntegerStorage::I64(values),
+            runmat_accelerate_api::HostIntegerDataOwned::U8(values) => IntegerStorage::U8(values),
+            runmat_accelerate_api::HostIntegerDataOwned::U16(values) => IntegerStorage::U16(values),
+            runmat_accelerate_api::HostIntegerDataOwned::U32(values) => IntegerStorage::U32(values),
+            runmat_accelerate_api::HostIntegerDataOwned::U64(values) => IntegerStorage::U64(values),
+        };
+        assert_eq!(actual, expected);
+        assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
+        for resident in [&output, &handle] {
+            provider.free(resident).ok();
+            runmat_accelerate_api::clear_residency(resident);
+        }
+    }
+}
+
+#[test]
+fn height_reads_resident_shape_without_provider_or_data_access() {
+    assert_eq!(HEIGHT_INTEGER_CAPABILITIES.len(), 1);
+    let handle = runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![13, 4],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+    };
+    assert!(matches!(
+        block_on(height_builtin(Value::GpuTensor(handle))).unwrap(),
+        Value::Num(13.0)
+    ));
 }
 
 #[test]

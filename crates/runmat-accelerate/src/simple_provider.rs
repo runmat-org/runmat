@@ -1044,19 +1044,24 @@ enum WindowKind {
     Blackman,
 }
 
-fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64> {
-    match len {
+fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Result<Vec<f64>> {
+    Ok(match len {
         0 => Vec::new(),
         1 => vec![1.0],
         _ => {
-            let effective_len = if periodic { len + 1 } else { len };
+            let effective_len = if periodic {
+                len.checked_add(1)
+                    .ok_or_else(|| anyhow::anyhow!("window length exceeds supported range"))?
+            } else {
+                len
+            };
             let denom = (effective_len - 1) as f64;
             let mut data = (0..effective_len)
                 .map(|idx| {
                     let phase = 2.0 * std::f64::consts::PI * idx as f64 / denom;
                     match kind {
                         WindowKind::Hann => 0.5 - 0.5 * phase.cos(),
-                        WindowKind::Hamming => 0.54 - 0.46 * phase.cos(),
+                        WindowKind::Hamming => 0.54 - 0.46 * window_cospi(2.0 * idx as f64 / denom),
                         WindowKind::Blackman => {
                             let first = 2.0 * idx as f64 / denom;
                             let second = 4.0 * idx as f64 / denom;
@@ -1070,7 +1075,7 @@ fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64
             }
             data
         }
-    }
+    })
 }
 
 fn window_cospi(value: f64) -> f64 {
@@ -6145,17 +6150,14 @@ impl AccelProvider for InProcessProvider {
             }
             let mut out = vec![0.0; abuf.len()];
             for i in 0..abuf.len() {
-                out[i] = abuf[i].hypot(bbuf[i]);
+                out[i] = if abuf[i].is_nan() || bbuf[i].is_nan() {
+                    f64::NAN
+                } else {
+                    abuf[i].hypot(bbuf[i])
+                };
             }
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn elem_atan2<'a>(
@@ -6915,14 +6917,7 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().copied().map(heaviside_scalar_host).collect();
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
 
@@ -7884,21 +7879,21 @@ impl AccelProvider for InProcessProvider {
 
     fn hann_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
         Ok(self.allocate_tensor(
-            generate_window_data(WindowKind::Hann, len, periodic),
+            generate_window_data(WindowKind::Hann, len, periodic)?,
             vec![len, 1],
         ))
     }
 
     fn hamming_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
         Ok(self.allocate_tensor(
-            generate_window_data(WindowKind::Hamming, len, periodic),
+            generate_window_data(WindowKind::Hamming, len, periodic)?,
             vec![len, 1],
         ))
     }
 
     fn blackman_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
         Ok(self.allocate_tensor(
-            generate_window_data(WindowKind::Blackman, len, periodic),
+            generate_window_data(WindowKind::Blackman, len, periodic)?,
             vec![len, 1],
         ))
     }

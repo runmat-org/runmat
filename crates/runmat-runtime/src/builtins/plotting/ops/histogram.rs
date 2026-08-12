@@ -1,7 +1,10 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::BarChart;
@@ -20,6 +23,45 @@ use super::state::{render_active_plot, HistogramHandleMetadata, PlotRenderOption
 use super::style::{parse_bar_style_args, BarStyleDefaults};
 
 const BUILTIN_NAME: &str = "histogram";
+
+const HISTOGRAM_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Histogram data accepts every built-in integer class and remains authoritative on the chart object.",
+    }];
+const HISTOGRAM_INTEGER_EDGES: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "BinEdges",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Explicit integer edges are ordered exactly before the floating rendering boundary.",
+    }];
+pub const HISTOGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = histogram(integer_Data, ...)",
+        inputs: &HISTOGRAM_INTEGER_DATA,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Exact typed Data is retained while raw double counts and renderer coordinates remain explicit statistical and client boundaries.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "h = histogram(X, integer_BinEdges)",
+        inputs: &HISTOGRAM_INTEGER_EDGES,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Bin membership compares against authoritative explicit edges before chart geometry materializes as double.",
+    },
+];
 const HIST_BAR_WIDTH: f32 = 0.95;
 const HIST_DEFAULT_COLOR: glam::Vec4 = glam::Vec4::new(0.15, 0.5, 0.8, 0.95);
 const HIST_DEFAULT_LABEL: &str = "Frequency";
@@ -331,14 +373,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::histogram::HISTOGRAM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::plotting::histogram::HISTOGRAM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::histogram"
 )]
 pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, data, rest) = parse_histogram_call(args)?;
+    let retained_data = match &data {
+        Value::GpuTensor(handle) => Some(
+            crate::builtins::common::gpu_helpers::gather_tensor_async(handle)
+                .await
+                .map_err(map_histogram_invalid_argument)?,
+        ),
+        _ => {
+            crate::builtins::common::tensor::value_into_tensor_for(BUILTIN_NAME, data.clone()).ok()
+        }
+    };
+    let evaluation_data = retained_data
+        .as_ref()
+        .map(|tensor| Value::Tensor(tensor.clone()))
+        .unwrap_or_else(|| data.clone());
     let (histcounts_args, style_args) = split_histogram_args(&rest);
-    let eval = crate::builtins::stats::hist::histcounts::evaluate(data, &histcounts_args)
-        .await
-        .map_err(map_histogram_invalid_argument)?;
+    let raw_histcounts_args = histcounts_count_args(&histcounts_args);
+    let eval =
+        crate::builtins::stats::hist::histcounts::evaluate(evaluation_data, &raw_histcounts_args)
+            .await
+            .map_err(map_histogram_invalid_argument)?;
     let (counts_value, edges_value) = eval.into_pair();
     let counts = Tensor::try_from(&counts_value)
         .map_err(|e| histogram_invalid_argument(format!("cannot convert counts tensor: {e}")))?;
@@ -357,13 +416,28 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style = parse_bar_style_args(BUILTIN_NAME, &style_args, defaults)
         .map_err(map_histogram_invalid_argument)?;
     let explicit_display_name = style.label.clone();
+    let normalization = infer_normalization(&histcounts_args);
+    crate::builtins::plotting::properties::validate_histogram_normalization(
+        &normalization,
+        BUILTIN_NAME,
+    )
+    .map_err(map_histogram_invalid_argument)?;
+    let normalization_denominator = retained_data
+        .as_ref()
+        .map(|tensor| tensor.len() as f64)
+        .unwrap_or_else(|| counts.iter().sum());
+    let render_counts = crate::builtins::plotting::properties::apply_histogram_normalization(
+        &counts,
+        &edges,
+        &normalization,
+        normalization_denominator,
+    );
     let labels = histogram_labels_from_edges(&edges);
-    let mut chart = BarChart::new(labels, counts.clone())
+    let mut chart = BarChart::new(labels, render_counts)
         .map_err(|e| histogram_internal(format!("chart construction failed: {e}")))?;
     chart.set_histogram_bin_edges(edges.clone());
     apply_bar_style(&mut chart, &style, HIST_DEFAULT_LABEL);
 
-    let normalization = infer_normalization(&histcounts_args);
     let y_label = match normalization.as_str() {
         "count" => "Count",
         "probability" => "Probability",
@@ -406,7 +480,8 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         edges.clone(),
         counts.clone(),
         normalization.clone(),
-        histogram_metadata(&edges, &style, None, false, "bar"),
+        normalization_denominator,
+        histogram_metadata(&edges, &style, retained_data, false, "bar"),
     );
     if let Some(display_name) = explicit_display_name {
         crate::builtins::plotting::state::set_histogram_handle_display_name(
@@ -496,16 +571,34 @@ fn infer_normalization(args: &[Value]) -> String {
                     return v.trim().to_ascii_lowercase();
                 }
             }
+            idx += 2;
+        } else {
+            idx += 1;
         }
-        idx += 2;
     }
     "count".to_string()
+}
+
+fn histcounts_count_args(args: &[Value]) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        if value_as_string(&args[idx])
+            .is_some_and(|key| key.trim().eq_ignore_ascii_case("Normalization"))
+        {
+            idx += 2;
+        } else {
+            out.push(args[idx].clone());
+            idx += 1;
+        }
+    }
+    out
 }
 
 pub(crate) fn histogram_metadata(
     edges: &[f64],
     style: &super::style::BarStyle,
-    data: Option<Vec<f64>>,
+    data: Option<Tensor>,
     is_polar: bool,
     display_style: &str,
 ) -> HistogramHandleMetadata {
@@ -581,7 +674,7 @@ mod tests {
         ]));
         let out = out.unwrap();
         let counts = Tensor::try_from(
-            &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
+            &get_builtin(vec![Value::Num(out), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
         assert_eq!(counts.as_f64_slice(), Some(&[3.0, 1.0][..]));
@@ -603,10 +696,41 @@ mod tests {
         ]))
         .unwrap();
         let counts = Tensor::try_from(
-            &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
+            &get_builtin(vec![Value::Num(out), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
         assert_eq!(counts.as_f64_slice(), Some(&[1.0, 2.0, 1.0][..]));
+    }
+
+    #[test]
+    fn histogram_retains_typed_data_and_normalizes_raw_counts_once() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let samples =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 1, 2]), vec![4, 1]).unwrap();
+        let handle = futures::executor::block_on(histogram_builtin(vec![
+            Value::Tensor(samples),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap()),
+            Value::String("Normalization".into()),
+            Value::String("probability".into()),
+        ]))
+        .unwrap();
+        let data = Tensor::try_from(
+            &get_builtin(vec![Value::Num(handle), Value::String("Data".into())]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(data.numeric_dtype(), runmat_builtins::NumericDType::U16);
+        assert_eq!(
+            data.integer_storage(),
+            Some(&IntegerStorage::U16(vec![0, 1, 1, 2]))
+        );
+        let values = Tensor::try_from(
+            &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(values.as_f64_slice(), Some(&[0.25, 0.5, 0.25][..]));
     }
 
     #[test]
@@ -635,6 +759,54 @@ mod tests {
                 .unwrap_or_default(),
             1.0
         );
+    }
+
+    #[test]
+    fn histogram_probability_uses_all_input_elements_and_keeps_raw_bin_counts() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let handle = futures::executor::block_on(histogram_builtin(vec![
+            Value::Tensor(tensor_from(&[0.25, 1.25, 99.0, f64::NAN])),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap()),
+            Value::String("Normalization".into()),
+            Value::String("probability".into()),
+        ]))
+        .unwrap();
+        let raw = Tensor::try_from(
+            &get_builtin(vec![Value::Num(handle), Value::String("BinCounts".into())]).unwrap(),
+        )
+        .unwrap();
+        let values = Tensor::try_from(
+            &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(raw.as_f64_slice(), Some(&[1.0, 1.0][..]));
+        assert_eq!(values.as_f64_slice(), Some(&[0.25, 0.25][..]));
+        let figure = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Bar(chart) = figure.plots().next().unwrap() else {
+            panic!("expected bar chart");
+        };
+        assert_eq!(
+            futures::executor::block_on(chart.export_scene_values()).unwrap(),
+            vec![0.25, 0.25]
+        );
+    }
+
+    #[test]
+    fn histogram_rejects_unknown_normalization_at_construction() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let error = futures::executor::block_on(histogram_builtin(vec![
+            Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])),
+            Value::String("Normalization".into()),
+            Value::String("bogus".into()),
+        ]))
+        .expect_err("unknown histogram normalization");
+        assert_eq!(error.identifier(), Some("RunMat:histogram:InvalidArgument"));
     }
 
     #[test]

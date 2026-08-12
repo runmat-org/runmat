@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Falls back to host execution when the acceleration provider does not expose an inverse FFT hook; even with a hook, the result is downloaded immediately to return a MATLAB-compatible host array."
+    "notes": "Uses the input handle's owning provider. A supported inverse-FFT hook returns a validated resident complex result. Symmetric output and unsupported-hook fallback may compute through an internal exact download; the result is restored to the owner only when that provider can preserve its numeric class."
   },
   "fusion": {
     "elementwise": false,
@@ -30,7 +30,7 @@
     "unit": "builtins::math::fft::ifft::tests",
     "integration": "builtins::math::fft::ifft::tests::ifft_gpu_roundtrip_matches_cpu"
   },
-  "description": "`ifft(X)` computes the inverse discrete Fourier transform of `X`. By default it operates along the first non-singleton dimension, with optional length, dimension, and symmetry forms following MATLAB semantics.",
+  "description": "`ifft(X)` computes the inverse discrete Fourier transform of `X`. By default it operates along the first non-singleton dimension, with optional length, dimension, and symmetry forms following MATLAB semantics. Documented integer data through 32 bits produces double output. Host `int64` and `uint64` data and wide typed controls are exactness-checked RunMat extensions.",
   "behaviors": [
     "`ifft(X)` transforms along the first dimension whose size is greater than 1.",
     "`ifft(X, N)` zero-pads or truncates `X` to length `N` before applying the transform.",
@@ -38,6 +38,9 @@
     "`ifft(X, [], DIM)` keeps the existing length and transforms along dimension `DIM`.",
     "`ifft(..., 'symmetric')` forces the output to be real-valued, mirroring MATLAB's handling of conjugate-symmetric spectra.",
     "`ifft(..., 'nonsymmetric')` keeps the default complex result; it is equivalent to omitting the symmetry flag but is accepted for MATLAB compatibility.",
+    "Documented integer data (`int8` through `int32` and `uint8` through `uint32`) crosses once into the double transform domain and returns double numeric class; the symmetry flag changes complexity, not numeric class.",
+    "Host `int64` and `uint64` data is available only in RunMat extension mode and must be exactly representable as double. Resident wide-integer data rejects before gather because no exact provider transform is available.",
+    "Typed `int64` and `uint64` length or dimension controls are independently gated RunMat extensions and are parsed from exact integer storage.",
     "Empty inputs and dimensions larger than the rank of `X` mirror MATLAB behaviour."
   ],
   "examples": [
@@ -86,7 +89,7 @@
     },
     {
       "question": "Will RunMat run the inverse FFT on the GPU automatically?",
-      "answer": "Only when the provider exposes an inverse FFT kernel (`ifft_dim`). Otherwise, the runtime gathers to the host transparently."
+      "answer": "When the input owner exposes a compatible `ifft_dim` kernel, nonsymmetric results remain resident after provider metadata and ownership validation. Unsupported hooks fall back through an internal owner download. RunMat restores the result to that owner when its physical precision matches the required output class; otherwise it returns the correctly typed host result instead of relabeling lower-precision storage."
     },
     {
       "question": "How do I perform multi-dimensional inverse transforms?",
@@ -127,8 +130,10 @@
     "label": "Open a ticket",
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
-  "gpu_residency": "RunMat's auto-offload system keeps tensors on the GPU when profitable, so explicit `gpuArray` calls are rarely required. They remain available to mirror MATLAB workflows. When the provider lacks an inverse FFT hook, RunMat automatically gathers once, evaluates the transform on the host, and returns the result, so manual residency management is unnecessary.",
+  "gpu_residency": "RunMat resolves execution and fallback through the provider that owns the input handle. Internal downloads do not change the source handle's class metadata. Host fallback results return to the owner only when its physical precision preserves the required output class; documented integer and logical inputs therefore remain double host results on an F32-only owner.",
   "gpu_behavior": [
-    "RunMat keeps `gpuArray` inputs on the device long enough to query the active acceleration provider for the `ifft_dim` hook. When the hook is present, the inverse transform executes on the device, after which RunMat immediately downloads the result to return the standard MATLAB host types. If the provider lacks that hook—or if the requested length is zero—the runtime gathers the data once, evaluates the inverse transform on the CPU via `rustfft`, and returns a MATLAB-compatible result."
+    "For floating input, RunMat asks the input owner for `ifft_dim` and accepts only a fresh, nonaliased output with the expected device, shape, complex storage, precision, and ownership. Provider execution or contract failures are terminal; only the exact unsupported-hook response selects host fallback.",
+    "The symmetric form safely downloads the validated inverse-FFT result, extracts the real component in its native class, and restores a fresh real handle when the owner preserves that class. This avoids relying on provider-specific physical complex-buffer shapes.",
+    "Zero-length, logical, and documented resident integer inputs use the exact host transform path. F32 floating inputs preserve single precision; integer and logical inputs produce double output and stay on the host when an F32-only provider cannot represent that class."
   ]
 }

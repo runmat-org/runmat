@@ -13,6 +13,8 @@ pub use structure::{
     table_replace_variables_like, table_variable_names_from_object, table_variables, table_width,
 };
 
+#[cfg(test)]
+pub(super) use analytics::cell_key_string;
 pub(super) use analytics::{groupsummary_impl, grpstats_impl, pivot_impl};
 pub(super) use indexing::*;
 pub(super) use properties::*;

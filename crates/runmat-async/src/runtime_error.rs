@@ -61,6 +61,19 @@ pub struct RuntimeError {
     pub source: Option<Box<dyn StdError + Send + Sync>>,
     pub identifier: Option<String>,
     pub context: ErrorContext,
+    pub gpu_gather_retry: GpuGatherRetry,
+}
+
+/// Whether dispatcher-level legacy GPU gather-and-retry may transform this error.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GpuGatherRetry {
+    /// Preserve the historical message-based fallback while callers migrate to an explicit policy.
+    #[default]
+    Legacy,
+    /// This is a final policy, semantic, or provider-integrity error and must be returned unchanged.
+    Never,
+    /// The implementation explicitly requests dispatcher-owned gather and one host retry.
+    Requested,
 }
 
 impl RuntimeError {
@@ -71,6 +84,7 @@ impl RuntimeError {
             source: None,
             identifier: None,
             context: ErrorContext::default(),
+            gpu_gather_retry: GpuGatherRetry::Legacy,
         }
     }
 
@@ -80,6 +94,10 @@ impl RuntimeError {
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    pub fn gpu_gather_retry(&self) -> GpuGatherRetry {
+        self.gpu_gather_retry
     }
 
     pub fn contains(&self, needle: &str) -> bool {
@@ -177,6 +195,11 @@ pub struct RuntimeErrorBuilder {
 impl RuntimeErrorBuilder {
     pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
         self.error.identifier = Some(identifier.into());
+        self
+    }
+
+    pub fn with_gpu_gather_retry(mut self, policy: GpuGatherRetry) -> Self {
+        self.error.gpu_gather_retry = policy;
         self
     }
 

@@ -2,7 +2,11 @@
 
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, NumericDType, ResolveContext, Tensor, Type, Value,
 };
@@ -140,6 +144,82 @@ pub const GRADIENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &GRADIENT_ERRORS,
 };
 
+const GRADIENT_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gradient-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gradient with typed-integer data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GradientIntegerDataExtension"),
+};
+
+const GRADIENT_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gradient-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gradient with logical data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GradientLogicalDataExtension"),
+};
+
+const GRADIENT_INTEGER_SPACING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gradient-integer-spacing",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gradient with typed-integer spacing is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GradientIntegerSpacingExtension"),
+};
+
+const GRADIENT_LOGICAL_SPACING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gradient-logical-spacing",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "gradient with logical spacing is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:GradientLogicalSpacingExtension"),
+};
+
+pub const GRADIENT_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    GRADIENT_INTEGER_DATA_EXTENSION,
+    GRADIENT_LOGICAL_DATA_EXTENSION,
+    GRADIENT_INTEGER_SPACING_EXTENSION,
+    GRADIENT_LOGICAL_SPACING_EXTENSION,
+];
+
+const GRADIENT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "F",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes must be exactly representable at the binary64 finite-difference boundary.",
+    }];
+
+const GRADIENT_INTEGER_SPACING_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "h or h_i",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Scalar and coordinate-vector integer spacing must be exactly representable at the binary64 finite-difference boundary.",
+    }];
+
+pub const GRADIENT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "G = gradient(integer_F, ...)",
+        inputs: &GRADIENT_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer data crosses one checked binary64 boundary and produces ordinary double gradient components; resident integer buffers never enter floating provider kernels.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "G = gradient(F, integer_h_or_h_i, ...)",
+        inputs: &GRADIENT_INTEGER_SPACING_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only integer spacing crosses one checked binary64 boundary; output precision continues to follow the ordinary floating data path.",
+    },
+];
+
 fn gradient_descriptor_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -221,19 +301,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "gradient",
     type_resolver(gradient_type),
     descriptor(crate::builtins::math::reduction::gradient::GRADIENT_DESCRIPTOR),
+    extensions(crate::builtins::math::reduction::gradient::GRADIENT_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::math::reduction::gradient::GRADIENT_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::math::reduction::gradient"
 )]
 async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
-    if requested_outputs == 0 {
-        return Ok(Value::OutputList(Vec::new()));
-    }
-
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(gradient_invalid_input(
             "operations involving complex numbers with integer types are not supported",
         ));
     }
+
+    ensure_gradient_extensions(&value, &rest)?;
+    ensure_exact_integer_boundary(&value, "input data")?;
 
     let available_outputs = gradient_output_dims(value_shape(&value), value_len(&value));
     if requested_outputs > available_outputs.len() {
@@ -245,10 +328,16 @@ async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
 
     let dim_lengths =
         gradient_dim_lengths(value_shape(&value), value_len(&value), &available_outputs);
+    let requires_host_gpu =
+        value_is_integer_or_logical(&value) || rest.iter().any(value_is_integer_or_logical);
     let spacings = parse_spacings(&rest, &available_outputs, &dim_lengths).await?;
-    let outputs =
-        evaluate_gradient_outputs(value, &available_outputs[..requested_outputs], &spacings)
-            .await?;
+    let outputs = evaluate_gradient_outputs(
+        value,
+        &available_outputs[..requested_outputs],
+        &spacings,
+        requires_host_gpu,
+    )
+    .await?;
 
     if crate::output_count::current_output_count().is_some() {
         return Ok(Value::OutputList(outputs));
@@ -260,13 +349,77 @@ async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         .expect("single-output gradient result"))
 }
 
+fn ensure_gradient_extensions(value: &Value, spacings: &[Value]) -> BuiltinResult<()> {
+    if value_is_typed_integer(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GRADIENT_INTEGER_DATA_EXTENSION,
+            NAME,
+        )?;
+    }
+    if value_is_logical(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GRADIENT_LOGICAL_DATA_EXTENSION,
+            NAME,
+        )?;
+    }
+    for spacing in spacings {
+        if value_is_typed_integer(spacing) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &GRADIENT_INTEGER_SPACING_EXTENSION,
+                NAME,
+            )?;
+        }
+        if value_is_logical(spacing) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &GRADIENT_LOGICAL_SPACING_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn value_is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn value_is_logical(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn value_is_integer_or_logical(value: &Value) -> bool {
+    value_is_typed_integer(value) || value_is_logical(value)
+}
+
+fn ensure_exact_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
+    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let valid = match value {
+        Value::Int(value) => exact(value),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .is_none_or(|storage| storage.exact_values().iter().all(exact)),
+        _ => true,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(gradient_invalid_input(format!(
+            "integer {role} must be exactly representable as double"
+        )))
+    }
+}
+
 async fn evaluate_gradient_outputs(
     value: Value,
     requested_dims: &[usize],
     all_spacings: &[GradientSpacing],
+    requires_host_gpu: bool,
 ) -> BuiltinResult<Vec<Value>> {
     if let Value::GpuTensor(handle) = value {
-        return gradient_gpu_outputs(handle, requested_dims, all_spacings).await;
+        return gradient_gpu_outputs(handle, requested_dims, all_spacings, requires_host_gpu).await;
     }
 
     evaluate_host_gradient_outputs(value, requested_dims, all_spacings)
@@ -277,6 +430,7 @@ fn evaluate_host_gradient_outputs(
     requested_dims: &[usize],
     all_spacings: &[GradientSpacing],
 ) -> BuiltinResult<Vec<Value>> {
+    ensure_exact_integer_boundary(&value, "input data")?;
     match value {
         Value::Tensor(tensor) => {
             let mut outputs = Vec::with_capacity(requested_dims.len());
@@ -344,13 +498,25 @@ async fn gradient_gpu_outputs(
     handle: GpuTensorHandle,
     requested_dims: &[usize],
     all_spacings: &[GradientSpacing],
+    requires_host_gpu: bool,
 ) -> BuiltinResult<Vec<Value>> {
+    let owner = runmat_accelerate_api::provider_for_handle(&handle)
+        .filter(|owner| owner.device_id() == handle.device_id);
     let complex_storage =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 
-    if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
+    if requires_host_gpu
+        || all_spacings
+            .iter()
+            .any(|spacing| matches!(spacing, GradientSpacing::Coordinates(_)))
     {
+        return gradient_host_fallback(&handle, owner, requested_dims, all_spacings).await;
+    }
+
+    if let Some(provider) = owner {
+        if runmat_accelerate_api::handle_precision(&handle) != Some(provider.precision()) {
+            return gradient_host_fallback(&handle, owner, requested_dims, all_spacings).await;
+        }
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let mut outputs = Vec::with_capacity(requested_dims.len());
         for &dim in requested_dims {
@@ -359,36 +525,18 @@ async fn gradient_gpu_outputs(
                 GradientSpacing::Scalar(spacing) => {
                     provider.gradient_dim(&handle, dim.saturating_sub(1), *spacing)
                 }
-                GradientSpacing::Coordinates(coordinates) => {
-                    let shape = vec![coordinates.len(), 1];
-                    let coord_handle =
-                        match provider.upload(&runmat_accelerate_api::HostTensorView {
-                            data: coordinates,
-                            shape: &shape,
-                        }) {
-                            Ok(handle) => handle,
-                            Err(_) => {
-                                let gathered =
-                                    gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                                        .await?;
-                                return evaluate_host_gradient_outputs(
-                                    gathered,
-                                    requested_dims,
-                                    all_spacings,
-                                );
-                            }
-                        };
-                    let result = provider.gradient_dim_with_coordinates(
-                        &handle,
-                        dim.saturating_sub(1),
-                        &coord_handle,
-                    );
-                    let _ = provider.free(&coord_handle);
-                    result
-                }
+                GradientSpacing::Coordinates(_) => unreachable!("coordinates use host fallback"),
             };
             match device_result {
-                Ok(device_result) => {
+                Ok(device_result)
+                    if valid_gradient_provider_result(
+                        &device_result,
+                        &handle,
+                        &outputs,
+                        provider,
+                        complex_storage,
+                    ) =>
+                {
                     if complex_storage
                         || runmat_accelerate_api::handle_storage(&device_result)
                             == GpuTensorStorage::ComplexInterleaved
@@ -398,18 +546,175 @@ async fn gradient_gpu_outputs(
                         outputs.push(gpu_helpers::resident_gpu_value(device_result));
                     }
                 }
+                Ok(device_result) => {
+                    free_gradient_handle_if_fresh(&device_result, &handle, &outputs);
+                    free_gradient_outputs(&outputs, &handle);
+                    return gradient_host_fallback(&handle, owner, requested_dims, all_spacings)
+                        .await;
+                }
                 Err(_) => {
-                    let gathered =
-                        gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
-                    return evaluate_host_gradient_outputs(gathered, requested_dims, all_spacings);
+                    free_gradient_outputs(&outputs, &handle);
+                    return gradient_host_fallback(&handle, owner, requested_dims, all_spacings)
+                        .await;
                 }
             }
         }
         return Ok(outputs);
     }
 
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
-    evaluate_host_gradient_outputs(gathered, requested_dims, all_spacings)
+    gradient_host_fallback(&handle, None, requested_dims, all_spacings).await
+}
+
+async fn gradient_host_fallback(
+    handle: &GpuTensorHandle,
+    owner: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    requested_dims: &[usize],
+    all_spacings: &[GradientSpacing],
+) -> BuiltinResult<Vec<Value>> {
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+    let outputs = evaluate_host_gradient_outputs(gathered, requested_dims, all_spacings)?;
+    restore_gradient_outputs_if_supported(owner, handle, outputs)
+}
+
+fn gradient_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+}
+
+fn gradient_output_handle(value: &Value) -> Option<&GpuTensorHandle> {
+    match value {
+        Value::GpuTensor(handle) => Some(handle),
+        _ => None,
+    }
+}
+
+fn valid_gradient_provider_result(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    prior_outputs: &[Value],
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    complex: bool,
+) -> bool {
+    let expected_storage = if complex {
+        GpuTensorStorage::ComplexInterleaved
+    } else {
+        GpuTensorStorage::Real
+    };
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gradient_handles_alias(output, input)
+        && prior_outputs
+            .iter()
+            .filter_map(gradient_output_handle)
+            .all(|prior| !gradient_handles_alias(output, prior))
+        && runmat_accelerate_api::handle_storage(output) == expected_storage
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .filter(|owner| owner.device_id() == output.device_id)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn free_gradient_handle_if_fresh(
+    handle: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    protected_outputs: &[Value],
+) {
+    if gradient_handles_alias(handle, input)
+        || protected_outputs
+            .iter()
+            .filter_map(gradient_output_handle)
+            .any(|protected| gradient_handles_alias(handle, protected))
+    {
+        return;
+    }
+    if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle)
+        .filter(|owner| owner.device_id() == handle.device_id)
+    {
+        let _ = owner.free(handle);
+    }
+}
+
+fn free_gradient_outputs(outputs: &[Value], input: &GpuTensorHandle) {
+    let mut freed = std::collections::BTreeSet::new();
+    for handle in outputs.iter().filter_map(gradient_output_handle) {
+        if gradient_handles_alias(handle, input)
+            || !freed.insert((handle.device_id, handle.buffer_id))
+        {
+            continue;
+        }
+        if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle)
+            .filter(|owner| owner.device_id() == handle.device_id)
+        {
+            let _ = owner.free(handle);
+        }
+    }
+}
+
+fn restore_gradient_outputs_if_supported(
+    provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    prototype: &GpuTensorHandle,
+    outputs: Vec<Value>,
+) -> BuiltinResult<Vec<Value>> {
+    let Some(provider) = provider else {
+        return Ok(outputs);
+    };
+    let precision_matches = outputs.iter().all(|value| match value {
+        Value::Num(_) | Value::Complex(_, _) => {
+            provider.precision() == runmat_accelerate_api::ProviderPrecision::F64
+        }
+        Value::Tensor(tensor) => match tensor.numeric_dtype() {
+            NumericDType::F32 => {
+                provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
+            }
+            _ => provider.precision() == runmat_accelerate_api::ProviderPrecision::F64,
+        },
+        Value::ComplexTensor(tensor) => match tensor.numeric_dtype() {
+            NumericDType::F32 => {
+                provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
+            }
+            _ => provider.precision() == runmat_accelerate_api::ProviderPrecision::F64,
+        },
+        _ => false,
+    });
+    if !precision_matches {
+        return Ok(outputs);
+    }
+    let mut restored = Vec::with_capacity(outputs.len());
+    for output in outputs.iter().cloned() {
+        let protected = std::iter::once(prototype.clone())
+            .chain(restored.iter().filter_map(gradient_output_handle).cloned())
+            .collect::<Vec<_>>();
+        match crate::builtins::math::trigonometry::inverse_helpers::upload_value_protected(
+            provider, output, NAME, &protected,
+        ) {
+            Ok(output) => {
+                let valid = gradient_output_handle(&output).is_some_and(|handle| {
+                    handle.device_id == prototype.device_id
+                        && !gradient_handles_alias(handle, prototype)
+                        && restored
+                            .iter()
+                            .filter_map(gradient_output_handle)
+                            .all(|prior| !gradient_handles_alias(handle, prior))
+                });
+                if valid {
+                    restored.push(output);
+                    continue;
+                }
+                if let Some(handle) = gradient_output_handle(&output) {
+                    free_gradient_handle_if_fresh(handle, prototype, &restored);
+                }
+                free_gradient_outputs(&restored, prototype);
+                return Ok(outputs);
+            }
+            Err(_) => {
+                free_gradient_outputs(&restored, prototype);
+                return Ok(outputs);
+            }
+        }
+    }
+    Ok(restored)
 }
 
 fn spacing_for_dim<'a>(
@@ -466,6 +771,7 @@ async fn parse_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<
 }
 
 fn parse_host_spacing_argument(value: &Value, dim_len: usize) -> BuiltinResult<GradientSpacing> {
+    ensure_exact_integer_boundary(value, "spacing")?;
     let tensor =
         tensor::value_into_tensor_for(NAME, value.clone()).map_err(gradient_invalid_argument)?;
     if tensor_len(&tensor) == 0 {
@@ -885,7 +1191,50 @@ mod tests {
     use runmat_builtins::{IntegerStorage, NumericDType, NumericStorage, Tensor};
 
     fn gradient_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::gradient_builtin(value, rest))
+    }
+
+    #[test]
+    fn gradient_integer_extensions_and_capabilities_are_declared() {
+        assert_eq!(GRADIENT_EXTENSIONS.len(), 4);
+        assert_eq!(GRADIENT_INTEGER_CAPABILITIES.len(), 2);
+        assert!(GRADIENT_EXTENSIONS
+            .iter()
+            .any(|extension| extension.id == "gradient-integer-data"));
+        assert!(GRADIENT_EXTENSIONS
+            .iter()
+            .any(|extension| extension.id == "gradient-integer-spacing"));
+    }
+
+    #[test]
+    fn gradient_strict_mode_rejects_integer_data_before_computation() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3])
+            .expect("integer input");
+        let error = block_on(super::gradient_builtin(Value::Tensor(input), Vec::new()))
+            .expect_err("integer data is an extension");
+        assert_eq!(
+            error.identifier(),
+            GRADIENT_INTEGER_DATA_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn gradient_rejects_inexact_integer_data_and_spacing() {
+        let inexact = 9_007_199_254_740_993_u64;
+        let data = Tensor::new_integer(IntegerStorage::U64(vec![inexact, inexact + 2]), vec![1, 2])
+            .expect("integer data");
+        let error = gradient_builtin(Value::Tensor(data), Vec::new())
+            .expect_err("inexact integer data must reject");
+        assert!(error.message().contains("exactly representable as double"));
+
+        let data = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double data");
+        let spacing = Tensor::new_integer(IntegerStorage::U64(vec![inexact]), vec![1, 1])
+            .expect("integer spacing");
+        let error = gradient_builtin(Value::Tensor(data), vec![Value::Tensor(spacing)])
+            .expect_err("inexact integer spacing must reject");
+        assert!(error.message().contains("exactly representable as double"));
     }
 
     #[test]

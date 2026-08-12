@@ -1,9 +1,11 @@
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned, IntegerElementType,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostTensorOwned,
+    IntegerElementType,
 };
 use runmat_builtins::{
     ComplexStorage, ComplexTensor, IntValue, NumericDType, NumericStorage, Tensor, Value,
@@ -16,6 +18,21 @@ use std::sync::Arc;
 
 fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
+}
+
+fn provider_integrity_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(builtin)
+        .with_identifier(format!("RunMat:{builtin}:ProviderIntegrity"))
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
+}
+
+fn terminal_builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(builtin)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
 }
 
 fn checked_product(dims: &[usize], builtin: &str, context: &str) -> BuiltinResult<usize> {
@@ -48,7 +65,7 @@ fn zeroed_complex_vec<T: rustfft::FftNum>(
     }
     let mut values = Vec::new();
     values.try_reserve_exact(len).map_err(|err| {
-        builtin_error(
+        terminal_builtin_error(
             builtin,
             format!("{builtin}: {context} allocation failed: {err}"),
         )
@@ -138,7 +155,7 @@ fn tensor_len(tensor: &Tensor) -> usize {
 
 fn parse_length_scalar(value: f64, builtin: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(builtin_error(
+        return Err(terminal_builtin_error(
             builtin,
             format!("{builtin}: length must be finite"),
         ));
@@ -244,13 +261,164 @@ pub fn restore_complex_gpu_result(
             format!("{builtin}: no acceleration provider owns the input handle"),
         )
     })?;
+    let precision = match tensor.complex_storage().numeric_dtype() {
+        NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+        _ => runmat_accelerate_api::ProviderPrecision::F64,
+    };
+    if provider.precision() != precision {
+        return Ok(complex_tensor_into_value(tensor.clone()));
+    }
+    let source_metadata = gpu_metadata_snapshot(source);
     let output = gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|source| {
-        builtin_error(
+        provider_integrity_error(
             builtin,
             format!("{builtin}: failed to restore GPU result: {source}"),
         )
     })?;
+    if same_gpu_handle(source, &output) {
+        restore_gpu_metadata(source, source_metadata);
+        return Err(provider_integrity_error(
+            builtin,
+            format!("{builtin}: provider aliased the protected input during complex restoration"),
+        ));
+    }
+    if !valid_provider_fft_output(
+        provider,
+        &output,
+        &tensor.shape,
+        GpuTensorStorage::ComplexInterleaved,
+        precision,
+    ) {
+        free_rejected_provider_fft_output(provider, &output, &[source]);
+        return Err(provider_integrity_error(
+            builtin,
+            format!("{builtin}: provider returned an invalid restored complex result"),
+        ));
+    }
     Ok(gpu_helpers::complex_gpu_value(output))
+}
+
+pub fn restore_real_gpu_result(
+    source: &GpuTensorHandle,
+    tensor: &Tensor,
+    builtin: &str,
+) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(source).ok_or_else(|| {
+        builtin_error(
+            builtin,
+            format!("{builtin}: no acceleration provider owns the input handle"),
+        )
+    })?;
+    let precision = match tensor.numeric_dtype() {
+        NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+        _ => runmat_accelerate_api::ProviderPrecision::F64,
+    };
+    if provider.precision() != precision {
+        return Ok(tensor::tensor_into_value(tensor.clone()));
+    }
+    let source_metadata = gpu_metadata_snapshot(source);
+    let output = gpu_helpers::upload_tensor(provider, tensor).map_err(|error| {
+        provider_integrity_error(
+            builtin,
+            format!("{builtin}: failed to restore GPU result: {error}"),
+        )
+    })?;
+    if same_gpu_handle(source, &output) {
+        restore_gpu_metadata(source, source_metadata);
+        return Err(provider_integrity_error(
+            builtin,
+            format!("{builtin}: provider aliased the protected input during real restoration"),
+        ));
+    }
+    if !valid_provider_fft_output(
+        provider,
+        &output,
+        &tensor.shape,
+        GpuTensorStorage::Real,
+        precision,
+    ) {
+        free_rejected_provider_fft_output(provider, &output, &[source]);
+        return Err(provider_integrity_error(
+            builtin,
+            format!("{builtin}: provider returned an invalid restored real result"),
+        ));
+    }
+    Ok(Value::GpuTensor(output))
+}
+
+pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
+    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+}
+
+pub type GpuMetadataSnapshot = (
+    GpuTensorStorage,
+    Option<runmat_accelerate_api::ProviderPrecision>,
+    Option<IntegerElementType>,
+    bool,
+);
+
+pub fn gpu_metadata_snapshot(handle: &GpuTensorHandle) -> GpuMetadataSnapshot {
+    (
+        runmat_accelerate_api::handle_storage(handle),
+        runmat_accelerate_api::handle_precision(handle),
+        runmat_accelerate_api::handle_integer_type(handle),
+        runmat_accelerate_api::handle_is_logical(handle),
+    )
+}
+
+pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnapshot) {
+    runmat_accelerate_api::set_handle_storage(handle, snapshot.0);
+    match snapshot.1 {
+        Some(precision) => runmat_accelerate_api::set_handle_precision(handle, precision),
+        None => runmat_accelerate_api::clear_handle_precision(handle),
+    }
+    match snapshot.2 {
+        Some(integer) => runmat_accelerate_api::set_handle_integer_type(handle, integer),
+        None => runmat_accelerate_api::clear_handle_integer_type(handle),
+    }
+    runmat_accelerate_api::set_handle_logical(handle, snapshot.3);
+}
+
+pub fn provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
+    let expected = format!("{operation} not supported by provider");
+    error.chain().any(|cause| cause.to_string() == expected)
+}
+
+/// Validate a provider FFT result before it crosses the public builtin boundary.
+pub fn valid_provider_fft_output(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+    expected_shape: &[usize],
+    expected_storage: GpuTensorStorage,
+    expected_precision: runmat_accelerate_api::ProviderPrecision,
+) -> bool {
+    handle.shape == expected_shape
+        && handle.device_id == provider.device_id()
+        && runmat_accelerate_api::provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_storage(handle) == expected_storage
+        && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
+        && runmat_accelerate_api::handle_integer_type(handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(handle)
+}
+
+/// Release a malformed provider result without freeing an aliased input handle.
+pub fn free_rejected_provider_fft_output(
+    _provider: &dyn AccelProvider,
+    output: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
+) {
+    if protected
+        .iter()
+        .any(|handle| same_gpu_handle(handle, output))
+    {
+        return;
+    }
+    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output) {
+        if owner.free(output).is_ok() {
+            runmat_accelerate_api::clear_residency(output);
+        }
+    }
 }
 
 /// Convert any numeric value into a `ComplexTensor`.
@@ -330,6 +498,7 @@ pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> Bui
 
 /// Convert a downloaded host tensor into a complex tensor, interpreting a trailing
 /// dimension of size 2 as `[real, imag]` pairs.
+#[cfg(test)]
 pub fn host_to_complex_tensor(
     host: HostTensorOwned,
     builtin: &str,
@@ -358,7 +527,7 @@ pub fn host_to_complex_tensor(
             .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
     } else {
         let tensor = Tensor::new(data, shape)
-            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
+            .map_err(|e| terminal_builtin_error(builtin, format!("{builtin}: {e}")))?;
         tensor_to_complex_tensor(tensor, builtin)
     }
 }
@@ -367,18 +536,95 @@ pub async fn gather_gpu_complex_tensor(
     handle: &GpuTensorHandle,
     builtin: &str,
 ) -> BuiltinResult<ComplexTensor> {
-    let provider = runmat_accelerate_api::provider_for_handle(handle)
-        .or_else(runmat_accelerate_api::provider)
-        .ok_or_else(|| {
-            builtin_error(
-                builtin,
-                format!("{builtin}: no acceleration provider registered"),
-            )
-        })?;
+    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+        terminal_builtin_error(
+            builtin,
+            format!("{builtin}: no acceleration provider owns the input handle"),
+        )
+    })?;
+    if matches!(
+        runmat_accelerate_api::handle_integer_type(handle),
+        Some(IntegerElementType::I64 | IntegerElementType::U64)
+    ) {
+        return Err(terminal_builtin_error(
+            builtin,
+            format!(
+                "{builtin}: resident int64 and uint64 FFT data require an exact provider transform"
+            ),
+        ));
+    }
+    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+        let integer = provider
+            .download_integer(handle)
+            .await
+            .map_err(|e| terminal_builtin_error(builtin, format!("{builtin}: {e}")))?;
+        let values: Vec<f64> = match integer.data {
+            HostIntegerDataOwned::I8(values) => values.into_iter().map(|v| v as f64).collect(),
+            HostIntegerDataOwned::I16(values) => values.into_iter().map(|v| v as f64).collect(),
+            HostIntegerDataOwned::I32(values) => values.into_iter().map(|v| v as f64).collect(),
+            HostIntegerDataOwned::I64(values) => values.into_iter().map(|v| v as f64).collect(),
+            HostIntegerDataOwned::U8(values) => values.into_iter().map(|v| v as f64).collect(),
+            HostIntegerDataOwned::U16(values) => values.into_iter().map(|v| v as f64).collect(),
+            HostIntegerDataOwned::U32(values) => values.into_iter().map(|v| v as f64).collect(),
+            HostIntegerDataOwned::U64(values) => values.into_iter().map(|v| v as f64).collect(),
+        };
+        return ComplexTensor::from_complex_storage(
+            ComplexStorage::F64(values.into_iter().map(|v| (v, 0.0)).collect()),
+            integer.shape,
+        )
+        .map_err(|e| terminal_builtin_error(builtin, format!("{builtin}: {e}")));
+    }
     let host = download_handle_async(provider, handle)
         .await
-        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
-    host_to_complex_tensor(host, builtin)
+        .map_err(|e| terminal_builtin_error(builtin, format!("{builtin}: {e}")))?;
+    let precision = if runmat_accelerate_api::handle_is_logical(handle) {
+        runmat_accelerate_api::ProviderPrecision::F64
+    } else {
+        runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision())
+    };
+    host_to_complex_tensor_with_precision(host, precision, builtin).map_err(|error| {
+        build_runtime_error(error.message().to_string())
+            .with_builtin(builtin)
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .with_source(error)
+            .build()
+    })
+}
+
+fn host_to_complex_tensor_with_precision(
+    host: HostTensorOwned,
+    precision: runmat_accelerate_api::ProviderPrecision,
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    let HostTensorOwned {
+        data,
+        shape,
+        storage,
+    } = host;
+    let values = if storage == GpuTensorStorage::ComplexInterleaved {
+        if data.len() % 2 != 0 {
+            return Err(builtin_error(
+                builtin,
+                format!("{builtin}: provider tensor has mismatched real/imag data"),
+            ));
+        }
+        data.chunks_exact(2)
+            .map(|chunk| (chunk[0], chunk[1]))
+            .collect::<Vec<_>>()
+    } else {
+        data.into_iter().map(|value| (value, 0.0)).collect()
+    };
+    let storage = match precision {
+        runmat_accelerate_api::ProviderPrecision::F32 => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(re, im)| (re as f32, im as f32))
+                .collect(),
+        ),
+        runmat_accelerate_api::ProviderPrecision::F64 => ComplexStorage::F64(values),
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub async fn download_provider_complex_tensor(
@@ -387,14 +633,27 @@ pub async fn download_provider_complex_tensor(
     builtin: &str,
     free_after_download: bool,
 ) -> BuiltinResult<ComplexTensor> {
-    let host = download_handle_async(provider, handle)
+    let decoded = download_handle_async(provider, handle)
         .await
-        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
+        .and_then(|host| {
+            let precision = runmat_accelerate_api::handle_precision(handle)
+                .unwrap_or_else(|| provider.precision());
+            host_to_complex_tensor_with_precision(host, precision, builtin)
+        });
     if free_after_download {
-        provider.free(handle).ok();
-        runmat_accelerate_api::clear_residency(handle);
+        match provider.free(handle) {
+            Ok(()) => runmat_accelerate_api::clear_residency(handle),
+            Err(error) if decoded.is_ok() => {
+                return Err(provider_integrity_error(
+                    builtin,
+                    format!("{builtin}: failed to free downloaded provider result: {error}"),
+                ));
+            }
+            Err(_) => {}
+        }
     }
-    host_to_complex_tensor(host, builtin)
+    decoded
 }
 
 /// Return the first non-singleton dimension (1-based), defaulting to 1.
@@ -710,6 +969,7 @@ pub fn parse_nd_sizes_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<u
         }
         Value::Num(n) => parse_nd_sizes_data(&[*n], builtin),
         Value::Int(i) => parse_nd_sizes_integers(std::slice::from_ref(i), builtin),
+        Value::Bool(value) => parse_nd_sizes_data(&[f64::from(u8::from(*value))], builtin),
         Value::Complex(re, im) => {
             if im.abs() > f64::EPSILON {
                 return Err(builtin_error(
@@ -1138,7 +1398,85 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
     use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn fft_gpu_handle_identity_includes_device_and_buffer() {
+        let left = GpuTensorHandle {
+            shape: vec![2],
+            device_id: 1,
+            buffer_id: 7,
+        };
+        let same = left.clone();
+        let other_device = GpuTensorHandle {
+            device_id: 2,
+            ..left.clone()
+        };
+        assert!(same_gpu_handle(&left, &same));
+        assert!(!same_gpu_handle(&left, &other_device));
+    }
+
+    #[test]
+    fn fft_provider_unsupported_classifier_is_exact() {
+        assert!(provider_operation_unsupported(
+            &anyhow::anyhow!("ifft_dim not supported by provider"),
+            "ifft_dim"
+        ));
+        assert!(provider_operation_unsupported(
+            &anyhow::anyhow!("ifft_dim not supported by provider").context("provider context"),
+            "ifft_dim"
+        ));
+        assert!(!provider_operation_unsupported(
+            &anyhow::anyhow!("ifft_dim failed on provider"),
+            "ifft_dim"
+        ));
+    }
+
+    #[test]
+    fn fft_gather_downloads_integer_storage_exactly_without_clearing_source_residency() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::I32(vec![1, -2, 3]), vec![1, 3]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+            runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::I32);
+            let gathered = block_on(gather_gpu_complex_tensor(&handle, "ifft"))
+                .expect("exact integer download");
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![(1.0, 0.0), (-2.0, 0.0), (3.0, 0.0)]
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::I32)
+            );
+            provider.free(&handle).ok();
+            runmat_accelerate_api::clear_residency(&handle);
+        });
+    }
+
+    #[test]
+    fn fft_gather_rejects_resident_wide_integer_before_materialization() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                    .unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+            runmat_accelerate_api::set_handle_integer_type(&handle, IntegerElementType::U64);
+            let error = block_on(gather_gpu_complex_tensor(&handle, "ifft"))
+                .expect_err("wide resident integer must not materialize through f64");
+            assert!(error.message().contains("exact provider transform"));
+            assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            provider.free(&handle).ok();
+            runmat_accelerate_api::clear_residency(&handle);
+        });
+    }
 
     #[test]
     fn fft_length_preserves_typed_integer_scalar_tensors() {

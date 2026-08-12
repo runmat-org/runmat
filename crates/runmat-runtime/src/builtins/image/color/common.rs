@@ -45,6 +45,17 @@ pub(crate) async fn gather_value(name: &'static str, value: &Value) -> BuiltinRe
         .map_err(|err| map_flow(name, err))
 }
 
+pub(crate) fn restore_resident_numeric_result(
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    value: Value,
+    name: &'static str,
+) -> BuiltinResult<Value> {
+    let Some(source) = source else {
+        return Ok(value);
+    };
+    crate::builtins::common::gpu_helpers::restore_class_preserving_value(source, value, name)
+}
+
 pub(crate) async fn gather_tensor(name: &'static str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_value(name, &value).await?;
     tensor::value_into_tensor_for(name, gathered).map_err(|err| builtin_error(name, err))

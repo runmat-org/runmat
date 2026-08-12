@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Keeps real GPU tensors resident when the active provider implements unary_heaviside; otherwise RunMat gathers and evaluates the host implementation."
+    "notes": "GPU-resident input is a RunMat extension. Admitted inputs use their owning provider and remain resident after an explicit unsupported-hook fallback; provider execution and contract failures are terminal."
   },
   "fusion": {
     "elementwise": true,
@@ -30,14 +30,14 @@
     "unit": "builtins::math::elementwise::heaviside::tests",
     "integration": "builtins::math::elementwise::heaviside::tests::heaviside_gpu_provider_roundtrip"
   },
-  "description": "`Y = heaviside(X)` returns the Heaviside step function applied element by element. Negative real values map to `0`, zero maps to `0.5`, and positive values map to `1`.",
+  "description": "`Y = heaviside(X)` returns the Heaviside step function applied element by element. Negative real values map to `0`, zero maps to `0.5`, and positive values map to `1`. Integer, logical, character, and GPU-resident numeric inputs are conservative RunMat extensions and require extension mode.",
   "behaviors": [
     "Real scalars, vectors, matrices, and higher-dimensional tensors are evaluated elementwise.",
     "Both `0.0` and `-0.0` map to `0.5`.",
     "`Inf` maps to `1`, `-Inf` maps to `0`, and `NaN` remains `NaN`.",
     "CPU, provider, WGPU, and fusion paths all use the same real scalar mapping.",
-    "Logical inputs are promoted to doubles, so `heaviside(false)` returns `0.5` and `heaviside(true)` returns `1`.",
-    "Character arrays are treated as their numeric code points and return doubles of the same shape.",
+    "In RunMat extension mode, logical inputs are promoted to doubles, so `heaviside(false)` returns `0.5` and `heaviside(true)` returns `1`.",
+    "In RunMat extension mode, character arrays are treated as their numeric code points and return doubles of the same shape.",
     "Symbolic scalar inputs return symbolic `heaviside(...)` expressions.",
     "Complex and string inputs are rejected with a stable invalid-input identifier."
   ],
@@ -57,7 +57,7 @@
       "output": "Y = [0 0.5; 1 NaN]"
     },
     {
-      "description": "Use logical inputs",
+      "description": "Use the RunMat logical-input extension",
       "input": "mask = [false true];\ny = heaviside(mask)",
       "output": "y = [0.5 1]"
     },
@@ -67,7 +67,7 @@
       "output": "y = heaviside(x)"
     },
     {
-      "description": "Execute on a GPU-resident tensor",
+      "description": "Use the RunMat GPU-resident-input extension",
       "input": "G = gpuArray([-1 0 1]);\nY = heaviside(G);\nhost = gather(Y)"
     }
   ],

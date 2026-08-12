@@ -8,7 +8,7 @@ temp_dir=$(mktemp -d)
 trap 'rm -rf "${temp_dir}"' EXIT
 fixture="${temp_dir}/catalog.json"
 
-jq -n '{builtins: ([range(0; 30) | {name: ("candidate" + tostring), signatures: [{label: ("candidate" + tostring + "(X)"), inputs: [{ty: (if . % 2 == 0 then "Any" else "SizeArg" end)}]}], integer_capabilities: [], integer_audit: null}] + [{name: "settled", signatures: [{label: "settled(X)", inputs: [{ty: "Any"}]}], integer_capabilities: [], integer_audit: {kind: "NotApplicable"}}])}' >"${fixture}"
+jq -n '{builtins: ([range(0; 30) | {name: ("candidate" + tostring), signatures: [{label: ("candidate" + tostring + "(X)"), inputs: [{ty: (if . % 2 == 0 then "Any" else "SizeArg" end)}]}], integer_capabilities: [], integer_audit: null}] + [{name: "settled", signatures: [{label: "settled(X)", inputs: [{ty: "Any"}]}], integer_capabilities: [], integer_audit: {kind: "NotApplicable"}}, {name: "open-form", signatures: [{label: "open-form(X)", inputs: [{ty: "Any"}]}], integer_capabilities: [{form: "open-form(X)", notes: "[integer-audit-open] documented form remains unresolved"}], integer_audit: null}])}' >"${fixture}"
 
 run_audit() {
   RUNMAT_INTEGER_AUDIT_CATALOG="${fixture}" "${audit}" "$@"
@@ -17,6 +17,8 @@ run_audit() {
 summary_count=$(run_audit summary | awk -F '\t' '$1 == "signature_screen_untriaged" {print $2}')
 queue_count=$(run_audit queue --limit 2000 --format json | jq 'length')
 [[ "${summary_count}" == "${queue_count}" ]]
+[[ "$(run_audit summary | awk -F '\t' '$1 == "integer_capability_open_builtin_names" {print $2}')" == "1" ]]
+run_audit queue --limit 2000 --format names | grep -qx 'open-form'
 
 first_queue=$(run_audit queue --limit 30 --format names)
 second_queue=$(run_audit queue --limit 30 --format names)

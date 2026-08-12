@@ -1,8 +1,13 @@
 //! `gray2rgb` compatibility helper for replicating grayscale images into RGB.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    LogicalArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -72,6 +77,37 @@ pub const GRAY2RGB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &GRAY2RGB_ERRORS,
 };
 
+const GRAY2RGB_CALL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "gray2rgb-callable",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "gray2rgb is a RunMat-provided image helper rather than an R2026a MATLAB product API",
+    error_identifier: Some("RunMat:compatibility:Gray2rgbCallExtension"),
+};
+
+pub const GRAY2RGB_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GRAY2RGB_CALL_EXTENSION];
+
+const GRAY2RGB_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "I",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are replicated directly from authoritative storage without entering a floating compatibility mirror.",
+    }];
+
+pub const GRAY2RGB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "RGB = gray2rgb(integer_I)",
+        inputs: &GRAY2RGB_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "The entire callable is RunMat-only. Integer images retain their class and exact values while a third RGB plane dimension is appended; resident input gathers through its owner and returns the host helper result.",
+    }];
+
 fn gray2rgb_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     gray2rgb_error_with_message(error.message, error)
 }
@@ -133,15 +169,49 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(gray2rgb_type),
     descriptor(crate::builtins::image::color::gray2rgb::GRAY2RGB_DESCRIPTOR),
+    extensions(crate::builtins::image::color::gray2rgb::GRAY2RGB_EXTENSIONS),
+    integer_capabilities(crate::builtins::image::color::gray2rgb::GRAY2RGB_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::color::gray2rgb"
 )]
 async fn gray2rgb_builtin(gray: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(gray2rgb_error(&GRAY2RGB_ERROR_TOO_MANY_INPUTS));
     }
-    let tensor = common::gather_tensor(NAME, gray)
+    crate::compatibility::ensure_builtin_extension_enabled(&GRAY2RGB_CALL_EXTENSION, NAME)?;
+    let gathered = common::gather_value(NAME, &gray)
         .await
         .map_err(|err| gray2rgb_map_error(err, &GRAY2RGB_ERROR_INVALID_INPUT))?;
+    match gathered {
+        Value::LogicalArray(logical) => replicate_logical(logical),
+        Value::Bool(value) => replicate_logical(
+            LogicalArray::new(vec![u8::from(value)], vec![1, 1])
+                .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?,
+        ),
+        gathered => gray2rgb_numeric(gathered),
+    }
+}
+
+fn replicate_logical(logical: LogicalArray) -> BuiltinResult<Value> {
+    if logical.shape.len() != 2 {
+        return Err(gray2rgb_error_with_message(
+            "gray2rgb: expected an MxN grayscale image",
+            &GRAY2RGB_ERROR_INVALID_INPUT,
+        ));
+    }
+    let rows = logical.shape[0];
+    let cols = logical.shape[1];
+    let mut data = Vec::with_capacity(logical.data.len().saturating_mul(3));
+    for _ in 0..3 {
+        data.extend_from_slice(&logical.data);
+    }
+    let output = LogicalArray::new(data, vec![rows, cols, 3])
+        .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INTERNAL))?;
+    Ok(Value::LogicalArray(output))
+}
+
+fn gray2rgb_numeric(gathered: Value) -> BuiltinResult<Value> {
+    let tensor = crate::builtins::common::tensor::value_into_tensor_for(NAME, gathered)
+        .map_err(|err| gray2rgb_error_with_message(err, &GRAY2RGB_ERROR_INVALID_INPUT))?;
     let (rows, cols) = common::grayscale_shape(&tensor, NAME)
         .map_err(|err| gray2rgb_map_error(err, &GRAY2RGB_ERROR_INVALID_INPUT))?;
     let pixels = rows * cols;
@@ -163,7 +233,30 @@ mod tests {
     use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
 
     fn call(value: Value) -> BuiltinResult<Value> {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(gray2rgb_builtin(value, Vec::new()))
+    }
+
+    #[test]
+    fn whole_gray2rgb_callable_is_runmat_only() {
+        let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input = Tensor::new(vec![0.5], vec![1, 1]).expect("input");
+        let error = block_on(gray2rgb_builtin(Value::Tensor(input), Vec::new()))
+            .expect_err("whole callable is an extension");
+        assert_eq!(error.identifier(), GRAY2RGB_CALL_EXTENSION.error_identifier);
+        assert_eq!(GRAY2RGB_EXTENSIONS.len(), 1);
+        assert_eq!(GRAY2RGB_INTEGER_CAPABILITIES.len(), 1);
+    }
+
+    #[test]
+    fn gray2rgb_preserves_logical_storage() {
+        let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical image");
+        let Value::LogicalArray(output) = call(Value::LogicalArray(logical)).expect("gray2rgb")
+        else {
+            panic!("expected logical output");
+        };
+        assert_eq!(output.shape, vec![1, 2, 3]);
+        assert_eq!(output.data, vec![0, 1, 0, 1, 0, 1]);
     }
 
     #[test]

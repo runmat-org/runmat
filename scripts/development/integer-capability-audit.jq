@@ -4,8 +4,11 @@ def has_capabilities:
 def has_audit:
   .integer_audit != null;
 
+def has_open_capability_form:
+  any((.integer_capabilities // [])[]; (.notes // "") | contains("[integer-audit-open]"));
+
 def is_settled:
-  has_capabilities or has_audit;
+  (has_capabilities and (has_open_capability_form | not)) or has_audit;
 
 def screened_input_types:
   [
@@ -47,8 +50,9 @@ def summary_rows:
   | [
       ["metric", "count", "interpretation"],
       ["public_descriptor_records", ($builtins | length), "All checked-in public builtin descriptor records."],
-      ["integer_capability_builtin_names", ($builtins | map(select(has_capabilities)) | length), "Builtin names with one or more settled per-form integer capability records."],
-      ["integer_capability_forms", ($builtins | map(.integer_capabilities // []) | flatten | length), "Settled call-form records across capability-bearing builtin names."],
+      ["integer_capability_builtin_names", ($builtins | map(select(has_capabilities)) | length), "Builtin names with one or more per-form integer capability records; names carrying an [integer-audit-open] form remain in the queue."],
+      ["integer_capability_forms", ($builtins | map(.integer_capabilities // []) | flatten | length), "Recorded call forms across capability-bearing builtin names, including explicitly open forms."],
+      ["integer_capability_open_builtin_names", ($builtins | map(select(has_open_capability_form)) | length), "Capability-bearing names retained in the queue because at least one documented integer form remains open."],
       ["integer_alias_builtin_names", ($builtins | map(select(.integer_audit.kind == "AliasOf")) | length), "Builtin names whose integer contract is explicitly inherited from a capability-bearing canonical builtin."],
       ["integer_inapplicable_builtin_names", ($builtins | map(select(.integer_audit.kind == "NotApplicable")) | length), "Audited builtin names with no integer data, control, class-preserving output, or backend surface."],
       ["signature_screen_candidates", ($builtins | map(select(is_screen_candidate)) | length), "Conservative triage population selected by numeric, Any, size, or prototype input descriptors."],

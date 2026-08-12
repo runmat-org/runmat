@@ -274,6 +274,18 @@ fn grpstats_table_impl(table: Value, groupvars: Value, rest: Vec<Value>) -> Buil
             let value = variables.fields.get(name).ok_or_else(|| {
                 invalid_variable(format!("grpstats: missing data variable '{name}'"))
             })?;
+            if let Value::Tensor(tensor) = value {
+                if tensor.integer_storage().is_some() {
+                    out_names.push(format!("{}_{}", stat.prefix(), name));
+                    out_columns.push(summarize_integer_table_groups(
+                        tensor,
+                        groups.rows.iter(),
+                        stat,
+                        options.alpha,
+                    )?);
+                    continue;
+                }
+            }
             let matrix = matrix_from_table_column(value)?;
             let summary =
                 summarize_matrix_groups(&matrix, groups.rows.iter(), stat, options.alpha)?;
@@ -298,6 +310,74 @@ fn grpstats_table_impl(table: Value, groupvars: Value, rest: Vec<Value>) -> Buil
         out_names = var_names;
     }
     table_from_columns(out_names, out_columns)
+}
+
+fn summarize_integer_table_groups<'a>(
+    tensor: &Tensor,
+    groups: impl Iterator<Item = &'a Vec<usize>>,
+    stat: GrpStat,
+    alpha: f64,
+) -> BuiltinResult<Value> {
+    let storage = tensor
+        .integer_storage()
+        .ok_or_else(|| invalid_variable("grpstats: expected integer table storage"))?;
+    let groups = groups.collect::<Vec<_>>();
+    if matches!(stat, GrpStat::Min | GrpStat::Max) {
+        let mut extrema = Vec::with_capacity(groups.len());
+        for rows in &groups {
+            let mut values = rows.iter().map(|row| {
+                storage
+                    .value_at(*row)
+                    .ok_or_else(|| invalid_index("grpstats: integer row out of bounds"))
+            });
+            let mut selected = values.next().transpose()?.ok_or_else(|| {
+                invalid_argument("grpstats: observed integer groups cannot be empty")
+            })?;
+            for value in values {
+                let value = value?;
+                let ordering = compare_integer_values(&value, &selected);
+                if (stat == GrpStat::Min && ordering == Ordering::Less)
+                    || (stat == GrpStat::Max && ordering == Ordering::Greater)
+                {
+                    selected = value;
+                }
+            }
+            extrema.push(selected);
+        }
+        let output = storage
+            .from_exact_values_like(extrema)
+            .map_err(invalid_variable)?;
+        return Tensor::new_integer(output, vec![groups.len(), 1])
+            .map(Value::Tensor)
+            .map_err(invalid_variable);
+    }
+
+    let mut data = vec![f64::NAN; storage.len()];
+    for row in groups.iter().flat_map(|rows| rows.iter().copied()) {
+        let value = storage
+            .value_at(row)
+            .ok_or_else(|| invalid_index("grpstats: integer row out of bounds"))?;
+        if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+            return Err(invalid_argument(
+                "grpstats: integer table data must be exactly representable as double for floating summary statistics",
+            ));
+        }
+        data[row] = value.to_f64();
+    }
+    let matrix = NumericMatrix {
+        data,
+        rows: tensor.rows(),
+        cols: 1,
+    };
+    let summary = summarize_matrix_groups(&matrix, groups.into_iter(), stat, alpha)?;
+    let shape = if summary.depth == 1 {
+        vec![summary.data.len(), 1]
+    } else {
+        vec![summary.data.len() / summary.depth, summary.depth]
+    };
+    Tensor::new(summary.data, shape)
+        .map(Value::Tensor)
+        .map_err(invalid_variable)
 }
 
 fn grpstats_matrix_impl(value: Value, group: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -351,11 +431,8 @@ fn numeric_matrix(value: Value, context: &str) -> BuiltinResult<NumericMatrix> {
                 rows = len;
                 cols = 1;
             }
-            Ok(NumericMatrix {
-                data: tensor_utils::tensor_into_values_f64(tensor),
-                rows,
-                cols,
-            })
+            let data = checked_tensor_values_f64(&tensor, context)?;
+            Ok(NumericMatrix { data, rows, cols })
         }
         Value::LogicalArray(array) => {
             let mut rows = array.shape.first().copied().unwrap_or(array.data.len());
@@ -378,6 +455,25 @@ fn numeric_matrix(value: Value, context: &str) -> BuiltinResult<NumericMatrix> {
             "{context}: X must be a numeric or logical matrix, got {other:?}"
         ))),
     }
+}
+
+fn checked_tensor_values_f64(tensor: &Tensor, context: &str) -> BuiltinResult<Vec<f64>> {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .exact_values()
+            .into_iter()
+            .map(|value| {
+                if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+                    Ok(value.to_f64())
+                } else {
+                    Err(invalid_argument(format!(
+                        "{context}: integer data must be exactly representable as double for floating summary statistics"
+                    )))
+                }
+            })
+            .collect();
+    }
+    Ok(tensor_utils::tensor_values_f64(tensor))
 }
 
 fn matrix_from_table_column(value: &Value) -> BuiltinResult<NumericMatrix> {
@@ -509,16 +605,6 @@ fn grouped_rows_from_row_keys(row_keys: Vec<(usize, Vec<GroupAtom>)>) -> Grouped
     GroupedRows { keys, rows }
 }
 
-fn group_atom_is_missing(atom: &GroupAtom) -> bool {
-    match atom {
-        GroupAtom::Missing => true,
-        GroupAtom::Number(value) => value.is_nan(),
-        GroupAtom::Integer(_) => false,
-        GroupAtom::Text(value) => value.is_empty(),
-        GroupAtom::Logical(_) => false,
-    }
-}
-
 fn grouping_columns(group: &Value, rows: usize) -> BuiltinResult<Vec<Vec<GroupAtom>>> {
     if option_value_is_empty(group) {
         return Ok(Vec::new());
@@ -567,8 +653,8 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
                     .numeric_value_at(index)
                     .expect("validated grouping tensor storage")
                 {
-                    NumericScalar::F64(value) => GroupAtom::Number(value),
-                    NumericScalar::F32(value) => GroupAtom::Number(f64::from(value)),
+                    NumericScalar::F64(value) => number_group_atom(value),
+                    NumericScalar::F32(value) => number_group_atom(f64::from(value)),
                     value => GroupAtom::Integer(
                         value
                             .into_int_value()
@@ -582,7 +668,7 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
             .iter()
             .map(|value| GroupAtom::Logical(*value != 0))
             .collect()),
-        Value::StringArray(array) => Ok(array.data.iter().cloned().map(GroupAtom::Text).collect()),
+        Value::StringArray(array) => Ok(array.data.iter().cloned().map(text_group_atom).collect()),
         Value::CharArray(array) => Ok((0..array.rows)
             .map(|row| {
                 let start = row * array.cols;
@@ -609,18 +695,18 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
 
 fn cell_atom(value: &Value) -> GroupAtom {
     match value {
-        Value::Num(value) => GroupAtom::Number(*value),
+        Value::Num(value) => number_group_atom(*value),
         Value::Int(value) => GroupAtom::Integer(value.clone()),
         Value::Bool(value) => GroupAtom::Logical(*value),
-        Value::String(value) => GroupAtom::Text(value.clone()),
+        Value::String(value) => text_group_atom(value.clone()),
         Value::CharArray(array) if array.rows == 1 => {
-            GroupAtom::Text(array.data.iter().collect::<String>().trim().to_string())
+            text_group_atom(array.data.iter().collect::<String>().trim().to_string())
         }
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0))
             .map(GroupAtom::Integer)
-            .unwrap_or_else(|| GroupAtom::Number(tensor_utils::tensor_value_f64(tensor, 0))),
+            .unwrap_or_else(|| number_group_atom(tensor_utils::tensor_value_f64(tensor, 0))),
         Value::LogicalArray(array) if array.data.len() == 1 => {
             GroupAtom::Logical(array.data[0] != 0)
         }
@@ -802,9 +888,9 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2]).unwrap();
         let group = Tensor::new_integer(IntegerStorage::I64(vec![-3, -3]), vec![1, 2]).unwrap();
 
-        let matrix = numeric_matrix(Value::Tensor(data), "grpstats").unwrap();
-        assert_eq!(matrix.rows, 2);
-        assert_eq!(matrix.cols, 1);
+        let error = numeric_matrix(Value::Tensor(data), "grpstats")
+            .expect_err("wide matrix data must reject at the floating boundary");
+        assert!(error.message.contains("exactly representable as double"));
         assert_eq!(grouping_vector_len(&Value::Tensor(group)), Some(2));
     }
 

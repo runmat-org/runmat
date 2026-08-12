@@ -1,9 +1,12 @@
 //! MATLAB-compatible `hsv2rgb` conversion.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -73,6 +76,26 @@ pub const HSV2RGB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &HSV2RGB_ERRORS,
 };
 
+const HSV2RGB_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "HSV",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented HSV image surface accepts double, single, or logical and the colormap surface accepts double; every typed-integer class is rejected.",
+    }];
+pub const HSV2RGB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "hsv2rgb(integer_HSV)",
+        inputs: &HSV2RGB_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Host integer storage and resident integer dtype metadata reject before conversion; RunMat mode does not widen the documented input-class surface.",
+    }];
+
 fn hsv2rgb_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     hsv2rgb_error_with_message(error.message, error)
 }
@@ -131,11 +154,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "sink",
     type_resolver(same_shape_type),
     descriptor(crate::builtins::image::color::hsv2rgb::HSV2RGB_DESCRIPTOR),
+    integer_capabilities(crate::builtins::image::color::hsv2rgb::HSV2RGB_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::color::hsv2rgb"
 )]
 async fn hsv2rgb_builtin(hsv: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(hsv2rgb_error(&HSV2RGB_ERROR_TOO_MANY_INPUTS));
+    }
+    if matches!(&hsv, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    {
+        return Err(hsv2rgb_error_with_message(
+            "hsv2rgb: integer gpuArray input is not supported; expected single, double, or logical",
+            &HSV2RGB_ERROR_INVALID_INPUT,
+        ));
     }
     let logical_input = match &hsv {
         Value::Bool(_) | Value::LogicalArray(_) => true,
@@ -147,6 +178,12 @@ async fn hsv2rgb_builtin(hsv: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
     let layout = common::color_layout(&tensor, NAME)
         .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
+    if logical_input && matches!(layout, common::ColorLayout::Colormap { .. }) {
+        return Err(hsv2rgb_error_with_message(
+            "hsv2rgb: logical input is supported only for MxNx3 HSV images",
+            &HSV2RGB_ERROR_INVALID_INPUT,
+        ));
+    }
     let input_dtype = tensor.numeric_dtype();
     if !logical_input && !matches!(input_dtype, NumericDType::F32 | NumericDType::F64) {
         return Err(hsv2rgb_error_with_message(
@@ -308,6 +345,25 @@ mod tests {
                 .expect_err("integer HSV input");
             assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
         }
+    }
+
+    #[test]
+    fn hsv2rgb_rejects_logical_colormap_shape() {
+        let logical = LogicalArray::new(vec![0, 1, 1], vec![1, 3]).unwrap();
+        let err = block_on(hsv2rgb_builtin(Value::LogicalArray(logical), Vec::new()))
+            .expect_err("logical colormap input");
+        assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn hsv2rgb_integer_capability_records_all_classes_as_rejected() {
+        assert_eq!(HSV2RGB_INTEGER_CAPABILITIES.len(), 1);
+        let input = &HSV2RGB_INTEGER_CAPABILITIES[0].inputs[0];
+        assert_eq!(
+            input.availability,
+            BuiltinIntegerInputAvailability::Rejected
+        );
+        assert_eq!(input.classes.len(), 8);
     }
 
     #[test]

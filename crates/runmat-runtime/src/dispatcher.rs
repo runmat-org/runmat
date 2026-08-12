@@ -663,8 +663,48 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
     if !args.iter().any(value_contains_gpu) {
         return false;
     }
+    if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Never) {
+        return false;
+    }
+    if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Requested) {
+        return true;
+    }
+    // Compatibility errors are policy decisions. Retain this source-chain
+    // defense for wrappers that have not yet propagated an explicit policy.
+    if error_chain_has_identifier_prefix(err, "RunMat:compatibility:") {
+        return false;
+    }
     let lowered = err.message().to_ascii_lowercase();
     lowered.contains("gpu")
+}
+
+fn error_chain_has_gpu_gather_retry(err: &RuntimeError, policy: crate::GpuGatherRetry) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(error) = current {
+        if error
+            .downcast_ref::<RuntimeError>()
+            .is_some_and(|error| error.gpu_gather_retry() == policy)
+        {
+            return true;
+        }
+        current = error.source();
+    }
+    false
+}
+
+fn error_chain_has_identifier_prefix(err: &RuntimeError, prefix: &str) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(error) = current {
+        if error
+            .downcast_ref::<RuntimeError>()
+            .and_then(RuntimeError::identifier)
+            .is_some_and(|identifier| identifier.starts_with(prefix))
+        {
+            return true;
+        }
+        current = error.source();
+    }
+    false
 }
 
 async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeError> {
@@ -687,7 +727,9 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
 
 #[cfg(test)]
 mod tests {
-    use super::{call_builtin, gather_if_needed_async, value_contains_gpu};
+    use super::{
+        call_builtin, gather_if_needed_async, should_retry_with_gpu_gather, value_contains_gpu,
+    };
     use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
     use runmat_builtins::{
         register_class, Access, ClassDef, Closure, MethodDef, StructValue, Value,
@@ -696,6 +738,80 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn compatibility_errors_never_trigger_automatic_gpu_gather_retry() {
+        let gpu = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 1,
+        });
+        let compatibility_error =
+            crate::build_runtime_error("example gpuArray call form is a RunMat extension")
+                .with_identifier("RunMat:compatibility:ExampleExtension")
+                .build();
+        assert!(!should_retry_with_gpu_gather(
+            &compatibility_error,
+            std::slice::from_ref(&gpu)
+        ));
+
+        let wrapped_compatibility_error =
+            crate::build_runtime_error("GPU implementation failed while checking the call")
+                .with_identifier("RunMat:example:GpuFailure")
+                .with_source(compatibility_error)
+                .build();
+        assert!(!should_retry_with_gpu_gather(
+            &wrapped_compatibility_error,
+            std::slice::from_ref(&gpu)
+        ));
+
+        let ordinary_gpu_error = crate::build_runtime_error("GPU input requires host fallback")
+            .with_identifier("RunMat:example:UnsupportedGpuPath")
+            .build();
+        assert!(should_retry_with_gpu_gather(&ordinary_gpu_error, &[gpu]));
+
+        let terminal_gpu_error = crate::build_runtime_error("GPU input is semantically invalid")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build();
+        assert!(!should_retry_with_gpu_gather(
+            &terminal_gpu_error,
+            &[Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: 0,
+                buffer_id: 2,
+            })]
+        ));
+
+        let nested_terminal = crate::build_runtime_error("terminal provider decision")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build();
+        let wrapped_terminal = crate::build_runtime_error("GPU implementation failed")
+            .with_source(nested_terminal)
+            .build();
+        assert!(!should_retry_with_gpu_gather(
+            &wrapped_terminal,
+            &[Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: 0,
+                buffer_id: 3,
+            })]
+        ));
+
+        let nested_request = crate::build_runtime_error("host implementation is required")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Requested)
+            .build();
+        let wrapped_request = crate::build_runtime_error("provider path unavailable")
+            .with_source(nested_request)
+            .build();
+        assert!(should_retry_with_gpu_gather(
+            &wrapped_request,
+            &[Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: 0,
+                buffer_id: 4,
+            })]
+        ));
+    }
 
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);

@@ -503,13 +503,14 @@ pub struct HistogramHandleState {
     pub bin_edges: Vec<f64>,
     pub raw_counts: Vec<f64>,
     pub normalization: String,
+    pub normalization_denominator: f64,
     pub display_name: Option<String>,
     pub metadata: HistogramHandleMetadata,
 }
 
 #[derive(Clone, Debug)]
 pub struct HistogramHandleMetadata {
-    pub data: Option<Vec<f64>>,
+    pub data: Option<Tensor>,
     pub display_style: String,
     pub face_color: String,
     pub face_alpha: f64,
@@ -553,10 +554,12 @@ pub struct Histogram2HandleState {
     pub x_bin_edges: Vec<f64>,
     pub y_bin_edges: Vec<f64>,
     pub normalization: String,
+    pub normalization_denominator: f64,
     pub display_style: crate::builtins::plotting::histogram2::Histogram2DisplayStyle,
     pub show_empty_bins: bool,
     pub face_alpha: f64,
     pub display_name: Option<String>,
+    pub data: Option<Tensor>,
 }
 
 #[derive(Clone, Debug)]
@@ -602,6 +605,8 @@ pub struct ImageHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
     pub plot_index: usize,
+    pub c_data: Option<Tensor>,
+    pub c_data_mapping: String,
 }
 
 #[derive(Clone, Debug)]
@@ -612,6 +617,7 @@ pub struct HeatmapHandleState {
     pub x_labels: Vec<String>,
     pub y_labels: Vec<String>,
     pub color_data: Tensor,
+    pub color_limits: Option<Tensor>,
 }
 
 #[derive(Clone, Debug)]
@@ -892,6 +898,7 @@ impl PlotChildHandleState {
                 bin_edges: state.bin_edges.clone(),
                 raw_counts: state.raw_counts.clone(),
                 normalization: state.normalization.clone(),
+                normalization_denominator: state.normalization_denominator,
                 display_name: state.display_name.clone(),
                 metadata: state.metadata.clone(),
             }),
@@ -904,10 +911,12 @@ impl PlotChildHandleState {
                 x_bin_edges: state.x_bin_edges.clone(),
                 y_bin_edges: state.y_bin_edges.clone(),
                 normalization: state.normalization.clone(),
+                normalization_denominator: state.normalization_denominator,
                 display_style: state.display_style,
                 show_empty_bins: state.show_empty_bins,
                 face_alpha: state.face_alpha,
                 display_name: state.display_name.clone(),
+                data: state.data.clone(),
             }),
             Self::Line(_) => Self::Line(SimplePlotHandleState {
                 figure,
@@ -992,10 +1001,12 @@ impl PlotChildHandleState {
                 plot_index,
                 is_3d: state.is_3d,
             }),
-            Self::Image(_) => Self::Image(ImageHandleState {
+            Self::Image(state) => Self::Image(ImageHandleState {
                 figure,
                 axes_index,
                 plot_index,
+                c_data: state.c_data.clone(),
+                c_data_mapping: state.c_data_mapping.clone(),
             }),
             Self::Heatmap(state) => Self::Heatmap(HeatmapHandleState {
                 figure,
@@ -1004,6 +1015,7 @@ impl PlotChildHandleState {
                 x_labels: state.x_labels.clone(),
                 y_labels: state.y_labels.clone(),
                 color_data: state.color_data.clone(),
+                color_limits: state.color_limits.clone(),
             }),
             Self::Binscatter(state) => Self::Binscatter(BinscatterHandleState {
                 figure,
@@ -3467,10 +3479,12 @@ pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
     let (handle, figure_clone) = {
         let mut reg = registry();
         let handle = reg.current;
+        let direct_images = direct_image_limits_updates(&reg.plot_children, handle, None);
         let state = get_state_mut(&mut reg, handle);
         let axes = state.active_axes;
         state.figure.set_axes_colormap(axes, colormap);
         state.colormap_lengths.insert(axes, length);
+        refresh_direct_image_limits(&direct_images, axes, length, &mut state.figure);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
@@ -3491,12 +3505,70 @@ pub fn set_colormap_for_axes_with_length(
     colormap: ColorMap,
     length: usize,
 ) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+    with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_colormap(axes_index, colormap);
         state.colormap_lengths.insert(axes_index, length);
     })?;
+    let figure_clone = {
+        let mut reg = registry();
+        let direct_images =
+            direct_image_limits_updates(&reg.plot_children, handle, Some(axes_index));
+        if let Some(state) = reg.figures.get_mut(&handle) {
+            refresh_direct_image_limits(&direct_images, axes_index, length, &mut state.figure);
+            state.figure.clone()
+        } else {
+            return Err(FigureError::InvalidHandle(handle.0));
+        }
+    };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
+}
+
+fn direct_image_limits_updates(
+    children: &HashMap<u64, PlotChildHandleState>,
+    figure: FigureHandle,
+    axes_index: Option<usize>,
+) -> Vec<(usize, usize, bool)> {
+    children
+        .values()
+        .filter_map(|child| match child {
+            PlotChildHandleState::Image(image)
+                if image.figure == figure
+                    && axes_index.is_none_or(|axes| image.axes_index == axes)
+                    && image.c_data_mapping == "direct" =>
+            {
+                Some((
+                    image.axes_index,
+                    image.plot_index,
+                    image
+                        .c_data
+                        .as_ref()
+                        .is_some_and(|tensor| tensor.integer_storage().is_some()),
+                ))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn refresh_direct_image_limits(
+    direct_images: &[(usize, usize, bool)],
+    axes_index: usize,
+    length: usize,
+    plot_figure: &mut Figure,
+) {
+    for &(_, plot_index, integer) in direct_images
+        .iter()
+        .filter(|(axes, _, _)| *axes == axes_index)
+    {
+        if let Some(runmat_plot::plots::figure::PlotElement::Surface(surface)) =
+            plot_figure.get_plot_mut(plot_index)
+        {
+            surface.set_color_limits(Some(
+                crate::builtins::plotting::image::direct_colormap_limits(integer, length),
+            ));
+        }
+    }
 }
 
 pub fn colormap_length_for_axes(handle: FigureHandle, axes_index: usize) -> usize {
@@ -3642,6 +3714,7 @@ pub fn register_histogram_handle(
     bin_edges: Vec<f64>,
     raw_counts: Vec<f64>,
     normalization: String,
+    normalization_denominator: f64,
     metadata: HistogramHandleMetadata,
 ) -> f64 {
     let mut reg = registry();
@@ -3656,6 +3729,7 @@ pub fn register_histogram_handle(
             bin_edges,
             raw_counts,
             normalization,
+            normalization_denominator,
             display_name: None,
             metadata,
         }),
@@ -3673,10 +3747,12 @@ pub fn register_histogram2_handle(
     x_bin_edges: Vec<f64>,
     y_bin_edges: Vec<f64>,
     normalization: String,
+    normalization_denominator: f64,
     display_style: crate::builtins::plotting::histogram2::Histogram2DisplayStyle,
     show_empty_bins: bool,
     face_alpha: f64,
     display_name: Option<String>,
+    data: Option<Tensor>,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3692,10 +3768,12 @@ pub fn register_histogram2_handle(
             x_bin_edges,
             y_bin_edges,
             normalization,
+            normalization_denominator,
             display_style,
             show_empty_bins,
             face_alpha,
             display_name,
+            data,
         }),
     );
     id as f64
@@ -3820,14 +3898,27 @@ pub fn register_quiver3_handle(figure: FigureHandle, axes_index: usize, plot_ind
     })
 }
 
-pub fn register_image_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
-    register_simple_plot_handle(figure, axes_index, plot_index, |state| {
+pub fn register_image_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    c_data: Option<Tensor>,
+    c_data_mapping: impl Into<String>,
+) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
         PlotChildHandleState::Image(ImageHandleState {
-            figure: state.figure,
-            axes_index: state.axes_index,
-            plot_index: state.plot_index,
-        })
-    })
+            figure,
+            axes_index,
+            plot_index,
+            c_data,
+            c_data_mapping: c_data_mapping.into(),
+        }),
+    );
+    id as f64
 }
 
 pub fn register_heatmap_handle(
@@ -3837,6 +3928,7 @@ pub fn register_heatmap_handle(
     x_labels: Vec<String>,
     y_labels: Vec<String>,
     color_data: Tensor,
+    color_limits: Option<Tensor>,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3850,9 +3942,24 @@ pub fn register_heatmap_handle(
             x_labels,
             y_labels,
             color_data,
+            color_limits,
         }),
     );
     id as f64
+}
+
+pub fn set_heatmap_color_limits(handle: f64, limits: Tensor) -> Result<(), FigureError> {
+    if !handle.is_finite() || handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let mut reg = registry();
+    match reg.plot_children.get_mut(&(handle.round() as u64)) {
+        Some(PlotChildHandleState::Heatmap(state)) => {
+            state.color_limits = Some(limits);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
 }
 
 pub fn register_binscatter_handle(
@@ -4438,6 +4545,30 @@ pub fn update_histogram2_handle_for_plot(
     match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
         PlotChildHandleState::Histogram2(hist) => {
             updater(hist);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_image_handle_for_plot(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    updater: impl FnOnce(&mut ImageHandleState),
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = reg.plot_children.values_mut().find(|state| match state {
+        PlotChildHandleState::Image(image) => {
+            image.figure == figure
+                && image.axes_index == axes_index
+                && image.plot_index == plot_index
+        }
+        _ => false,
+    });
+    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
+        PlotChildHandleState::Image(image) => {
+            updater(image);
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),

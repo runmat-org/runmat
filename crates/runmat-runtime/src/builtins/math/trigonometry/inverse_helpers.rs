@@ -73,13 +73,22 @@ pub(crate) fn upload_value_like(
     builtin: &str,
     prototype: &GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    let output = upload_value(provider, value, builtin)?;
+    upload_value_like_protected(provider, value, builtin, prototype, &[])
+}
+
+pub(crate) fn upload_value_like_protected(
+    provider: &dyn AccelProvider,
+    value: Value,
+    builtin: &str,
+    prototype: &GpuTensorHandle,
+    protected: &[GpuTensorHandle],
+) -> BuiltinResult<Value> {
+    let output = upload_value_protected(provider, value, builtin, protected)?;
     let Value::GpuTensor(handle) = &output else {
         unreachable!("upload_value always returns a resident value")
     };
     if handle.device_id != prototype.device_id {
-        let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(provider);
-        let _ = owner.free(handle);
+        free_unless_protected(provider, handle, protected);
         return Err(build_runtime_error(format!(
             "{builtin}: provider restored the result on the wrong device"
         ))
@@ -93,6 +102,15 @@ pub(crate) fn upload_value(
     provider: &dyn AccelProvider,
     value: Value,
     builtin: &str,
+) -> BuiltinResult<Value> {
+    upload_value_protected(provider, value, builtin, &[])
+}
+
+pub(crate) fn upload_value_protected(
+    provider: &dyn AccelProvider,
+    value: Value,
+    builtin: &str,
+    protected: &[GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let (expected_shape, expected_storage, expected_integer_type, expected_precision) = match &value
     {
@@ -193,8 +211,7 @@ pub(crate) fn upload_value(
         && runmat_accelerate_api::provider_for_handle(&handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider));
     if !valid {
-        let owner = runmat_accelerate_api::provider_for_handle(&handle).unwrap_or(provider);
-        let _ = owner.free(&handle);
+        free_unless_protected(provider, &handle, protected);
         return Err(build_runtime_error(format!(
             "{builtin}: provider returned an incompatible restored result"
         ))
@@ -202,6 +219,20 @@ pub(crate) fn upload_value(
         .build());
     }
     Ok(gpu_helpers::resident_gpu_value(handle))
+}
+
+fn free_unless_protected(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+    protected: &[GpuTensorHandle],
+) {
+    if protected.iter().any(|candidate| {
+        candidate.device_id == handle.device_id && candidate.buffer_id == handle.buffer_id
+    }) {
+        return;
+    }
+    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(provider);
+    let _ = owner.free(handle);
 }
 
 fn upload_complex_without_precision_override(
