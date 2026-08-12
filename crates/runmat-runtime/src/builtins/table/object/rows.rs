@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
+
 pub(crate) fn selected_row_names(
     object: &ObjectInstance,
     rows: &[usize],
@@ -60,22 +62,71 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
     match value {
         Value::Tensor(tensor) => {
             let cols = tensor.cols();
+            if let Some(storage) = tensor.integer_storage() {
+                let mut values = Vec::with_capacity(rows.len() * cols);
+                for col in 0..cols {
+                    for &row in rows {
+                        values.push(storage.value_at(row + col * tensor.rows()).ok_or_else(
+                            || invalid_index("table: numeric variable row index out of bounds"),
+                        )?);
+                    }
+                }
+                return Tensor::new_integer(
+                    storage
+                        .from_exact_values_like(values)
+                        .map_err(invalid_variable)?,
+                    vec![rows.len(), cols],
+                )
+                .map(Value::Tensor)
+                .map_err(invalid_variable);
+            }
             let mut data = Vec::with_capacity(rows.len() * cols);
             for col in 0..cols {
                 for &row in rows {
                     data.push(tensor.get2(row, col).map_err(invalid_index)?);
                 }
             }
-            Tensor::new_with_dtype(data, vec![rows.len(), cols], tensor.dtype)
+            Tensor::new_with_dtype(data, vec![rows.len(), cols], tensor.numeric_dtype())
                 .map(Value::Tensor)
                 .map_err(invalid_variable)
         }
         Value::ComplexTensor(tensor) => {
+            if let Some(storage) = &tensor.integer_storage() {
+                let mut real = Vec::with_capacity(rows.len() * tensor.cols);
+                let mut imag = Vec::with_capacity(rows.len() * tensor.cols);
+                for col in 0..tensor.cols {
+                    for &row in rows {
+                        let index = row + col * tensor.rows;
+                        real.push(storage.real.value_at(index).ok_or_else(|| {
+                            invalid_index("table: complex variable row index out of bounds")
+                        })?);
+                        imag.push(storage.imag.value_at(index).ok_or_else(|| {
+                            invalid_index("table: complex variable row index out of bounds")
+                        })?);
+                    }
+                }
+                return ComplexTensor::new_integer(
+                    runmat_builtins::IntegerComplexStorage::new(
+                        storage
+                            .real
+                            .from_exact_values_like(real)
+                            .map_err(invalid_variable)?,
+                        storage
+                            .imag
+                            .from_exact_values_like(imag)
+                            .map_err(invalid_variable)?,
+                    )
+                    .map_err(invalid_variable)?,
+                    vec![rows.len(), tensor.cols],
+                )
+                .map(Value::ComplexTensor)
+                .map_err(invalid_variable);
+            }
             let mut data = Vec::with_capacity(rows.len() * tensor.cols);
             for col in 0..tensor.cols {
                 for &row in rows {
                     let idx = row + col * tensor.rows;
-                    data.push(*tensor.data.get(idx).ok_or_else(|| {
+                    data.push(*tensor.materialize_f64().get(idx).ok_or_else(|| {
                         invalid_index("table: complex variable row index out of bounds")
                     })?);
                 }
@@ -198,10 +249,18 @@ pub(super) fn assign_rows(mut current: Value, rows: &[usize], rhs: Value) -> Bui
                     "table: tensor assignment column count mismatch",
                 ));
             }
-            for col in 0..target.cols() {
+            let target_rows = target.rows();
+            let target_cols = target.cols();
+            for col in 0..target_cols {
                 for (src_row, &dst_row) in rows.iter().enumerate() {
-                    let value = source.get2(src_row, col).map_err(invalid_index)?;
-                    target.set2(dst_row, col, value).map_err(invalid_index)?;
+                    let source_index = src_row + col * source.rows();
+                    let target_index = dst_row + col * target_rows;
+                    let value = source.numeric_value_at(source_index).ok_or_else(|| {
+                        invalid_index("table: source numeric storage is inconsistent")
+                    })?;
+                    target
+                        .set_numeric_assignment_at(target_index, value)
+                        .map_err(invalid_variable)?;
                 }
             }
             Ok(current)
@@ -229,6 +288,36 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     let total_cols: usize = cols.iter().sum();
+    let typed_prototype = values.iter().find_map(|value| match value {
+        Value::Tensor(tensor) => tensor.integer_storage(),
+        _ => None,
+    });
+    if let Some(prototype) = typed_prototype {
+        let target = IntegerTarget::from_storage(prototype);
+        let mut exact = Vec::with_capacity(rows * total_cols);
+        for value in values {
+            let Value::Tensor(tensor) = value else {
+                unreachable!("numeric columns were validated above");
+            };
+            for col in 0..tensor.cols() {
+                for row in 0..rows {
+                    let index = row + col * tensor.rows();
+                    let value = match tensor.integer_storage() {
+                        Some(storage) => {
+                            target.cast_int(&storage.value_at(index).ok_or_else(|| {
+                                invalid_index("table: integer column row index out of bounds")
+                            })?)
+                        }
+                        None => target.cast_scalar(tensor.get2(row, col).map_err(invalid_index)?),
+                    };
+                    exact.push(value);
+                }
+            }
+        }
+        return Tensor::new_integer(target.storage(exact), vec![rows, total_cols])
+            .map(Value::Tensor)
+            .map_err(invalid_variable);
+    }
     let mut data = Vec::with_capacity(rows * total_cols);
     for value in values {
         let Value::Tensor(tensor) = value else {
@@ -243,4 +332,172 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
     Tensor::new(data, vec![rows, total_cols])
         .map(Value::Tensor)
         .map_err(invalid_variable)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
+
+    #[test]
+    fn select_rows_preserves_native_single_storage() {
+        let value = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+
+        let Value::Tensor(selected) = select_rows(&value, &[1, 0]).unwrap() else {
+            panic!("expected tensor row selection");
+        };
+        assert_eq!(
+            selected.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![2.0, 1.0, 4.0, 3.0])
+        );
+    }
+
+    #[test]
+    fn select_rows_preserves_exact_integer_storage() {
+        let large = 9_007_199_254_740_993_u64;
+        let value = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX, 7, 0]), vec![2, 2])
+                .unwrap(),
+        );
+
+        let selected = select_rows(&value, &[1, 0]).unwrap();
+        let Value::Tensor(selected) = selected else {
+            panic!("expected tensor row selection");
+        };
+        assert_eq!(
+            selected.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, large, 0, 7]))
+        );
+    }
+
+    #[test]
+    fn select_rows_preserves_exact_complex_integer_storage() {
+        let large = 9_007_199_254_740_993_i64;
+        let value = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                runmat_builtins::IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![large, i64::MIN]),
+                    IntegerStorage::I64(vec![0, 7]),
+                )
+                .unwrap(),
+                vec![2, 1],
+            )
+            .unwrap(),
+        );
+
+        let selected = select_rows(&value, &[1, 0]).unwrap();
+        let Value::ComplexTensor(selected) = selected else {
+            panic!("expected complex tensor row selection");
+        };
+        assert_eq!(
+            selected.integer_storage().cloned(),
+            Some(
+                runmat_builtins::IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MIN, large]),
+                    IntegerStorage::I64(vec![7, 0]),
+                )
+                .unwrap(),
+            )
+        );
+    }
+
+    #[test]
+    fn assign_rows_preserves_exact_integer_source_and_target_storage() {
+        let large = 9_007_199_254_740_993_u64;
+        let current = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![0, 1]), vec![2, 1]).unwrap(),
+        );
+        let rhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap(),
+        );
+
+        let Value::Tensor(result) = assign_rows(current, &[1], rhs).unwrap() else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![0, large]))
+        );
+    }
+
+    #[test]
+    fn assign_rows_converts_floating_source_into_target_integer_class() {
+        let current =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I8(vec![0, 0]), vec![2, 1]).unwrap());
+        let rhs = Value::Tensor(Tensor::new_2d(vec![200.6], 1, 1).unwrap());
+
+        let Value::Tensor(result) = assign_rows(current, &[0], rhs).unwrap() else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I8(vec![i8::MAX, 0]))
+        );
+    }
+
+    #[test]
+    fn assign_rows_preserves_native_single_target_storage() {
+        let current = Value::Tensor(Tensor::from_f32(vec![0.0, 2.0], vec![2, 1]).unwrap());
+        let rhs = Value::Tensor(Tensor::new(vec![1.25], vec![1, 1]).unwrap());
+
+        let Value::Tensor(result) = assign_rows(current, &[0], rhs).unwrap() else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.into_numeric_storage().expect("single storage"),
+            runmat_builtins::NumericStorage::F32(vec![1.25, 2.0])
+        );
+    }
+
+    #[test]
+    fn concatenate_numeric_columns_preserves_same_class_exact_integers() {
+        let large = 9_007_199_254_740_993_u64;
+        let first = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX]), vec![2, 1]).unwrap(),
+        );
+        let second = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![7, 0, 9, 2]), vec![2, 2]).unwrap(),
+        );
+
+        let Value::Tensor(result) = concatenate_numeric_columns(&[&first, &second]).unwrap() else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![large, u64::MAX, 7, 0, 9, 2]))
+        );
+    }
+
+    #[test]
+    fn concatenate_numeric_columns_uses_leftmost_integer_class_for_mixed_inputs() {
+        let first = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I8(vec![12, i8::MIN]), vec![2, 1])
+                .expect("left integer column"),
+        );
+        let second = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 7]), vec![2, 1])
+                .expect("wide unsigned column"),
+        );
+        let third =
+            Value::Tensor(Tensor::new(vec![3.5, -300.0], vec![2, 1]).expect("double column"));
+
+        let Value::Tensor(result) =
+            concatenate_numeric_columns(&[&first, &second, &third]).expect("mixed integer columns")
+        else {
+            panic!("expected exact integer tensor result");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I8(vec![
+                12,
+                i8::MIN,
+                i8::MAX,
+                7,
+                4,
+                i8::MIN
+            ]))
+        );
+    }
 }

@@ -10,7 +10,7 @@ fn simple_range() {
     if let Value::Tensor(t) = &vars[0] {
         assert_eq!(t.rows(), 1);
         assert_eq!(t.cols(), 4);
-        assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
     } else {
         panic!("expected tensor");
     }
@@ -20,7 +20,7 @@ fn simple_range() {
 fn range_with_step() {
     let vars = execute_source("x = 1:2:5").unwrap();
     if let Value::Tensor(t) = &vars[0] {
-        assert_eq!(t.data, vec![1.0, 3.0, 5.0]);
+        assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0]);
     } else {
         panic!("expected tensor");
     }
@@ -31,7 +31,7 @@ fn descending_range() {
     // MATLAB: 5:-2:0 -> [5, 3, 1]
     let vars = execute_source("x = 5:-2:0").unwrap();
     if let Value::Tensor(t) = &vars[0] {
-        assert_eq!(t.data, vec![5.0, 3.0, 1.0]);
+        assert_eq!(t.materialize_f64(), vec![5.0, 3.0, 1.0]);
     } else {
         panic!("expected tensor");
     }
@@ -43,7 +43,7 @@ fn leading_dot_step_range_executes() {
     if let Value::Tensor(t) = &vars[0] {
         assert_eq!(t.rows(), 1);
         assert_eq!(t.cols(), 4);
-        assert_eq!(t.data, vec![0.0, 0.1, 0.2, 0.3]);
+        assert_eq!(t.materialize_f64(), vec![0.0, 0.1, 0.2, 0.3]);
     } else {
         panic!("expected tensor");
     }

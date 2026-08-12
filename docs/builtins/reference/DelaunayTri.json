@@ -32,6 +32,7 @@
     "`DelaunayTri()` returns an empty 2-D triangulation object with 0-by-2 points and 0-by-3 connectivity.",
     "`DelaunayTri(X)` accepts an N-by-2 finite point matrix and constructs one-based triangle connectivity.",
     "`DelaunayTri(x, y)` accepts equal-length coordinate vectors.",
+    "MATLAB-compatible coordinates and topology use double storage. Typed-integer coordinates and typed-integer empty constraints are available in `runmat` compatibility mode; nonempty constrained triangulation remains unsupported.",
     "Duplicate point coordinates are ignored for triangulation while the public point matrix preserves the supplied rows.",
     "Nonempty constrained triangulation inputs and 3-D point forms return explicit unsupported-target errors rather than placeholder topology."
   ],

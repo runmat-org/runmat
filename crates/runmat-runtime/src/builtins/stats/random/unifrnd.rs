@@ -198,22 +198,24 @@ async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<(f64, f64, Vec<usi
             "unifrnd: requires at least two arguments (a, b)",
         ));
     }
-    let a = scalar_f64(&args[0])?;
-    let b = scalar_f64(&args[1])?;
+    let a = scalar_f64(&args[0]).await?;
+    let b = scalar_f64(&args[1]).await?;
     let shape = parse_shape_args(&args[2..]).await?;
     Ok((a, b, shape))
 }
 
-fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
-    match value {
-        Value::Num(v) => Ok(*v),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(unifrnd_error_with(
-            &UNIFRND_ERROR_INVALID_ARGUMENT,
-            format!("unifrnd: expected scalar parameter, got {other:?}"),
-        )),
-    }
+async fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
+    tensor::scalar_f64_from_value_async(value)
+        .await
+        .map_err(|err| {
+            unifrnd_error_with(&UNIFRND_ERROR_INVALID_ARGUMENT, format!("unifrnd: {err}"))
+        })?
+        .ok_or_else(|| {
+            unifrnd_error_with(
+                &UNIFRND_ERROR_INVALID_ARGUMENT,
+                format!("unifrnd: expected scalar parameter, got {value:?}"),
+            )
+        })
 }
 
 async fn parse_shape_args(rest: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
@@ -267,6 +269,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     struct CpuOnlyProvider;
 
@@ -310,6 +313,10 @@ mod tests {
         )
     }
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
+    }
+
     #[test]
     fn unifrnd_scalar_deterministic() {
         let _guard = random::test_guard();
@@ -340,7 +347,10 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 4]);
-                assert!(t.data.iter().all(|&v| (0.0..10.0).contains(&v)));
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&v| (0.0..10.0).contains(&v)));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -355,6 +365,31 @@ mod tests {
         let result = block_on(unifrnd_builtin(args)).expect("unifrnd");
         match result {
             Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unifrnd_reads_typed_integer_parameters_and_size_exactly() {
+        let _guard = random::test_guard();
+        let _provider_guard = reset_cpu_path();
+        let a = poisoned_int_tensor(IntegerStorage::I16(vec![-2]), vec![1, 1]);
+        let b = poisoned_int_tensor(IntegerStorage::U16(vec![3]), vec![1, 1]);
+        let size = poisoned_int_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
+        let result = block_on(unifrnd_builtin(vec![
+            Value::Tensor(a),
+            Value::Tensor(b),
+            Value::Tensor(size),
+        ]))
+        .expect("unifrnd");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 3]);
+                assert!(t
+                    .materialize_f64()
+                    .iter()
+                    .all(|&v| (-2.0..3.0).contains(&v)));
+            }
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -394,7 +429,7 @@ mod tests {
         ];
         let result = block_on(unifrnd_builtin(args)).expect("unifrnd");
         let data = match result {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         };
         assert!(

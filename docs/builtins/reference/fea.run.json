@@ -1,0 +1,20 @@
+{
+  "title": "fea.run",
+  "category": "fea",
+  "keywords": ["fea", "run", "solve", "study", "sweep"],
+  "summary": "Execute a RunMat FEA study or sweep.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
+  "description": "`fea.run(studyOrSweepOrPath)` resolves and executes one typed study, a sequential sweep, or a `.fea` document.",
+  "behaviors": [
+    "Exactly one `.fea` path, `fea.Study`, or `fea.Sweep` input is required. Direct numeric inputs have no role and reject before document resolution or solver execution.",
+    "A single study returns a `fea.RunResult` with its run id, status, quality gates, provenance, selected operation, and evidence path. A sweep returns aggregate study/success/failure counts, per-study run entries, and exact one-based failure indexes.",
+    "Discrete provenance, option, prep, sweep, count, and index fields remain exact typed integers. Solver measurements, tolerances, rates, ratios, and physical quantities remain binary64.",
+    "The selected study backend may execute through the configured CPU or GPU solver. Argument decoding and result-object serialization are host-side and do not gather resident arguments.",
+    "Running an already resolved study or non-CAD document does not intrinsically require native OCCT. Resolving a path that imports topology-bearing CAD may require the configured OCCT geometry backend before solving."
+  ],
+  "examples": [{ "description": "Run a typed study", "input": "run = fea.run(study);\nresults = fea.results(run);" }],
+  "faqs": [{ "question": "Does `fea.run` always use the CPU?", "answer": "No. It executes the backend selected by the study; only input decoding and public object construction are host-side." }],
+  "links": [{ "label": "FEA solves", "url": "../../fea/solves" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

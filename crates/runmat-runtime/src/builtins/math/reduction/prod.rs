@@ -2,11 +2,14 @@
 
 use std::collections::HashSet;
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, NumericDType, Tensor, Type, Value,
 };
 const NAME: &str = "prod";
 
@@ -19,7 +22,7 @@ fn prod_type(args: &[Type], ctx: &ResolveContext) -> Type {
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::arg_tokens::tokens_from_values;
-use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
+use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -83,7 +86,7 @@ const PROD_INPUTS_ALL: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const PROD_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [
+const PROD_INPUTS_MISSINGFLAG: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -92,11 +95,11 @@ const PROD_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
 ];
 
@@ -113,11 +116,11 @@ const PROD_INPUTS_OUTTYPE: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"double\""),
-        description: "Output class specifier: \"double\", \"default\", \"native\", or \"like\".",
+        description: "Output class specifier: \"double\", \"default\", or \"native\".",
     },
 ];
 
-const PROD_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
+const PROD_INPUTS_DIM_MISSINGFLAG: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -133,15 +136,15 @@ const PROD_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
         description: "Dimension selector or vector of dimensions.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
 ];
 
-const PROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
+const PROD_INPUTS_MISSINGFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "A",
         ty: BuiltinParamType::Any,
@@ -150,11 +153,11 @@ const PROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
         description: "Input array.",
     },
     BuiltinParamDescriptor {
-        name: "nanflag",
+        name: "missingflag",
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
-        default: Some("\"includenan\""),
-        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+        default: Some("\"includemissing\""),
+        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
     },
     BuiltinParamDescriptor {
         name: "dim",
@@ -165,31 +168,7 @@ const PROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const PROD_INPUTS_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"like\""),
-        description: "Prototype keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value controlling output class/device.",
-    },
-];
-
-const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     BuiltinSignatureDescriptor {
         label: "B = prod(A)",
         inputs: &PROD_INPUTS_CORE,
@@ -206,8 +185,8 @@ const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "B = prod(A, nanflag)",
-        inputs: &PROD_INPUTS_NANFLAG,
+        label: "B = prod(A, missingflag)",
+        inputs: &PROD_INPUTS_MISSINGFLAG,
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
@@ -216,18 +195,13 @@ const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "B = prod(A, dim, nanflag)",
-        inputs: &PROD_INPUTS_DIM_NANFLAG,
+        label: "B = prod(A, dim, missingflag)",
+        inputs: &PROD_INPUTS_DIM_MISSINGFLAG,
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "B = prod(A, nanflag, dim)",
-        inputs: &PROD_INPUTS_NANFLAG_DIM,
-        outputs: &PROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = prod(A, \"like\", prototype)",
-        inputs: &PROD_INPUTS_LIKE,
+        label: "B = prod(A, missingflag, dim)",
+        inputs: &PROD_INPUTS_MISSINGFLAG_DIM,
         outputs: &PROD_OUTPUT,
     },
 ];
@@ -235,7 +209,7 @@ const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
 const PROD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.PROD.INVALID_ARGUMENT",
     identifier: Some("RunMat:prod:InvalidArgument"),
-    when: "Dimension, nanflag, or output class argument grammar is invalid.",
+    when: "Dimension, missing-data flag, or output class argument grammar is invalid.",
     message: "prod: invalid argument",
 };
 
@@ -274,6 +248,46 @@ pub const PROD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &PROD_ERRORS,
 };
+
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Ordinary real arrays accept all eight integer storage classes; complex-integer reduction remains a separately tracked conformance question.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Dimension scalars and vectors explicitly accept every integer class as well as integer-valued floating selectors.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = prod(A, dim_or_vecdim, nanflag, \"default\"|\"double\")",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Default and explicit-double integer products compute and return double; omitted dimensions and all share the same rule, and resident results remain resident.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = prod(A, dim_or_vecdim, nanflag, \"native\")",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Saturate,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Native integer products preserve the input class and saturate at its bounds; host and provider paths retain exact integer storage, although documented reduction order can affect signed saturated results.",
+    },
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::prod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -349,10 +363,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "prod",
     category = "math/reduction",
     summary = "Multiply elements across array dimensions.",
-    keywords = "prod,product,reduction,gpu,omitnan",
+    keywords = "prod,product,reduction,gpu,omitmissing,omitnan",
     accel = "reduction",
     type_resolver(prod_type),
     descriptor(crate::builtins::math::reduction::prod::PROD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::reduction::prod::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::prod"
 )]
 async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -427,7 +442,6 @@ struct ResolvedDims {
 enum OutputTemplate {
     Double,
     Native,
-    Like(Value),
 }
 
 struct ParsedArguments {
@@ -476,6 +490,13 @@ impl InputMeta {
             Value::LogicalArray(_) => InputClass::Logical,
             Value::Bool(_) => InputClass::Bool,
             Value::Int(i) => InputClass::Integer(IntClass::from_int_value(i)),
+            Value::Tensor(tensor) => IntClass::from_numeric_dtype(tensor.numeric_dtype())
+                .map(InputClass::Integer)
+                .unwrap_or(InputClass::Double),
+            Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle)
+                .map(IntClass::from_integer_element_type)
+                .map(InputClass::Integer)
+                .unwrap_or(InputClass::Double),
             _ => InputClass::Double,
         };
         let device = match value {
@@ -493,7 +514,7 @@ impl InputMeta {
 
 fn numeric_dtype_from_value(value: &Value) -> Option<NumericDType> {
     match value {
-        Value::Tensor(t) => Some(t.dtype),
+        Value::Tensor(t) => Some(t.numeric_dtype()),
         Value::GpuTensor(handle) => {
             let precision = runmat_accelerate_api::handle_precision(handle).or_else(|| {
                 runmat_accelerate_api::provider_for_handle(handle)
@@ -515,6 +536,33 @@ fn precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
 }
 
 impl IntClass {
+    fn from_numeric_dtype(dtype: NumericDType) -> Option<Self> {
+        match dtype {
+            NumericDType::I8 => Some(Self::I8),
+            NumericDType::I16 => Some(Self::I16),
+            NumericDType::I32 => Some(Self::I32),
+            NumericDType::I64 => Some(Self::I64),
+            NumericDType::U8 => Some(Self::U8),
+            NumericDType::U16 => Some(Self::U16),
+            NumericDType::U32 => Some(Self::U32),
+            NumericDType::U64 => Some(Self::U64),
+            NumericDType::F32 | NumericDType::F64 => None,
+        }
+    }
+
+    fn from_integer_element_type(dtype: runmat_accelerate_api::IntegerElementType) -> Self {
+        match dtype {
+            runmat_accelerate_api::IntegerElementType::I8 => Self::I8,
+            runmat_accelerate_api::IntegerElementType::I16 => Self::I16,
+            runmat_accelerate_api::IntegerElementType::I32 => Self::I32,
+            runmat_accelerate_api::IntegerElementType::I64 => Self::I64,
+            runmat_accelerate_api::IntegerElementType::U8 => Self::U8,
+            runmat_accelerate_api::IntegerElementType::U16 => Self::U16,
+            runmat_accelerate_api::IntegerElementType::U32 => Self::U32,
+            runmat_accelerate_api::IntegerElementType::U64 => Self::U64,
+        }
+    }
+
     fn from_int_value(value: &IntValue) -> Self {
         match value {
             IntValue::I8(_) => IntClass::I8,
@@ -568,12 +616,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         let arg = &args[idx];
         if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
             match text.as_str() {
-                "omitnan" => {
+                "omitmissing" | "omitnan" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includemissing" | "includenan" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -595,12 +643,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
         if let Some(keyword) = keyword_of(arg) {
             match keyword.as_str() {
-                "omitnan" => {
+                "omitmissing" | "omitnan" => {
                     nan_mode = ReductionNaN::Omit;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
+                "includemissing" | "includenan" => {
                     nan_mode = ReductionNaN::Include;
                     idx += 1;
                     continue;
@@ -640,29 +688,6 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     output_set = true;
                     idx += 1;
                     continue;
-                }
-                "like" => {
-                    if output_set {
-                        return Err(prod_descriptor_error_with_detail(
-                            &PROD_ERROR_INVALID_ARGUMENT,
-                            "cannot combine 'like' with another output class specifier",
-                        ));
-                    }
-                    let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err(prod_descriptor_error_with_detail(
-                            &PROD_ERROR_INVALID_ARGUMENT,
-                            "expected prototype after 'like'",
-                        ));
-                    };
-                    output = OutputTemplate::Like(proto);
-                    idx += 2;
-                    if idx < args.len() {
-                        return Err(prod_descriptor_error_with_detail(
-                            &PROD_ERROR_INVALID_ARGUMENT,
-                            "'like' must be the final argument",
-                        ));
-                    }
-                    break;
                 }
                 _ => {}
             }
@@ -782,13 +807,40 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
         return prod_gpu_fallback(&handle, parsed).await;
     }
 
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) else {
         return prod_gpu_fallback(&handle, parsed).await;
     };
 
     let resolved = resolve_dims(&handle.shape, &parsed.selection)?;
     if resolved.dims_in_bounds.is_empty() {
         return Ok(Value::GpuTensor(handle));
+    }
+    if matches!(parsed.output, OutputTemplate::Native)
+        && runmat_accelerate_api::handle_integer_type(&handle).is_some()
+    {
+        if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
+            return provider
+                .reduce_integer_prod_native(&handle)
+                .await
+                .map(Value::GpuTensor)
+                .map_err(|err| {
+                    prod_internal_error(format!(
+                        "prod: native integer gpuArray reduction failed: {err}"
+                    ))
+                });
+        }
+        let mut current = handle.clone();
+        for &dim in &resolved.dims_in_bounds {
+            current = provider
+                .reduce_integer_prod_native_dim(&current, dim)
+                .await
+                .map_err(|err| {
+                    prod_internal_error(format!(
+                        "prod: native integer gpuArray reduction failed: {err}"
+                    ))
+                })?;
+        }
+        return Ok(Value::GpuTensor(current));
     }
 
     if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
@@ -936,7 +988,8 @@ fn prod_tensor(
         }
     }
 
-    for (linear, &value) in tensor.data.iter().enumerate() {
+    let values = tensor::tensor_values_f64_cow(tensor);
+    for (linear, &value) in values.iter().enumerate() {
         linear_to_multi(linear, &shape, &mut coords);
         for (i, coord) in coords.iter().enumerate() {
             out_coords[i] = if reduce_mask[i] { 0 } else { *coord };
@@ -992,12 +1045,31 @@ async fn apply_output_template(
     meta: &InputMeta,
 ) -> BuiltinResult<Value> {
     match template {
-        OutputTemplate::Double => Ok(value),
+        OutputTemplate::Double => apply_double_template(value, meta).await,
         OutputTemplate::Native => {
             let value = apply_native_template(value, meta).await?;
             ensure_device(value, meta.device).await
         }
-        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
+    }
+}
+
+async fn apply_double_template(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
+    if !matches!(meta.class, InputClass::Integer(_)) {
+        return Ok(value);
+    }
+    match value {
+        Value::Int(value) => Ok(Value::Num(value.to_f64())),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(Value::Tensor(
+            tensor::coerce_tensor_dtype(tensor, NumericDType::F64),
+        )),
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(&handle).is_some() =>
+        {
+            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+            let tensor = tensor::coerce_tensor_dtype(tensor, NumericDType::F64);
+            ensure_device(Value::Tensor(tensor), meta.device).await
+        }
+        other => Ok(other),
     }
 }
 
@@ -1005,12 +1077,16 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
     match meta.class {
         InputClass::Integer(class) => match value {
             Value::Num(n) => class.to_value(n),
-            Value::Tensor(t) if t.data.len() == 1 => class.to_value(t.data[0]),
+            Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
+                class.to_value(tensor::tensor_value_f64(&t, 0))
+            }
             other => Ok(other),
         },
         InputClass::Bool => match value {
             Value::Num(n) => Ok(Value::Bool(n != 0.0)),
-            Value::Tensor(t) if t.data.len() == 1 => Ok(Value::Bool(t.data[0] != 0.0)),
+            Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
+                Ok(Value::Bool(tensor::tensor_value_f64(&t, 0) != 0.0))
+            }
             other => Ok(other),
         },
         _ => {
@@ -1026,8 +1102,15 @@ async fn apply_native_template(value: Value, meta: &InputMeta) -> BuiltinResult<
 async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResult<Value> {
     match dtype {
         NumericDType::F64 => Ok(value),
-        NumericDType::F32 | NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => match value
-        {
+        NumericDType::F32
+        | NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => match value {
             Value::Tensor(tensor) => {
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
@@ -1091,88 +1174,9 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
         ));
     };
 
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| prod_internal_error(format!("failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
-}
-
-async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysed = analyse_like_prototype(prototype).await?;
-    match analysed.class {
-        PrototypeClass::Real => match analysed.device {
-            DevicePreference::Host => ensure_device(value, DevicePreference::Host).await,
-            DevicePreference::Gpu => ensure_device(value, DevicePreference::Gpu).await,
-        },
-        PrototypeClass::Complex => {
-            let host_value = ensure_device(value, DevicePreference::Host).await?;
-            real_to_complex(host_value)
-        }
-    }
-}
-
-fn real_to_complex(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
-        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
-        Value::Tensor(t) => {
-            let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor =
-                ComplexTensor::new(data, t.shape.clone()).map_err(|e| prod_internal_error(&e))?;
-            Ok(complex_tensor_into_value(tensor))
-        }
-        Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|e| prod_internal_error(&e))?;
-            real_to_complex(Value::Tensor(tensor))
-        }
-        other => Err(prod_descriptor_error_with_detail(
-            &PROD_ERROR_INVALID_INPUT,
-            format!("cannot convert value {other:?} to a complex result"),
-        )),
-    }
-}
-
-struct LikeAnalysis {
-    device: DevicePreference,
-    class: PrototypeClass,
-}
-
-enum PrototypeClass {
-    Real,
-    Complex,
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
-    match proto {
-        Value::GpuTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Gpu,
-            class: PrototypeClass::Real,
-        }),
-        Value::Tensor(_)
-        | Value::Num(_)
-        | Value::Int(_)
-        | Value::LogicalArray(_)
-        | Value::Bool(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Host,
-            class: PrototypeClass::Real,
-        }),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Host,
-            class: PrototypeClass::Complex,
-        }),
-        other => {
-            let gathered = crate::dispatcher::gather_if_needed_async(other)
-                .await
-                .map_err(|e| prod_internal_error(e.to_string()))?;
-            analyse_like_prototype(&gathered).await
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1180,11 +1184,17 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::IntValue;
+    use runmat_accelerate_api::{
+        HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
+    };
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn prod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::prod_builtin(value, rest))
+    }
+
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
     }
 
     fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
@@ -1217,11 +1227,20 @@ pub(crate) mod tests {
         assert!(labels.contains(&"B = prod(A)"));
         assert!(labels.contains(&"B = prod(A, dim)"));
         assert!(labels.contains(&"B = prod(A, \"all\")"));
-        assert!(labels.contains(&"B = prod(A, nanflag)"));
+        assert!(labels.contains(&"B = prod(A, missingflag)"));
         assert!(labels.contains(&"B = prod(A, outtype)"));
-        assert!(labels.contains(&"B = prod(A, dim, nanflag)"));
-        assert!(labels.contains(&"B = prod(A, nanflag, dim)"));
-        assert!(labels.contains(&"B = prod(A, \"like\", prototype)"));
+        assert!(labels.contains(&"B = prod(A, dim, missingflag)"));
+        assert!(labels.contains(&"B = prod(A, missingflag, dim)"));
+        assert!(!labels.iter().any(|label| label.contains("nanflag")));
+        assert!(!labels.iter().any(|label| label.contains("like")));
+        let missingflag = PROD_DESCRIPTOR
+            .signatures
+            .iter()
+            .flat_map(|signature| signature.inputs)
+            .find(|input| input.name == "missingflag")
+            .expect("missingflag descriptor");
+        assert_eq!(missingflag.default, Some("\"includemissing\""));
+        assert!(missingflag.description.contains("\"omitmissing\""));
         assert!(PROD_DESCRIPTOR
             .errors
             .iter()
@@ -1251,7 +1270,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![4.0, 10.0, 18.0]);
+                assert_eq!(values(&out), vec![4.0, 10.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1266,7 +1285,22 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![6.0, 120.0]);
+                assert_eq!(values(&out), vec![6.0, 120.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prod_double_path_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+            .expect("tensor");
+
+        let result = prod_builtin(Value::Tensor(tensor), Vec::new()).expect("prod");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(values(&out), vec![4.0, 10.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1294,7 +1328,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 4, 1]);
-                assert_eq!(out.data, vec![16380.0, 587520.0, 4021920.0, 16030080.0]);
+                assert_eq!(values(&out), vec![16380.0, 587520.0, 4021920.0, 16030080.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1307,6 +1341,21 @@ pub(crate) mod tests {
         let result =
             prod_builtin(Value::Tensor(tensor), vec![Value::from("omitnan")]).expect("prod");
         assert_eq!(result, Value::Num(8.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn prod_generic_missing_flags_match_legacy_aliases() {
+        let tensor = || Tensor::new(vec![2.0, f64::NAN, 4.0], vec![3, 1]).unwrap();
+        let omitted = prod_builtin(Value::Tensor(tensor()), vec![Value::from("omitmissing")])
+            .expect("prod omitmissing");
+        assert_eq!(omitted, Value::Num(8.0));
+        let included = prod_builtin(Value::Tensor(tensor()), vec![Value::from("includemissing")])
+            .expect("prod includemissing");
+        match included {
+            Value::Num(value) => assert!(value.is_nan()),
+            other => panic!("expected scalar NaN, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1333,6 +1382,137 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn prod_integer_dimension_beyond_rank_still_honors_output_class() {
+        let storages = vec![
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer tensor");
+            let default = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(4))],
+            )
+            .expect("default prod");
+            let explicit_double = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(4)), Value::from("double")],
+            )
+            .expect("double prod");
+            let explicit_default = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(4)), Value::from("default")],
+            )
+            .expect("explicit default prod");
+            for result in [default, explicit_default, explicit_double] {
+                let Value::Tensor(output) = result else {
+                    panic!("expected tensor output");
+                };
+                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.numeric_dtype(), NumericDType::F64);
+                assert_eq!(values(&output), vec![2.0, 3.0]);
+            }
+            let native = prod_builtin(
+                Value::Tensor(tensor),
+                vec![Value::Int(IntValue::I32(4)), Value::from("native")],
+            )
+            .expect("native prod");
+            let Value::Tensor(output) = native else {
+                panic!("expected native tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&storage));
+        }
+    }
+
+    #[test]
+    fn prod_empty_integer_identities_preserve_shape_and_output_class() {
+        let storages = vec![
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ];
+        for storage in storages {
+            let tensor =
+                Tensor::new_integer(storage.clone(), vec![0, 3]).expect("empty integer tensor");
+            let default = prod_builtin(Value::Tensor(tensor.clone()), Vec::new())
+                .expect("default empty prod");
+            let Value::Tensor(default) = default else {
+                panic!("expected default tensor output");
+            };
+            assert_eq!(default.shape, vec![1, 3]);
+            assert_eq!(default.numeric_dtype(), NumericDType::F64);
+            assert_eq!(values(&default), vec![1.0; 3]);
+
+            let native = prod_builtin(Value::Tensor(tensor.clone()), vec![Value::from("native")])
+                .expect("native empty prod");
+            let Value::Tensor(native) = native else {
+                panic!("expected native tensor output");
+            };
+            assert_eq!(native.shape, vec![1, 3]);
+            assert_eq!(native.integer_storage(), Some(&storage.ones_like(3)));
+
+            let default_dim_two = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(2))],
+            )
+            .expect("default empty prod along dimension two");
+            let Value::Tensor(default_dim_two) = default_dim_two else {
+                panic!("expected default empty tensor output");
+            };
+            assert_eq!(default_dim_two.shape, vec![0, 1]);
+            assert_eq!(default_dim_two.numeric_dtype(), NumericDType::F64);
+            assert!(default_dim_two.is_empty());
+
+            let native_dim_two = prod_builtin(
+                Value::Tensor(tensor.clone()),
+                vec![Value::Int(IntValue::I32(2)), Value::from("native")],
+            )
+            .expect("native empty prod along dimension two");
+            let Value::Tensor(native_dim_two) = native_dim_two else {
+                panic!("expected native empty tensor output");
+            };
+            assert_eq!(native_dim_two.shape, vec![0, 1]);
+            assert_eq!(native_dim_two.integer_storage(), Some(&storage));
+
+            let default_all = prod_builtin(Value::Tensor(tensor.clone()), vec![Value::from("all")])
+                .expect("default empty prod across all dimensions");
+            assert_eq!(default_all, Value::Num(1.0));
+
+            let native_all = prod_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from("all"), Value::from("native")],
+            )
+            .expect("native empty prod across all dimensions");
+            assert_eq!(
+                native_all,
+                Value::Int(storage.ones_like(1).value_at(0).unwrap())
+            );
+
+            let zero_by_zero =
+                Tensor::new_integer(storage.clone(), vec![0, 0]).expect("zero-by-zero tensor");
+            let zero_by_zero =
+                prod_builtin(Value::Tensor(zero_by_zero), vec![Value::from("native")])
+                    .expect("zero-by-zero prod");
+            let Value::Tensor(zero_by_zero) = zero_by_zero else {
+                panic!("expected zero-by-zero tensor output");
+            };
+            assert_eq!(zero_by_zero.shape, vec![1, 0]);
+            assert_eq!(zero_by_zero.integer_storage(), Some(&storage));
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn prod_native_integer_scalar() {
@@ -1341,31 +1521,96 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Int(IntValue::I16(4)));
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn prod_like_complex_prototype() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let proto = Value::Complex(0.0, 1.0);
+    fn prod_native_integer_tensor_forms_read_typed_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 4, 2, 5, 3, 6]), vec![2, 3])
+            .expect("tensor");
+
+        let result =
+            prod_builtin(Value::Tensor(tensor), vec![Value::from("native")]).expect("prod");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::I16(vec![4, 10, 18]))
+                );
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, 3, 4]), vec![3, 1]).expect("tensor");
         let result = prod_builtin(
             Value::Tensor(tensor),
-            vec![Value::from("all"), Value::from("like"), proto.clone()],
+            vec![Value::from("all"), Value::from("native")],
         )
-        .expect("prod");
+        .expect("prod all");
+        assert_eq!(result, Value::Int(IntValue::I16(24)));
+
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I32((1..=12).collect::<Vec<i32>>()),
+            vec![2, 3, 2],
+        )
+        .expect("tensor");
+        let dims = Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![1, 2]).expect("dims");
+
+        let result = prod_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Tensor(dims), Value::from("native")],
+        )
+        .expect("prod vecdim");
         match result {
-            Value::Complex(re, im) => {
-                assert_eq!(re, 6.0);
-                assert_eq!(im, 0.0);
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 3, 1]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::I32(vec![112, 1080, 3960]))
+                );
             }
-            other => panic!("expected complex result, got {other:?}"),
+            other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn prod_native_template_reads_typed_integer_scalar_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U32(vec![77]), vec![1, 1]).expect("tensor");
+        let meta = InputMeta {
+            class: InputClass::Integer(IntClass::U32),
+            device: DevicePreference::Host,
+            numeric_dtype: None,
+        };
+
+        let result =
+            block_on(apply_native_template(Value::Tensor(tensor), &meta)).expect("native template");
+
+        assert_eq!(result, Value::Int(IntValue::U32(77)));
+
+        let logical_tensor =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("logical tensor");
+        let meta = InputMeta {
+            class: InputClass::Bool,
+            device: DevicePreference::Host,
+            numeric_dtype: None,
+        };
+
+        let result = block_on(apply_native_template(Value::Tensor(logical_tensor), &meta))
+            .expect("logical native template");
+
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn prod_like_without_prototype_errors() {
+    fn prod_rejects_undocumented_like_option() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = prod_builtin(Value::Tensor(tensor), vec![Value::from("like")]).unwrap_err();
-        assert!(err.message().contains("expected prototype"));
+        let err = prod_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("like"), Value::Num(0.0)],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), PROD_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1400,15 +1645,11 @@ pub(crate) mod tests {
     fn prod_gpu_provider_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = prod_builtin(Value::GpuTensor(handle), Vec::new()).expect("prod");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![4.0, 10.0, 18.0]);
+            assert_eq!(values(&gathered), vec![4.0, 10.0, 18.0]);
         });
     }
 
@@ -1417,11 +1658,7 @@ pub(crate) mod tests {
     fn prod_gpu_all_reduction() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.5, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = prod_builtin(Value::GpuTensor(handle.clone()), vec![Value::from("all")])
                 .expect("prod");
             let gathered = test_support::gather(result).expect("gather");
@@ -1429,29 +1666,159 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn prod_integer_gpu_dimension_beyond_rank_returns_resident_double() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[9_007_199_254_740_992, 5]),
+                    shape: &[1, 2],
+                })
+                .expect("upload integer gpuArray");
+            let result = prod_builtin(Value::GpuTensor(handle), vec![Value::Int(IntValue::I32(4))])
+                .expect("prod");
+            let Value::GpuTensor(output) = &result else {
+                panic!("expected resident gpuArray output");
+            };
+            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(runmat_accelerate_api::handle_integer_type(output), None);
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
+            assert_eq!(values(&gathered), vec![9_007_199_254_740_992.0, 5.0]);
+        });
+    }
+
+    #[test]
+    fn prod_empty_integer_gpu_identities_preserve_class_shape_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let upload = || {
+                provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::U16(&[]),
+                        shape: &[0, 3],
+                    })
+                    .expect("upload empty integer gpuArray")
+            };
+            let default =
+                prod_builtin(Value::GpuTensor(upload()), Vec::new()).expect("default prod");
+            let Value::GpuTensor(default_handle) = &default else {
+                panic!("expected resident default output");
+            };
+            assert_eq!(default_handle.shape, vec![1, 3]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(default_handle),
+                None
+            );
+            let default = test_support::gather(default).expect("gather default prod");
+            assert_eq!(default.numeric_dtype(), NumericDType::F64);
+            assert_eq!(values(&default), vec![1.0; 3]);
+
+            let native = prod_builtin(Value::GpuTensor(upload()), vec![Value::from("native")])
+                .expect("native prod");
+            let Value::GpuTensor(native) = native else {
+                panic!("expected resident native output");
+            };
+            assert_eq!(native.shape, vec![1, 3]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&native),
+                Some(IntegerElementType::U16)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&native))
+                    .expect("download native prod")
+                    .data,
+                HostIntegerDataOwned::U16(vec![1; 3])
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn prod_gpu_like_prototype() {
+    #[cfg(feature = "wgpu")]
+    fn prod_native_integer_gpu_stays_resident() {
+        match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) {
+            Ok(_) => {}
+            Err(error) if error.to_string() == "wgpu: no compatible adapter found" => return,
+            Err(error) => panic!("register wgpu provider failed: {error:?}"),
+        }
+        let provider = runmat_accelerate_api::provider().expect("provider");
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U8(&[20, 30, 15, 10]),
+                shape: &[2, 2],
+            })
+            .expect("upload native integer gpuArray");
+        let result = prod_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::Int(IntValue::I32(1)), Value::from("native")],
+        )
+        .expect("prod native integer gpuArray");
+        let Value::GpuTensor(out) = result else {
+            panic!("expected resident gpuArray result");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&out),
+            Some(IntegerElementType::U8)
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&out))
+                .expect("download native prod")
+                .data,
+            HostIntegerDataOwned::U8(vec![255, 150])
+        );
+    }
+
+    #[test]
+    fn prod_native_integer_gpu_vecdim_and_all_nd_stay_resident() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-            let proto_view = HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            };
-            let proto_handle = provider.upload(&proto_view).expect("upload");
-            let result = prod_builtin(
-                Value::Tensor(tensor.clone()),
-                vec![Value::from("like"), Value::GpuTensor(proto_handle.clone())],
+            let values: Vec<u16> = (1..=12).collect();
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U16(&values),
+                    shape: &[2, 3, 2],
+                })
+                .expect("upload native integer gpuArray");
+            let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
+            let vecdim = prod_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::Tensor(dims), Value::from("native")],
             )
-            .expect("prod");
-            match result {
-                Value::GpuTensor(h) => {
-                    let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 2]);
-                    assert_eq!(gathered.data, vec![2.0, 12.0]);
-                }
-                other => panic!("expected GPU tensor, got {other:?}"),
-            }
+            .expect("prod native integer gpuArray vecdim");
+            let all = prod_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::from("all"), Value::from("native")],
+            )
+            .expect("prod native integer gpuArray all");
+            let Value::GpuTensor(vecdim_out) = vecdim else {
+                panic!("expected resident vecdim gpuArray result");
+            };
+            let Value::GpuTensor(all_out) = all else {
+                panic!("expected resident all gpuArray result");
+            };
+            assert_eq!(vecdim_out.shape, vec![1, 3, 1]);
+            assert_eq!(all_out.shape, vec![1, 1, 1]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&vecdim_out),
+                Some(IntegerElementType::U16)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&all_out),
+                Some(IntegerElementType::U16)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&vecdim_out))
+                    .expect("download native vecdim prod")
+                    .data,
+                HostIntegerDataOwned::U16(vec![112, 1080, 3960])
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&all_out))
+                    .expect("download native all prod")
+                    .data,
+                HostIntegerDataOwned::U16(vec![u16::MAX])
+            );
         });
     }
 
@@ -1460,16 +1827,12 @@ pub(crate) mod tests {
     fn prod_gpu_omit_nan_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 4.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result =
                 prod_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")]).expect("prod");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 2]);
-            assert_eq!(gathered.data, vec![2.0, 4.0]);
+            assert_eq!(values(&gathered), vec![2.0, 4.0]);
         });
     }
 
@@ -1490,13 +1853,7 @@ pub(crate) mod tests {
             },
         )
         .unwrap();
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
+        let h = gpu_helpers::upload_tensor(runmat_accelerate_api::provider().unwrap(), &tensor)
             .unwrap();
         let gpu = block_on(prod_gpu(
             h,
@@ -1511,7 +1868,7 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in values(&gt).iter().zip(values(&ct).iter()) {
                     assert!((a - b).abs() < 1e-8);
                 }
             }

@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "RunMat gathers gpuArray inputs once, assembles the block diagonal result on the host, and uploads dense numeric, logical, or complex results back to the active provider. Sparse results remain host sparse matrices because RunMat does not yet have a sparse gpuArray representation."
+    "notes": "RunMat gathers gpuArray inputs once, assembles the block diagonal result on the host, and uploads dense floating, exact integer, logical, or complex results back to the owning provider. Sparse results remain host sparse matrices because RunMat does not yet have a sparse gpuArray representation."
   },
   "fusion": {
     "elementwise": false,
@@ -34,10 +34,12 @@
   "behaviors": [
     "`blkdiag()` returns the canonical empty `0 x 0` double matrix.",
     "Numeric scalars are treated as `1 x 1` blocks, vectors and matrices keep their two-dimensional shape, and inputs with only singleton trailing dimensions are accepted.",
-    "All-logical inputs return a logical array. Mixed logical and numeric inputs return a numeric array.",
+    "All-logical inputs return a logical array. If any dense real block is integer, the first integer block determines output class; unlike integer, single, double, and logical blocks convert into that class with ordinary rounding and saturation.",
     "If any input is sparse and no input is character, the output is sparse when complex inputs are real-valued; dense numeric, logical, and real-valued complex blocks contribute only their nonzero entries.",
     "If any input is complex and no input is character, the output is complex and real, logical, and sparse inputs are promoted into the real part when needed.",
+    "Public sparse numeric storage is single, double, or logical. Same-class sparse integer assembly is an explicitly gated RunMat extension and remains host-resident.",
     "Sparse inputs mixed with non-real complex blocks currently return a dense complex result because RunMat does not yet have a complex sparse matrix representation.",
+    "Same-class paired complex-integer assembly is an explicitly gated RunMat extension; MATLAB-compatible mode rejects it because the public integer domain does not support complex-integer operations.",
     "Single-precision dense blocks preserve single dtype when all dense numeric blocks share that dtype.",
     "Character blocks are supported when every input is a character array; off-block entries are spaces.",
     "String arrays, cell arrays, and non-matrix higher-dimensional inputs raise errors.",
@@ -72,11 +74,11 @@
   "faqs": [
     {
       "question": "What class does `blkdiag` return?",
-      "answer": "All-logical inputs return logical. Sparse inputs return sparse unless character input is present or a non-real complex block requires complex output. Complex inputs promote the output to complex when needed. Otherwise numeric dense output is returned."
+      "answer": "All-logical inputs return logical. For dense real blocks, the first integer input class dominates unlike integer, floating, and logical blocks; otherwise single/double promotion applies. Sparse inputs return sparse unless character input is present or a non-real complex block requires complex output."
     },
     {
       "question": "Does `blkdiag` preserve sparse matrices?",
-      "answer": "Yes for real-valued sparse outputs. If any input is sparse and the output is not character or non-real complex, RunMat builds a sparse CSC result and keeps only nonzero entries from dense numeric, logical, and real-valued complex blocks. Non-real complex entries currently promote the result to dense complex because RunMat does not yet provide complex sparse storage."
+      "answer": "Yes for public single, double, and logical sparse outputs. Same-class sparse integer CSC preservation is a RunMat-only extension. Non-real complex entries currently promote the result to dense complex because RunMat does not yet provide complex sparse storage."
     },
     {
       "question": "Can I mix host arrays and gpuArray values?",
@@ -125,7 +127,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs"
   },
-  "gpu_residency": "gpuArray inputs are gathered to host for block placement, then dense numeric, logical, and complex results are uploaded back to the active provider. Sparse results remain host sparse matrices.",
+  "gpu_residency": "gpuArray inputs are gathered exactly to host for block placement, then dense floating, integer, logical, and complex results are uploaded back to the owning provider. Sparse results remain host sparse matrices.",
   "gpu_behavior": [
     "`blkdiag` is GPU-aware but not fused. It materialises a fresh block diagonal array and therefore acts as a fusion sink."
   ]

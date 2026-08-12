@@ -354,6 +354,7 @@ fn parse_start(value: &Value) -> BuiltinResult<StartSpec> {
             "kmeans: numeric Start must be a matrix or 3-D array",
         ));
     }
+    let values = tensor::tensor_values_f64(&tensor);
     if tensor.shape.len() == 3 {
         let k = tensor.shape[0];
         let cols = tensor.shape[1];
@@ -364,7 +365,7 @@ fn parse_start(value: &Value) -> BuiltinResult<StartSpec> {
             for col in 0..cols {
                 for (row, center_row) in centers.iter_mut().enumerate().take(k) {
                     let offset = row + col * k + page * k * cols;
-                    center_row[col] = tensor.data[offset];
+                    center_row[col] = values[offset];
                 }
             }
             pages.push(centers);
@@ -375,7 +376,7 @@ fn parse_start(value: &Value) -> BuiltinResult<StartSpec> {
         let mut centers = vec![vec![0.0; cols]; rows];
         for col in 0..cols {
             for (row, center_row) in centers.iter_mut().enumerate().take(rows) {
-                center_row[col] = tensor.data[col * rows + row];
+                center_row[col] = values[col * rows + row];
             }
         }
         Ok(StartSpec::Numeric(centers))
@@ -411,17 +412,21 @@ fn infer_k_from_start(start: &StartSpec) -> Option<usize> {
 }
 
 fn scalar_number(value: &Value) -> Option<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Some(integer.to_f64());
+    }
     match value {
         Value::Num(value) => Some(*value),
-        Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
 }
 
 fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinResult<()> {
@@ -476,7 +481,7 @@ fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinRe
 
 fn is_empty_option_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::StringArray(array) => array.data.is_empty(),
@@ -486,11 +491,15 @@ fn is_empty_option_value(value: &Value) -> bool {
 }
 
 fn bool_option(value: &Value) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(!integer.is_zero());
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => Ok(*value != 0.0),
-        Value::Int(value) => Ok(value.to_f64() != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
+        }
         other => Err(invalid(format!(
             "kmeans: option value must be a logical scalar, got {other:?}"
         ))),
@@ -503,10 +512,11 @@ fn prepare_data(value: Value, distance: Distance) -> BuiltinResult<PreparedData>
     if tensor.shape.len() > 2 {
         return Err(invalid("kmeans: X must be a numeric vector or 2-D matrix"));
     }
+    let values = tensor::tensor_values_f64_cow(&tensor);
     let (raw_rows, raw_cols) = tensor_rows_cols(&tensor);
     let vector_as_column = raw_rows == 1 || raw_cols == 1;
     let original_row_count = if vector_as_column {
-        tensor.data.len()
+        values.len()
     } else {
         raw_rows
     };
@@ -514,25 +524,25 @@ fn prepare_data(value: Value, distance: Distance) -> BuiltinResult<PreparedData>
     let mut rows = Vec::new();
     let mut original_to_valid = Vec::with_capacity(original_row_count);
     for row in 0..original_row_count {
-        let mut values = Vec::with_capacity(cols);
+        let mut row_values = Vec::with_capacity(cols);
         let mut has_nan = false;
         for col in 0..cols {
-            let value = if vector_as_column {
-                tensor.data[row]
+            let value: f64 = if vector_as_column {
+                values[row]
             } else {
-                tensor.data[col * raw_rows + row]
+                values[col * raw_rows + row]
             };
             if value.is_nan() {
                 has_nan = true;
             } else if !value.is_finite() {
                 return Err(invalid("kmeans: X cannot contain Inf values"));
             }
-            values.push(value);
+            row_values.push(value);
         }
         if has_nan {
             original_to_valid.push(None);
         } else {
-            let transformed = transform_row(&values, distance)?;
+            let transformed = transform_row(&row_values, distance)?;
             if transformed.iter().any(|value| value.is_nan()) {
                 original_to_valid.push(None);
             } else {
@@ -1144,11 +1154,45 @@ fn distance_output(result: &ReplicateResult, data: &PreparedData) -> BuiltinResu
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     use super::*;
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_int_tensor_shape(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn option_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, 1, 1);
+            assert_eq!(parse_positive_usize(&value, "k").unwrap(), 1);
+            assert!(bool_option(&value).unwrap());
+        }
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn outputs(value: Value) -> Vec<Value> {
@@ -1177,23 +1221,23 @@ mod tests {
         .unwrap();
         let out = outputs(out);
         match &out[0] {
-            Value::Tensor(idx) => assert_eq!(idx.data, vec![1.0, 1.0, 2.0, 2.0]),
+            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0]),
             other => panic!("idx {other:?}"),
         }
         match &out[1] {
             Value::Tensor(c) => {
                 assert_eq!(c.shape, vec![2, 2]);
-                assert!((c.data[0] - 0.1).abs() < 1.0e-12);
-                assert!((c.data[1] - 9.9).abs() < 1.0e-12);
-                assert!((c.data[2] - 0.05).abs() < 1.0e-12);
-                assert!((c.data[3] - 10.0).abs() < 1.0e-12);
+                assert!((c.materialize_f64()[0] - 0.1).abs() < 1.0e-12);
+                assert!((c.materialize_f64()[1] - 9.9).abs() < 1.0e-12);
+                assert!((c.materialize_f64()[2] - 0.05).abs() < 1.0e-12);
+                assert!((c.materialize_f64()[3] - 10.0).abs() < 1.0e-12);
             }
             other => panic!("centers {other:?}"),
         }
         match &out[2] {
             Value::Tensor(sumd) => {
                 assert_eq!(sumd.shape, vec![2, 1]);
-                assert!(sumd.data.iter().all(|v| v.is_finite()));
+                assert!(sumd.materialize_f64().iter().all(|v| v.is_finite()));
             }
             other => panic!("sumd {other:?}"),
         }
@@ -1201,6 +1245,56 @@ mod tests {
             Value::Tensor(d) => assert_eq!(d.shape, vec![4, 2]),
             other => panic!("distances {other:?}"),
         }
+    }
+
+    #[test]
+    fn kmeans_reads_typed_integer_inputs_start_and_options_exactly() {
+        let mut statset = StructValue::new();
+        statset.insert(
+            "MaxIter",
+            cleared_int_tensor(IntegerStorage::U16(vec![20]), 1, 1),
+        );
+        statset.insert(
+            "TolFun",
+            cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+        );
+        statset.insert(
+            "UseParallel",
+            cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
+        );
+
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let out = block_on(kmeans_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 0, 10, 10]), 4, 1),
+            poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
+            vec![
+                Value::from("Start"),
+                poisoned_int_tensor(IntegerStorage::I16(vec![0, 10]), 2, 1),
+                Value::from("Replicates"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                Value::from("Options"),
+                Value::Struct(statset),
+            ],
+        ))
+        .unwrap();
+        let out = outputs(out);
+        match &out[0] {
+            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0]),
+            other => panic!("idx {other:?}"),
+        }
+        match &out[1] {
+            Value::Tensor(centers) => assert_eq!(centers.materialize_f64(), vec![0.0, 10.0]),
+            other => panic!("centers {other:?}"),
+        }
+    }
+
+    #[test]
+    fn kmeans_empty_option_helpers_use_typed_integer_storage_len() {
+        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        let empty = Value::Tensor(empty);
+
+        assert!(is_empty_numeric(&empty));
+        assert!(is_empty_option_value(&empty));
     }
 
     #[test]
@@ -1219,9 +1313,9 @@ mod tests {
         match &out[0] {
             Value::Tensor(idx) => {
                 assert_eq!(idx.shape, vec![5, 1]);
-                assert!(idx.data[2].is_nan());
-                assert!(idx.data[0].is_finite());
-                assert!(idx.data[4].is_finite());
+                assert!(idx.materialize_f64()[2].is_nan());
+                assert!(idx.materialize_f64()[0].is_finite());
+                assert!(idx.materialize_f64()[4].is_finite());
             }
             other => panic!("idx {other:?}"),
         }
@@ -1277,7 +1371,8 @@ mod tests {
     #[test]
     fn kmeans_accepts_3d_numeric_starts_as_replicates() {
         let x = tensor(vec![0.0, 0.2, 10.0, 10.2], 4, 1);
-        let starts = Value::Tensor(Tensor::new(vec![0.0, 10.0, 0.2, 10.2], vec![2, 1, 2]).unwrap());
+        let starts =
+            poisoned_int_tensor_shape(IntegerStorage::I16(vec![0, 10, 0, 10]), vec![2, 1, 2]);
         let _guard = crate::output_count::push_output_count(Some(3));
         let out = block_on(kmeans_builtin(
             x,

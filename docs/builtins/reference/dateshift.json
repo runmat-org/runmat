@@ -1,0 +1,84 @@
+{
+  "title": "dateshift",
+  "category": "datetime",
+  "keywords": [
+    "dateshift",
+    "datetime",
+    "calendar boundary",
+    "dayofweek",
+    "weekday",
+    "weekend"
+  ],
+  "summary": "Shift datetime values to calendar boundaries or weekday occurrences.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "same size or scalar",
+    "notes": "dateshift operates on host datetime objects. Resident arguments are compatibility-gated before provider access."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "description": "`dateshift` implements the public start, end, and day-of-week forms with singular calendar units and optional `current`, `next`, `previous`, `nearest`, or integer occurrence rules. Week calculations begin on Sunday. Weekday indices and integer rules are read from authoritative integer storage before calendar evaluation.",
+  "behaviors": [
+    "`dateshift(t, 'start', unit)` and `dateshift(t, 'end', unit)` default to the current unit. Supported singular units are `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, and `second`.",
+    "The end of a year, quarter, month, or week is midnight at the beginning of its last day. The end of a day, hour, minute, or second is exactly the start of the next unit.",
+    "`dateshift(t, 'dayofweek', dow)` accepts weekday names or numeric indices from 1 for Sunday through 7 for Saturday. `weekday` and `weekend` select the corresponding day groups.",
+    "Rules can be `current`, `next`, `previous`, `nearest`, or integer scalar/arrays. Datetime, weekday, and rule arrays must have matching sizes or be scalar; scalar expansion preserves the non-scalar input shape.",
+    "Plural unit aliases, `nearest` as a boundary token, and a custom week-start argument are rejected because they are not part of this public contract.",
+    "There is no resident datetime output. Resident arguments are accepted only through the declared RunMat extension and are gathered to a host result."
+  ],
+  "examples": [
+    {
+      "description": "Shift to the Sunday at the start of the current week",
+      "input": "dateshift(datetime(2024, 3, 14), 'start', 'week')",
+      "output": "ans =\n  10-Mar-2024"
+    },
+    {
+      "description": "Shift to the next Monday occurrence",
+      "input": "dateshift(datetime(2024, 3, 14), 'dayofweek', 'Monday')",
+      "output": "ans =\n  18-Mar-2024"
+    },
+    {
+      "description": "Shift to the end of the current month",
+      "input": "dateshift(datetime(2024, 2, 10), 'end', 'month')",
+      "output": "ans =\n  29-Feb-2024"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When does a week begin?",
+      "answer": "Sunday, matching the compatibility contract used by MATLAB calendar weeks."
+    },
+    {
+      "question": "Does end of month mean the last millisecond?",
+      "answer": "No. For month, quarter, year, and week, it is midnight at the beginning of the final calendar day."
+    }
+  ],
+  "links": [
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "day",
+      "url": "./day"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "gpu_residency": "No. Inputs and outputs are host datetime objects. A compatibility-gated resident input is gathered before calendar evaluation.",
+  "gpu_behavior": [
+    "No GPU kernel is dispatched. MATLAB-compatible mode rejects resident arguments before provider access; RunMat extension mode gathers them and returns a host object."
+  ]
+}

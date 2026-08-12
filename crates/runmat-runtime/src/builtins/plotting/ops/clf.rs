@@ -4,7 +4,11 @@ use std::collections::BTreeSet;
 
 use runmat_builtins::Value;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
@@ -67,6 +71,57 @@ pub const CLF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CLF_ERRORS,
 };
 
+pub(crate) const CLF_INTEGER_FIGURE_NUMBER_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "clf-integer-figure-number",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "clf with a typed integer figure number is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ClfIntegerFigureNumberExtension"),
+    };
+
+pub(crate) const CLF_ALL_SELECTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "clf-all-selector",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "clf('all') is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ClfAllSelectorExtension"),
+    };
+
+pub(crate) const CLF_VARIADIC_TARGETS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "clf-variadic-targets",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "clf with separate variadic figure targets is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ClfVariadicTargetsExtension"),
+    };
+
+pub const CLF_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    CLF_INTEGER_FIGURE_NUMBER_EXTENSION,
+    CLF_ALL_SELECTOR_EXTENSION,
+    CLF_VARIADIC_TARGETS_EXTENSION,
+];
+
+const CLF_INTEGER_TARGET_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fig",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "RunMat mode interprets a scalar or array of any built-in integer class as figure numbers, not as numeric figure data. The public compatibility contract documents figure numbers but does not advertise typed integer classes.",
+    }];
+
+pub const CLF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "f = clf(integer_fig)",
+        inputs: &CLF_INTEGER_TARGET_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Figure numbers are read from authoritative host integer storage and must be positive and representable as RunMat's u32 figure identifier. RunMat currently encodes a returned figure opaquely as f64 and returns a scalar count for multiple targets; those are explicit graphics-representation gaps, not integer numeric output. No numeric kernel or provider dispatch occurs.",
+    }];
+
 #[runtime_builtin(
     name = "clf",
     category = "plotting",
@@ -76,9 +131,26 @@ pub const CLF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::clf::CLF_DESCRIPTOR),
+    extensions(crate::builtins::plotting::clf::CLF_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::clf::CLF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::clf"
 )]
 pub fn clf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {
+    if requests_variadic_targets(&rest) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CLF_VARIADIC_TARGETS_EXTENSION,
+            "clf",
+        )?;
+    }
+    if rest.iter().any(is_all_selector) {
+        crate::compatibility::ensure_builtin_extension_enabled(&CLF_ALL_SELECTOR_EXTENSION, "clf")?;
+    }
+    if rest.iter().any(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CLF_INTEGER_FIGURE_NUMBER_EXTENSION,
+            "clf",
+        )?;
+    }
     let (action, _reset) = parse_clf_action(&rest)?;
     match action {
         FigureAction::Current => {
@@ -114,11 +186,56 @@ pub fn clf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {
     }
 }
 
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+}
+
+fn is_all_selector(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.trim().eq_ignore_ascii_case("all"),
+        Value::CharArray(chars) if chars.rows == 1 => chars
+            .data
+            .iter()
+            .collect::<String>()
+            .trim()
+            .eq_ignore_ascii_case("all"),
+        Value::StringArray(strings) if strings.data.len() == 1 => {
+            strings.data[0].trim().eq_ignore_ascii_case("all")
+        }
+        _ => false,
+    }
+}
+
+fn requests_variadic_targets(values: &[Value]) -> bool {
+    values
+        .iter()
+        .filter(|value| !is_reset_selector(value) && !is_all_selector(value))
+        .count()
+        > 1
+}
+
+fn is_reset_selector(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.trim().eq_ignore_ascii_case("reset"),
+        Value::CharArray(chars) if chars.rows == 1 => chars
+            .data
+            .iter()
+            .collect::<String>()
+            .trim()
+            .eq_ignore_ascii_case("reset"),
+        Value::StringArray(strings) if strings.data.len() == 1 => {
+            strings.data[0].trim().eq_ignore_ascii_case("reset")
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Tensor, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -169,6 +286,111 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_all_integer_figure_number_classes_exactly() {
+        let storages = [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ];
+
+        for storage in storages {
+            let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).expect("figure"));
+            let (FigureAction::Handles(handles), false) = parse_clf_action(&[value]).unwrap()
+            else {
+                panic!("expected integer figure target");
+            };
+            assert_eq!(handles, vec![FigureHandle::from(2)]);
+        }
+    }
+
+    #[test]
+    fn integer_figure_numbers_enforce_positive_u32_bounds() {
+        for storage in [
+            IntegerStorage::I64(vec![-1]),
+            IntegerStorage::U64(vec![u32::MAX as u64 + 1]),
+        ] {
+            let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).expect("figure"));
+            assert!(parse_clf_action(&[value]).is_err());
+        }
+    }
+
+    #[test]
+    fn compatibility_mode_rejects_all_integer_figure_number_classes() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let storages = [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ];
+
+        for storage in storages {
+            let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).expect("figure"));
+            let err = clf_builtin(vec![value]).expect_err("typed integer extension must be gated");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:ClfIntegerFigureNumberExtension")
+            );
+        }
+    }
+
+    #[test]
+    fn compatibility_mode_rejects_runmat_all_selector_before_plot_state_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err =
+            clf_builtin(vec![Value::String("all".into())]).expect_err("RunMat-only all selector");
+        assert_eq!(
+            err.identifier(),
+            CLF_ALL_SELECTOR_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn compatibility_mode_rejects_separate_variadic_targets() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = clf_builtin(vec![Value::Num(1.0), Value::Num(2.0)])
+            .expect_err("RunMat-only variadic targets");
+        assert_eq!(
+            err.identifier(),
+            CLF_VARIADIC_TARGETS_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn resident_numeric_targets_are_rejected_without_provider_dispatch() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        assert!(parse_clf_action(&[resident]).is_err());
+    }
+
+    #[test]
+    fn clf_integer_capability_is_structural_and_host_only() {
+        let capability = &CLF_INTEGER_CAPABILITIES[0];
+        assert_eq!(capability.inputs[0].classes.len(), 8);
+        assert_eq!(
+            capability.computation_domain,
+            BuiltinIntegerComputationDomain::Structural
+        );
+        assert_eq!(capability.backend, BuiltinIntegerBackendRule::HostOnly);
+        assert_eq!(
+            capability.output_class,
+            BuiltinIntegerOutputClassRule::NotApplicable
+        );
     }
 
     #[test]

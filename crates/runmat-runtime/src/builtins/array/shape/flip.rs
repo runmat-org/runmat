@@ -2,10 +2,8 @@
 //!
 //! This module implements the `flip` function, mirroring MathWorks MATLAB
 //! behaviour for numeric tensors, logical masks, string arrays, complex data,
-//! character arrays, and gpuArray handles. It honours dimension vectors,
-//! direction keywords such as `'horizontal'`, and gracefully falls back to the
-//! host when a registered acceleration provider does not expose a native flip
-//! kernel.
+//! character arrays, and gpuArray handles. RunMat also offers separately gated
+//! dimension-vector and direction-keyword extensions.
 
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::spec::{
@@ -14,11 +12,16 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericScalar, NumericStorage, ResolveContext,
+    StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -77,6 +80,69 @@ fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
 }
 
 const BUILTIN_NAME: &str = "flip";
+
+const FLIP_TYPED_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "flip-typed-dimension",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "flip(A,dim) with a typed-integer or logical dim is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FlipTypedDimensionExtension"),
+};
+const FLIP_DIMENSION_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "flip-dimension-vector",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "flip(A,dims) with multiple or zero dimension entries is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FlipDimensionVectorExtension"),
+};
+const FLIP_DIRECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "flip-direction-keyword",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "flip(A,direction) is a RunMat convenience extension",
+    error_identifier: Some("RunMat:compatibility:FlipDirectionExtension"),
+};
+pub const FLIP_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    FLIP_TYPED_DIMENSION_EXTENSION,
+    FLIP_DIMENSION_VECTOR_EXTENSION,
+    FLIP_DIRECTION_EXTENSION,
+];
+
+const FLIP_INTEGER_A_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are reordered through authoritative storage without numeric conversion.",
+    }];
+const FLIP_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer dimensions are exact structural controls and are gated as a RunMat extension.",
+    }];
+pub const FLIP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = flip(integer_A[,dim])",
+        inputs: &FLIP_INTEGER_A_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "The operation only permutes elements; GPU fallback gathers and re-uploads exact integer storage to the owning provider.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "B = flip(A,integer_dim)",
+        inputs: &FLIP_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Strict compatibility rejects this extension before parsing the dimension value.",
+    },
+];
 
 const FLIP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "B",
@@ -186,12 +252,15 @@ fn flip_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeE
     accel = "custom",
     type_resolver(preserve_array_type),
     descriptor(crate::builtins::array::shape::flip::FLIP_DESCRIPTOR),
+    extensions(crate::builtins::array::shape::flip::FLIP_EXTENSIONS),
+    integer_capabilities(crate::builtins::array::shape::flip::FLIP_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::flip"
 )]
 async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(flip_error(&FLIP_ERROR_TOO_MANY_INPUTS));
     }
+    ensure_flip_extensions(&rest)?;
     let spec = parse_flip_spec(&rest)?;
     match value {
         Value::Tensor(tensor) => {
@@ -217,7 +286,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             Ok(flip_string_array(strings, &dims).map(Value::StringArray)?)
         }
         Value::CharArray(chars) => {
-            let dims = resolve_dims(&spec, &[chars.rows, chars.cols]);
+            let dims = resolve_dims(&spec, &chars.shape);
             Ok(flip_char_array(chars, &dims).map(Value::CharArray)?)
         }
         Value::String(scalar) => Ok(Value::String(scalar)),
@@ -276,6 +345,42 @@ enum FlipSpec {
     Dims(Vec<usize>),
 }
 
+fn ensure_flip_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
+    let Some(value) = args.first() else {
+        return Ok(());
+    };
+    if matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FLIP_DIRECTION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let is_typed_dimension = matches!(value, Value::Int(_) | Value::Bool(_))
+        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+        || matches!(value, Value::LogicalArray(_));
+    if is_typed_dimension {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FLIP_TYPED_DIMENSION_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let is_dimension_vector = match value {
+        Value::Tensor(t) => tensor::tensor_element_len(t) != 1,
+        Value::LogicalArray(a) => a.data.len() != 1,
+        _ => false,
+    };
+    if is_dimension_vector {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FLIP_DIMENSION_VECTOR_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
 fn parse_flip_spec(args: &[Value]) -> crate::BuiltinResult<FlipSpec> {
     match args.len() {
         0 => Ok(FlipSpec::Default),
@@ -290,11 +395,8 @@ fn parse_flip_spec(args: &[Value]) -> crate::BuiltinResult<FlipSpec> {
                 return Ok(FlipSpec::Dims(direction_dims));
             }
             let dims = parse_dims_value(&args[0])?;
-            if dims.is_empty() {
-                Ok(FlipSpec::Default)
-            } else {
-                Ok(FlipSpec::Dims(dims))
-            }
+            validate_unique_dims(&dims)?;
+            Ok(FlipSpec::Dims(dims))
         }
         _ => unreachable!(),
     }
@@ -396,30 +498,79 @@ fn parse_dims_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
             "flip: dimension vector must be a row or column vector",
         ));
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for entry in &tensor.data {
+    if tensor::tensor_element_len(tensor) == 0 {
+        return Err(flip_error_for(
+            "flip",
+            "flip: dimension argument must be nonempty",
+        ));
+    }
+    if let Some(parsed) = tensor::integer_tensor_dimension_vector(tensor, "flip", false) {
+        return parsed.map_err(|e| flip_error_for("flip", e));
+    }
+    let len = tensor::tensor_element_len(tensor);
+    let mut dims = Vec::with_capacity(len);
+    for index in 0..len {
+        let entry = match tensor
+            .numeric_value_at(index)
+            .expect("dimension tensor index is in bounds")
+        {
+            NumericScalar::F64(value) => value,
+            NumericScalar::F32(value) => f64::from(value),
+            NumericScalar::I8(_)
+            | NumericScalar::I16(_)
+            | NumericScalar::I32(_)
+            | NumericScalar::I64(_)
+            | NumericScalar::U8(_)
+            | NumericScalar::U16(_)
+            | NumericScalar::U32(_)
+            | NumericScalar::U64(_) => {
+                unreachable!("integer dimension tensors return through the exact parser")
+            }
+        };
         if !entry.is_finite() {
             return Err(flip_error_for(
                 "flip",
                 "flip: dimension indices must be finite",
             ));
         }
-        let rounded = entry.round();
-        if (rounded - entry).abs() > f64::EPSILON {
+        if entry.fract() != 0.0 {
             return Err(flip_error_for(
                 "flip",
                 "flip: dimension indices must be integers",
             ));
         }
-        if rounded < 1.0 {
+        if entry < 1.0 {
             return Err(flip_error_for(
                 "flip",
                 "flip: dimension indices must be >= 1",
             ));
         }
-        dims.push(rounded as usize);
+        if entry >= usize::MAX as f64 {
+            return Err(flip_error_for(
+                "flip",
+                "flip: dimension index is out of platform range",
+            ));
+        }
+        dims.push(entry as usize);
     }
     Ok(dims)
+}
+
+fn validate_unique_dims(dims: &[usize]) -> crate::BuiltinResult<()> {
+    if dims.is_empty() {
+        return Err(flip_error_for(
+            "flip",
+            "flip: dimension argument must not be empty",
+        ));
+    }
+    let mut seen = std::collections::HashSet::with_capacity(dims.len());
+    if dims.iter().any(|dim| !seen.insert(*dim)) {
+        return Err(flip_error_for(
+            "flip",
+            "flip: dimension indices must be unique",
+        ));
+    }
+    Ok(())
 }
 
 fn is_vector(shape: &[usize]) -> bool {
@@ -460,12 +611,41 @@ pub(crate) fn flip_tensor_with(
     tensor: Tensor,
     dims: &[usize],
 ) -> crate::BuiltinResult<Tensor> {
-    if tensor.data.is_empty() || dims.is_empty() {
+    if tensor::tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    let data = flip_generic(&tensor.data, &tensor.shape, dims, builtin)?;
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
+    let storage = flip_numeric_storage(storage, &shape, dims, builtin)?;
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
+}
+
+fn flip_numeric_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    dims: &[usize],
+    builtin: &'static str,
+) -> crate::BuiltinResult<NumericStorage> {
+    macro_rules! flip {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(flip_generic(&$values, shape, dims, builtin)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => flip!(values, F64),
+        NumericStorage::F32(values) => flip!(values, F32),
+        NumericStorage::I8(values) => flip!(values, I8),
+        NumericStorage::I16(values) => flip!(values, I16),
+        NumericStorage::I32(values) => flip!(values, I32),
+        NumericStorage::I64(values) => flip!(values, I64),
+        NumericStorage::U8(values) => flip!(values, U8),
+        NumericStorage::U16(values) => flip!(values, U16),
+        NumericStorage::U32(values) => flip!(values, U32),
+        NumericStorage::U64(values) => flip!(values, U64),
+    })
 }
 
 pub(crate) fn flip_complex_tensor(
@@ -480,11 +660,17 @@ pub(crate) fn flip_complex_tensor_with(
     tensor: ComplexTensor,
     dims: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    if tensor.data.is_empty() || dims.is_empty() {
+    if tensor::complex_tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    let data = flip_generic(&tensor.data, &tensor.shape, dims, builtin)?;
-    ComplexTensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let indices = (0..tensor.len()).collect::<Vec<_>>();
+    let indices = flip_generic(&indices, &shape, dims, builtin)?;
+    let storage = tensor
+        .into_complex_storage()
+        .gather(&indices)
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
+    ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
@@ -540,37 +726,10 @@ pub(crate) fn flip_char_array_with(
     if array.data.is_empty() || dims.is_empty() {
         return Ok(array);
     }
-    let rows = array.rows;
-    let cols = array.cols;
-    let mut flip_rows = false;
-    let mut flip_cols = false;
-    for &dim in dims {
-        if dim == 0 {
-            return Err(flip_error_for(
-                builtin,
-                format!("{builtin}: dimension must be >= 1"),
-            ));
-        }
-        match dim {
-            1 => flip_rows = !flip_rows,
-            2 => flip_cols = !flip_cols,
-            _ => {}
-        }
-    }
-    if !flip_rows && !flip_cols {
-        return Ok(array);
-    }
-    let mut out = vec!['\0'; array.data.len()];
-    for row in 0..rows {
-        for col in 0..cols {
-            let dest_idx = row * cols + col;
-            let src_row = if flip_rows { rows - 1 - row } else { row };
-            let src_col = if flip_cols { cols - 1 - col } else { col };
-            let src_idx = src_row * cols + src_col;
-            out[dest_idx] = array.data[src_idx];
-        }
-    }
-    CharArray::new(out, rows, cols).map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
+    let shape = array.shape.clone();
+    let data = flip_generic(&array.to_column_major(), &shape, dims, builtin)?;
+    CharArray::from_column_major(data, shape)
+        .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) async fn flip_gpu(
@@ -594,25 +753,56 @@ pub(crate) async fn flip_gpu_with(
             format!("{builtin}: dimension indices must be >= 1"),
         ));
     }
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        let logical = runmat_accelerate_api::handle_is_logical(&handle);
+        let integer_type = runmat_accelerate_api::handle_integer_type(&handle);
         let zero_based: Vec<usize> = dims.iter().map(|&d| d - 1).collect();
-        if let Ok(out) = provider.flip(&handle, &zero_based) {
-            return Ok(Value::GpuTensor(out));
+        if integer_type.is_none() {
+            if let Ok(out) = provider.flip(&handle, &zero_based) {
+                if flip_native_output_matches(&handle, &out, provider) {
+                    runmat_accelerate_api::set_handle_logical(&out, logical);
+                    return Ok(gpu_helpers::resident_gpu_value(out));
+                }
+                if !gpu_handles_alias(&handle, &out) {
+                    let owner =
+                        runmat_accelerate_api::provider_for_handle(&out).unwrap_or(provider);
+                    let _ = owner.free(&out);
+                }
+            }
         }
         let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let flipped = flip_tensor_with(builtin, host_tensor, dims)?;
-        let view = HostTensorView {
-            data: &flipped.data,
-            shape: &flipped.shape,
-        };
-        provider
-            .upload(&view)
-            .map(Value::GpuTensor)
-            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
+        let out = gpu_helpers::upload_tensor(provider, &flipped)
+            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
+        runmat_accelerate_api::set_handle_logical(&out, logical);
+        Ok(Value::GpuTensor(out))
     } else {
-        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        flip_tensor_with(builtin, host_tensor, dims).map(tensor::tensor_into_value)
+        Err(flip_error_for(
+            builtin,
+            format!("{builtin}: no acceleration provider owns the input handle"),
+        ))
     }
+}
+
+fn flip_native_output_matches(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    output.shape == input.shape
+        && output.device_id == input.device_id
+        && !gpu_handles_alias(output, input)
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::handle_storage(input)
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+}
+
+fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
+    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
 }
 
 fn flip_generic<T: Clone>(
@@ -630,38 +820,33 @@ fn flip_generic<T: Clone>(
     if data.is_empty() {
         return Ok(Vec::new());
     }
-    let max_dim = dims.iter().copied().max().unwrap_or(0);
-    let mut ext_shape = shape.to_vec();
-    if max_dim > ext_shape.len() {
-        ext_shape.extend(std::iter::repeat_n(1, max_dim - ext_shape.len()));
-    }
-    let total: usize = ext_shape.iter().product();
+    let total: usize = shape.iter().product();
     if total != data.len() {
         return Err(flip_error_for(
             builtin,
             format!("{builtin}: shape does not match data length"),
         ));
     }
-    let mut flip_flags = vec![false; ext_shape.len()];
+    let mut flip_flags = vec![false; shape.len()];
     for &dim in dims {
         let axis = dim - 1;
         if axis >= flip_flags.len() {
             continue;
         }
-        flip_flags[axis] = !flip_flags[axis];
+        flip_flags[axis] = true;
     }
     if !flip_flags.iter().any(|&flag| flag) {
         return Ok(data.to_vec());
     }
     let mut out = Vec::with_capacity(total);
     for idx in 0..total {
-        let mut coords = unravel_index(idx, &ext_shape);
+        let mut coords = unravel_index(idx, shape);
         for (axis, flag) in flip_flags.iter().enumerate() {
-            if *flag && ext_shape[axis] > 1 {
-                coords[axis] = ext_shape[axis] - 1 - coords[axis];
+            if *flag && shape[axis] > 1 {
+                coords[axis] = shape[axis] - 1 - coords[axis];
             }
         }
-        let src_idx = ravel_index(&coords, &ext_shape);
+        let src_idx = ravel_index(&coords, shape);
         out.push(data[src_idx].clone());
     }
     Ok(out)
@@ -693,9 +878,9 @@ fn ravel_index(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
+        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
+        Value::Complex(value.re, value.im)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -710,7 +895,13 @@ pub(crate) mod tests {
         block_on(super::flip_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        StringArray, Tensor,
+    };
 
     #[test]
     fn flip_type_preserves_logical_shape() {
@@ -728,6 +919,136 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn flip_integer_contract_covers_data_and_typed_dimension_separately() {
+        assert_eq!(FLIP_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(FLIP_EXTENSIONS.len(), 3);
+        assert_eq!(FLIP_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(
+            FLIP_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+        assert_eq!(
+            FLIP_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+    }
+
+    #[test]
+    fn flip_extensions_are_gated_independently_before_parsing() {
+        let input = || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let direction =
+            flip_builtin(input(), vec![Value::from("vertical")]).expect_err("direction extension");
+        assert_eq!(
+            direction.identifier(),
+            FLIP_DIRECTION_EXTENSION.error_identifier
+        );
+
+        let typed = flip_builtin(input(), vec![Value::Int(IntValue::I32(1))])
+            .expect_err("typed dimension extension");
+        assert_eq!(
+            typed.identifier(),
+            FLIP_TYPED_DIMENSION_EXTENSION.error_identifier
+        );
+
+        let dims = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+        let vector = flip_builtin(input(), vec![dims]).expect_err("dimension vector extension");
+        assert_eq!(
+            vector.identifier(),
+            FLIP_DIMENSION_VECTOR_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn flip_dimension_extensions_reject_ambiguous_or_lossy_controls() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input = || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        assert!(flip_builtin(input(), vec![empty])
+            .expect_err("empty dimensions")
+            .message()
+            .contains("nonempty"));
+
+        let duplicate = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
+        assert!(flip_builtin(input(), vec![duplicate])
+            .expect_err("duplicate dimensions")
+            .message()
+            .contains("unique"));
+
+        let near_integer =
+            Value::Tensor(Tensor::new(vec![1.0 + f64::EPSILON], vec![1, 1]).unwrap());
+        assert!(flip_builtin(input(), vec![near_integer])
+            .expect_err("near integer dimension")
+            .message()
+            .contains("must be integers"));
+
+        let huge = Value::Tensor(Tensor::new(vec![f64::MAX], vec![1, 1]).unwrap());
+        assert!(flip_builtin(input(), vec![huge])
+            .expect_err("out of range dimension")
+            .message()
+            .contains("platform range"));
+    }
+
+    #[test]
+    fn flip_gpu_logical_result_preserves_residency_and_class() {
+        test_support::with_test_provider(|provider| {
+            let values = [1.0, 0.0, 0.0, 1.0];
+            let handle = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &[2, 2],
+                })
+                .expect("upload logical");
+            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let Value::GpuTensor(result) =
+                flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip logical gpu")
+            else {
+                panic!("expected resident logical output");
+            };
+            assert!(runmat_accelerate_api::handle_is_logical(&result));
+            assert!(std::ptr::eq(
+                runmat_accelerate_api::provider_for_handle(&result).expect("result owner"),
+                provider
+            ));
+        });
+    }
+
+    #[test]
+    fn flip_gpu_integer_fallback_preserves_exact_storage_resident() {
+        test_support::with_test_provider(|provider| {
+            let values = [1_u64, 9_007_199_254_740_993, 4_u64, u64::MAX];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[2, 2],
+                })
+                .expect("upload integer");
+            let Value::GpuTensor(result) =
+                flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip integer gpu")
+            else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&result),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    1,
+                    u64::MAX,
+                    4,
+                ]))
+            );
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_vector_defaults_to_first_non_singleton_dim() {
@@ -735,9 +1056,40 @@ pub(crate) mod tests {
         let value =
             flip_builtin(Value::Tensor(tensor), Vec::new()).expect("flip row vector default");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn flip_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+        let Value::Tensor(output) = flip_builtin(Value::Tensor(tensor), Vec::new()).expect("flip")
+        else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![3.0, 2.0, 1.0])
+        );
+    }
+
+    #[test]
+    fn flip_complex_scalar_keeps_typed_integer_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![7]), IntegerStorage::I16(vec![-3]))
+                .expect("matching complex integer storage");
+        let input = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
+            .expect("typed complex integer input");
+
+        let flipped = flip_complex_tensor(input, &[1]).expect("flip typed complex scalar");
+        assert_eq!(flipped.integer_storage().cloned(), Some(storage.clone()));
+
+        let value = complex_tensor_into_value(flipped);
+        let Value::ComplexTensor(output) = value else {
+            panic!("typed complex integer scalar must not collapse to double complex");
+        };
+        assert_eq!(output.integer_storage().cloned(), Some(storage));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -748,7 +1100,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.data, vec![2.0, 4.0, 1.0, 6.0, 3.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 6.0, 3.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -757,11 +1109,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_horizontal_keyword() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![3, 2]).expect("tensor");
         let value = flip_builtin(Value::Tensor(tensor), vec![Value::from("horizontal")])
             .expect("flip horizontal");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![5.0, 3.0, 6.0, 1.0, 4.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![5.0, 3.0, 6.0, 1.0, 4.0, 2.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -769,6 +1122,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_multiple_dimensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).unwrap();
         let value = flip_builtin(
             Value::Tensor(tensor),
@@ -780,7 +1134,10 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
-                assert_eq!(t.data, vec![6.0, 5.0, 8.0, 7.0, 2.0, 1.0, 4.0, 3.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![6.0, 5.0, 8.0, 7.0, 2.0, 1.0, 4.0, 3.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -789,12 +1146,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_both_direction_keyword() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((1..=6).map(|v| v as f64).collect(), vec![3, 2]).unwrap();
         let expected = flip_tensor(tensor.clone(), &[1, 2]).expect("cpu flip");
         let value =
             flip_builtin(Value::Tensor(tensor), vec![Value::from("both")]).expect("flip both");
         match value {
-            Value::Tensor(out) => assert_eq!(out.data, expected.data),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), expected.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -802,6 +1160,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_char_array_horizontal() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
         let value =
             flip_builtin(Value::CharArray(chars), vec![Value::from("horizontal")]).expect("flip");
@@ -819,13 +1178,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_direction_accepts_char_array_keyword() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let keyword = CharArray::new_row("vertical");
         let tensor = Tensor::new((1..=4).map(|v| v as f64).collect(), vec![2, 2]).unwrap();
         let expected = flip_tensor(tensor.clone(), &[1]).expect("cpu flip");
         let value = flip_builtin(Value::Tensor(tensor), vec![Value::CharArray(keyword)])
             .expect("flip via char");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, expected.data),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), expected.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -833,6 +1193,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_logical_array_preserves_type() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
         let expected = flip_logical_array(logical.clone(), &[2]).expect("cpu logical flip");
         let value = flip_builtin(
@@ -857,7 +1218,9 @@ pub(crate) mod tests {
         let expected = flip_complex_tensor(tensor.clone(), &[1]).expect("cpu complex flip");
         let value = flip_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("flip complex");
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.data, expected.data),
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.materialize_f64(), expected.materialize_f64())
+            }
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -865,6 +1228,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_string_array_vertical() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let strings =
             StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).expect("string array");
         let value =
@@ -880,13 +1244,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_accepts_dimension_vector_tensor() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).unwrap();
         let dims = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let value =
             flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("flip dims");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0, 8.0, 7.0, 6.0, 5.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![4.0, 3.0, 2.0, 1.0, 8.0, 7.0, 6.0, 5.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -894,7 +1262,40 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn flip_dimension_vector_reads_integer_tensor_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![1, large]),
+            vec![1, 2],
+        )
+        .expect("dims");
+        let parsed = parse_dims_tensor(&dims).expect("parse dims");
+        assert_eq!(parsed, vec![1, large as usize]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn flip_large_integer_dimension_beyond_rank_is_noop() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let original = tensor.clone();
+        let large = 9_007_199_254_740_993_u64;
+        let dims = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![large]),
+            vec![1, 1],
+        )
+        .expect("dims");
+        let value = flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("flip");
+        match value {
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), original.materialize_f64()),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn flip_dimension_tensor_must_be_vector() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).unwrap();
         let dims = Tensor::new((1..=4).map(|v| v as f64).collect(), vec![2, 2]).unwrap();
         let err =
@@ -910,7 +1311,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
         let value = flip_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("flip");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, original.data),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), original.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -918,6 +1319,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flip_rejects_zero_dimension() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = flip_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))])
             .expect_err("flip should fail");
@@ -931,7 +1333,7 @@ pub(crate) mod tests {
             let tensor =
                 Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).expect("tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -939,7 +1341,7 @@ pub(crate) mod tests {
                 flip_tensor(tensor.clone(), &[default_flip_dim(&tensor.shape)]).expect("cpu flip");
             let value = flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip gpu");
             let gathered = test_support::gather(value).expect("gather gpu result");
-            assert_eq!(gathered.data, cpu.data);
+            assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
         });
     }
 
@@ -954,7 +1356,7 @@ pub(crate) mod tests {
             Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).expect("tensor");
         let cpu = flip_tensor(tensor.clone(), &[1, 3]).expect("cpu flip");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -969,6 +1371,6 @@ pub(crate) mod tests {
         )
         .expect("flip gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

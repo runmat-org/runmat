@@ -532,6 +532,17 @@ impl WgpuProvider {
         dim: usize,
         op: crate::backend::wgpu::types::DimReduceExtrema,
     ) -> Result<ReduceDimResult> {
+        if self.get_entry_raw(a)?.integer_type.is_some() {
+            return self.integer_reduce_extrema_dim_exec(
+                matches!(op, crate::backend::wgpu::types::DimReduceExtrema::Min),
+                dim,
+                match op {
+                    crate::backend::wgpu::types::DimReduceExtrema::Min => "reduce_min_dim",
+                    crate::backend::wgpu::types::DimReduceExtrema::Max => "reduce_max_dim",
+                },
+                a,
+            );
+        }
         let entry = self.get_entry(a)?;
         if entry.shape.len() != 2 {
             return Err(anyhow!("reduce: only 2D tensors supported"));

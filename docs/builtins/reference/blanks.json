@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "No GPU kernel is registered for this compatibility builtin; GPU-resident inputs are gathered to host memory before evaluation."
+    "notes": "The public API has no interactive GPU-array overload. RunMat can gather a resident scalar length only when RunMat extensions are enabled."
   },
   "fusion": {
     "elementwise": false,
@@ -28,17 +28,17 @@
     "unit": "builtins::strings::core::compat::tests",
     "integration": null
   },
-  "description": "s = blanks(n) - Return a character row vector of spaces.",
+  "description": "`blanks(n)` returns a 1-by-n character row containing space characters. The length accepts integer-valued single, double, or any of the eight built-in integer classes.",
   "signatures": [
     {
       "label": "s = blanks(n)",
       "inputs": [
         {
-          "name": "value",
-          "ty": "Any",
+          "name": "n",
+          "ty": "IntegerScalar",
           "arity": "Required",
           "default": null,
-          "description": "Input value."
+          "description": "Number of elements."
         }
       ],
       "outputs": [
@@ -53,12 +53,20 @@
     }
   ],
   "behaviors": [
-    "Return a character row vector of spaces."
+    "Returns a 1-by-n character row of spaces.",
+    "Length n accepts integer-valued single, double, int8, int16, int32, int64, uint8, uint16, uint32, or uint64.",
+    "A zero or negative length returns a 1-by-0 character array.",
+    "Interactive GPU-resident length input is available only as an explicitly gated RunMat extension."
   ],
   "examples": [
     "blanks(3) returns a 1-by-3 character row of spaces."
   ],
-  "faqs": [],
+  "faqs": [
+    {
+      "question": "Does an integer length produce an integer array?",
+      "answer": "No. The integer is a structural length control; the output is always a character row."
+    }
+  ],
   "links": [
     {
       "label": "string",

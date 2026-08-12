@@ -2,8 +2,8 @@
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-    Value,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::AxesKind;
@@ -12,12 +12,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::line::handles_value;
 use super::op_common::polar::{
     evaluate_theta_rho_tensors, is_real_numeric_value, polar_to_cartesian, real_tensor_from_value,
-    tensor_columns, tensor_is_vector, EvaluatedPolarData,
+    tensor_is_vector, EvaluatedPolarData,
 };
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
@@ -346,22 +347,21 @@ fn series_style_value(
     let Value::Tensor(tensor) = value else {
         return value.clone();
     };
-    if tensor.data.len() <= 1 || tensor_is_vector(tensor) {
+    if tensor_utils::tensor_element_len(tensor) <= 1 || tensor_is_vector(tensor) {
         return value.clone();
     }
     if tensor.rows == point_count && tensor.cols == series_count {
-        let column = tensor_columns(tensor)
-            .into_iter()
-            .nth(series_idx)
-            .unwrap_or_default();
-        return Value::Tensor(runmat_builtins::Tensor {
-            rows: point_count,
-            cols: 1,
-            shape: vec![point_count, 1],
-            data: column,
-            integer_data: None,
-            dtype: tensor.dtype,
-        });
+        let start = series_idx * point_count;
+        let indices: Vec<usize> = (start..start + point_count).collect();
+        let storage = tensor
+            .clone()
+            .into_numeric_storage()
+            .and_then(|storage| storage.gather(&indices))
+            .expect("series style column is valid native storage");
+        return Value::Tensor(
+            Tensor::from_numeric_storage(storage, vec![point_count, 1])
+                .expect("series style column shape"),
+        );
     }
     if is_color_arg && (tensor.cols == 3 || tensor.cols == 4) && tensor.rows == point_count {
         return value.clone();
@@ -416,17 +416,31 @@ mod tests {
     use crate::builtins::plotting::{
         clone_figure, current_figure_handle, reset_hold_state_for_run, reset_plot_state,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::{IntegerStorage, NumericDType, Tensor};
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("polar scatter tensor"))
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn series_style_value_reads_typed_integer_matrix_length_without_mirror() {
+        let value = cleared_int_tensor(IntegerStorage::U8(vec![10, 20, 30, 40]), 2, 2);
+        let series = series_style_value(&value, 1, 2, 2, false);
+
+        let Value::Tensor(tensor) = series else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.materialize_f64(), vec![30.0, 40.0]);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U8(vec![30, 40]))
+        );
     }
 
     #[test]
@@ -454,13 +468,16 @@ mod tests {
         let Value::Tensor(theta) = theta else {
             panic!("expected theta tensor");
         };
-        assert_eq!(theta.data, vec![0.0, std::f64::consts::FRAC_PI_2]);
+        assert_eq!(
+            theta.materialize_f64(),
+            vec![0.0, std::f64::consts::FRAC_PI_2]
+        );
         let r =
             get_builtin(vec![Value::Num(handle), Value::String("RData".into())]).expect("r data");
         let Value::Tensor(r) = r else {
             panic!("expected r tensor");
         };
-        assert_eq!(r.data, vec![1.0, 2.0]);
+        assert_eq!(r.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[test]
@@ -479,7 +496,7 @@ mod tests {
         let Value::Tensor(handles) = out else {
             panic!("expected handle vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
         let figure = clone_figure(current_figure_handle()).expect("figure");
         assert_eq!(figure.plots().count(), 2);
         let size_vectors: Vec<Vec<f32>> = figure
@@ -578,8 +595,8 @@ mod tests {
         let Value::Tensor(y) = y else {
             panic!("expected y tensor");
         };
-        assert!(x.data[0].abs() < 1e-12);
-        assert!((y.data[0] - 2.0).abs() < 1e-12);
+        assert!(x.materialize_f64()[0].abs() < 1e-12);
+        assert!((y.materialize_f64()[0] - 2.0).abs() < 1e-12);
     }
 
     #[test]

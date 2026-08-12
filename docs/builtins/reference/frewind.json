@@ -31,7 +31,7 @@
   "description": "`frewind(fid)` resets the file position indicator to the beginning of the file associated with `fid`. It is equivalent to `fseek(fid, 0, 'bof')` and follows MATLAB and RunMat status/error semantics.",
   "behaviors": [
     "`frewind(fid)` rewinds the file position indicator to byte offset 0 for the file identified by `fid`.",
-    "`fid` must be a non-negative integer returned by `fopen`. Passing an invalid identifier raises an error.",
+    "R2026a documents a double `fid` returned by `fopen`. Typed integer, single, logical, and provider-resident identifiers are independently gated RunMat extensions and invalid identifiers raise an error.",
     "Standard input/output identifiers (`0`, `1`, `2`) are silently accepted and treated as a no-op; RunMat does not support seeking on those streams.",
     "`frewind` produces no output value. Assigning the result of `frewind` to a variable yields an empty output list.",
     "After `frewind`, subsequent calls to `fread`, `fgets`, or `fscanf` start from the beginning of the file."
@@ -114,8 +114,8 @@
     "label": "Open an issue",
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
-  "gpu_residency": "No. File identifiers are always owned by the host-side registry maintained by `fopen`. Wrapping a scalar identifier in `gpuArray` does not keep the file handle on the GPU—the runtime gathers the scalar before performing the seek. The rewind operation itself executes entirely on the host.",
+  "gpu_residency": "File identifiers are owned by the host registry. In `runmat` compatibility mode, a provider-resident identifier is an explicitly gated extension that gathers before the seek; the rewind operation itself always executes on the host.",
   "gpu_behavior": [
-    "`frewind` is a host-only operation. If `fid` resides on the GPU (for example inside a `gpuArray`), RunMat gathers the scalar to host memory before consulting the file registry. File handles always remain on the CPU, so there are no provider hooks or fusion paths for this builtin."
+    "`frewind` is a host-only operation. Typed integer, single, logical, and provider-resident identifiers are classified and gated before gather; file handles always remain on the CPU and there are no provider hooks or fusion paths."
   ]
 }

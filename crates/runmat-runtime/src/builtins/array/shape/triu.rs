@@ -12,11 +12,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+    ComplexStorage, ComplexTensor, LogicalArray, NumericStorage, ResolveContext, Tensor, Type,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -277,7 +278,12 @@ async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
 
 fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
     match value {
-        Value::Int(i) => Ok(i.to_i64() as isize),
+        Value::Int(i) => i.try_to_isize().ok_or_else(|| {
+            triu_error_with_message(
+                format!("{name}: diagonal offset is outside the supported range"),
+                &TRIU_ERROR_INVALID_OFFSET,
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(triu_error_with_message(
@@ -292,10 +298,29 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
                     &TRIU_ERROR_INVALID_OFFSET,
                 ));
             }
+            if rounded < isize::MIN as f64
+                || rounded > isize::MAX as f64
+                || (isize::BITS == 64 && rounded == isize::MAX as f64)
+            {
+                return Err(triu_error_with_message(
+                    format!("{name}: diagonal offset is outside the supported range"),
+                    &TRIU_ERROR_INVALID_OFFSET,
+                ));
+            }
             Ok(rounded as isize)
         }
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            scalar_to_isize(&Value::Num(t.data[0]), name)
+            if let Some(storage) = t.integer_storage() {
+                return scalar_to_isize(
+                    &Value::Int(
+                        storage
+                            .value_at(0)
+                            .expect("scalar integer storage has one element"),
+                    ),
+                    name,
+                );
+            }
+            scalar_to_isize(&Value::Num(tensor::tensor_value_f64(t, 0)), name)
         }
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
         other => Err(triu_error_with_message(
@@ -305,9 +330,47 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
     }
 }
 
-fn triu_tensor(mut tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
-    apply_triu_inplace(&mut tensor.data, &tensor.shape, offset, 0.0)?;
-    Ok(tensor)
+fn triu_tensor(tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))?;
+    let storage = map_triu_storage(storage, &shape, offset)?;
+    Tensor::from_numeric_storage(storage, shape)
+        .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))
+}
+
+fn map_triu_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    offset: isize,
+) -> crate::BuiltinResult<NumericStorage> {
+    macro_rules! apply {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(apply_triu_values($values, shape, offset)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => apply!(values, F64),
+        NumericStorage::F32(values) => apply!(values, F32),
+        NumericStorage::I8(values) => apply!(values, I8),
+        NumericStorage::I16(values) => apply!(values, I16),
+        NumericStorage::I32(values) => apply!(values, I32),
+        NumericStorage::I64(values) => apply!(values, I64),
+        NumericStorage::U8(values) => apply!(values, U8),
+        NumericStorage::U16(values) => apply!(values, U16),
+        NumericStorage::U32(values) => apply!(values, U32),
+        NumericStorage::U64(values) => apply!(values, U64),
+    })
+}
+
+fn apply_triu_values<T: Clone + Default>(
+    mut values: Vec<T>,
+    shape: &[usize],
+    offset: isize,
+) -> crate::BuiltinResult<Vec<T>> {
+    apply_triu_inplace(&mut values, shape, offset, T::default())?;
+    Ok(values)
 }
 
 fn triu_logical_array(
@@ -319,28 +382,64 @@ fn triu_logical_array(
 }
 
 fn triu_complex_tensor(
-    mut tensor: ComplexTensor,
+    tensor: ComplexTensor,
     offset: isize,
 ) -> crate::BuiltinResult<ComplexTensor> {
-    apply_triu_inplace(&mut tensor.data, &tensor.shape, offset, (0.0, 0.0))?;
-    Ok(tensor)
+    let shape = tensor.shape.clone();
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(mut values) => {
+            apply_triu_inplace(&mut values, &shape, offset, (0.0, 0.0))?;
+            ComplexStorage::F64(values)
+        }
+        ComplexStorage::F32(mut values) => {
+            apply_triu_inplace(&mut values, &shape, offset, (0.0, 0.0))?;
+            ComplexStorage::F32(values)
+        }
+        ComplexStorage::Integer(storage) => {
+            let zero = storage
+                .real
+                .zeros_like(1)
+                .value_at(0)
+                .expect("one typed integer zero");
+            ComplexStorage::Integer(
+                storage
+                    .reorder(|values| {
+                        let mut values = values.to_vec();
+                        apply_triu_inplace(&mut values, &shape, offset, zero.clone())
+                            .map_err(|e| e.to_string())?;
+                        Ok(values)
+                    })
+                    .map_err(|e| {
+                        triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL)
+                    })?,
+            )
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))
 }
 
 async fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        match provider.triu(&handle, offset).await {
-            Ok(out) => return Ok(Value::GpuTensor(out)),
-            Err(_) => {
-                // Fall through to the gather path.
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        if handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            match provider.triu(&handle, offset).await {
+                Ok(out) => return Ok(Value::GpuTensor(out)),
+                Err(_) => {
+                    // Fall through to the gather path.
+                }
             }
         }
         let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
         let result = triu_tensor(tensor, offset)?;
-        let view = HostTensorView {
-            data: &result.data,
-            shape: &result.shape,
-        };
-        let uploaded = provider.upload(&view).map_err(|e| {
+        let uploaded = gpu_helpers::upload_tensor(provider, &result).map_err(|e| {
             triu_error_with_message(
                 format!("triu: failed to upload fallback result: {e}"),
                 &TRIU_ERROR_INTERNAL,
@@ -413,7 +512,72 @@ pub(crate) mod tests {
         block_on(super::triu_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{IntValue, LogicalArray, Type};
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Type};
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn triu_offset_parser_preserves_signed_values_and_rejects_unrepresentable_uint64() {
+        assert_eq!(
+            scalar_to_isize(&Value::Int(IntValue::I64(-1)), "triu").expect("signed offset"),
+            -1
+        );
+        let err = scalar_to_isize(&Value::Int(IntValue::U64(u64::MAX)), "triu")
+            .expect_err("unrepresentable typed offset must not saturate");
+        assert_eq!(err.identifier(), TRIU_ERROR_INVALID_OFFSET.identifier);
+    }
+
+    #[test]
+    fn triu_gpu_integer_fallback_preserves_exact_storage_resident() {
+        test_support::with_test_provider(|provider| {
+            let values = [u64::MAX, 9_007_199_254_740_993, 7_u64, 0_u64];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[2, 2],
+                })
+                .expect("upload integer");
+            let Value::GpuTensor(result) =
+                triu_builtin(Value::GpuTensor(handle), Vec::new()).expect("triu integer gpu")
+            else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&result),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, 0, 7, 0]))
+            );
+        });
+    }
+
+    #[test]
+    fn triu_offset_parser_reads_typed_integer_tensor_storage_exactly() {
+        assert_eq!(
+            scalar_to_isize(
+                &poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+                "triu",
+            )
+            .expect("typed integer tensor offset"),
+            -1
+        );
+        let err = scalar_to_isize(
+            &poisoned_int_tensor(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]),
+            "triu",
+        )
+        .expect_err("unrepresentable typed integer tensor offset");
+        assert_eq!(err.identifier(), TRIU_ERROR_INVALID_OFFSET.identifier);
+    }
 
     #[test]
     fn triu_type_preserves_matrix_shape() {
@@ -439,10 +603,40 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(result) => {
                 assert_eq!(result.shape, vec![2, 3]);
-                assert_eq!(result.data, vec![1.0, 0.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(result.materialize_f64(), vec![1.0, 0.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn triu_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
+        let Value::Tensor(result) = triu_builtin(Value::Tensor(tensor), Vec::new()).expect("triu")
+        else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.0, 0.0, 2.0, 5.0])
+        );
+    }
+
+    #[test]
+    fn triu_masks_exact_integer_storage() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 7, 0]),
+            vec![2, 2],
+        )
+        .expect("input");
+        let Value::Tensor(result) = triu_builtin(Value::Tensor(tensor), Vec::new()).expect("triu")
+        else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 0, 7, 0]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -454,7 +648,7 @@ pub(crate) mod tests {
             triu_builtin(Value::Tensor(tensor), vec![offset]).expect("triu with positive offset");
         match value {
             Value::Tensor(result) => {
-                assert_eq!(result.data, vec![0.0, 0.0, 2.0, 0.0, 3.0, 6.0]);
+                assert_eq!(result.materialize_f64(), vec![0.0, 0.0, 2.0, 0.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -469,7 +663,7 @@ pub(crate) mod tests {
             triu_builtin(Value::Tensor(tensor), vec![offset]).expect("triu with negative offset");
         match value {
             Value::Tensor(result) => {
-                assert_eq!(result.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(result.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -500,10 +694,10 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(result) => {
                 assert_eq!(result.shape, vec![2, 2]);
-                assert_eq!(result.data[0], (1.0, 2.0));
-                assert_eq!(result.data[1], (0.0, 0.0));
-                assert_eq!(result.data[2], (5.0, 6.0));
-                assert_eq!(result.data[3], (7.0, 8.0));
+                assert_eq!(result.materialize_f64()[0], (1.0, 2.0));
+                assert_eq!(result.materialize_f64()[1], (0.0, 0.0));
+                assert_eq!(result.materialize_f64()[2], (5.0, 6.0));
+                assert_eq!(result.materialize_f64()[3], (7.0, 8.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -526,14 +720,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let value = triu_builtin(Value::GpuTensor(handle), Vec::new()).expect("triu gpu");
             let gathered = test_support::gather(value).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 3.0, 4.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 3.0, 4.0]);
         });
     }
 
@@ -577,7 +771,7 @@ pub(crate) mod tests {
             Tensor::new((1..=16).map(|v| v as f64).collect::<Vec<_>>(), vec![4, 4]).unwrap();
         let cpu = triu_tensor(tensor.clone(), 1).expect("cpu triu");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -587,6 +781,6 @@ pub(crate) mod tests {
         let gpu = block_on(super::triu_gpu(handle, 1)).expect("gpu triu");
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

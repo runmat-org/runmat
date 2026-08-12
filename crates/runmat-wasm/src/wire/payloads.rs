@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
+use serde_json::{json, Value as JsonValue};
 use uuid::Uuid;
 use wasm_bindgen::prelude::JsValue;
 
@@ -14,7 +14,7 @@ use runmat_core::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
     value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
     FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot, MaterializedVariable,
-    StdinEvent, StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions,
+    NumericPreviewValue, StdinEvent, StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions,
     WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions,
     WorkspaceSnapshot,
 };
@@ -425,16 +425,27 @@ fn line_col_from_source(source: &str, offset: usize) -> (usize, usize) {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkspacePreviewPayload {
-    pub(crate) values: Vec<f64>,
+    pub(crate) values: Vec<JsonValue>,
     pub(crate) truncated: bool,
 }
 
 impl From<WorkspacePreview> for WorkspacePreviewPayload {
     fn from(preview: WorkspacePreview) -> Self {
         Self {
-            values: preview.values,
+            values: preview
+                .values
+                .into_iter()
+                .map(workspace_preview_value_to_json)
+                .collect(),
             truncated: preview.truncated,
         }
+    }
+}
+
+fn workspace_preview_value_to_json(value: NumericPreviewValue) -> JsonValue {
+    match value {
+        NumericPreviewValue::Float(value) => json!(value),
+        NumericPreviewValue::Integer(value) => crate::wire::value::integer_json_value(&value),
     }
 }
 
@@ -448,9 +459,16 @@ pub(crate) struct DataMaterializedVariablePayload {
     pub(crate) is_gpu: bool,
     pub(crate) residency: &'static str,
     pub(crate) size_bytes: Option<u64>,
-    pub(crate) preview: Option<WorkspacePreviewPayload>,
+    pub(crate) preview: Option<DataArrayPreviewPayload>,
     pub(crate) value_text: String,
     pub(crate) value_json: JsonValue,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DataArrayPreviewPayload {
+    pub(crate) values: Vec<JsonValue>,
+    pub(crate) truncated: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -543,15 +561,12 @@ pub(crate) fn estimate_data_array_bytes(shape: &[usize], dtype: &str) -> u64 {
 }
 
 fn bytes_per_data_element(dtype: &str) -> usize {
-    let normalized = dtype.to_ascii_lowercase();
-    if normalized.contains("64") {
-        8
-    } else if normalized.contains("32") {
-        4
-    } else if normalized.contains("16") {
-        2
-    } else {
-        8
+    match dtype.trim().to_ascii_lowercase().as_str() {
+        "int8" | "uint8" | "logical" => 1,
+        "int16" | "uint16" => 2,
+        "int32" | "uint32" | "single" => 4,
+        "int64" | "uint64" | "double" => 8,
+        _ => 8,
     }
 }
 
@@ -826,6 +841,7 @@ pub(crate) fn parse_materialize_options(
 mod tests {
     use super::*;
     use runmat_core::abi::{ExecutionSourceContext, WorkspaceBindingValue, WorkspaceDelta};
+    use runmat_core::NumericPreviewValue;
     use runmat_hir::BindingName;
 
     fn test_source_context() -> ExecutionSourceContext {
@@ -851,6 +867,39 @@ mod tests {
                 { "kind": "double", "value": 1.0, "shape": [1, 1] },
                 { "kind": "double", "value": 2.0, "shape": [1, 1] }
             ])
+        );
+    }
+
+    #[test]
+    fn data_array_size_uses_native_integer_widths() {
+        for (dtype, expected) in [
+            ("int8", 3),
+            ("uint8", 3),
+            ("int16", 6),
+            ("uint16", 6),
+            ("int32", 12),
+            ("uint32", 12),
+            ("int64", 24),
+            ("uint64", 24),
+        ] {
+            assert_eq!(estimate_data_array_bytes(&[3, 1], dtype), expected);
+        }
+    }
+
+    #[test]
+    fn workspace_preview_serializes_unsafe_integers_exactly() {
+        let payload = WorkspacePreviewPayload::from(WorkspacePreview {
+            values: vec![
+                NumericPreviewValue::Float(1.5),
+                NumericPreviewValue::Integer(runmat_builtins::IntValue::U64(42)),
+                NumericPreviewValue::Integer(runmat_builtins::IntValue::U64(u64::MAX)),
+            ],
+            truncated: false,
+        });
+
+        assert_eq!(
+            serde_json::to_value(payload).expect("serialize preview"),
+            json!({"values": [1.5, 42, "18446744073709551615"], "truncated": false})
         );
     }
 

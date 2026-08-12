@@ -30,14 +30,14 @@
     "unit": "builtins::image::filters::filter2::tests",
     "integration": "builtins::image::filters::filter2::tests::filter2_gpu_matches_cpu"
   },
-  "description": "`filter2(H, X)` performs 2-D correlation of matrix or image data `X` with kernel `H`. By default it returns a result the same size as `X`, and shape/convolution-mode options follow MATLAB semantics. It matches `conv2(X, rot90(H, 2), 'same')` in default mode.",
+  "description": "`filter2(H, X)` performs 2-D correlation of matrix or image data `X` with kernel `H`. The documented compatibility surface accepts the `same`, `full`, and `valid` shape options. RunMat mode additionally exposes explicit `conv` and `corr` flags. The default matches `conv2(X, rot90(H, 2), 'same')`.",
   "behaviors": [
     "The first argument is the kernel and the second is the image or matrix being filtered.",
     "The default configuration performs correlation with zero padding and `'same'` output sizing.",
     "Passing `'full'` or `'valid'` as the third argument switches the output size to the full convolution result or the strictly valid interior, respectively.",
-    "Supplying `'conv'` rotates the kernel by 180° so the operation matches MATLAB convolution. Use `'corr'` for an explicit correlation request; it is the default.",
+    "In RunMat extension mode, supplying `'conv'` rotates the kernel by 180° and `'corr'` explicitly requests the default correlation behavior. These flags are not part of MATLAB's `filter2` signature.",
     "Inputs may be numeric or logical. Logical arrays are promoted to double precision prior to filtering.",
-    "Both arguments may be gpuArray handles; RunMat keeps them on the device whenever the active acceleration provider exposes the `imfilter` hook."
+    "Single- and double-precision arguments may be gpuArray handles. Integer and logical gpuArray inputs are separately gated RunMat extensions and gather before floating filtering; they never enter floating provider shaders as native integer buffers."
   ],
   "examples": [
     {
@@ -81,7 +81,7 @@
     },
     {
       "question": "Can I combine `filter2` with gpuArray inputs?",
-      "answer": "Yes. If either argument is a gpuArray, RunMat forwards the computation to the active acceleration provider and only gathers the data when the provider hook is unavailable."
+      "answer": "Yes. A resident image selects its owning provider. RunMat uploads or transfers the kernel to that provider when possible and gathers operands only when the provider hook cannot execute the operation."
     },
     {
       "question": "Does `filter2` support higher-dimensional arrays?",

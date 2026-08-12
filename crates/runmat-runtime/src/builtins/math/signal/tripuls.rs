@@ -208,10 +208,9 @@ pub(crate) fn tripuls_scalar(t: f64, width: f64, skew: f64) -> f64 {
 
 pub(crate) fn tripuls_tensor(tensor: Tensor, width: f64, skew: f64) -> Result<Tensor, String> {
     let shape = tensor.shape.clone();
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| tripuls_scalar(value, width, skew))
+    let data = tensor::tensor_into_values_f64(tensor)
+        .into_iter()
+        .map(|value| tripuls_scalar(value, width, skew))
         .collect::<Vec<_>>();
     Tensor::new(data, shape).map_err(|err| err.to_string())
 }
@@ -312,7 +311,7 @@ fn tripuls_real(value: Value, width: f64, skew: f64) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, CharArray};
+    use runmat_builtins::{builtin_function_by_name, CharArray, IntegerStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(tripuls_builtin(t, rest))
@@ -325,12 +324,25 @@ mod tests {
         }
     }
 
+    fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor")
+    }
+
     #[test]
     fn tripuls_default_samples_triangle() {
         let input = Tensor::new(vec![-0.5, -0.25, 0.0, 0.25, 0.5], vec![1, 5]).unwrap();
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("tripuls"));
         assert_eq!(out.shape, vec![1, 5]);
-        assert_eq!(out.data, vec![0.0, 0.5, 1.0, 0.5, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 0.5, 1.0, 0.5, 0.0]);
+    }
+
+    #[test]
+    fn tripuls_reads_typed_integer_storage_exactly() {
+        let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
+        let out =
+            expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("tripuls"));
+        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -339,7 +351,7 @@ mod tests {
         let out = expect_tensor(
             call(Value::Tensor(input), vec![Value::Num(2.0), Value::Num(1.0)]).expect("tripuls"),
         );
-        assert_eq!(out.data, vec![0.0, 0.5, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 0.5, 1.0]);
     }
 
     #[test]

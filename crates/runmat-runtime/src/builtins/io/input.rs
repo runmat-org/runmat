@@ -526,7 +526,7 @@ pub(crate) mod tests {
         push_queued_response(Ok(InteractionResponse::Line("   ".into())));
         let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
         match value {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             other => panic!("expected empty tensor, got {other:?}"),
         }
     }
@@ -542,7 +542,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.rows, 1);
                 assert_eq!(t.cols, 3);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected 1×3 tensor, got {other:?}"),
         }
@@ -606,7 +606,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.rows, 3);
                 assert_eq!(t.cols, 1);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected 3×1 tensor, got {other:?}"),
         }
@@ -649,7 +649,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.rows, 1);
                 assert_eq!(t.cols, 2);
-                assert_eq!(t.data, vec![1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected Tensor, got {other:?}"),
         }

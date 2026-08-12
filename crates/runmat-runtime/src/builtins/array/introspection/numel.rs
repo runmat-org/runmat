@@ -190,16 +190,17 @@ fn parse_dimension_args(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
             }
             Value::Tensor(t) => {
                 ensure_dim_vector(t)?;
-                if t.data.is_empty() {
+                if t.is_empty() {
                     return Err(numel_error(
                         "numel: dimension vector must contain at least one element",
                     ));
                 }
-                let parsed = t
-                    .data
-                    .iter()
-                    .map(|&raw| parse_dim_scalar(raw))
-                    .collect::<crate::BuiltinResult<Vec<_>>>()?;
+                let parsed = match tensor::integer_tensor_dimension_vector(t, "numel", false) {
+                    Some(parsed) => parsed.map_err(numel_error)?,
+                    None => (0..t.len())
+                        .map(|index| parse_dim_scalar(tensor::tensor_value_f64(t, index)))
+                        .collect::<crate::BuiltinResult<Vec<_>>>()?,
+                };
                 dims.extend(parsed);
             }
             _ => {
@@ -255,7 +256,7 @@ pub(crate) mod tests {
     fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::numel_builtin(value, rest))
     }
-    use runmat_builtins::{CellArray, CharArray, Tensor};
+    use runmat_builtins::{CellArray, CharArray, IntegerStorage, Tensor};
 
     #[test]
     fn numel_type_returns_int() {
@@ -324,13 +325,30 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(8.0));
     }
 
+    #[test]
+    fn numel_dimension_vector_reads_native_single_storage() {
+        let dims = Tensor::from_f32(vec![1.0, 3.0], vec![1, 2]).unwrap();
+        let parsed = parse_dimension_args(&[Value::Tensor(dims)]).expect("parse dims");
+        assert_eq!(parsed, vec![1, 3]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn numel_dimension_vector_reads_integer_tensor_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, large]), vec![1, 2]).expect("dims");
+        let parsed = parse_dimension_args(&[Value::Tensor(dims)]).expect("parse dims");
+        assert_eq!(parsed, vec![1, large as usize]);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_gpu_tensor_uses_shape() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0; 12], vec![3, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -387,7 +405,7 @@ pub(crate) mod tests {
         );
         let tensor = Tensor::new(vec![0.0; 18], vec![3, 3, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()

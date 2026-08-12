@@ -14,6 +14,9 @@ use crate::runtime::workspace::{
 };
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ObjectInstance, StructValue, Tensor, Value};
+use runmat_runtime::builtins::common::tensor::{
+    is_scalar_tensor, tensor_element_len, tensor_value_f64,
+};
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
 use std::collections::{HashMap, HashSet};
@@ -95,12 +98,12 @@ pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool
                 array.data.len()
             ),
         )),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => Ok(tensor_value_f64(tensor, 0) != 0.0),
         Value::Tensor(tensor) => Err(crate::interpreter::errors::mex(
             "InvalidConditionType",
             &format!(
                 "{label}: expected scalar logical or numeric value, got numeric array with {} elements",
-                tensor.data.len()
+                tensor_element_len(tensor)
             ),
         )),
         Value::GpuTensor(_) => {
@@ -133,7 +136,7 @@ fn requested_outputs_from_slot(vars: &[Value], slot: usize) -> Result<usize, Run
             }
             Ok(*n as usize)
         }
-        Value::Int(i) => usize::try_from(i.to_i64()).map_err(|_| {
+        Value::Int(i) => i.try_to_usize().ok_or_else(|| {
             crate::interpreter::errors::mex(
                 "InvalidOutputCountValue",
                 "requested output count slot must contain a nonnegative integer scalar",
@@ -1961,12 +1964,13 @@ pub async fn dispatch_instruction(
 
 #[cfg(test)]
 mod tests {
-    use super::enforce_spawn_value_concurrency_policy;
+    use super::{enforce_spawn_value_concurrency_policy, logical_truth_from_value};
+    use futures::executor::block_on;
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
         SpawnHandleConcurrency, ThreadProviderGuard,
     };
-    use runmat_builtins::{CellArray, HandleRef, StructValue, Value};
+    use runmat_builtins::{CellArray, HandleRef, IntegerStorage, StructValue, Tensor, Value};
 
     struct RejectSpawnProvider;
     static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
@@ -2020,6 +2024,37 @@ mod tests {
         fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
             SpawnHandleConcurrency::ImmutableShare
         }
+    }
+
+    #[test]
+    fn logical_truth_reads_typed_integer_tensor_storage_exactly() {
+        let zero = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
+            .expect("zero integer tensor");
+        assert!(!block_on(logical_truth_from_value(
+            &Value::Tensor(zero),
+            "if condition"
+        ))
+        .unwrap());
+
+        let nonzero = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("nonzero integer tensor");
+        assert!(block_on(logical_truth_from_value(
+            &Value::Tensor(nonzero),
+            "if condition"
+        ))
+        .unwrap());
+    }
+
+    #[test]
+    fn logical_truth_accepts_typed_integer_scalar_with_cleared_mirror() {
+        let value = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer scalar");
+
+        assert!(block_on(logical_truth_from_value(
+            &Value::Tensor(value),
+            "if condition"
+        ))
+        .unwrap());
     }
 
     #[test]

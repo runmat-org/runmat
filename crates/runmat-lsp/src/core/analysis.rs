@@ -6,7 +6,7 @@ use lsp_types::{
     CompletionItem, Diagnostic, DiagnosticSeverity, DocumentSymbol, Hover, Location, Position,
     Range, SignatureHelp, Url,
 };
-use runmat_builtins::{self, BuiltinFunction, Constant, Type};
+use runmat_builtins::{self, BuiltinCompletionPolicy, BuiltinFunction, Constant, Type};
 use runmat_hir::{
     CallKind, DefPath, FunctionKind, HirDiagnostic, HirDiagnosticSeverity, HirError,
     LoweringContext, LoweringResult, ReferenceKind,
@@ -1343,6 +1343,11 @@ fn completion_from_semantic(semantic: &AnalysisModel) -> Vec<CompletionItem> {
         items.push(function_completion(func));
     }
     for func in runmat_builtins::builtin_functions() {
+        if func.descriptor.is_some_and(|descriptor| {
+            descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal
+        }) {
+            continue;
+        }
         items.push(builtin_completion(func));
     }
     for constant in runmat_builtins::constants() {
@@ -1985,15 +1990,23 @@ mod tests {
     fn signature_help_uses_stats_summary_descriptors() {
         let cases = [
             ("mode([1 2 2 3]);", "M = mode(X)"),
-            ("mode([1 2 2 3], 1);", "M = mode(X, dim_or_all)"),
-            ("mode([1 2 2 3], 'all');", "M = mode(X, dim_or_all)"),
+            ("mode([1 2 2 3], 1);", "M = mode(X, dim_or_vecdim_or_all)"),
+            (
+                "mode([1 2 2 3], 'all');",
+                "M = mode(X, dim_or_vecdim_or_all)",
+            ),
             ("cov([1 2; 3 4]);", "C = cov(X)"),
             ("cov([1 2; 3 4], 0);", "C = cov(X, normalization)"),
             (
                 "corrcoef([1 2; 3 4], 'rows', 'complete');",
-                "R = corrcoef(X, \"rows\", rows_option)",
+                "___ = corrcoef(A, Name, Value)",
             ),
-            ("corrcoef([1 2; 3 4], [5 6; 7 8]);", "R = corrcoef(X, Y)"),
+            ("corrcoef([1 2; 3 4], [5 6; 7 8]);", "R = corrcoef(A, B)"),
+            ("corrcov([1 0.2; 0.2 1]);", "R = corrcov(C)"),
+            (
+                "cov2corr([1 0.2; 0.2 1]);",
+                "[ExpSigma, ExpCorrC] = cov2corr(ExpCovariance)",
+            ),
         ];
 
         for (text, expected_label) in cases {
@@ -2186,10 +2199,10 @@ mod tests {
             ("grid('on');", "enabled = grid(mode)"),
             (
                 "axis([0 1 0 1]);",
-                "ok = axis([xmin xmax ymin ymax | ... zmin zmax])",
+                "axis([xmin xmax ymin ymax | ... cmin cmax])",
             ),
             ("cla();", "ok = cla()"),
-            ("colormap('parula');", "ok = colormap(name)"),
+            ("colormap('parula');", "colormap(name)"),
             ("shading('flat');", "ok = shading(mode)"),
             ("colorbar('off');", "enabled = colorbar(mode)"),
             ("semilogx([1 10 100]);", "h = semilogx(Y)"),
@@ -2253,6 +2266,8 @@ mod tests {
             ("imagesc([1 2; 3 4]);", "h = imagesc(C)"),
             ("contour([1 2; 3 4]);", "h = contour(Z)"),
             ("contourf([1 2; 3 4]);", "h = contourf(Z)"),
+            ("contourf(1, [1 2; 3 4]);", "h = contourf(ax, ...)"),
+            ("copyobj(1, 2);", "hnew = copyobj(h, parent)"),
             ("hist([1 2 3]);", "N = hist(X)"),
             ("histogram([1 2 3]);", "h = histogram(X)"),
             ("text(1, 2, 'pt');", "h = text(x, y, label)"),
@@ -2709,6 +2724,12 @@ mod tests {
                 "sortrows([3 1;2 4], 'MissingPlacement', 'first');",
                 "B = sortrows(A, ..., \"MissingPlacement\", placement)",
             ),
+            ("maxk([3 1 2], 2);", "B = maxk(A, k)"),
+            (
+                "maxk([3 1 2], 2, 'ComparisonMethod', 'abs');",
+                "B = maxk(A, k, \"ComparisonMethod\", method)",
+            ),
+            ("mink([3 1 2], 2, 1);", "B = mink(A, k, dim)"),
         ];
 
         for (text, expected_label) in cases {
@@ -2727,10 +2748,10 @@ mod tests {
     #[test]
     fn signature_help_uses_diagnostics_descriptors() {
         let cases = [
-            ("assert(true);", "out = assert(condition)"),
+            ("assert(true);", "assert(condition)"),
             (
                 "assert(false, \"id:test\", \"failed %d\", 1);",
-                "out = assert(condition, message_id, message, A...)",
+                "assert(condition, message_id, message, A...)",
             ),
             ("error(\"failure\");", "out = error(message)"),
             (
@@ -2946,10 +2967,10 @@ mod tests {
                 "movefile(\"a\", \"b\", \"f\");",
                 "status = movefile(source, destination, flag)",
             ),
-            ("delete(\"a.txt\");", "status = delete(filename)"),
+            ("delete(\"a.txt\");", "delete(filename)"),
             (
                 "delete(\"a.txt\", \"b.txt\");",
-                "status = delete(filename1, filename2, ...)",
+                "delete(filename1, filename2, ...)",
             ),
         ];
 
@@ -3123,12 +3144,9 @@ mod tests {
         let cases = [
             (
                 "data.create(\"tmp/demo.data\", struct());",
-                "ds = data.create(path, schema, Name, Value, ...)",
+                "ds = data.create(path, schema)",
             ),
-            (
-                "data.open(\"tmp/demo.data\");",
-                "ds = data.open(path, Name, Value, ...)",
-            ),
+            ("data.open(\"tmp/demo.data\");", "ds = data.open(path)"),
             ("data.exists(\"tmp/demo.data\");", "tf = data.exists(path)"),
             ("data.inspect(\"tmp/demo.data\");", "S = data.inspect(path)"),
             ("Dataset.path(ds);", "path = Dataset.path(ds)"),
@@ -3147,9 +3165,9 @@ mod tests {
             ),
             (
                 "DataTransaction.commit(tx);",
-                "tf = DataTransaction.commit(tx, Name, Value, ...)",
+                "tf = DataTransaction.commit(tx, options)",
             ),
-            ("commit(tx);", "tf = commit(tx, Name, Value, ...)"),
+            ("commit(tx);", "tf = commit(tx, options)"),
             (
                 "DataTransaction.status(tx);",
                 "status = DataTransaction.status(tx)",
@@ -3384,11 +3402,7 @@ mod tests {
         let cases = [
             ("fix(-3.7);", "Y = fix(X)"),
             ("round(3.14159, 2);", "Y = round(X, N)"),
-            ("ceil(3.14159, 3, \"decimals\");", "Y = ceil(X, N, mode)"),
-            (
-                "floor(3.14159, \"like\", 1);",
-                "Y = floor(X, \"like\", prototype)",
-            ),
+            ("ceil(3.14159);", "Y = ceil(X)"),
             ("mod(17, 5);", "R = mod(A, B)"),
             ("rem(-7, 4);", "R = rem(A, B)"),
         ];
@@ -3421,13 +3435,12 @@ mod tests {
             ("min([1,2,3], [], 1);", "M = min(A, [], dim)"),
             ("median([1,2,3]);", "M = median(A)"),
             ("median([1,2,3], 1);", "M = median(A, dim)"),
-            ("median([1,2,3], \"omitnan\");", "M = median(A, nanflag)"),
+            (
+                "median([1,2,3], \"omitnan\");",
+                "M = median(A, missingflag)",
+            ),
             ("std([1,2,3]);", "S = std(A)"),
             ("std([1,2,3], 0, 1);", "S = std(A, w, dim)"),
-            (
-                "std([1,2,3], \"like\", 1);",
-                "S = std(A, \"like\", prototype)",
-            ),
             ("var([1,2,3]);", "V = var(A)"),
             ("var([1,2,3], 0, 1);", "V = var(A, w, dim)"),
             ("var([1,2,3], \"omitnan\");", "V = var(A, nanflag)"),
@@ -3569,7 +3582,7 @@ mod tests {
     #[test]
     fn signature_help_uses_math_linalg_structure_descriptors() {
         let cases = [
-            ("bandwidth([1,2;3,4]);", "bw = bandwidth(A)"),
+            ("bandwidth([1,2;3,4]);", "[lower, upper] = bandwidth(A)"),
             (
                 "bandwidth([1,2;3,4], \"lower\");",
                 "b = bandwidth(A, selector)",
@@ -4596,10 +4609,6 @@ mod tests {
                 "Y = factorial(X, \"like\", prototype)",
             ),
             ("gamma(5);", "Y = gamma(X)"),
-            (
-                "gamma(5, \"like\", 1);",
-                "Y = gamma(X, \"like\", prototype)",
-            ),
             ("hypot(3, 4);", "R = hypot(X, Y)"),
             ("nextpow2(9);", "p = nextpow2(X)"),
             ("pow2(3);", "Y = pow2(X)"),
@@ -4886,12 +4895,16 @@ mod tests {
             ("containers.Map.keys(m);", "K = containers.Map.keys(M)"),
             ("containers.Map.values(m);", "V = containers.Map.values(M)"),
             (
+                "containers.Map.values(m, {'a'});",
+                "V = containers.Map.values(M, keySet)",
+            ),
+            (
                 "containers.Map.isKey(m, \"a\");",
                 "tf = containers.Map.isKey(M, keySet)",
             ),
             (
                 "containers.Map.remove(m, \"a\");",
-                "M = containers.Map.remove(M, keySet)",
+                "containers.Map.remove(M, keySet)",
             ),
             (
                 "containers.Map.subsref(m, \"()\", {\"a\"});",
@@ -4914,6 +4927,20 @@ mod tests {
                 labels
             );
         }
+    }
+
+    #[test]
+    fn signature_help_uses_confusionmat_descriptor() {
+        let text = "confusionmat(group,grouphat);";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+        let labels: Vec<&str> = sig
+            .signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect();
+        assert!(labels.contains(&"[C,order] = confusionmat(___)"));
     }
 
     #[test]

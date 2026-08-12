@@ -39,7 +39,10 @@
     "`[z, p, k] = butter(...)` returns zero-pole-gain form.",
     "`[A, B, C, D] = butter(...)` returns a controllable-canonical state-space realization.",
     "Digital cutoff frequencies must be finite, greater than 0, and less than 1. Analog cutoff frequencies must be finite and greater than 0.",
-    "Bandpass and bandstop designs require a strictly increasing two-element `Wn` vector."
+    "Bandpass and bandstop designs require a strictly increasing two-element `Wn` vector.",
+    "MATLAB-compatible calls use `double` for `n` and `Wn`, limit `n` to 500, and return `double` outputs. RunMat mode additionally admits independently gated integer, logical, single, resident, option-alias, and larger-order forms.",
+    "Typed-integer `n` is parsed exactly as a structural order. Typed-integer `Wn` is explicitly converted at the double filter-design boundary, and every supported output remains host `double`.",
+    "The documented cascaded-transfer-function (`\"ctf\"`) forms introduced in MATLAB R2024b are not yet implemented."
   ],
   "examples": [
     {
@@ -74,7 +77,7 @@
     },
     {
       "question": "Does `butter` execute on the GPU?",
-      "answer": "No. It generates small coefficient arrays on the host. GPU acceleration applies when those coefficients are used by `filter` with a real gpuArray signal and a provider that implements `iir_filter`."
+      "answer": "The documented API lists code generation but no interactive gpuArray overload. In MATLAB-compatible mode RunMat rejects resident arguments before gather; RunMat mode can gather them and generate host double coefficients. GPU acceleration applies when those coefficients are later used by `filter` with a real gpuArray signal and a provider that implements `iir_filter`."
     }
   ],
   "links": [

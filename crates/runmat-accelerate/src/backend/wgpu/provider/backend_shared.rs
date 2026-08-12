@@ -148,6 +148,25 @@ mod compute_binding_count_tests {
     }
 }
 
+#[cfg(test)]
+mod float_result_materialization_tests {
+    use super::host_tensor_from_value;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+
+    #[test]
+    fn rejects_wide_and_poisoned_native_integers() {
+        let scalar = host_tensor_from_value("eig", Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("wide integer scalar must not use f64");
+        assert!(scalar.to_string().contains("typed provider result path"));
+
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+            .expect("integer tensor");
+        let tensor = host_tensor_from_value("eig", Value::Tensor(tensor))
+            .expect_err("integer tensor must use a typed provider result path");
+        assert!(tensor.to_string().contains("typed provider result path"));
+    }
+}
+
 pub(super) fn parse_two_pass_mode(raw: &str) -> Option<ReductionTwoPassMode> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -366,11 +385,7 @@ pub(super) fn conv1d_window(
     let (output_len, start_offset) = match mode {
         ProviderConvMode::Full => (full_len, 0usize),
         ProviderConvMode::Same => {
-            let start = if kernel_len == 0 {
-                0
-            } else {
-                (kernel_len - 1) / 2
-            };
+            let start = if kernel_len == 0 { 0 } else { kernel_len / 2 };
             let len = signal_len.min(full_len.saturating_sub(start));
             (len, start)
         }
@@ -415,6 +430,49 @@ pub(super) fn pad_dims(mut dims: Vec<usize>, rank: usize) -> Vec<usize> {
         dims.truncate(rank);
     }
     dims
+}
+
+pub(super) fn matlab_broadcast_shapes(
+    operation: &str,
+    lhs: &[usize],
+    rhs: &[usize],
+    max_rank: usize,
+) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>)> {
+    let rank = lhs.len().max(rhs.len());
+    ensure!(
+        rank <= max_rank,
+        "{operation}: broadcast rank exceeds limit"
+    );
+    let mut lhs = if rank >= 2 {
+        canonical_matrix_shape(lhs)
+    } else {
+        lhs.to_vec()
+    };
+    lhs.resize(rank, 1);
+    let mut rhs = if rank >= 2 {
+        canonical_matrix_shape(rhs)
+    } else {
+        rhs.to_vec()
+    };
+    rhs.resize(rank, 1);
+    let mut output = Vec::with_capacity(rank);
+    for (index, (&left, &right)) in lhs.iter().zip(&rhs).enumerate() {
+        output.push(if left == right {
+            left
+        } else if left == 1 {
+            right
+        } else if right == 1 {
+            left
+        } else {
+            return Err(anyhow!(
+                "{operation}: non-singleton dimension mismatch (dimension {}: {} vs {})",
+                index + 1,
+                left,
+                right
+            ));
+        });
+    }
+    Ok((lhs, rhs, output))
 }
 
 pub(super) fn compute_page_strides(dims: &[usize]) -> Vec<usize> {
@@ -504,11 +562,14 @@ pub(super) fn filter_state_shape(
 
 pub(crate) fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
     match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Err(anyhow!(
+            "{label}: native integer tensor requires a typed provider result path; refusing f64 fallback"
+        )),
         Value::Tensor(tensor) => Ok(tensor),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}")),
-        Value::Int(i) => {
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}"))
-        }
+        Value::Int(_) => Err(anyhow!(
+            "{label}: native integer scalar requires a typed provider result path; refusing f64 fallback"
+        )),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
             .map_err(|e| anyhow!("{label}: {e}")),
         Value::ComplexTensor(_) => Err(anyhow!(
@@ -759,9 +820,14 @@ pub(super) fn compare_finite_for_sort(
     if primary != Ordering::Equal {
         return primary;
     }
+    let ordering = if matches!(comparison, SortComparison::Abs) {
+        b.partial_cmp(&a).unwrap_or(Ordering::Equal)
+    } else {
+        a.partial_cmp(&b).unwrap_or(Ordering::Equal)
+    };
     match order {
-        SortOrder::Ascend => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
-        SortOrder::Descend => b.partial_cmp(&a).unwrap_or(Ordering::Equal),
+        SortOrder::Ascend => ordering,
+        SortOrder::Descend => ordering.reverse(),
     }
 }
 

@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Tensor, Value,
+    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
@@ -336,8 +336,12 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
         )
     })?;
     match id_value {
-        Value::Int(IntValue::U64(id)) => Ok(*id),
-        Value::Int(iv) => Ok(iv.to_i64() as u64),
+        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
+            readline_flow(
+                &READLINE_ERROR_INVALID_CLIENT,
+                "readline: tcpclient struct has invalid handle field",
+            )
+        }),
         _ => Err(readline_flow(
             &READLINE_ERROR_INVALID_CLIENT,
             "readline: tcpclient struct has invalid handle field",
@@ -386,6 +390,17 @@ pub(crate) mod tests {
 
     fn assert_error_identifier(err: RuntimeError, expected: &str) {
         assert_eq!(err.identifier(), Some(expected));
+    }
+
+    #[test]
+    fn typed_negative_client_handle_is_rejected() {
+        let mut client = StructValue::new();
+        client.fields.insert(
+            CLIENT_HANDLE_FIELD.to_string(),
+            Value::Int(IntValue::I8(-1)),
+        );
+        let err = extract_client_id(&client).unwrap_err();
+        assert_error_identifier(err, READLINE_ERROR_INVALID_CLIENT.identifier.unwrap());
     }
 
     fn run_readline(client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -475,7 +490,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty 0x0 double, got {other:?}"),
         }
@@ -510,7 +525,7 @@ pub(crate) mod tests {
         match first {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected timeout as empty 0x0 double, got {other:?}"),
         }

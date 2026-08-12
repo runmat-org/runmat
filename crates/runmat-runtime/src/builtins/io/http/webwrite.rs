@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::io::json::jsondecode::decode_json_text;
 use crate::call_builtin_async;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -721,9 +722,10 @@ fn encode_binary_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
 }
 
 fn tensor_f64_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(tensor.data.len());
-    for value in &tensor.data {
-        bytes.push(float_to_byte(*value)?);
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
+    let mut bytes = Vec::with_capacity(values.len());
+    for value in values.iter().copied() {
+        bytes.push(float_to_byte(value)?);
     }
     Ok(bytes)
 }
@@ -912,8 +914,8 @@ fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(tensor.data[0])
+            if tensor_utils::is_scalar_tensor(tensor) {
+                Ok(tensor_utils::tensor_value_f64(tensor, 0))
             } else {
                 Err(webwrite_error(context))
             }
@@ -928,11 +930,17 @@ fn scalar_to_string(value: &Value) -> BuiltinResult<String> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::Num(n) => Ok(format!("{}", n)),
-        Value::Int(i) => Ok(i.to_i64().to_string()),
+        Value::Int(i) => Ok(i.decimal_string()),
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(format!("{}", tensor.data[0]))
+            if tensor_utils::is_scalar_tensor(tensor) {
+                Ok(tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                    .map_or_else(
+                        || format!("{}", tensor_utils::tensor_value_f64(tensor, 0)),
+                        |value| value.decimal_string(),
+                    ))
             } else {
                 Err(webwrite_error(
                     "webwrite: expected scalar value for text payload",
@@ -973,11 +981,17 @@ fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::Num(n) => Ok(format!("{}", n)),
-        Value::Int(i) => Ok(i.to_i64().to_string()),
+        Value::Int(i) => Ok(i.decimal_string()),
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(format!("{}", tensor.data[0]))
+            if tensor_utils::is_scalar_tensor(tensor) {
+                Ok(tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                    .map_or_else(
+                        || format!("{}", tensor_utils::tensor_value_f64(tensor, 0)),
+                        |value| value.decimal_string(),
+                    ))
             } else {
                 Err(webwrite_error(format!(
                     "webwrite: query parameter '{}' must be scalar",
@@ -1152,6 +1166,45 @@ pub(crate) mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc;
     use std::thread;
+
+    #[test]
+    fn body_and_query_text_preserve_exact_uint64() {
+        let value = Value::Int(runmat_builtins::IntValue::U64(u64::MAX));
+        assert_eq!(
+            scalar_to_string(&value).expect("body text"),
+            "18446744073709551615"
+        );
+        assert_eq!(
+            value_to_query_string(&value, "id").expect("query text"),
+            "18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn body_query_and_numeric_scalar_read_typed_integer_storage_exactly() {
+        let text = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("typed text tensor");
+        let value = Value::Tensor(text.clone());
+        assert_eq!(
+            scalar_to_string(&value).expect("body text"),
+            "18446744073709551615"
+        );
+        assert_eq!(
+            value_to_query_string(&value, "id").expect("query text"),
+            "18446744073709551615"
+        );
+
+        let timeout =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2026]), vec![1, 1])
+                .expect("typed timeout tensor");
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
+            2026.0
+        );
+    }
 
     fn spawn_server<F>(handler: F) -> String
     where
@@ -1427,7 +1480,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn webwrite_binary_payload_respected() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 255.0], vec![4, 1]).unwrap();
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U8(vec![1, 2, 3, 255]),
+            vec![4, 1],
+        )
+        .unwrap();
         let payload = Value::Tensor(tensor);
         let mut opts_struct = StructValue::new();
         opts_struct

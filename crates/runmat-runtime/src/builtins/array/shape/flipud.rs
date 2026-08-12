@@ -11,14 +11,37 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ComplexTensor, ResolveContext, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, ComplexTensor, ResolveContext, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 const UD_DIM: [usize; 1] = [1];
 const BUILTIN_NAME: &str = "flipud";
+
+const FLIPUD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are reordered through authoritative storage without numeric conversion.",
+    }];
+pub const FLIPUD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = flipud(integer_A)",
+        inputs: &FLIPUD_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Dimension 1 is reversed exactly; GPU fallback restores the result to the owning provider.",
+    }];
 
 fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
@@ -26,20 +49,12 @@ fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
         None => return Type::Unknown,
     };
     match input {
-        Type::Tensor { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Tensor {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-        Type::Logical { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Logical {
-                shape: Some(vec![rows, cols]),
-            }
-        }
+        Type::Tensor { shape: Some(shape) } => Type::Tensor {
+            shape: Some(shape.clone()),
+        },
+        Type::Logical { shape: Some(shape) } => Type::Logical {
+            shape: Some(shape.clone()),
+        },
         Type::Tensor { shape: None } => Type::tensor(),
         Type::Logical { shape: None } => Type::logical(),
         Type::Num | Type::Int | Type::Bool => Type::tensor(),
@@ -167,6 +182,7 @@ fn remap_flipud_error(err: RuntimeError) -> RuntimeError {
     accel = "custom",
     type_resolver(preserve_matrix_type),
     descriptor(crate::builtins::array::shape::flipud::FLIPUD_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::flipud::FLIPUD_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::flipud"
 )]
 async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -275,7 +291,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Type, Value,
+        CellArray, CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
+        StructValue, Tensor, Type, Value,
     };
 
     #[test]
@@ -294,6 +311,23 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn flipud_type_keeps_full_nd_shape_and_integer_contract() {
+        let shape = vec![Some(2), Some(3), Some(4), Some(5)];
+        let out = preserve_matrix_type(
+            &[Type::Logical {
+                shape: Some(shape.clone()),
+            }],
+            &ResolveContext::new(Vec::new()),
+        );
+        assert_eq!(out, Type::Logical { shape: Some(shape) });
+        assert_eq!(FLIPUD_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(
+            FLIPUD_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_matrix_reverses_rows() {
@@ -303,7 +337,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
+                assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -316,7 +350,7 @@ pub(crate) mod tests {
         let expected = flip_tensor(tensor.clone(), &UD_DIM).expect("expected");
         let result = flipud_builtin(Value::Tensor(tensor)).expect("flipud");
         match result {
-            Value::Tensor(out) => assert_eq!(out.data, expected.data),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), expected.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -328,7 +362,7 @@ pub(crate) mod tests {
         let expected = tensor.clone();
         let result = flipud_builtin(Value::Tensor(tensor)).expect("flipud");
         match result {
-            Value::Tensor(out) => assert_eq!(out.data, expected.data),
+            Value::Tensor(out) => assert_eq!(out.materialize_f64(), expected.materialize_f64()),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -342,7 +376,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
+                assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -416,6 +450,55 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn flipud_preserves_exact_integer_storage_without_f64_mirror() {
+        let exact = IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993, 7]);
+        let tensor = Tensor::new_integer(exact, vec![2, 2]).expect("integer tensor");
+
+        let result = flipud_builtin(Value::Tensor(tensor)).expect("flipud");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(
+                    out.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![
+                        0,
+                        u64::MAX,
+                        7,
+                        9_007_199_254_740_993,
+                    ]))
+                );
+            }
+            other => panic!("expected typed integer tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn flipud_preserves_typed_complex_integer_storage_without_f64_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2, 3, 4]),
+            IntegerStorage::I16(vec![5, 6, 7, 8]),
+        )
+        .expect("complex integer storage");
+        let tensor =
+            ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex integer tensor");
+
+        let result = flipud_builtin(Value::ComplexTensor(tensor)).expect("flipud");
+
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                let storage = out.integer_storage().expect("typed complex integer output");
+                assert_eq!(storage.real, IntegerStorage::I16(vec![2, 1, 4, 3]));
+                assert_eq!(storage.imag, IntegerStorage::I16(vec![6, 5, 8, 7]));
+            }
+            other => panic!("expected typed complex integer tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn flipud_scalar_numeric_noop() {
         let result = flipud_builtin(Value::Num(42.0)).expect("flipud");
         match result {
@@ -435,7 +518,9 @@ pub(crate) mod tests {
         let expected = flip_complex_tensor(tensor.clone(), &UD_DIM).expect("expected");
         let result = flipud_builtin(Value::ComplexTensor(tensor)).expect("flipud");
         match result {
-            Value::ComplexTensor(out) => assert_eq!(out.data, expected.data),
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.materialize_f64(), expected.materialize_f64())
+            }
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -455,7 +540,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -463,7 +548,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             let expected = flip_tensor(tensor, &UD_DIM).expect("expected");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
@@ -473,14 +558,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = flipud_builtin(Value::GpuTensor(handle)).expect("flipud");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, tensor.shape);
-            assert_eq!(gathered.data, tensor.data);
+            assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
         });
     }
 
@@ -491,7 +576,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
         let result = flipud_builtin(Value::Tensor(tensor.clone())).expect("flipud");
         match result {
-            Value::Tensor(out) => assert_eq!(out.data, flip_tensor(tensor, &UD_DIM).unwrap().data),
+            Value::Tensor(out) => assert_eq!(
+                out.materialize_f64(),
+                flip_tensor(tensor, &UD_DIM).unwrap().materialize_f64()
+            ),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -502,7 +590,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -521,7 +609,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let cpu = flip_tensor(tensor.clone(), &UD_DIM).expect("cpu flip");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -531,6 +619,6 @@ pub(crate) mod tests {
         let gpu = flipud_builtin(Value::GpuTensor(handle)).expect("flipud");
         let gathered = test_support::gather(gpu).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

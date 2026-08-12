@@ -10,17 +10,37 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
+use runmat_accelerate_api::{GpuTensorHandle, PagefunOp, PagefunRequest};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 type ComplexMatrixData = (Vec<(f64, f64)>, usize, usize);
 const BUILTIN_NAME: &str = "pagefun";
+
+const PAGEFUN_HOST_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pagefun-host-inputs",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pagefun with no distributed or gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PagefunHostInputsExtension"),
+};
+
+const PAGEFUN_TEXT_CALLABLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "pagefun-text-callable",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "pagefun text callables are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:PagefunTextCallableExtension"),
+};
+
+pub const PAGEFUN_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    PAGEFUN_HOST_INPUT_EXTENSION,
+    PAGEFUN_TEXT_CALLABLE_EXTENSION,
+];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::pagefun")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -234,6 +254,7 @@ fn pagefun_internal_error(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     type_resolver(pagefun_type),
     descriptor(crate::builtins::acceleration::gpu::pagefun::PAGEFUN_DESCRIPTOR),
+    extensions(crate::builtins::acceleration::gpu::pagefun::PAGEFUN_EXTENSIONS),
     builtin_path = "crate::builtins::acceleration::gpu::pagefun"
 )]
 async fn pagefun_builtin(
@@ -241,6 +262,29 @@ async fn pagefun_builtin(
     first: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if matches!(
+        &func,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PAGEFUN_TEXT_CALLABLE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if !matches!(&first, Value::GpuTensor(_))
+        && !rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &PAGEFUN_HOST_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    pagefun_impl(func, first, rest).await
+}
+
+async fn pagefun_impl(func: Value, first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let operation = PageOperation::from_callable(func)?;
     let mut operands = Vec::with_capacity(rest.len() + 1);
     operands.push(first);
@@ -255,7 +299,7 @@ async fn pagefun_builtin(
         return Ok(value);
     }
 
-    let all_gpu = operands.iter().all(|v| matches!(v, Value::GpuTensor(_)));
+    let wants_gpu = operands.iter().any(|v| matches!(v, Value::GpuTensor(_)));
     let mut host_values = Vec::with_capacity(operands.len());
     for value in operands {
         host_values.push(gather_if_needed_async(&value).await?);
@@ -324,7 +368,7 @@ async fn pagefun_builtin(
             &prepared_inputs,
             &result_page_dims,
             output_kind,
-            all_gpu,
+            wants_gpu,
         );
     }
 
@@ -407,7 +451,7 @@ async fn pagefun_builtin(
         }
     };
 
-    output.into_value(all_gpu)
+    output.into_value(wants_gpu)
 }
 
 fn try_pagefun_gpu(operation: &PageOperation, operands: &[Value]) -> BuiltinResult<Option<Value>> {
@@ -583,7 +627,7 @@ fn finalise_empty_output(
                         format!("failed to build empty complex tensor ({e})"),
                     )
                 })?;
-            FinalOutput::Complex(tensor).into_value(false)
+            FinalOutput::Complex(tensor).into_value(wants_gpu)
         }
     }
 }
@@ -639,18 +683,31 @@ impl FinalOutput {
                         }
                     }
                     if let Some(provider) = runmat_accelerate_api::provider() {
-                        let view = HostTensorView {
-                            data: &tensor.data,
-                            shape: &tensor.shape,
-                        };
-                        if let Ok(handle) = provider.upload(&view) {
+                        if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
                             return Ok(Value::GpuTensor(handle));
                         }
                     }
                 }
                 Ok(Value::Tensor(tensor))
             }
-            FinalOutput::Complex(tensor) => Ok(Value::ComplexTensor(tensor)),
+            FinalOutput::Complex(tensor) => {
+                if wants_gpu {
+                    #[cfg(all(test, feature = "wgpu"))]
+                    {
+                        if runmat_accelerate_api::provider().is_none() {
+                            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                            );
+                        }
+                    }
+                    if let Some(provider) = runmat_accelerate_api::provider() {
+                        if let Ok(handle) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
+                            return Ok(Value::GpuTensor(handle));
+                        }
+                    }
+                }
+                Ok(Value::ComplexTensor(tensor))
+            }
         }
     }
 }
@@ -677,10 +734,10 @@ impl PageInput {
                 Tensor::new(vec![n], vec![1, 1])
                     .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
             ),
-            Value::Int(i) => Self::from_tensor(
-                Tensor::new(vec![i.to_f64()], vec![1, 1])
-                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
-            ),
+            Value::Int(_) => Err(pagefun_error_with_detail(
+                &PAGEFUN_ERROR_INVALID_INPUT,
+                "pagefun has no typed integer kernel; refusing f64 fallback",
+            )),
             Value::Bool(flag) => Self::from_tensor(
                 Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
                     .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
@@ -699,8 +756,15 @@ impl PageInput {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
+        if tensor.integer_storage().is_some() {
+            return Err(pagefun_error_with_detail(
+                &PAGEFUN_ERROR_INVALID_INPUT,
+                "pagefun has no typed integer kernel; refusing f64 fallback",
+            ));
+        }
         let shape = canonical_matrix_shape(&tensor.shape);
-        if tensor.data.len() != shape.iter().copied().product::<usize>() {
+        let data = tensor_utils::tensor_into_values_f64(tensor);
+        if data.len() != shape.iter().copied().product::<usize>() {
             return Err(pagefun_error_with_detail(
                 &PAGEFUN_ERROR_INTERNAL,
                 "tensor data does not match its shape",
@@ -717,13 +781,13 @@ impl PageInput {
             page_dims,
             rows,
             cols,
-            data: PageData::Real(tensor.data),
+            data: PageData::Real(data),
         })
     }
 
     fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(&tensor.shape);
-        if tensor.data.len() != shape.iter().copied().product::<usize>() {
+        if tensor.materialize_f64().len() != shape.iter().copied().product::<usize>() {
             return Err(pagefun_error_with_detail(
                 &PAGEFUN_ERROR_INTERNAL,
                 "tensor data does not match its shape",
@@ -740,7 +804,7 @@ impl PageInput {
             page_dims,
             rows,
             cols,
-            data: PageData::Complex(tensor.data),
+            data: PageData::Complex(tensor.materialize_f64()),
         })
     }
 
@@ -836,6 +900,12 @@ fn compute_strides(dims: &[usize]) -> Vec<usize> {
 fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
     match value {
         Value::Tensor(t) => {
+            if t.integer_storage().is_some() {
+                return Err(pagefun_error_with_detail(
+                    &PAGEFUN_ERROR_RESULT_TYPE,
+                    "pagefun callback returned a typed integer tensor; refusing f64 fallback",
+                ));
+            }
             if t.shape.len() > 2 {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_TYPE,
@@ -845,16 +915,20 @@ fn tensor_matrix_data(value: Value) -> BuiltinResult<(Vec<f64>, usize, usize)> {
             let canonical = canonical_matrix_shape(&t.shape);
             let rows = canonical[0];
             let cols = canonical[1];
-            if rows * cols != t.data.len() {
+            let data = tensor_utils::tensor_into_values_f64(t);
+            if rows * cols != data.len() {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_SHAPE,
                     "result size mismatch",
                 ));
             }
-            Ok((t.data, rows, cols))
+            Ok((data, rows, cols))
         }
         Value::Num(n) => Ok((vec![n], 1, 1)),
-        Value::Int(i) => Ok((vec![i.to_f64()], 1, 1)),
+        Value::Int(_) => Err(pagefun_error_with_detail(
+            &PAGEFUN_ERROR_RESULT_TYPE,
+            "pagefun callback returned an integer scalar; refusing f64 fallback",
+        )),
         other => Err(pagefun_error_with_detail(
             &PAGEFUN_ERROR_RESULT_TYPE,
             format!(
@@ -877,13 +951,13 @@ fn complex_matrix_data(value: Value) -> BuiltinResult<ComplexMatrixData> {
             let canonical = canonical_matrix_shape(&t.shape);
             let rows = canonical[0];
             let cols = canonical[1];
-            if rows * cols != t.data.len() {
+            if rows * cols != t.materialize_f64().len() {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_SHAPE,
                     "result size mismatch",
                 ));
             }
-            Ok((t.data, rows, cols))
+            Ok((t.materialize_f64(), rows, cols))
         }
         Value::Complex(re, im) => Ok((vec![(re, im)], 1, 1)),
         other => Err(pagefun_error_with_detail(
@@ -1045,9 +1119,17 @@ impl TypeName for Value {
             Value::CharArray(_) => "char array",
             Value::Symbolic(_) => "sym",
             Value::SymbolicArray(_) => "symbolic array",
-            Value::Tensor(_) => "double array",
-            Value::SparseTensor(_) => "sparse double array",
-            Value::ComplexTensor(_) => "complex double array",
+            Value::Tensor(tensor) => numeric_array_type_name(tensor.numeric_dtype(), ""),
+            Value::SparseTensor(tensor) if tensor.is_logical() => "sparse logical array",
+            Value::SparseTensor(tensor) => numeric_array_type_name(
+                tensor
+                    .numeric_dtype()
+                    .expect("non-logical sparse tensor has a numeric dtype"),
+                "sparse",
+            ),
+            Value::ComplexTensor(tensor) => {
+                numeric_array_type_name(tensor.numeric_dtype(), "complex")
+            }
             Value::Cell(_) => "cell array",
             Value::Struct(_) => "struct",
             Value::GpuTensor(_) => "gpuArray",
@@ -1070,19 +1152,108 @@ impl TypeName for Value {
     }
 }
 
+fn numeric_array_type_name(dtype: NumericDType, kind: &str) -> &'static str {
+    match (kind, dtype) {
+        ("", NumericDType::F64) => "double array",
+        ("", NumericDType::F32) => "single array",
+        ("", NumericDType::I8) => "int8 array",
+        ("", NumericDType::I16) => "int16 array",
+        ("", NumericDType::I32) => "int32 array",
+        ("", NumericDType::I64) => "int64 array",
+        ("", NumericDType::U8) => "uint8 array",
+        ("", NumericDType::U16) => "uint16 array",
+        ("", NumericDType::U32) => "uint32 array",
+        ("", NumericDType::U64) => "uint64 array",
+        ("sparse", NumericDType::F64) => "sparse double array",
+        ("sparse", NumericDType::F32) => "sparse single array",
+        ("sparse", NumericDType::I8) => "sparse int8 array",
+        ("sparse", NumericDType::I16) => "sparse int16 array",
+        ("sparse", NumericDType::I32) => "sparse int32 array",
+        ("sparse", NumericDType::I64) => "sparse int64 array",
+        ("sparse", NumericDType::U8) => "sparse uint8 array",
+        ("sparse", NumericDType::U16) => "sparse uint16 array",
+        ("sparse", NumericDType::U32) => "sparse uint32 array",
+        ("sparse", NumericDType::U64) => "sparse uint64 array",
+        ("complex", NumericDType::F64) => "complex double array",
+        ("complex", NumericDType::F32) => "complex single array",
+        ("complex", NumericDType::I8) => "complex int8 array",
+        ("complex", NumericDType::I16) => "complex int16 array",
+        ("complex", NumericDType::I32) => "complex int32 array",
+        ("complex", NumericDType::I64) => "complex int64 array",
+        ("complex", NumericDType::U8) => "complex uint8 array",
+        ("complex", NumericDType::U16) => "complex uint16 array",
+        ("complex", NumericDType::U32) => "complex uint32 array",
+        ("complex", NumericDType::U64) => "complex uint64 array",
+        _ => "numeric array",
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, ResolveContext, StringArray, Type};
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{CharArray, IntegerStorage, ResolveContext, StringArray, Type};
+
+    #[test]
+    fn pagefun_extensions_follow_compatibility_mode() {
+        let matrix = || Tensor::new(vec![1.0], vec![1, 1]).expect("matrix");
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(pagefun_builtin(
+                Value::FunctionHandle("mtimes".into()),
+                Value::Tensor(matrix()),
+                vec![Value::Tensor(matrix())],
+            ))
+            .expect_err("MATLAB mode rejects all-host pagefun");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:PagefunHostInputsExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            block_on(pagefun_builtin(
+                Value::FunctionHandle("mtimes".into()),
+                Value::Tensor(matrix()),
+                vec![Value::Tensor(matrix())],
+            ))
+            .expect("RunMat mode accepts all-host pagefun");
+        }
+
+        test_support::with_test_provider(|provider| {
+            let tensor = matrix();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let invoke = || {
+                pagefun_builtin(
+                    Value::from("@mtimes"),
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::GpuTensor(handle.clone())],
+                )
+            };
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error =
+                    block_on(invoke()).expect_err("MATLAB mode rejects text pagefun callable");
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:PagefunTextCallableExtension")
+                );
+            }
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+                block_on(invoke()).expect("RunMat mode accepts text pagefun callable");
+            }
+        });
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_mtimes_single_page() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
-        let result = pagefun_builtin(
+        let result = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1091,7 +1262,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1099,10 +1270,51 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn pagefun_rejects_poisoned_typed_integer_inputs_before_float_materialization() {
+        let lhs = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).unwrap();
+        let rhs = Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
+
+        let result = pagefun_impl(
+            Value::FunctionHandle("mtimes".into()),
+            Value::Tensor(lhs),
+            vec![Value::Tensor(rhs)],
+        );
+        let error = block_on(result).expect_err("typed integer page inputs must not use f64");
+        assert!(error.to_string().contains("typed integer kernel"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pagefun_matrix_result_reader_rejects_poisoned_typed_integer_storage() {
+        let result = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, 7]),
+            vec![1, 2],
+        )
+        .unwrap();
+
+        let error = tensor_matrix_data(Value::Tensor(result))
+            .expect_err("typed callback result must not use f64");
+        assert!(error.to_string().contains("typed integer tensor"));
+    }
+
+    #[test]
+    fn pagefun_rejects_wide_integer_scalar_before_float_materialization() {
+        let result = pagefun_impl(
+            Value::FunctionHandle("mtimes".into()),
+            Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            vec![Value::Num(1.0)],
+        );
+
+        let error = block_on(result).expect_err("wide integer scalar must not use f64");
+        assert!(error.to_string().contains("typed integer kernel"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn pagefun_mtimes_multiple_pages() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0, 2.0, 1.0, 0.0, 3.0], vec![2, 2, 2]).unwrap();
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0, 1.0, 0.0, 2.0, 1.0], vec![2, 2, 2]).unwrap();
-        let result = pagefun_builtin(
+        let result = pagefun_impl(
             Value::from("@mtimes"),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1111,7 +1323,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0, 2.0, 1.0, 4.0, 5.0]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    vec![19.0, 43.0, 22.0, 50.0, 2.0, 1.0, 4.0, 5.0]
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1122,7 +1337,7 @@ pub(crate) mod tests {
     fn pagefun_mtimes_broadcast_rhs() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0], vec![2, 2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let result = pagefun_builtin(
+        let result = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1132,7 +1347,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
                 assert_eq!(
-                    t.data,
+                    t.materialize_f64(),
                     vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0],
                     "broadcasted identity should preserve pages"
                 );
@@ -1146,7 +1361,7 @@ pub(crate) mod tests {
     fn pagefun_mtimes_empty_pages() {
         let lhs = Tensor::new(Vec::new(), vec![2, 2, 0]).unwrap();
         let rhs = Tensor::new(Vec::new(), vec![2, 2, 0]).unwrap();
-        let result = pagefun_builtin(
+        let result = pagefun_impl(
             Value::from("@mtimes"),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1155,7 +1370,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1167,7 +1382,7 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
         let func = CharArray::new("@mtimes".chars().collect(), 1, 7).unwrap();
-        let result = pagefun_builtin(
+        let result = pagefun_impl(
             Value::CharArray(func),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1176,7 +1391,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1186,7 +1401,7 @@ pub(crate) mod tests {
     fn pagefun_mtimes_external_function_handle() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
-        let result = pagefun_builtin(
+        let result = pagefun_impl(
             Value::ExternalFunctionHandle("mtimes".to_string()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1195,7 +1410,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1205,7 +1420,7 @@ pub(crate) mod tests {
     fn pagefun_mtimes_semantic_function_handle() {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
-        let result = pagefun_builtin(
+        let result = pagefun_impl(
             Value::BoundFunctionHandle {
                 name: "mtimes".to_string(),
                 function: 17,
@@ -1217,7 +1432,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1229,7 +1444,7 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
         let strings = StringArray::new(vec!["@mtimes".to_string()], vec![1]).unwrap();
-        let result = pagefun_builtin(
+        let result = pagefun_impl(
             Value::StringArray(strings),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1238,7 +1453,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+                assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1250,7 +1465,7 @@ pub(crate) mod tests {
         let chars = CharArray::new("@mtimes@".chars().collect(), 2, 4).unwrap();
         let lhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let rhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = pagefun_builtin(
+        let err = pagefun_impl(
             Value::CharArray(chars),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1270,7 +1485,7 @@ pub(crate) mod tests {
             StringArray::new(vec!["@mtimes".to_string(), "@mtimes".to_string()], vec![2]).unwrap();
         let lhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let rhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = pagefun_builtin(
+        let err = pagefun_impl(
             Value::StringArray(strings),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1288,7 +1503,7 @@ pub(crate) mod tests {
     fn pagefun_unsupported_operation_identifier() {
         let lhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let rhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = pagefun_builtin(
+        let err = pagefun_impl(
             Value::FunctionHandle("plus".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1304,7 +1519,7 @@ pub(crate) mod tests {
     #[test]
     fn pagefun_invalid_arity_identifier() {
         let lhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = pagefun_builtin(
+        let err = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![],
@@ -1324,7 +1539,7 @@ pub(crate) mod tests {
             vec![2, 2, 3],
         )
         .unwrap();
-        let err = pagefun_builtin(
+        let err = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1342,7 +1557,7 @@ pub(crate) mod tests {
     fn pagefun_mtimes_dim_mismatch() {
         let lhs = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = pagefun_builtin(
+        let err = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs),
             vec![Value::Tensor(rhs)],
@@ -1366,6 +1581,20 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn pagefun_type_names_report_authoritative_numeric_storage() {
+        let single = Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap());
+        let integer = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+        );
+        let complex_single =
+            Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.0, -2.0)], vec![1, 1]).unwrap());
+
+        assert_eq!(single.type_name(), "single array");
+        assert_eq!(integer.type_name(), "uint64 array");
+        assert_eq!(complex_single.type_name(), "complex single array");
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pagefun_gpu_roundtrip_mtimes() {
@@ -1375,17 +1604,17 @@ pub(crate) mod tests {
             let identity = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
 
             let view_lhs = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let view_rhs = HostTensorView {
-                data: &identity.data,
+                data: &identity.materialize_f64(),
                 shape: &identity.shape,
             };
             let lhs = provider.upload(&view_lhs).expect("upload lhs");
             let rhs = provider.upload(&view_rhs).expect("upload rhs");
 
-            let result = pagefun_builtin(
+            let result = pagefun_impl(
                 Value::FunctionHandle("mtimes".into()),
                 Value::GpuTensor(lhs),
                 vec![Value::GpuTensor(rhs)],
@@ -1395,9 +1624,58 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2, 2]);
             assert_eq!(
-                gathered.data,
+                gathered.materialize_f64(),
                 vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0],
                 "GPU fallback should match identity broadcast"
+            );
+        });
+    }
+
+    #[test]
+    fn pagefun_mixed_gpu_host_inputs_return_gpu_results() {
+        test_support::with_test_provider(|provider| {
+            let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("lhs");
+            let rhs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("rhs");
+            let lhs = gpu_helpers::upload_tensor(provider, &lhs).expect("upload lhs");
+
+            let result = block_on(pagefun_impl(
+                Value::FunctionHandle("mtimes".into()),
+                Value::GpuTensor(lhs),
+                vec![Value::Tensor(rhs)],
+            ))
+            .expect("mixed pagefun");
+            assert!(
+                matches!(result, Value::GpuTensor(_)),
+                "mixed host/GPU pagefun must return a gpuArray"
+            );
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
+        });
+    }
+
+    #[test]
+    fn pagefun_mixed_complex_gpu_host_inputs_return_complex_gpu_results() {
+        test_support::with_test_provider(|provider| {
+            let lhs = ComplexTensor::new(
+                vec![(1.0, 1.0), (3.0, -1.0), (2.0, 0.5), (4.0, 2.0)],
+                vec![2, 2],
+            )
+            .expect("lhs");
+            let rhs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("rhs");
+            let lhs = gpu_helpers::upload_complex_tensor(provider, &lhs).expect("upload lhs");
+
+            let result = block_on(pagefun_impl(
+                Value::FunctionHandle("mtimes".into()),
+                Value::GpuTensor(lhs),
+                vec![Value::Tensor(rhs)],
+            ))
+            .expect("mixed complex pagefun");
+            let Value::GpuTensor(handle) = result else {
+                panic!("mixed complex host/GPU pagefun must return a gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
             );
         });
     }
@@ -1432,11 +1710,11 @@ pub(crate) mod tests {
         .unwrap();
 
         let view_lhs = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_rhs = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
 
@@ -1452,7 +1730,7 @@ pub(crate) mod tests {
         let provider_tensor =
             test_support::gather(Value::GpuTensor(provider_result)).expect("gather provider");
 
-        let builtin_value = pagefun_builtin(
+        let builtin_value = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(lhs_handle.clone()),
             vec![Value::GpuTensor(rhs_handle.clone())],
@@ -1460,7 +1738,7 @@ pub(crate) mod tests {
         let builtin_value = block_on(builtin_value).expect("pagefun builtin on GPU");
         let builtin_tensor = test_support::gather(builtin_value).expect("gather builtin");
 
-        let expected_value = pagefun_builtin(
+        let expected_value = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(lhs.clone()),
             vec![Value::Tensor(rhs.clone())],
@@ -1472,8 +1750,14 @@ pub(crate) mod tests {
         };
 
         assert_eq!(provider_tensor.shape, expected_tensor.shape);
-        assert_eq!(provider_tensor.data, expected_tensor.data);
+        assert_eq!(
+            provider_tensor.materialize_f64(),
+            expected_tensor.materialize_f64()
+        );
         assert_eq!(builtin_tensor.shape, expected_tensor.shape);
-        assert_eq!(builtin_tensor.data, expected_tensor.data);
+        assert_eq!(
+            builtin_tensor.materialize_f64(),
+            expected_tensor.materialize_f64()
+        );
     }
 }

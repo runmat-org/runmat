@@ -1,5 +1,6 @@
 use super::selectors::parse_variable_selector;
 use super::*;
+use runmat_builtins::IntValue;
 
 mod grpstats;
 
@@ -96,11 +97,22 @@ pub(in crate::builtins::table) fn compare_table_cells(
     b: usize,
 ) -> BuiltinResult<Ordering> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor
-            .get2(a, 0)
-            .map_err(invalid_index)?
-            .partial_cmp(&tensor.get2(b, 0).map_err(invalid_index)?)
-            .unwrap_or(Ordering::Greater)),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                let left = storage
+                    .value_at(a)
+                    .ok_or_else(|| invalid_index("table: numeric row index out of bounds"))?;
+                let right = storage
+                    .value_at(b)
+                    .ok_or_else(|| invalid_index("table: numeric row index out of bounds"))?;
+                return Ok(compare_integer_values(&left, &right));
+            }
+            Ok(tensor
+                .get2(a, 0)
+                .map_err(invalid_index)?
+                .partial_cmp(&tensor.get2(b, 0).map_err(invalid_index)?)
+                .unwrap_or(Ordering::Greater))
+        }
         Value::StringArray(array) => {
             let av = array.data.get(a).cloned().unwrap_or_default();
             let bv = array.data.get(b).cloned().unwrap_or_default();
@@ -113,12 +125,9 @@ pub(in crate::builtins::table) fn compare_table_cells(
         }
         Value::Object(obj) if obj.is_class("datetime") => {
             let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
-            Ok(tensor
-                .data
-                .get(a)
-                .copied()
+            Ok(double_value_at(&tensor, a)
                 .unwrap_or(f64::NAN)
-                .partial_cmp(&tensor.data.get(b).copied().unwrap_or(f64::NAN))
+                .partial_cmp(&double_value_at(&tensor, b).unwrap_or(f64::NAN))
                 .unwrap_or(Ordering::Greater))
         }
         other => Ok(cell_key_string(other, a).cmp(&cell_key_string(other, b))),
@@ -128,6 +137,7 @@ pub(in crate::builtins::table) fn compare_table_cells(
 #[derive(Clone, Debug)]
 pub(in crate::builtins::table) enum GroupAtom {
     Number(f64),
+    Integer(IntValue),
     Text(String),
     Logical(bool),
     Missing,
@@ -139,7 +149,8 @@ impl GroupAtom {
             Self::Missing => 0,
             Self::Logical(_) => 1,
             Self::Number(_) => 2,
-            Self::Text(_) => 3,
+            Self::Integer(_) => 3,
+            Self::Text(_) => 4,
         }
     }
 }
@@ -168,18 +179,51 @@ impl Ord for GroupAtom {
             (Self::Missing, Self::Missing) => Ordering::Equal,
             (Self::Logical(a), Self::Logical(b)) => a.cmp(b),
             (Self::Number(a), Self::Number(b)) => a.total_cmp(b),
+            (Self::Integer(a), Self::Integer(b)) => compare_integer_values(a, b),
             (Self::Text(a), Self::Text(b)) => a.cmp(b),
             _ => Ordering::Equal,
         }
     }
 }
 
+fn compare_integer_values(left: &IntValue, right: &IntValue) -> Ordering {
+    let left = integer_sign_and_magnitude(left);
+    let right = integer_sign_and_magnitude(right);
+    match (left.0, right.0) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => left.1.cmp(&right.1),
+        (true, true) => right.1.cmp(&left.1),
+    }
+}
+
+fn integer_sign_and_magnitude(value: &IntValue) -> (bool, u64) {
+    match value {
+        IntValue::I8(value) => (*value < 0, value.unsigned_abs() as u64),
+        IntValue::I16(value) => (*value < 0, value.unsigned_abs() as u64),
+        IntValue::I32(value) => (*value < 0, value.unsigned_abs() as u64),
+        IntValue::I64(value) => (*value < 0, value.unsigned_abs()),
+        IntValue::U8(value) => (false, *value as u64),
+        IntValue::U16(value) => (false, *value as u64),
+        IntValue::U32(value) => (false, *value as u64),
+        IntValue::U64(value) => (false, *value),
+    }
+}
+
 pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> GroupAtom {
     match value {
-        Value::Tensor(tensor) => tensor
-            .get2(row, 0)
-            .map(GroupAtom::Number)
-            .unwrap_or(GroupAtom::Missing),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .value_at(row)
+                    .map(GroupAtom::Integer)
+                    .unwrap_or(GroupAtom::Missing);
+            }
+            tensor
+                .get2(row, 0)
+                .map(GroupAtom::Number)
+                .unwrap_or(GroupAtom::Missing)
+        }
         Value::StringArray(array) => array
             .data
             .get(row)
@@ -194,7 +238,7 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
         Value::Object(obj) if obj.is_class("datetime") => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
-                .and_then(|tensor| tensor.data.get(row).copied())
+                .and_then(|tensor| double_value_at(&tensor, row))
                 .map(GroupAtom::Number)
                 .unwrap_or(GroupAtom::Missing)
         }
@@ -330,9 +374,23 @@ pub(in crate::builtins::table) fn group_key_label(key: &[GroupAtom]) -> String {
 pub(in crate::builtins::table) fn group_atom_label(atom: &GroupAtom) -> String {
     match atom {
         GroupAtom::Number(value) => format_key_number(*value),
+        GroupAtom::Integer(value) => format_integer_key(value),
         GroupAtom::Text(text) => text.clone(),
         GroupAtom::Logical(flag) => flag.to_string(),
         GroupAtom::Missing => "missing".to_string(),
+    }
+}
+
+fn format_integer_key(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
     }
 }
 
@@ -477,10 +535,18 @@ pub(in crate::builtins::table) fn summarize_groups<'a>(
 
 pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> String {
     match value {
-        Value::Tensor(tensor) => tensor
-            .get2(row, 0)
-            .map(format_key_number)
-            .unwrap_or_default(),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .value_at(row)
+                    .map(|value| format_integer_key(&value))
+                    .unwrap_or_default();
+            }
+            tensor
+                .get2(row, 0)
+                .map(format_key_number)
+                .unwrap_or_default()
+        }
         Value::StringArray(array) => array.data.get(row).cloned().unwrap_or_default(),
         Value::LogicalArray(array) => array
             .data
@@ -490,14 +556,14 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
         Value::Object(obj) if obj.is_class("datetime") => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
-                .and_then(|tensor| tensor.data.get(row).copied())
+                .and_then(|tensor| double_value_at(&tensor, row))
                 .map(format_key_number)
                 .unwrap_or_default()
         }
         Value::Object(obj) if obj.is_class("duration") => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .ok()
-                .and_then(|tensor| tensor.data.get(row).copied())
+                .and_then(|tensor| double_value_at(&tensor, row))
                 .map(format_key_number)
                 .unwrap_or_default()
         }
@@ -509,5 +575,40 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
             .map(|item| cell_to_text(&item))
             .unwrap_or_default(),
         other => format!("{other}"),
+    }
+}
+
+fn double_value_at(tensor: &Tensor, index: usize) -> Option<f64> {
+    tensor.as_f64_slice()?.get(index).copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn typed_integer_group_atoms_and_table_ordering_remain_exact() {
+        let large = 9_007_199_254_740_992_u64;
+        let value = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large, large + 1]), vec![2, 1]).unwrap(),
+        );
+
+        let first = cell_group_atom(&value, 0);
+        let second = cell_group_atom(&value, 1);
+        assert_ne!(first, second);
+        assert_eq!(compare_table_cells(&value, 0, 1).unwrap(), Ordering::Less);
+        assert_eq!(group_atom_label(&second), (large + 1).to_string());
+    }
+
+    #[test]
+    fn cell_key_string_reads_typed_integer_storage_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+
+        assert_eq!(
+            cell_key_string(&Value::Tensor(tensor), 0),
+            "9007199254740993"
+        );
     }
 }

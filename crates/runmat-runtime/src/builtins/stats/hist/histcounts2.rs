@@ -355,7 +355,7 @@ fn histcounts2_from_tensors(
     y_tensor: Tensor,
     options: &Histcounts2Options,
 ) -> BuiltinResult<Histcounts2Evaluation> {
-    if x_tensor.data.len() != y_tensor.data.len() {
+    if x_tensor.len() != y_tensor.len() {
         return Err(builtin_error(format!(
             "{NAME}: X and Y must contain the same number of elements"
         )));
@@ -366,13 +366,17 @@ fn histcounts2_from_tensors(
         )));
     }
 
-    let x_axis = collect_axis_data(&x_tensor.data);
-    let y_axis = collect_axis_data(&y_tensor.data);
+    // Histogram statistics and returned edges are defined in the floating
+    // computation domain even when observations arrive in integer storage.
+    let x_values = tensor::tensor_into_values_f64(x_tensor);
+    let y_values = tensor::tensor_into_values_f64(y_tensor);
+    let x_axis = collect_axis_data(&x_values);
+    let y_axis = collect_axis_data(&y_values);
 
     let x_edges = compute_edges_for_axis(&x_axis, &options.x, "X")?;
     let y_edges = compute_edges_for_axis(&y_axis, &options.y, "Y")?;
 
-    let counts = compute_histogram_counts(&x_tensor.data, &y_tensor.data, &x_edges, &y_edges);
+    let counts = compute_histogram_counts(&x_values, &y_values, &x_edges, &y_edges);
     let normalised = apply_normalization_2d(&counts, &x_edges, &y_edges, options.normalization);
 
     let x_bins = x_edges.len() - 1;
@@ -1115,18 +1119,15 @@ fn parse_options(args: &[Value]) -> BuiltinResult<Histcounts2Options> {
             }
             index += 2;
         } else {
-            let bins = numeric_vector(&args[index], NAME, "NumBins")?;
-            match bins.len() {
-                1 => {
-                    let n = positive_usize_from_f64(bins[0], "NumBins")?;
-                    options.x.num_bins = Some(n);
-                    options.y.num_bins = Some(n);
+            let bins = num_bins_vector(&args[index])?;
+            match bins.as_slice() {
+                [n] => {
+                    options.x.num_bins = Some(*n);
+                    options.y.num_bins = Some(*n);
                 }
-                2 => {
-                    let nx = positive_usize_from_f64(bins[0], "NumBins")?;
-                    let ny = positive_usize_from_f64(bins[1], "NumBins")?;
-                    options.x.num_bins = Some(nx);
-                    options.y.num_bins = Some(ny);
+                [nx, ny] => {
+                    options.x.num_bins = Some(*nx);
+                    options.y.num_bins = Some(*ny);
                 }
                 _ => {
                     return Err(builtin_error(format!(
@@ -1153,18 +1154,15 @@ fn parse_options(args: &[Value]) -> BuiltinResult<Histcounts2Options> {
 
         match lowered.as_str() {
             "numbins" => {
-                let bins = numeric_vector(value, NAME, "NumBins")?;
-                match bins.len() {
-                    1 => {
-                        let n = positive_usize_from_f64(bins[0], "NumBins")?;
-                        options.x.num_bins = Some(n);
-                        options.y.num_bins = Some(n);
+                let bins = num_bins_vector(value)?;
+                match bins.as_slice() {
+                    [n] => {
+                        options.x.num_bins = Some(*n);
+                        options.y.num_bins = Some(*n);
                     }
-                    2 => {
-                        let nx = positive_usize_from_f64(bins[0], "NumBins")?;
-                        let ny = positive_usize_from_f64(bins[1], "NumBins")?;
-                        options.x.num_bins = Some(nx);
-                        options.y.num_bins = Some(ny);
+                    [nx, ny] => {
+                        options.x.num_bins = Some(*nx);
+                        options.y.num_bins = Some(*ny);
                     }
                     _ => {
                         return Err(builtin_error(format!(
@@ -1339,26 +1337,55 @@ fn is_option_key(value: &Value) -> bool {
 fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| builtin_error(format!("{name}: {option} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
+}
+
+fn num_bins_vector(value: &Value) -> BuiltinResult<Vec<usize>> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(vec![integer
+            .try_to_usize()
+            .filter(valid_num_bins)
+            .ok_or_else(|| {
+                descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID)
+            })?]);
+    }
+    let tensor = tensor::value_to_tensor(value)
+        .map_err(|_| builtin_error(format!("{NAME}: NumBins must be numeric")))?;
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .exact_values()
+            .into_iter()
+            .map(|value| {
+                value
+                    .try_to_usize()
+                    .filter(valid_num_bins)
+                    .ok_or_else(|| descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID))
+            })
+            .collect();
+    }
+    tensor
+        .materialize_f64()
+        .iter()
+        .map(|value| positive_usize_from_f64(*value, "NumBins"))
+        .collect()
 }
 
 fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
+    if let Some(value) = tensor::scalar_integer_value(value) {
+        return value.try_to_usize().filter(valid_num_bins).ok_or_else(|| {
+            if name == NAME && option == "NumBins" {
+                descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID)
+            } else {
+                builtin_error(format!("{name}: {option} must be a positive finite scalar"))
+            }
+        });
+    }
     let scalar = scalar_value(value, name, option)?;
-    if scalar <= 0.0 || !scalar.is_finite() {
-        if name == NAME && option == "NumBins" {
-            return Err(descriptor_error(&HISTCOUNTS2_ERROR_NUMBINS_INVALID));
-        }
-        return Err(builtin_error(format!(
-            "{name}: {option} must be a positive finite scalar"
-        )));
-    }
-    let rounded = scalar.round();
-    if (scalar - rounded).abs() > f64::EPSILON {
-        return Err(builtin_error(format!(
-            "{name}: {option} must be an integer"
-        )));
-    }
-    Ok(rounded as usize)
+    positive_usize_from_f64(scalar, option)
+}
+
+fn valid_num_bins(value: &usize) -> bool {
+    *value > 0 && *value < usize::MAX
 }
 
 fn positive_scalar(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
@@ -1377,10 +1404,10 @@ fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if !tensor::is_scalar_tensor(tensor) {
                 return Err(builtin_error(format!("{name}: {option} must be a scalar")));
             }
-            Ok(tensor.data[0])
+            Ok(tensor::tensor_value_f64(tensor, 0))
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
@@ -1408,6 +1435,11 @@ fn positive_usize_from_f64(value: f64, option: &str) -> BuiltinResult<usize> {
     if (value - rounded).abs() > f64::EPSILON {
         return Err(builtin_error(format!(
             "{NAME}: {option} must be an integer"
+        )));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(builtin_error(format!(
+            "{NAME}: {option} is outside the supported range"
         )));
     }
     Ok(rounded as usize)
@@ -1455,7 +1487,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
 
     fn tensor_from_value(value: Value) -> Tensor {
         match value {
@@ -1463,6 +1495,14 @@ pub(crate) mod tests {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("expected tensor value, got {:?}", other),
         }
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    fn double_values(tensor: &Tensor) -> &[f64] {
+        tensor.as_f64_slice().expect("expected double tensor")
     }
 
     #[test]
@@ -1516,6 +1556,111 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn histcounts2_numbins_preserves_typed_integers_and_rejects_lossy_f64() {
+        assert_eq!(
+            positive_usize(&Value::Int(IntValue::U16(3)), NAME, "NumBins").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_usize(
+                &integer_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+                NAME,
+                "NumBins",
+            )
+            .unwrap(),
+            4
+        );
+        assert_eq!(
+            positive_usize(
+                &integer_tensor(IntegerStorage::U16(vec![9]), vec![1, 1]),
+                NAME,
+                "NumBins",
+            )
+            .unwrap(),
+            9
+        );
+        assert_eq!(
+            num_bins_vector(&integer_tensor(
+                IntegerStorage::U16(vec![7, 11]),
+                vec![1, 2],
+            ))
+            .unwrap(),
+            vec![7, 11]
+        );
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            integer_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+            integer_tensor(IntegerStorage::I16(vec![2, -1]), vec![1, 2]),
+            integer_tensor(IntegerStorage::U64(vec![usize::MAX as u64]), vec![1, 1]),
+            integer_tensor(IntegerStorage::U64(vec![2, usize::MAX as u64]), vec![1, 2]),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_usize(&value, NAME, "NumBins").is_err());
+        }
+        assert!(num_bins_vector(&integer_tensor(
+            IntegerStorage::I16(vec![2, -1]),
+            vec![1, 2],
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn histcounts2_numeric_vectors_read_typed_integer_storage_exactly() {
+        assert_eq!(
+            numeric_vector(
+                &integer_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3]),
+                NAME,
+                "XBinEdges",
+            )
+            .unwrap(),
+            vec![1.0, 3.0, 5.0]
+        );
+        assert_eq!(
+            scalar_value(
+                &integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                NAME,
+                "BinWidth",
+            )
+            .unwrap(),
+            2.0
+        );
+    }
+
+    #[test]
+    fn histcounts2_accepts_every_integer_class_and_native_single_at_floating_boundary() {
+        let integer_cases = [
+            IntegerStorage::I8(vec![0, 1, 2]),
+            IntegerStorage::I16(vec![0, 1, 2]),
+            IntegerStorage::I32(vec![0, 1, 2]),
+            IntegerStorage::I64(vec![0, 1, 2]),
+            IntegerStorage::U8(vec![0, 1, 2]),
+            IntegerStorage::U16(vec![0, 1, 2]),
+            IntegerStorage::U32(vec![0, 1, 2]),
+            IntegerStorage::U64(vec![0, 1, 2]),
+        ];
+        for storage in integer_cases {
+            let x = Tensor::new_integer(storage, vec![3, 1]).expect("integer observations");
+            let y =
+                Tensor::from_f32(vec![0.25, 1.25, 2.25], vec![3, 1]).expect("single observations");
+            let eval = block_on(evaluate(
+                Value::Tensor(x),
+                Value::Tensor(y),
+                &[
+                    Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap()),
+                    Value::Tensor(Tensor::from_f32(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap()),
+                ],
+            ))
+            .expect("typed histcounts2");
+            let counts = tensor_from_value(eval.into_counts_value());
+            assert_eq!(
+                double_values(&counts),
+                &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            );
+        }
+    }
+
+    #[test]
     fn histcounts2_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = HISTCOUNTS2_DESCRIPTOR
             .signatures
@@ -1546,10 +1691,10 @@ pub(crate) mod tests {
         assert_eq!(counts.shape, vec![4, 3]);
         let xedges = tensor_from_value(xedges);
         let yedges = tensor_from_value(yedges);
-        assert_eq!(xedges.data, vec![0.0, 1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(yedges.data, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(double_values(&xedges), &[0.0, 1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(double_values(&yedges), &[0.0, 1.0, 2.0, 3.0]);
         let rows = counts.shape[0];
-        let count = |ix: usize, iy: usize| counts.data[ix + iy * rows];
+        let count = |ix: usize, iy: usize| double_values(&counts)[ix + iy * rows];
         assert_eq!(count(0, 0), 1.0);
         assert_eq!(count(1, 0), 1.0);
         assert_eq!(count(2, 1), 1.0);
@@ -1582,7 +1727,7 @@ pub(crate) mod tests {
         .expect("histcounts2");
         let counts = tensor_from_value(eval.into_counts_value());
         assert_eq!(counts.shape, vec![2, 2]);
-        assert_eq!(counts.data, vec![0.5, 0.0, 0.0, 0.5]);
+        assert_eq!(double_values(&counts), &[0.5, 0.0, 0.0, 0.5]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1600,7 +1745,7 @@ pub(crate) mod tests {
         ))
         .expect("histcounts2");
         let counts = tensor_from_value(eval.into_counts_value());
-        assert_eq!(counts.data.iter().sum::<f64>(), 2.0);
+        assert_eq!(double_values(&counts).iter().sum::<f64>(), 2.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1619,7 +1764,7 @@ pub(crate) mod tests {
         .expect("histcounts2");
         let counts = tensor_from_value(eval.into_counts_value());
         assert_eq!(counts.shape, vec![2, 4]);
-        assert_eq!(counts.data.iter().sum::<f64>(), 4.0);
+        assert_eq!(double_values(&counts).iter().sum::<f64>(), 4.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1647,10 +1792,10 @@ pub(crate) mod tests {
         let xedges = tensor_from_value(xedges_v);
         let yedges = tensor_from_value(yedges_v);
 
-        assert_eq!(xedges.data, vec![0.0, 1.0, 2.0, 3.0]);
-        assert_eq!(yedges.data, vec![0.0, 0.5, 1.0, 1.5, 2.0, 2.5]);
+        assert_eq!(double_values(&xedges), &[0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(double_values(&yedges), &[0.0, 0.5, 1.0, 1.5, 2.0, 2.5]);
         assert_eq!(counts.shape, vec![3, 5]);
-        assert_eq!(counts.data.iter().sum::<f64>(), 4.0);
+        assert_eq!(double_values(&counts).iter().sum::<f64>(), 4.0);
 
         let density_eval = block_on(evaluate(
             Value::Tensor(x_tensor),
@@ -1668,12 +1813,16 @@ pub(crate) mod tests {
         ))
         .expect("histcounts2 countdensity");
         let density = tensor_from_value(density_eval.into_counts_value());
-        let positives: Vec<f64> = density.data.iter().copied().filter(|v| *v > 0.0).collect();
+        let positives: Vec<f64> = double_values(&density)
+            .iter()
+            .copied()
+            .filter(|v| *v > 0.0)
+            .collect();
         assert!(!positives.is_empty());
         for value in positives {
             assert!((value - 2.0).abs() < 1e-12);
         }
-        assert_eq!(density.data[0], 2.0);
+        assert_eq!(double_values(&density)[0], 2.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1694,8 +1843,8 @@ pub(crate) mod tests {
         .expect("histcounts2");
         let cdf = tensor_from_value(eval.into_counts_value());
         assert_eq!(cdf.shape, vec![2, 2]);
-        assert_eq!(cdf.data.last().copied().unwrap(), 1.0);
-        assert!(cdf.data.windows(2).all(|w| w[0] <= w[1] + 1e-12));
+        assert_eq!(double_values(&cdf).last().copied().unwrap(), 1.0);
+        assert!(double_values(&cdf).windows(2).all(|w| w[0] <= w[1] + 1e-12));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1720,11 +1869,10 @@ pub(crate) mod tests {
         let counts = tensor_from_value(counts_v);
         let xedges = tensor_from_value(xedges_v);
         let yedges = tensor_from_value(yedges_v);
-        assert_eq!(xedges.data, vec![0.0, 1.0, 2.0, 3.0]);
-        assert_eq!(yedges.data, vec![1.0, 2.0, 3.0]);
-        assert_eq!(counts.data.iter().sum::<f64>(), 3.0);
-        assert!(xedges
-            .data
+        assert_eq!(double_values(&xedges), &[0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(double_values(&yedges), &[1.0, 2.0, 3.0]);
+        assert_eq!(double_values(&counts).iter().sum::<f64>(), 3.0);
+        assert!(double_values(&xedges)
             .windows(2)
             .all(|w| (w[1] - w[0] - 1.0).abs() < 1e-12));
     }
@@ -1777,11 +1925,11 @@ pub(crate) mod tests {
             let x = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
             let y = Tensor::new(vec![1.0, 1.1, 2.9], vec![3, 1]).unwrap();
             let x_view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: double_values(&x),
                 shape: &x.shape,
             };
             let y_view = runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: double_values(&y),
                 shape: &y.shape,
             };
             let x_handle = provider.upload(&x_view).expect("upload X");
@@ -1798,7 +1946,7 @@ pub(crate) mod tests {
             let counts = tensor_from_value(eval.into_counts_value());
             assert_eq!(counts.shape, vec![3, 2]);
             let rows = counts.shape[0];
-            let count = |ix: usize, iy: usize| counts.data[ix + iy * rows];
+            let count = |ix: usize, iy: usize| double_values(&counts)[ix + iy * rows];
             assert_eq!(count(0, 0), 1.0);
             assert_eq!(count(1, 0), 1.0);
             assert_eq!(count(2, 1), 1.0);
@@ -1822,13 +1970,13 @@ pub(crate) mod tests {
 
         let x_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: double_values(&x),
                 shape: &x.shape,
             })
             .expect("upload x");
         let y_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: double_values(&y),
                 shape: &y.shape,
             })
             .expect("upload y");
@@ -1848,12 +1996,12 @@ pub(crate) mod tests {
         let xedges = tensor_from_value(xedges_v);
         let yedges = tensor_from_value(yedges_v);
 
-        assert_eq!(xedges.data, vec![0.0, 1.0, 2.0, 3.0]);
-        assert_eq!(yedges.data, vec![0.0, 2.0, 3.0]);
+        assert_eq!(double_values(&xedges), &[0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(double_values(&yedges), &[0.0, 2.0, 3.0]);
 
         assert_eq!(counts.shape, vec![3, 2]);
         let rows = counts.shape[0];
-        let count = |ix: usize, iy: usize| counts.data[ix + iy * rows];
+        let count = |ix: usize, iy: usize| double_values(&counts)[ix + iy * rows];
         assert_eq!(count(0, 0), 1.0);
         assert_eq!(count(1, 0), 1.0);
         assert_eq!(count(2, 1), 1.0);

@@ -1,12 +1,17 @@
 //! MATLAB-compatible `corrcoef` builtin with GPU-aware semantics for RunMat.
 
+use num_complex::Complex64;
 use runmat_accelerate_api::{
-    CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, GpuTensorHandle,
+    CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, GpuTensorHandle, GpuTensorStorage,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    ComplexTensor, IntValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -16,205 +21,111 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor::{self, value_to_string};
+use crate::builtins::stats::summary::distribution_math::{
+    standard_normal_inv, student_t_cdf_upper,
+};
 use crate::builtins::stats::type_resolvers::corrcoef_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "corrcoef";
-const CORRCOEF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const OUTPUT_R: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "R",
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Correlation coefficient matrix.",
-}];
+};
+const OUTPUT_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "P",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "P-values for testing zero correlation.",
+};
+const OUTPUT_RL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "RL",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Lower confidence bounds for the correlation coefficients.",
+};
+const OUTPUT_RU: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "RU",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Upper confidence bounds for the correlation coefficients.",
+};
+const OUTPUTS_R: [BuiltinParamDescriptor; 1] = [OUTPUT_R];
+const OUTPUTS_R_P: [BuiltinParamDescriptor; 2] = [OUTPUT_R, OUTPUT_P];
+const OUTPUTS_FULL: [BuiltinParamDescriptor; 4] = [OUTPUT_R, OUTPUT_P, OUTPUT_RL, OUTPUT_RU];
 
-const CORRCOEF_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
+const PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Input observations (rows are observations, columns are variables).",
-}];
+};
+const PARAM_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Second array with the same size as A; both arrays are vectorized.",
+};
+const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "nameValuePairs",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Alpha and Rows name-value arguments.",
+};
+const INPUTS_A: [BuiltinParamDescriptor; 1] = [PARAM_A];
+const INPUTS_A_B: [BuiltinParamDescriptor; 2] = [PARAM_A, PARAM_B];
+const INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [PARAM_A, PARAM_OPTIONS];
+const INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_A, PARAM_B, PARAM_OPTIONS];
 
-const CORRCOEF_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second dataset with matching row count.",
-    },
-];
-
-const CORRCOEF_INPUTS_X_NORMALIZATION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "normalization",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0"),
-        description: "Normalization flag: 0 (unbiased) or 1 (biased).",
-    },
-];
-
-const CORRCOEF_INPUTS_X_ROWS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"rows\""),
-        description: "Rows option keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "rows_option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"all\""),
-        description: "Rows handling mode: 'all', 'complete', or 'pairwise'.",
-    },
-];
-
-const CORRCOEF_INPUTS_X_Y_NORMALIZATION: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second dataset with matching row count.",
-    },
-    BuiltinParamDescriptor {
-        name: "normalization",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0"),
-        description: "Normalization flag: 0 (unbiased) or 1 (biased).",
-    },
-];
-
-const CORRCOEF_INPUTS_X_Y_ROWS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second dataset with matching row count.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"rows\""),
-        description: "Rows option keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "rows_option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"all\""),
-        description: "Rows handling mode: 'all', 'complete', or 'pairwise'.",
-    },
-];
-
-const CORRCOEF_INPUTS_X_NORM_ROWS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input observations (rows are observations, columns are variables).",
-    },
-    BuiltinParamDescriptor {
-        name: "normalization",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0"),
-        description: "Normalization flag: 0 (unbiased) or 1 (biased).",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"rows\""),
-        description: "Rows option keyword.",
-    },
-    BuiltinParamDescriptor {
-        name: "rows_option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"all\""),
-        description: "Rows handling mode: 'all', 'complete', or 'pairwise'.",
-    },
-];
-
-const CORRCOEF_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+const CORRCOEF_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
     BuiltinSignatureDescriptor {
-        label: "R = corrcoef(X)",
-        inputs: &CORRCOEF_INPUTS_X,
-        outputs: &CORRCOEF_OUTPUT,
+        label: "R = corrcoef(A)",
+        inputs: &INPUTS_A,
+        outputs: &OUTPUTS_R,
     },
     BuiltinSignatureDescriptor {
-        label: "R = corrcoef(X, Y)",
-        inputs: &CORRCOEF_INPUTS_X_Y,
-        outputs: &CORRCOEF_OUTPUT,
+        label: "R = corrcoef(A, B)",
+        inputs: &INPUTS_A_B,
+        outputs: &OUTPUTS_R,
     },
     BuiltinSignatureDescriptor {
-        label: "R = corrcoef(X, normalization)",
-        inputs: &CORRCOEF_INPUTS_X_NORMALIZATION,
-        outputs: &CORRCOEF_OUTPUT,
+        label: "[R, P] = corrcoef(A)",
+        inputs: &INPUTS_A,
+        outputs: &OUTPUTS_R_P,
     },
     BuiltinSignatureDescriptor {
-        label: "R = corrcoef(X, \"rows\", rows_option)",
-        inputs: &CORRCOEF_INPUTS_X_ROWS,
-        outputs: &CORRCOEF_OUTPUT,
+        label: "[R, P] = corrcoef(A, B)",
+        inputs: &INPUTS_A_B,
+        outputs: &OUTPUTS_R_P,
     },
     BuiltinSignatureDescriptor {
-        label: "R = corrcoef(X, Y, normalization)",
-        inputs: &CORRCOEF_INPUTS_X_Y_NORMALIZATION,
-        outputs: &CORRCOEF_OUTPUT,
+        label: "[R, P, RL, RU] = corrcoef(A)",
+        inputs: &INPUTS_A,
+        outputs: &OUTPUTS_FULL,
     },
     BuiltinSignatureDescriptor {
-        label: "R = corrcoef(X, Y, \"rows\", rows_option)",
-        inputs: &CORRCOEF_INPUTS_X_Y_ROWS,
-        outputs: &CORRCOEF_OUTPUT,
+        label: "[R, P, RL, RU] = corrcoef(A, B)",
+        inputs: &INPUTS_A_B,
+        outputs: &OUTPUTS_FULL,
     },
     BuiltinSignatureDescriptor {
-        label: "R = corrcoef(X, normalization, \"rows\", rows_option)",
-        inputs: &CORRCOEF_INPUTS_X_NORM_ROWS,
-        outputs: &CORRCOEF_OUTPUT,
+        label: "___ = corrcoef(A, Name, Value)",
+        inputs: &INPUTS_A_OPTIONS,
+        outputs: &OUTPUTS_FULL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "___ = corrcoef(A, B, Name, Value)",
+        inputs: &INPUTS_A_B_OPTIONS,
+        outputs: &OUTPUTS_FULL,
     },
 ];
 
@@ -225,25 +136,25 @@ const CORRCOEF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDesc
     message: "corrcoef: invalid argument",
 };
 
-const CORRCOEF_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:corrcoef:ComplexUnsupported"),
-    when: "Any input argument is complex-valued.",
-    message: "corrcoef: complex inputs are not supported yet",
+const CORRCOEF_ERROR_COMPLEX_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.COMPLEX_OUTPUTS",
+    identifier: Some("RunMat:corrcoef:ComplexOutputs"),
+    when: "P-values or confidence bounds are requested for complex correlation coefficients.",
+    message: "corrcoef: P-values and confidence bounds are invalid for complex coefficients",
 };
 
-const CORRCOEF_ERROR_ROWS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.ROWS_MISMATCH",
-    identifier: Some("RunMat:corrcoef:RowsMismatch"),
-    when: "Two input datasets do not have the same number of rows.",
-    message: "corrcoef: inputs must have the same number of rows",
+const CORRCOEF_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.SIZE_MISMATCH",
+    identifier: Some("RunMat:corrcoef:SizeMismatch"),
+    when: "A and B do not have the same size.",
+    message: "corrcoef: A and B must have the same size",
 };
 
-const CORRCOEF_ERROR_NORMALIZATION_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.NORMALIZATION_INVALID",
-    identifier: Some("RunMat:corrcoef:NormalizationInvalid"),
-    when: "Normalization flag is non-finite, non-integer, or not 0/1.",
-    message: "corrcoef: normalization flag is invalid",
+const CORRCOEF_ERROR_ALPHA_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.ALPHA_INVALID",
+    identifier: Some("RunMat:corrcoef:AlphaInvalid"),
+    when: "Alpha is not a finite single/double scalar strictly between zero and one.",
+    message: "corrcoef: Alpha must be a floating scalar in the open interval (0,1)",
 };
 
 const CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -253,11 +164,11 @@ const CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorD
     message: "corrcoef: unknown rows option",
 };
 
-const CORRCOEF_ERROR_NORMALIZATION_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CORRCOEF.NORMALIZATION_DUPLICATE",
-    identifier: Some("RunMat:corrcoef:NormalizationDuplicate"),
-    when: "Normalization flag is provided more than once.",
-    message: "corrcoef: normalization flag specified more than once",
+const CORRCOEF_ERROR_OPTION_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.OPTION_DUPLICATE",
+    identifier: Some("RunMat:corrcoef:OptionDuplicate"),
+    when: "Alpha or Rows is specified more than once.",
+    message: "corrcoef: option specified more than once",
 };
 
 const CORRCOEF_ERROR_ROWS_OPTION_MALFORMED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -290,20 +201,60 @@ const CORRCOEF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const CORRCOEF_ERRORS: [BuiltinErrorDescriptor; 10] = [
     CORRCOEF_ERROR_INVALID_ARGUMENT,
-    CORRCOEF_ERROR_COMPLEX_UNSUPPORTED,
-    CORRCOEF_ERROR_ROWS_MISMATCH,
-    CORRCOEF_ERROR_NORMALIZATION_INVALID,
+    CORRCOEF_ERROR_COMPLEX_OUTPUTS,
+    CORRCOEF_ERROR_SIZE_MISMATCH,
+    CORRCOEF_ERROR_ALPHA_INVALID,
     CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN,
-    CORRCOEF_ERROR_NORMALIZATION_DUPLICATE,
+    CORRCOEF_ERROR_OPTION_DUPLICATE,
     CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
     CORRCOEF_ERROR_OPTION_UNKNOWN,
     CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS,
     CORRCOEF_ERROR_INTERNAL,
 ];
 
+const CORRCOEF_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "corrcoef-integer-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "corrcoef with typed-integer observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CorrcoefIntegerDataExtension"),
+};
+
+const CORRCOEF_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "corrcoef-logical-data",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "corrcoef with logical observation data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:CorrcoefLogicalDataExtension"),
+};
+
+const CORRCOEF_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    CORRCOEF_INTEGER_DATA_EXTENSION,
+    CORRCOEF_LOGICAL_DATA_EXTENSION,
+];
+
+const CORRCOEF_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A_or_B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented real or complex observation domain is single or double; RunMat mode additionally accepts all eight real and componentwise-complex integer classes.",
+    }];
+
+const CORRCOEF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "___ = corrcoef(integer_A_or_B, Name, Value)",
+        inputs: &CORRCOEF_INTEGER_DATA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat preserves exact integer component differences while centering each variable before producing real or complex double correlation coefficients.",
+    }];
+
 pub const CORRCOEF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &CORRCOEF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &CORRCOEF_ERRORS,
 };
@@ -365,35 +316,48 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "corrcoef",
     category = "stats/summary",
     summary = "Compute Pearson correlation coefficients.",
-    keywords = "corrcoef,correlation,statistics,rows,normalization,gpu",
+    keywords = "corrcoef,correlation,statistics,rows,alpha,p-value,confidence,gpu",
     accel = "reduction",
     type_resolver(corrcoef_type),
     descriptor(crate::builtins::stats::summary::corrcoef::CORRCOEF_DESCRIPTOR),
+    extensions(CORRCOEF_EXTENSIONS),
+    integer_capabilities(CORRCOEF_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
 async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CorrcoefArgs::parse(value, rest)?;
-    if let Some(result) = corrcoef_try_gpu(&args).await? {
-        return Ok(result);
+    ensure_corrcoef_extensions(&args)?;
+    let requested_outputs = crate::output_count::current_output_count();
+    if requested_outputs == Some(0) {
+        return Ok(Value::OutputList(Vec::new()));
     }
-    corrcoef_host(args).await
+    if requested_outputs.is_none() || requested_outputs == Some(1) {
+        if let Some(result) = corrcoef_try_gpu(&args).await? {
+            return Ok(match requested_outputs {
+                Some(1) => Value::OutputList(vec![result]),
+                _ => result,
+            });
+        }
+    }
+    corrcoef_host(args, requested_outputs).await
 }
 
 /// Exposed for acceleration providers that need the host reference implementation.
 pub fn corrcoef_from_tensors(
     left: Tensor,
     right: Option<Tensor>,
-    normalization: CorrcoefNormalization,
+    _normalization: CorrcoefNormalization,
     rows: CorrcoefRows,
 ) -> BuiltinResult<Tensor> {
-    let matrix = combine_tensors(left, right)?;
-    match rows {
-        CorrcoefRows::All => corrcoef_dense(&matrix, normalization),
-        CorrcoefRows::Complete => {
-            let filtered = filter_complete_rows(&matrix);
-            corrcoef_dense(&filtered, normalization)
+    match evaluate_inputs(
+        NumericInput::Real(left),
+        right.map(NumericInput::Real),
+        rows,
+    )? {
+        CorrcoefEvaluation::Real(evaluation) => Ok(evaluation.r),
+        CorrcoefEvaluation::Complex(_) => {
+            unreachable!("real tensor inputs cannot produce a complex result")
         }
-        CorrcoefRows::Pairwise => corrcoef_pairwise(&matrix, normalization),
     }
 }
 
@@ -401,105 +365,206 @@ pub fn corrcoef_from_tensors(
 struct CorrcoefArgs {
     first: Value,
     second: Option<Value>,
-    normalization: CorrcoefNormalization,
     rows: CorrcoefRows,
+    alpha: f64,
 }
 
 impl CorrcoefArgs {
     fn parse(first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
-        let mut second: Option<Value> = None;
-        let mut normalization: Option<CorrcoefNormalization> = None;
+        let mut values = rest.into_iter();
+        let mut second = None;
         let mut rows = CorrcoefRows::All;
-        let mut iter = rest.into_iter().peekable();
+        let mut alpha = 0.05;
+        let mut rows_seen = false;
+        let mut alpha_seen = false;
+        let mut pending = values.next();
 
-        while let Some(arg) = iter.next() {
-            match arg {
-                Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-                    let key = value_to_string(&arg)
-                        .ok_or_else(|| corrcoef_error(&CORRCOEF_ERROR_INVALID_ARGUMENT))?
-                        .to_ascii_lowercase();
-                    match key.as_str() {
-                        "rows" => {
-                            let option = iter.next().ok_or_else(|| {
-                                corrcoef_error_with_detail(
-                                    &CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
-                                    "expected a rows option after 'rows'",
-                                )
-                            })?;
-                            let choice = value_to_string(&option)
-                                .ok_or_else(|| {
-                                    corrcoef_error_with_detail(
-                                        &CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
-                                        "rows option must be a string value",
-                                    )
-                                })?
-                                .to_ascii_lowercase();
-                            rows = parse_rows_option(&choice)?;
-                        }
-                        _ => {
-                            return Err(corrcoef_error_with_detail(
-                                &CORRCOEF_ERROR_OPTION_UNKNOWN,
-                                format!("'{key}'"),
-                            ))
-                        }
-                    }
-                }
-                Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-                    if normalization.is_some() {
-                        return Err(corrcoef_error(&CORRCOEF_ERROR_NORMALIZATION_DUPLICATE));
-                    }
-                    normalization = Some(parse_normalization(arg)?);
-                }
-                Value::Tensor(_) | Value::LogicalArray(_) | Value::GpuTensor(_) => {
+        if pending.as_ref().is_some_and(|value| !is_text_value(value)) {
+            second = pending.take();
+            pending = values.next();
+        }
+
+        while let Some(name) = pending {
+            let key = value_to_string(&name)
+                .ok_or_else(|| {
                     if second.is_some() {
-                        return Err(corrcoef_error(&CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS));
+                        corrcoef_error(&CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS)
+                    } else {
+                        corrcoef_error(&CORRCOEF_ERROR_INVALID_ARGUMENT)
                     }
-                    second = Some(arg);
+                })?
+                .trim()
+                .to_ascii_lowercase();
+            let option = values.next().ok_or_else(|| {
+                corrcoef_error_with_detail(
+                    &CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
+                    format!("option '{key}' requires a value"),
+                )
+            })?;
+            match key.as_str() {
+                "rows" => {
+                    if rows_seen {
+                        return Err(corrcoef_error_with_detail(
+                            &CORRCOEF_ERROR_OPTION_DUPLICATE,
+                            "'Rows'",
+                        ));
+                    }
+                    let choice = value_to_string(&option).ok_or_else(|| {
+                        corrcoef_error_with_detail(
+                            &CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
+                            "Rows must be a string value",
+                        )
+                    })?;
+                    rows = parse_rows_option(choice.trim())?;
+                    rows_seen = true;
                 }
-                Value::ComplexTensor(_) => {
-                    return Err(corrcoef_error(&CORRCOEF_ERROR_COMPLEX_UNSUPPORTED));
+                "alpha" => {
+                    if alpha_seen {
+                        return Err(corrcoef_error_with_detail(
+                            &CORRCOEF_ERROR_OPTION_DUPLICATE,
+                            "'Alpha'",
+                        ));
+                    }
+                    alpha = parse_alpha(&option)?;
+                    alpha_seen = true;
                 }
-                other => {
+                _ => {
                     return Err(corrcoef_error_with_detail(
-                        &CORRCOEF_ERROR_INVALID_ARGUMENT,
-                        format!("{other:?}"),
+                        &CORRCOEF_ERROR_OPTION_UNKNOWN,
+                        format!("'{key}'"),
                     ))
                 }
             }
+            pending = values.next();
         }
 
         Ok(Self {
             first,
             second,
-            normalization: normalization.unwrap_or(CorrcoefNormalization::Unbiased),
             rows,
+            alpha,
         })
     }
+}
+
+fn is_text_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    )
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(
+            value,
+            Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()
+        )
+        || matches!(
+            value,
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        )
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(
+            value,
+            Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)
+        )
+}
+
+fn ensure_corrcoef_extensions(args: &CorrcoefArgs) -> BuiltinResult<()> {
+    if is_typed_integer_value(&args.first)
+        || args.second.as_ref().is_some_and(is_typed_integer_value)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CORRCOEF_INTEGER_DATA_EXTENSION,
+            NAME,
+        )?;
+    }
+    if is_logical_value(&args.first) || args.second.as_ref().is_some_and(is_logical_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &CORRCOEF_LOGICAL_DATA_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
 }
 
 async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     if args.rows != CorrcoefRows::All {
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-
     let first_handle = match &args.first {
-        Value::GpuTensor(handle) => handle.clone(),
+        Value::GpuTensor(handle) => handle,
         _ => return Ok(None),
     };
+    if first_handle.shape.len() > 2 {
+        return Err(corrcoef_error_with_detail(
+            &CORRCOEF_ERROR_INVALID_ARGUMENT,
+            "A must be a matrix",
+        ));
+    }
+    if runmat_accelerate_api::handle_integer_type(first_handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(first_handle)
+        || runmat_accelerate_api::handle_storage(first_handle)
+            == GpuTensorStorage::ComplexInterleaved
+    {
+        return Ok(None);
+    }
+    let provider = match runmat_accelerate_api::provider_for_handle(first_handle)
+        .or_else(runmat_accelerate_api::provider)
+    {
+        Some(provider) => provider,
+        None => return Ok(None),
+    };
     let maybe_second_handle = match &args.second {
-        Some(Value::GpuTensor(handle)) => Some(handle.clone()),
+        Some(Value::GpuTensor(handle)) => {
+            if !same_size(&first_handle.shape, &handle.shape) {
+                return Err(corrcoef_error(&CORRCOEF_ERROR_SIZE_MISMATCH));
+            }
+            if runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_storage(handle)
+                    == GpuTensorStorage::ComplexInterleaved
+            {
+                return Ok(None);
+            }
+            let Some(second_provider) = runmat_accelerate_api::provider_for_handle(handle)
+                .or_else(runmat_accelerate_api::provider)
+            else {
+                return Ok(None);
+            };
+            if !std::ptr::eq(provider, second_provider) {
+                return Ok(None);
+            }
+            Some(handle)
+        }
         Some(_) => return Ok(None),
         None => None,
     };
 
     let mut owned_concat: Option<GpuTensorHandle> = None;
     let matrix_handle = if let Some(second) = maybe_second_handle {
-        let handles = [first_handle.clone(), second];
-        match provider.cat(2, &handles) {
+        let rows = first_handle.shape.iter().copied().product::<usize>();
+        let left = match provider.reshape(first_handle, &[rows, 1]) {
+            Ok(handle) => handle,
+            Err(_) => return Ok(None),
+        };
+        let right = match provider.reshape(second, &[rows, 1]) {
+            Ok(handle) => handle,
+            Err(_) => {
+                release_gpu_reshape(provider, first_handle, &left);
+                return Ok(None);
+            }
+        };
+        let result = provider.cat(2, &[left.clone(), right.clone()]);
+        release_gpu_reshape(provider, first_handle, &left);
+        release_gpu_reshape(provider, second, &right);
+        match result {
             Ok(concat) => {
                 owned_concat = Some(concat.clone());
                 concat
@@ -507,11 +572,11 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
             Err(_) => return Ok(None),
         }
     } else {
-        first_handle
+        first_handle.clone()
     };
 
     let options = CorrcoefOptions {
-        normalization: args.normalization,
+        normalization: CorrcoefNormalization::Unbiased,
         rows: args.rows,
     };
 
@@ -531,26 +596,50 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     }
 }
 
-async fn corrcoef_host(args: CorrcoefArgs) -> BuiltinResult<Value> {
+fn release_gpu_reshape(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    original: &GpuTensorHandle,
+    reshaped: &GpuTensorHandle,
+) {
+    if reshaped.buffer_id == original.buffer_id {
+        let _ = provider.reshape(reshaped, &original.shape);
+    } else {
+        let _ = provider.free(reshaped);
+    }
+}
+
+async fn corrcoef_host(
+    args: CorrcoefArgs,
+    requested_outputs: Option<usize>,
+) -> BuiltinResult<Value> {
     let CorrcoefArgs {
         first,
         second,
-        normalization,
         rows,
+        alpha,
     } = args;
-    let left = value_to_tensor_gather(first).await?;
+    let left = value_to_numeric_input_gather(first).await?;
     let right = match second {
-        Some(value) => Some(value_to_tensor_gather(value).await?),
+        Some(value) => Some(value_to_numeric_input_gather(value).await?),
         None => None,
     };
-    let tensor = corrcoef_from_tensors(left, right, normalization, rows)?;
-    Ok(Value::Tensor(tensor))
+    let evaluation = evaluate_inputs(left, right, rows)?;
+    evaluation.outputs(requested_outputs, alpha)
 }
 
-async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
-    match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
-        other => tensor::value_into_tensor_for("corrcoef", other).map_err(corrcoef_internal_error),
+async fn value_to_numeric_input_gather(value: Value) -> BuiltinResult<NumericInput> {
+    let gathered = match value {
+        Value::GpuTensor(handle) => Value::Tensor(gpu_helpers::gather_tensor_async(&handle).await?),
+        other => other,
+    };
+    match gathered {
+        Value::Complex(real, imag) => ComplexTensor::new(vec![(real, imag)], vec![1, 1])
+            .map(NumericInput::Complex)
+            .map_err(corrcoef_internal_error),
+        Value::ComplexTensor(tensor) => Ok(NumericInput::Complex(tensor)),
+        other => tensor::value_into_tensor_for("corrcoef", other)
+            .map(NumericInput::Real)
+            .map_err(corrcoef_internal_error),
     }
 }
 
@@ -568,56 +657,157 @@ fn parse_rows_option(value: &str) -> BuiltinResult<CorrcoefRows> {
     }
 }
 
-fn parse_normalization(value: Value) -> BuiltinResult<CorrcoefNormalization> {
+fn parse_alpha(value: &Value) -> BuiltinResult<f64> {
     match value {
-        Value::Int(i) => match i.to_i64() {
-            0 => Ok(CorrcoefNormalization::Unbiased),
-            1 => Ok(CorrcoefNormalization::Biased),
-            other => Err(corrcoef_error_with_detail(
-                &CORRCOEF_ERROR_NORMALIZATION_INVALID,
-                format!("expected 0 or 1, received {other}"),
-            )),
-        },
-        Value::Num(n) => {
-            if !n.is_finite() {
-                return Err(corrcoef_error_with_detail(
-                    &CORRCOEF_ERROR_NORMALIZATION_INVALID,
-                    "value must be finite",
-                ));
-            }
-            let rounded = n.round();
-            if (rounded - n).abs() > 1.0e-12 {
-                return Err(corrcoef_error_with_detail(
-                    &CORRCOEF_ERROR_NORMALIZATION_INVALID,
-                    "value must be an integer",
-                ));
-            }
-            match rounded as i64 {
-                0 => Ok(CorrcoefNormalization::Unbiased),
-                1 => Ok(CorrcoefNormalization::Biased),
-                other => Err(corrcoef_error_with_detail(
-                    &CORRCOEF_ERROR_NORMALIZATION_INVALID,
-                    format!("expected 0 or 1, received {other}"),
-                )),
+        Value::Num(value) if value.is_finite() && *value > 0.0 && *value < 1.0 => Ok(*value),
+        Value::Tensor(tensor)
+            if tensor.len() == 1
+                && tensor.integer_storage().is_none()
+                && matches!(
+                    tensor.numeric_dtype(),
+                    runmat_builtins::NumericDType::F32 | runmat_builtins::NumericDType::F64
+                ) =>
+        {
+            let value = tensor.materialize_f64()[0];
+            if value.is_finite() && value > 0.0 && value < 1.0 {
+                Ok(value)
+            } else {
+                Err(corrcoef_error(&CORRCOEF_ERROR_ALPHA_INVALID))
             }
         }
-        Value::Bool(b) => Ok(if b {
-            CorrcoefNormalization::Biased
-        } else {
-            CorrcoefNormalization::Unbiased
-        }),
-        other => Err(corrcoef_error_with_detail(
-            &CORRCOEF_ERROR_NORMALIZATION_INVALID,
-            format!("value must be numeric or logical, received {other:?}"),
-        )),
+        _ => Err(corrcoef_error(&CORRCOEF_ERROR_ALPHA_INVALID)),
     }
 }
 
-fn normalization_denominator(norm: CorrcoefNormalization, len: usize) -> f64 {
-    match norm {
-        CorrcoefNormalization::Unbiased => (len as f64) - 1.0,
-        CorrcoefNormalization::Biased => len as f64,
+#[derive(Debug)]
+enum NumericInput {
+    Real(Tensor),
+    Complex(ComplexTensor),
+}
+
+impl NumericInput {
+    fn shape(&self) -> &[usize] {
+        match self {
+            Self::Real(tensor) => &tensor.shape,
+            Self::Complex(tensor) => &tensor.shape,
+        }
     }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Real(tensor) => tensor.len(),
+            Self::Complex(tensor) => tensor.len(),
+        }
+    }
+
+    fn is_complex(&self) -> bool {
+        matches!(self, Self::Complex(_))
+    }
+}
+
+#[derive(Debug)]
+enum CorrcoefEvaluation {
+    Real(RealEvaluation),
+    Complex(ComplexTensor),
+}
+
+#[derive(Debug)]
+struct RealEvaluation {
+    r: Tensor,
+    counts: Vec<usize>,
+}
+
+impl CorrcoefEvaluation {
+    fn outputs(self, requested_outputs: Option<usize>, alpha: f64) -> BuiltinResult<Value> {
+        match self {
+            Self::Complex(r) => match requested_outputs {
+                None => Ok(Value::ComplexTensor(r)),
+                Some(1) => Ok(Value::OutputList(vec![Value::ComplexTensor(r)])),
+                Some(_) => Err(corrcoef_error(&CORRCOEF_ERROR_COMPLEX_OUTPUTS)),
+            },
+            Self::Real(evaluation) => evaluation.outputs(requested_outputs, alpha),
+        }
+    }
+}
+
+impl RealEvaluation {
+    fn outputs(self, requested_outputs: Option<usize>, alpha: f64) -> BuiltinResult<Value> {
+        let RealEvaluation { r, counts } = self;
+        let Some(count) = requested_outputs else {
+            return Ok(Value::Tensor(r));
+        };
+        if count > 4 {
+            return Err(corrcoef_error_with_detail(
+                &CORRCOEF_ERROR_INVALID_ARGUMENT,
+                "too many output arguments; maximum is 4",
+            ));
+        }
+        let mut outputs = Vec::with_capacity(count);
+        if count >= 1 {
+            outputs.push(Value::Tensor(r.clone()));
+        }
+        if count >= 2 {
+            outputs.push(Value::Tensor(p_values(&r, &counts)?));
+        }
+        if count >= 3 {
+            let (lower, upper) = confidence_bounds(&r, &counts, alpha)?;
+            outputs.push(Value::Tensor(lower));
+            if count >= 4 {
+                outputs.push(Value::Tensor(upper));
+            }
+        }
+        Ok(Value::OutputList(outputs))
+    }
+}
+
+fn evaluate_inputs(
+    left: NumericInput,
+    right: Option<NumericInput>,
+    rows: CorrcoefRows,
+) -> BuiltinResult<CorrcoefEvaluation> {
+    if left.shape().len() > 2 {
+        return Err(corrcoef_error_with_detail(
+            &CORRCOEF_ERROR_INVALID_ARGUMENT,
+            "A must be a matrix",
+        ));
+    }
+    if let Some(right) = right {
+        if !same_size(left.shape(), right.shape()) {
+            return Err(corrcoef_error(&CORRCOEF_ERROR_SIZE_MISMATCH));
+        }
+        if left.is_complex() || right.is_complex() {
+            let matrix = ComplexMatrix::from_pair(left, right)?;
+            return evaluate_complex_matrix(matrix, rows).map(CorrcoefEvaluation::Complex);
+        }
+        let (NumericInput::Real(left), NumericInput::Real(right)) = (left, right) else {
+            unreachable!("complex inputs handled above")
+        };
+        evaluate_real_matrix(Matrix::from_pair(left, right), rows).map(CorrcoefEvaluation::Real)
+    } else {
+        match left {
+            NumericInput::Real(tensor) => evaluate_real_matrix(Matrix::from_single(tensor), rows)
+                .map(CorrcoefEvaluation::Real),
+            NumericInput::Complex(tensor) => {
+                evaluate_complex_matrix(ComplexMatrix::from_single(tensor), rows)
+                    .map(CorrcoefEvaluation::Complex)
+            }
+        }
+    }
+}
+
+fn same_size(left: &[usize], right: &[usize]) -> bool {
+    canonical_shape(left) == canonical_shape(right)
+}
+
+fn canonical_shape(shape: &[usize]) -> Vec<usize> {
+    let mut canonical = shape.to_vec();
+    while canonical.len() > 2 && canonical.last() == Some(&1) {
+        canonical.pop();
+    }
+    while canonical.len() < 2 {
+        canonical.push(1);
+    }
+    canonical
 }
 
 #[derive(Debug, Clone)]
@@ -628,310 +818,512 @@ struct Matrix {
 }
 
 impl Matrix {
-    fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
-            return Err(corrcoef_error_with_detail(
-                &CORRCOEF_ERROR_INVALID_ARGUMENT,
-                "inputs must be 2-D matrices or vectors",
-            ));
+    fn from_single(tensor: Tensor) -> Self {
+        let (rows, cols) = single_geometry(&tensor.shape, tensor.len());
+        Self {
+            data: centered_tensor_values(&tensor, rows, cols),
+            rows,
+            cols,
         }
-        Ok(Self {
-            rows: tensor.rows(),
-            cols: tensor.cols(),
-            data: tensor.data,
-        })
+    }
+
+    fn from_pair(left: Tensor, right: Tensor) -> Self {
+        let rows = left.len();
+        if rows == 1 {
+            return Self {
+                data: centered_scalar_pair(&left, &right),
+                rows: 2,
+                cols: 1,
+            };
+        }
+        let mut data = centered_tensor_values(&left, rows, 1);
+        data.extend(centered_tensor_values(&right, rows, 1));
+        Self {
+            data,
+            rows,
+            cols: 2,
+        }
     }
 
     #[inline]
     fn get(&self, row: usize, col: usize) -> f64 {
         self.data[row + col * self.rows]
     }
+}
 
-    #[inline]
-    fn column(&self, col: usize) -> &[f64] {
-        let start = col * self.rows;
-        let end = start + self.rows;
-        &self.data[start..end]
+fn centered_scalar_pair(left: &Tensor, right: &Tensor) -> Vec<f64> {
+    match (left.integer_storage(), right.integer_storage()) {
+        (Some(left), Some(right)) => {
+            let left = left
+                .value_at(0)
+                .map(|value| int_value_to_i128(&value))
+                .unwrap_or(0);
+            let right = right
+                .value_at(0)
+                .map(|value| int_value_to_i128(&value))
+                .unwrap_or(left);
+            vec![0.0, (right - left) as f64]
+        }
+        _ => vec![left.materialize_f64()[0], right.materialize_f64()[0]],
     }
 }
 
-fn combine_tensors(left: Tensor, right: Option<Tensor>) -> BuiltinResult<Matrix> {
-    let mut matrix = Matrix::from_tensor(left)?;
-    if let Some(second) = right {
-        let right_matrix = Matrix::from_tensor(second)?;
-        if matrix.rows != right_matrix.rows {
-            return Err(corrcoef_error(&CORRCOEF_ERROR_ROWS_MISMATCH));
-        }
-        matrix.cols += right_matrix.cols;
-        matrix
-            .data
-            .extend_from_slice(&right_matrix.data[..right_matrix.rows * right_matrix.cols]);
+fn single_geometry(shape: &[usize], len: usize) -> (usize, usize) {
+    let (rows, cols) = match shape {
+        [] => (1, 1),
+        [count] => (1, *count),
+        [rows, cols, ..] => (*rows, *cols),
+    };
+    if rows == 1 || cols == 1 {
+        (len, 1)
+    } else {
+        (rows, cols)
     }
-    Ok(matrix)
+}
+
+fn centered_tensor_values(tensor: &Tensor, rows: usize, cols: usize) -> Vec<f64> {
+    let Some(storage) = tensor.integer_storage() else {
+        return tensor.materialize_f64();
+    };
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    for col in 0..cols {
+        let start = col * rows;
+        let anchor = storage
+            .value_at(start)
+            .map(|value| int_value_to_i128(&value))
+            .unwrap_or(0);
+        for index in start..start + rows {
+            let value = storage
+                .value_at(index)
+                .map(|value| int_value_to_i128(&value))
+                .unwrap_or(anchor);
+            values.push((value - anchor) as f64);
+        }
+    }
+    values
+}
+
+fn int_value_to_i128(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
+}
+
+fn evaluate_real_matrix(matrix: Matrix, rows: CorrcoefRows) -> BuiltinResult<RealEvaluation> {
+    let matrix = match rows {
+        CorrcoefRows::Complete => filter_complete_rows(&matrix),
+        CorrcoefRows::All | CorrcoefRows::Pairwise => matrix,
+    };
+    let cols = matrix.cols;
+    let mut coefficients = vec![f64::NAN; cols * cols];
+    let mut counts = vec![0usize; cols * cols];
+    for lhs in 0..cols {
+        for rhs in lhs..cols {
+            let (coefficient, count) = real_pair(&matrix, lhs, rhs, rows == CorrcoefRows::Pairwise);
+            set_symmetric(&mut coefficients, cols, lhs, rhs, coefficient);
+            set_symmetric(&mut counts, cols, lhs, rhs, count);
+        }
+    }
+    Ok(RealEvaluation {
+        r: Tensor::new(coefficients, vec![cols, cols]).map_err(corrcoef_internal_error)?,
+        counts,
+    })
 }
 
 fn filter_complete_rows(matrix: &Matrix) -> Matrix {
-    if matrix.rows == 0 {
-        return Matrix {
-            data: Vec::new(),
-            rows: 0,
-            cols: matrix.cols,
-        };
-    }
-
-    let mut valid_rows = Vec::new();
-    for row in 0..matrix.rows {
-        let mut is_valid = true;
-        for col in 0..matrix.cols {
-            let value = matrix.get(row, col);
-            if !value.is_finite() {
-                is_valid = false;
-                break;
-            }
-        }
-        if is_valid {
-            valid_rows.push(row);
-        }
-    }
-
-    let new_rows = valid_rows.len();
-    if new_rows == 0 {
-        return Matrix {
-            data: Vec::new(),
-            rows: 0,
-            cols: matrix.cols,
-        };
-    }
-
-    let mut data = Vec::with_capacity(new_rows * matrix.cols);
+    let valid = (0..matrix.rows)
+        .filter(|&row| (0..matrix.cols).all(|col| !matrix.get(row, col).is_nan()))
+        .collect::<Vec<_>>();
+    let mut data = Vec::with_capacity(valid.len() * matrix.cols);
     for col in 0..matrix.cols {
-        for &row in &valid_rows {
-            data.push(matrix.get(row, col));
-        }
+        data.extend(valid.iter().map(|&row| matrix.get(row, col)));
     }
-
     Matrix {
         data,
-        rows: new_rows,
+        rows: valid.len(),
         cols: matrix.cols,
     }
 }
 
-fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> BuiltinResult<Tensor> {
-    let cols = matrix.cols;
-    if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(corrcoef_internal_error);
+fn real_pair(matrix: &Matrix, lhs: usize, rhs: usize, pairwise: bool) -> (f64, usize) {
+    let mut xs = Vec::with_capacity(matrix.rows);
+    let mut ys = Vec::with_capacity(matrix.rows);
+    for row in 0..matrix.rows {
+        let x = matrix.get(row, lhs);
+        let y = matrix.get(row, rhs);
+        if !x.is_nan() && !y.is_nan() {
+            xs.push(x);
+            ys.push(y);
+        } else if !pairwise {
+            return (f64::NAN, matrix.rows);
+        }
+    }
+    (real_correlation(&xs, &ys), xs.len())
+}
+
+fn real_correlation(xs: &[f64], ys: &[f64]) -> f64 {
+    let count = xs.len().min(ys.len());
+    if count < 2 {
+        return f64::NAN;
+    }
+    let mean_x = xs.iter().take(count).sum::<f64>() / count as f64;
+    let mean_y = ys.iter().take(count).sum::<f64>() / count as f64;
+    let mut sum_xx = 0.0;
+    let mut sum_yy = 0.0;
+    let mut sum_xy = 0.0;
+    for index in 0..count {
+        let dx = xs[index] - mean_x;
+        let dy = ys[index] - mean_y;
+        sum_xx += dx * dx;
+        sum_yy += dy * dy;
+        sum_xy += dx * dy;
+    }
+    if sum_xx <= 0.0 || sum_yy <= 0.0 {
+        f64::NAN
+    } else {
+        clamp_correlation(sum_xy / (sum_xx.sqrt() * sum_yy.sqrt()))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ComplexMatrix {
+    data: Vec<Complex64>,
+    rows: usize,
+    cols: usize,
+}
+
+impl ComplexMatrix {
+    fn from_single(tensor: ComplexTensor) -> Self {
+        let (rows, cols) = single_geometry(&tensor.shape, tensor.len());
+        Self {
+            data: centered_complex_values(&tensor, rows, cols),
+            rows,
+            cols,
+        }
     }
 
-    let mut result = vec![f64::NAN; cols * cols];
-    let rows = matrix.rows;
-    if rows == 0 {
-        return Tensor::new(result, vec![cols, cols]).map_err(corrcoef_internal_error);
+    fn from_pair(left: NumericInput, right: NumericInput) -> BuiltinResult<Self> {
+        let rows = left.len();
+        if rows == 1 {
+            return Ok(Self {
+                data: centered_complex_scalar_pair(&left, &right),
+                rows: 2,
+                cols: 1,
+            });
+        }
+        let mut data = centered_numeric_values(left, rows)?;
+        data.extend(centered_numeric_values(right, rows)?);
+        Ok(Self {
+            data,
+            rows,
+            cols: 2,
+        })
     }
 
-    let denom = normalization_denominator(normalization, rows);
-    if denom <= 0.0 {
-        return Tensor::new(result, vec![cols, cols]).map_err(corrcoef_internal_error);
+    #[inline]
+    fn get(&self, row: usize, col: usize) -> Complex64 {
+        self.data[row + col * self.rows]
     }
+}
 
-    let mut means = vec![0.0; cols];
-    for (col, mean_slot) in means.iter_mut().enumerate() {
-        let column = matrix.column(col);
-        let mut sum = 0.0;
-        let mut count = 0usize;
-        for &value in column {
-            if value.is_finite() {
-                sum += value;
-                count += 1;
+fn centered_complex_scalar_pair(left: &NumericInput, right: &NumericInput) -> Vec<Complex64> {
+    let left = exact_complex_scalar(left);
+    let right = exact_complex_scalar(right);
+    match (left, right) {
+        (
+            ExactComplexScalar::Integer(left_real, left_imag),
+            ExactComplexScalar::Integer(right_real, right_imag),
+        ) => vec![
+            Complex64::new(0.0, 0.0),
+            Complex64::new(
+                (right_real - left_real) as f64,
+                (right_imag - left_imag) as f64,
+            ),
+        ],
+        (left, right) => vec![left.materialize(), right.materialize()],
+    }
+}
+
+enum ExactComplexScalar {
+    Integer(i128, i128),
+    Floating(Complex64),
+}
+
+impl ExactComplexScalar {
+    fn materialize(self) -> Complex64 {
+        match self {
+            Self::Integer(real, imag) => Complex64::new(real as f64, imag as f64),
+            Self::Floating(value) => value,
+        }
+    }
+}
+
+fn exact_complex_scalar(input: &NumericInput) -> ExactComplexScalar {
+    match input {
+        NumericInput::Real(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                let value = storage
+                    .value_at(0)
+                    .map(|value| int_value_to_i128(&value))
+                    .unwrap_or(0);
+                ExactComplexScalar::Integer(value, 0)
+            } else {
+                ExactComplexScalar::Floating(Complex64::new(tensor.materialize_f64()[0], 0.0))
             }
         }
-        *mean_slot = if count > 0 {
-            sum / (count as f64)
-        } else {
-            f64::NAN
-        };
-    }
-
-    for col in 0..cols {
-        let mean = means[col];
-        if !mean.is_finite() {
-            continue;
-        }
-        let mut variance = 0.0;
-        for row in 0..rows {
-            let value = matrix.get(row, col);
-            if !value.is_finite() {
-                variance = f64::NAN;
-                break;
+        NumericInput::Complex(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                let real = storage
+                    .real
+                    .value_at(0)
+                    .map(|value| int_value_to_i128(&value))
+                    .unwrap_or(0);
+                let imag = storage
+                    .imag
+                    .value_at(0)
+                    .map(|value| int_value_to_i128(&value))
+                    .unwrap_or(0);
+                ExactComplexScalar::Integer(real, imag)
+            } else {
+                let (real, imag) = tensor.materialize_f64()[0];
+                ExactComplexScalar::Floating(Complex64::new(real, imag))
             }
-            let dev = value - mean;
-            variance += dev * dev;
-        }
-        if variance.is_nan() {
-            continue;
-        }
-        variance /= denom;
-        if variance < 0.0 && variance > -1.0e-12 {
-            variance = 0.0;
-        }
-        let stddev = variance.sqrt();
-        let diag = if stddev > 0.0 { 1.0 } else { f64::NAN };
-        set_entry(&mut result, cols, col, col, diag);
-        for other in (col + 1)..cols {
-            let corr = column_pair_corr(matrix, col, other, &means, denom);
-            set_entry(&mut result, cols, col, other, corr);
         }
     }
-
-    Tensor::new(result, vec![cols, cols]).map_err(corrcoef_internal_error)
 }
 
-fn column_pair_corr(matrix: &Matrix, lhs: usize, rhs: usize, means: &[f64], denom: f64) -> f64 {
-    let mean_x = means[lhs];
-    let mean_y = means[rhs];
-    if !mean_x.is_finite() || !mean_y.is_finite() {
-        return f64::NAN;
-    }
-
-    let mut var_x = 0.0;
-    let mut var_y = 0.0;
-    let mut covariance = 0.0;
-    for row in 0..matrix.rows {
-        let a = matrix.get(row, lhs);
-        let b = matrix.get(row, rhs);
-        if !a.is_finite() || !b.is_finite() {
-            return f64::NAN;
-        }
-        let dx = a - mean_x;
-        let dy = b - mean_y;
-        var_x += dx * dx;
-        var_y += dy * dy;
-        covariance += dx * dy;
-    }
-
-    var_x /= denom;
-    var_y /= denom;
-    covariance /= denom;
-
-    clamp_correlation(divide_covariance(var_x, var_y, covariance))
+fn centered_numeric_values(input: NumericInput, rows: usize) -> BuiltinResult<Vec<Complex64>> {
+    Ok(match input {
+        NumericInput::Real(tensor) => centered_tensor_values(&tensor, rows, 1)
+            .into_iter()
+            .map(|value| Complex64::new(value, 0.0))
+            .collect(),
+        NumericInput::Complex(tensor) => centered_complex_values(&tensor, rows, 1),
+    })
 }
 
-fn corrcoef_pairwise(
-    matrix: &Matrix,
-    normalization: CorrcoefNormalization,
-) -> BuiltinResult<Tensor> {
-    let cols = matrix.cols;
-    if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(corrcoef_internal_error);
-    }
-    let mut result = vec![f64::NAN; cols * cols];
+fn centered_complex_values(tensor: &ComplexTensor, rows: usize, cols: usize) -> Vec<Complex64> {
+    let Some(storage) = tensor.integer_storage() else {
+        return tensor
+            .materialize_f64()
+            .into_iter()
+            .map(|(real, imag)| Complex64::new(real, imag))
+            .collect();
+    };
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for col in 0..cols {
-        set_entry(&mut result, cols, col, col, 1.0);
-        for other in (col + 1)..cols {
-            let corr = pairwise_corr(matrix, col, other, normalization);
-            set_entry(&mut result, cols, col, other, corr);
+        let start = col * rows;
+        let real_anchor = storage
+            .real
+            .value_at(start)
+            .map(|value| int_value_to_i128(&value))
+            .unwrap_or(0);
+        let imag_anchor = storage
+            .imag
+            .value_at(start)
+            .map(|value| int_value_to_i128(&value))
+            .unwrap_or(0);
+        for index in start..start + rows {
+            let real = storage
+                .real
+                .value_at(index)
+                .map(|value| int_value_to_i128(&value))
+                .unwrap_or(real_anchor);
+            let imag = storage
+                .imag
+                .value_at(index)
+                .map(|value| int_value_to_i128(&value))
+                .unwrap_or(imag_anchor);
+            values.push(Complex64::new(
+                (real - real_anchor) as f64,
+                (imag - imag_anchor) as f64,
+            ));
         }
     }
-    Tensor::new(result, vec![cols, cols]).map_err(corrcoef_internal_error)
+    values
 }
 
-fn pairwise_corr(
-    matrix: &Matrix,
-    lhs: usize,
-    rhs: usize,
-    normalization: CorrcoefNormalization,
-) -> f64 {
-    let mut xs = Vec::new();
-    let mut ys = Vec::new();
+fn evaluate_complex_matrix(
+    matrix: ComplexMatrix,
+    rows: CorrcoefRows,
+) -> BuiltinResult<ComplexTensor> {
+    let matrix = match rows {
+        CorrcoefRows::Complete => filter_complete_complex_rows(&matrix),
+        CorrcoefRows::All | CorrcoefRows::Pairwise => matrix,
+    };
+    let cols = matrix.cols;
+    let mut coefficients = vec![Complex64::new(f64::NAN, f64::NAN); cols * cols];
+    for lhs in 0..cols {
+        for rhs in lhs..cols {
+            let mut coefficient = complex_pair(&matrix, lhs, rhs, rows == CorrcoefRows::Pairwise);
+            if lhs == rhs && complex_is_finite(coefficient) {
+                coefficient = Complex64::new(1.0, 0.0);
+            }
+            set_hermitian(&mut coefficients, cols, lhs, rhs, coefficient);
+        }
+    }
+    ComplexTensor::new(
+        coefficients
+            .into_iter()
+            .map(|value| (value.re, value.im))
+            .collect(),
+        vec![cols, cols],
+    )
+    .map_err(corrcoef_internal_error)
+}
 
+fn filter_complete_complex_rows(matrix: &ComplexMatrix) -> ComplexMatrix {
+    let valid = (0..matrix.rows)
+        .filter(|&row| (0..matrix.cols).all(|col| !complex_has_nan(matrix.get(row, col))))
+        .collect::<Vec<_>>();
+    let mut data = Vec::with_capacity(valid.len() * matrix.cols);
+    for col in 0..matrix.cols {
+        data.extend(valid.iter().map(|&row| matrix.get(row, col)));
+    }
+    ComplexMatrix {
+        data,
+        rows: valid.len(),
+        cols: matrix.cols,
+    }
+}
+
+fn complex_pair(matrix: &ComplexMatrix, lhs: usize, rhs: usize, pairwise: bool) -> Complex64 {
+    let mut xs = Vec::with_capacity(matrix.rows);
+    let mut ys = Vec::with_capacity(matrix.rows);
     for row in 0..matrix.rows {
-        let a = matrix.get(row, lhs);
-        let b = matrix.get(row, rhs);
-        if a.is_finite() && b.is_finite() {
-            xs.push(a);
-            ys.push(b);
+        let x = matrix.get(row, lhs);
+        let y = matrix.get(row, rhs);
+        if !complex_has_nan(x) && !complex_has_nan(y) {
+            xs.push(x);
+            ys.push(y);
+        } else if !pairwise {
+            return Complex64::new(f64::NAN, f64::NAN);
         }
     }
-
-    compute_corr(&xs, &ys, normalization)
+    complex_correlation(&xs, &ys)
 }
 
-fn compute_corr(xs: &[f64], ys: &[f64], normalization: CorrcoefNormalization) -> f64 {
-    if xs.is_empty() || ys.is_empty() {
-        return f64::NAN;
+fn complex_correlation(xs: &[Complex64], ys: &[Complex64]) -> Complex64 {
+    let count = xs.len().min(ys.len());
+    if count < 2 {
+        return Complex64::new(f64::NAN, f64::NAN);
     }
-    let n = xs.len().min(ys.len());
-    let denom = normalization_denominator(normalization, n);
-    if denom <= 0.0 {
-        return f64::NAN;
+    let mean_x = xs.iter().take(count).copied().sum::<Complex64>() / count as f64;
+    let mean_y = ys.iter().take(count).copied().sum::<Complex64>() / count as f64;
+    let mut sum_xx = 0.0;
+    let mut sum_yy = 0.0;
+    let mut sum_xy = Complex64::new(0.0, 0.0);
+    for index in 0..count {
+        let dx = xs[index] - mean_x;
+        let dy = ys[index] - mean_y;
+        sum_xx += dx.norm_sqr();
+        sum_yy += dy.norm_sqr();
+        sum_xy += dx.conj() * dy;
     }
-    let sum_x: f64 = xs.iter().take(n).sum();
-    let sum_y: f64 = ys.iter().take(n).sum();
-    let mean_x = sum_x / (n as f64);
-    let mean_y = sum_y / (n as f64);
-
-    let mut var_x = 0.0;
-    let mut var_y = 0.0;
-    let mut covariance = 0.0;
-    for i in 0..n {
-        let dx = xs[i] - mean_x;
-        let dy = ys[i] - mean_y;
-        var_x += dx * dx;
-        var_y += dy * dy;
-        covariance += dx * dy;
+    if sum_xx <= 0.0 || sum_yy <= 0.0 {
+        Complex64::new(f64::NAN, f64::NAN)
+    } else {
+        sum_xy / (sum_xx.sqrt() * sum_yy.sqrt())
     }
-    var_x /= denom;
-    var_y /= denom;
-    covariance /= denom;
-    if var_x < 0.0 && var_x > -1.0e-12 {
-        var_x = 0.0;
-    }
-    if var_y < 0.0 && var_y > -1.0e-12 {
-        var_y = 0.0;
-    }
-    clamp_correlation(divide_covariance(var_x, var_y, covariance))
 }
 
-fn divide_covariance(var_x: f64, var_y: f64, covariance: f64) -> f64 {
-    if !var_x.is_finite() || !var_y.is_finite() || var_x <= 0.0 || var_y <= 0.0 {
+fn complex_is_finite(value: Complex64) -> bool {
+    value.re.is_finite() && value.im.is_finite()
+}
+
+fn complex_has_nan(value: Complex64) -> bool {
+    value.re.is_nan() || value.im.is_nan()
+}
+
+fn p_values(r: &Tensor, counts: &[usize]) -> BuiltinResult<Tensor> {
+    let dim = r.rows();
+    let coefficients = r.materialize_f64();
+    let mut values = vec![f64::NAN; coefficients.len()];
+    for col in 0..dim {
+        for row in 0..dim {
+            let index = row + col * dim;
+            let coefficient = coefficients[index];
+            values[index] = if row == col && coefficient.is_finite() {
+                1.0
+            } else {
+                correlation_p_value(coefficient, counts[index])
+            };
+        }
+    }
+    Tensor::new(values, r.shape.clone()).map_err(corrcoef_internal_error)
+}
+
+fn correlation_p_value(coefficient: f64, count: usize) -> f64 {
+    if !coefficient.is_finite() || count <= 2 {
         return f64::NAN;
     }
-    let std_x = var_x.sqrt();
-    let std_y = var_y.sqrt();
-    if std_x == 0.0 || std_y == 0.0 {
-        return f64::NAN;
+    let magnitude = coefficient.abs();
+    if magnitude >= 1.0 {
+        return 0.0;
     }
-    covariance / (std_x * std_y)
+    let degrees = (count - 2) as f64;
+    let statistic = magnitude * (degrees / (1.0 - magnitude * magnitude)).sqrt();
+    (2.0 * student_t_cdf_upper(statistic, degrees)).clamp(0.0, 1.0)
+}
+
+fn confidence_bounds(r: &Tensor, counts: &[usize], alpha: f64) -> BuiltinResult<(Tensor, Tensor)> {
+    let dim = r.rows();
+    let coefficients = r.materialize_f64();
+    let mut lower = vec![f64::NAN; coefficients.len()];
+    let mut upper = vec![f64::NAN; coefficients.len()];
+    let critical = standard_normal_inv(1.0 - alpha / 2.0);
+    for col in 0..dim {
+        for row in 0..dim {
+            let index = row + col * dim;
+            let coefficient = coefficients[index];
+            if row == col && coefficient.is_finite() {
+                lower[index] = 1.0;
+                upper[index] = 1.0;
+                continue;
+            }
+            if !coefficient.is_finite() || counts[index] <= 3 {
+                continue;
+            }
+            if coefficient.abs() >= 1.0 {
+                lower[index] = coefficient.signum();
+                upper[index] = coefficient.signum();
+                continue;
+            }
+            let center = coefficient.atanh();
+            let radius = critical / ((counts[index] - 3) as f64).sqrt();
+            lower[index] = (center - radius).tanh();
+            upper[index] = (center + radius).tanh();
+        }
+    }
+    Ok((
+        Tensor::new(lower, r.shape.clone()).map_err(corrcoef_internal_error)?,
+        Tensor::new(upper, r.shape.clone()).map_err(corrcoef_internal_error)?,
+    ))
 }
 
 fn clamp_correlation(value: f64) -> f64 {
-    if value.is_nan() {
-        return value;
-    }
-    if value > 1.0 {
-        if value - 1.0 < 1.0e-12 {
-            1.0
-        } else {
-            value
-        }
-    } else if value < -1.0 {
-        if -1.0 - value < 1.0e-12 {
-            -1.0
-        } else {
-            value
-        }
+    if value.is_finite() && (value.abs() - 1.0).abs() <= 1.0e-12 {
+        value.signum()
     } else {
         value
     }
 }
 
-fn set_entry(buffer: &mut [f64], dim: usize, row: usize, col: usize, value: f64) {
-    let idx = row + col * dim;
-    buffer[idx] = value;
-    if row != col {
-        let symmetrical = col + row * dim;
-        buffer[symmetrical] = value;
-    }
+fn set_symmetric<T: Copy>(buffer: &mut [T], dim: usize, row: usize, col: usize, value: T) {
+    buffer[row + col * dim] = value;
+    buffer[col + row * dim] = value;
+}
+
+fn set_hermitian(buffer: &mut [Complex64], dim: usize, row: usize, col: usize, value: Complex64) {
+    buffer[row + col * dim] = value;
+    buffer[col + row * dim] = value.conj();
 }
 
 #[cfg(test)]
@@ -941,12 +1333,26 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
+    use runmat_builtins::{
+        ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, ResolveContext, Tensor,
+        Type, Value,
+    };
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Tensor {
+        Tensor::new_integer(storage, shape).unwrap()
+    }
 
     fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
         let dim = (expected.len() as f64).sqrt() as usize;
         assert_eq!(actual.shape, vec![dim, dim], "unexpected tensor shape");
-        for (idx, (&got, &want)) in actual.data.iter().zip(expected.iter()).enumerate() {
+        for (idx, (&got, &want)) in actual
+            .materialize_f64()
+            .iter()
+            .zip(expected.iter())
+            .enumerate()
+        {
             if want.is_nan() {
                 assert!(
                     got.is_nan(),
@@ -995,9 +1401,14 @@ pub(crate) mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"R = corrcoef(X)"));
-        assert!(labels.contains(&"R = corrcoef(X, Y)"));
-        assert!(labels.contains(&"R = corrcoef(X, \"rows\", rows_option)"));
+        assert!(labels.contains(&"R = corrcoef(A)"));
+        assert!(labels.contains(&"R = corrcoef(A, B)"));
+        assert!(labels.contains(&"[R, P, RL, RU] = corrcoef(A)"));
+        assert!(labels.contains(&"___ = corrcoef(A, Name, Value)"));
+        assert_eq!(
+            CORRCOEF_DESCRIPTOR.output_mode,
+            BuiltinOutputMode::ByRequestedOutputCount
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1033,9 +1444,60 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn corrcoef_accepts_typed_integer_matrix_inputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2], 0.0);
+        let result =
+            block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new())).expect("corrcoef");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
+                assert!((out.materialize_f64()[3] - 1.0).abs() < 1.0e-12);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corrcoef_complete_rows_reads_typed_integer_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let x = poisoned_int_tensor(
+            IntegerStorage::I16(vec![1, 2, 3, 2, 4, 6]),
+            vec![3, 2],
+            f64::NAN,
+        );
+        let y = poisoned_int_tensor(
+            IntegerStorage::U16(vec![5, 10, 15, 10, 20, 30]),
+            vec![3, 2],
+            f64::NAN,
+        );
+
+        let result = block_on(corrcoef_builtin(
+            Value::Tensor(x),
+            vec![
+                Value::Tensor(y),
+                Value::from("Rows"),
+                Value::from("complete"),
+            ],
+        ))
+        .expect("corrcoef complete rows");
+
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                for value in out.materialize_f64() {
+                    assert!((value - 1.0).abs() < 1.0e-12);
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn corrcoef_two_inputs_matches_concatenation() {
+    fn corrcoef_two_inputs_vectorize_equal_size_matrices() {
         let left = Tensor::new(
             vec![
                 1.0, 2.0, 3.0, 4.0, //
@@ -1044,14 +1506,22 @@ pub(crate) mod tests {
             vec![4, 2],
         )
         .unwrap();
-        let right = Tensor::new(vec![8.0, 6.0, 7.0, 5.0], vec![4, 1]).unwrap();
+        let right = Tensor::new(
+            vec![
+                8.0, 6.0, 7.0, 5.0, //
+                2.0, 9.0, 1.0, 3.0,
+            ],
+            vec![4, 2],
+        )
+        .unwrap();
         let combined = Tensor::new(
             vec![
                 1.0, 2.0, 3.0, 4.0, //
                 4.0, 5.0, 6.0, 7.0, //
-                8.0, 6.0, 7.0, 5.0,
+                8.0, 6.0, 7.0, 5.0, //
+                2.0, 9.0, 1.0, 3.0,
             ],
-            vec![4, 3],
+            vec![8, 2],
         )
         .unwrap();
 
@@ -1071,7 +1541,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => t,
             _ => panic!("expected tensor output"),
         };
-        assert_tensor_close(&actual_tensor, &expected_tensor.data, 1.0e-10);
+        assert_tensor_close(&actual_tensor, &expected_tensor.materialize_f64(), 1.0e-10);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1105,6 +1575,28 @@ pub(crate) mod tests {
                 assert_tensor_close(&out, &expected, 1.0e-10);
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn corrcoef_rows_options_do_not_treat_infinity_as_missing() {
+        for rows in ["complete", "pairwise"] {
+            let tensor =
+                Tensor::new(vec![1.0, f64::INFINITY, 3.0, 1.0, 2.0, 3.0], vec![3, 2]).unwrap();
+            let result = block_on(corrcoef_builtin(
+                Value::Tensor(tensor),
+                vec![Value::from("rows"), Value::from(rows)],
+            ))
+            .expect("corrcoef");
+            let Value::Tensor(out) = result else {
+                panic!("expected tensor result");
+            };
+            let values = out.materialize_f64();
+            assert!(values[0].is_nan());
+            assert!(values[1].is_nan());
+            assert!(values[2].is_nan());
+            assert_eq!(values[3], 1.0);
         }
     }
 
@@ -1149,32 +1641,235 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn corrcoef_flag_one_accepted() {
-        let tensor = Tensor::new(
+    fn corrcoef_numeric_scalar_second_argument_is_data() {
+        let result = block_on(corrcoef_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
+            .expect("scalar pair");
+        let Value::Tensor(result) = result else {
+            panic!("expected tensor")
+        };
+        assert_tensor_close(&result, &[1.0], 0.0);
+
+        let equal = block_on(corrcoef_builtin(Value::Num(2.0), vec![Value::Num(2.0)]))
+            .expect("equal scalar pair");
+        let Value::Tensor(equal) = equal else {
+            panic!("expected tensor")
+        };
+        assert_tensor_close(&equal, &[f64::NAN], 0.0);
+    }
+
+    #[test]
+    fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
+        let scalar = Tensor::new(vec![7.0], vec![1, 1]).unwrap();
+        let Value::Tensor(scalar_result) =
+            block_on(corrcoef_builtin(Value::Tensor(scalar), Vec::new())).expect("scalar")
+        else {
+            panic!("expected tensor")
+        };
+        assert_tensor_close(&scalar_result, &[f64::NAN], 0.0);
+
+        for shape in [vec![1, 4], vec![4, 1]] {
+            let vector = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], shape).unwrap();
+            let Value::Tensor(vector_result) =
+                block_on(corrcoef_builtin(Value::Tensor(vector), Vec::new())).expect("vector")
+            else {
+                panic!("expected tensor")
+            };
+            assert_tensor_close(&vector_result, &[1.0], 0.0);
+        }
+
+        let left = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let right = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let Value::Tensor(empty) = block_on(corrcoef_builtin(
+            Value::Tensor(left),
+            vec![Value::Tensor(right)],
+        ))
+        .expect("paired empty") else {
+            panic!("expected tensor")
+        };
+        assert_tensor_close(&empty, &[f64::NAN; 4], 0.0);
+    }
+
+    #[test]
+    fn corrcoef_supports_all_integer_classes_and_exact_wide_centering() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2, 3, 3, 2, 1]),
+            IntegerStorage::I16(vec![1, 2, 3, 3, 2, 1]),
+            IntegerStorage::I32(vec![1, 2, 3, 3, 2, 1]),
+            IntegerStorage::I64(vec![1, 2, 3, 3, 2, 1]),
+            IntegerStorage::U8(vec![1, 2, 3, 3, 2, 1]),
+            IntegerStorage::U16(vec![1, 2, 3, 3, 2, 1]),
+            IntegerStorage::U32(vec![1, 2, 3, 3, 2, 1]),
+            IntegerStorage::U64(vec![1, 2, 3, 3, 2, 1]),
+        ];
+        for storage in storages {
+            let class = storage.class_name();
+            let tensor = Tensor::new_integer(storage, vec![3, 2]).unwrap();
+            let Value::Tensor(result) =
+                block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new()))
+                    .unwrap_or_else(|error| panic!("{class}: {error}"))
+            else {
+                panic!("{class}: expected tensor")
+            };
+            assert_tensor_close(&result, &[1.0, -1.0, -1.0, 1.0], 1.0e-12);
+        }
+
+        let base = u64::MAX - 2;
+        let wide = Tensor::new_integer(
+            IntegerStorage::U64(vec![base, base + 1, base + 2, base + 2, base + 1, base]),
+            vec![3, 2],
+        )
+        .unwrap();
+        let Value::Tensor(result) =
+            block_on(corrcoef_builtin(Value::Tensor(wide), Vec::new())).expect("wide corrcoef")
+        else {
+            panic!("expected tensor")
+        };
+        assert_tensor_close(&result, &[1.0, -1.0, -1.0, 1.0], 1.0e-12);
+    }
+
+    #[test]
+    fn corrcoef_integer_and_logical_extensions_gate_before_dispatch() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]).unwrap();
+        let integer_error =
+            block_on(corrcoef_builtin(Value::Tensor(integer), Vec::new())).unwrap_err();
+        assert_eq!(
+            integer_error.identifier(),
+            Some("RunMat:compatibility:CorrcoefIntegerDataExtension")
+        );
+
+        let logical = LogicalArray::new(vec![0, 1, 1], vec![3, 1]).unwrap();
+        let logical_error =
+            block_on(corrcoef_builtin(Value::LogicalArray(logical), Vec::new())).unwrap_err();
+        assert_eq!(
+            logical_error.identifier(),
+            Some("RunMat:compatibility:CorrcoefLogicalDataExtension")
+        );
+    }
+
+    #[test]
+    fn corrcoef_resident_integer_gate_precedes_provider_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(corrcoef_builtin(
+                Value::GpuTensor(handle.clone()),
+                Vec::new(),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:CorrcoefIntegerDataExtension")
+            );
+            let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    fn corrcoef_complex_coefficients_are_hermitian() {
+        let tensor = ComplexTensor::new(
             vec![
-                1.0, 3.0, 5.0, //
-                2.0, 4.0, 6.0,
+                (1.0, 0.0),
+                (2.0, 0.0),
+                (3.0, 0.0),
+                (0.0, 1.0),
+                (0.0, 2.0),
+                (0.0, 3.0),
             ],
             vec![3, 2],
         )
         .unwrap();
-        let unbiased = block_on(corrcoef_builtin(Value::Tensor(tensor.clone()), Vec::new()))
-            .expect("unbiased");
-        let biased = block_on(corrcoef_builtin(
-            Value::Tensor(tensor),
-            vec![Value::Int(IntValue::I32(1))],
-        ))
-        .expect("biased");
+        let Value::ComplexTensor(result) =
+            block_on(corrcoef_builtin(Value::ComplexTensor(tensor), Vec::new()))
+                .expect("complex corrcoef")
+        else {
+            panic!("expected complex tensor")
+        };
+        assert_eq!(result.shape, vec![2, 2]);
+        let values = result.materialize_f64();
+        assert_eq!(values[0], (1.0, 0.0));
+        assert!((values[1].0).abs() < 1.0e-12);
+        assert!((values[1].1 + 1.0).abs() < 1.0e-12);
+        assert!((values[2].0).abs() < 1.0e-12);
+        assert!((values[2].1 - 1.0).abs() < 1.0e-12);
+        assert_eq!(values[3], (1.0, 0.0));
+    }
 
-        let a = match biased {
-            Value::Tensor(t) => t,
-            _ => panic!("expected tensor"),
+    #[test]
+    fn corrcoef_complex_integer_components_center_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let base = u64::MAX - 2;
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![base, base + 1, base + 2]),
+            IntegerStorage::U64(vec![base + 2, base + 1, base]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(storage, vec![3, 1]).unwrap();
+        let Value::ComplexTensor(result) =
+            block_on(corrcoef_builtin(Value::ComplexTensor(tensor), Vec::new()))
+                .expect("complex integer corrcoef")
+        else {
+            panic!("expected complex tensor")
         };
-        let b = match unbiased {
-            Value::Tensor(t) => t,
-            _ => panic!("expected tensor"),
+        let values = result.materialize_f64();
+        assert_eq!(result.shape, vec![1, 1]);
+        assert!((values[0].0 - 1.0).abs() < 1.0e-12);
+        assert!(values[0].1.abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn corrcoef_requested_outputs_include_p_values_and_alpha_bounds() {
+        let tensor = Tensor::new(
+            vec![
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, //
+                1.0, 2.0, 1.0, 3.0, 5.0, 4.0,
+            ],
+            vec![6, 2],
+        )
+        .unwrap();
+        let _outputs = crate::output_count::push_output_count(Some(4));
+        let Value::OutputList(outputs) = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("Alpha"), Value::Num(0.1)],
+        ))
+        .expect("four outputs") else {
+            panic!("expected output list")
         };
-        assert_tensor_close(&a, &b.data, 1.0e-12);
+        assert_eq!(outputs.len(), 4);
+        let tensors = outputs
+            .into_iter()
+            .map(|value| match value {
+                Value::Tensor(tensor) => tensor,
+                other => panic!("expected tensor, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        for tensor in &tensors {
+            assert_eq!(tensor.shape, vec![2, 2]);
+        }
+        let p = tensors[1].materialize_f64();
+        assert_eq!(p[0], 1.0);
+        assert_eq!(p[3], 1.0);
+        assert!(p[1] > 0.0 && p[1] < 1.0);
+        let r = tensors[0].materialize_f64()[1];
+        let lower = tensors[2].materialize_f64()[1];
+        let upper = tensors[3].materialize_f64()[1];
+        assert!(lower < r && r < upper);
+    }
+
+    #[test]
+    fn corrcoef_complex_multi_output_is_rejected() {
+        let tensor =
+            ComplexTensor::new(vec![(1.0, 1.0), (2.0, 0.0), (3.0, -1.0)], vec![3, 1]).unwrap();
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error =
+            block_on(corrcoef_builtin(Value::ComplexTensor(tensor), Vec::new())).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            CORRCOEF_ERROR_COMPLEX_OUTPUTS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1191,7 +1886,7 @@ pub(crate) mod tests {
             )
             .unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1215,7 +1910,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn corrcoef_mismatched_rows_errors() {
+    fn corrcoef_mismatched_sizes_error() {
         let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
         let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = block_on(corrcoef_builtin(
@@ -1223,22 +1918,19 @@ pub(crate) mod tests {
             vec![Value::Tensor(right)],
         ))
         .expect_err("expected mismatch error");
-        assert_eq!(err.identifier(), CORRCOEF_ERROR_ROWS_MISMATCH.identifier);
+        assert_eq!(err.identifier(), CORRCOEF_ERROR_SIZE_MISMATCH.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn corrcoef_invalid_flag_errors() {
+    fn corrcoef_invalid_alpha_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = block_on(corrcoef_builtin(
             Value::Tensor(tensor),
-            vec![Value::Num(2.5)],
+            vec![Value::from("Alpha"), Value::Num(1.0)],
         ))
-        .expect_err("expected invalid flag error");
-        assert_eq!(
-            err.identifier(),
-            CORRCOEF_ERROR_NORMALIZATION_INVALID.identifier
-        );
+        .expect_err("expected invalid Alpha error");
+        assert_eq!(err.identifier(), CORRCOEF_ERROR_ALPHA_INVALID.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1258,17 +1950,19 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn corrcoef_duplicate_normalization_flag_errors() {
+    fn corrcoef_duplicate_alpha_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = block_on(corrcoef_builtin(
             Value::Tensor(tensor),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            vec![
+                Value::from("Alpha"),
+                Value::Num(0.05),
+                Value::from("Alpha"),
+                Value::Num(0.1),
+            ],
         ))
-        .expect_err("expected duplicate normalization flag error");
-        assert_eq!(
-            err.identifier(),
-            CORRCOEF_ERROR_NORMALIZATION_DUPLICATE.identifier
-        );
+        .expect_err("expected duplicate Alpha error");
+        assert_eq!(err.identifier(), CORRCOEF_ERROR_OPTION_DUPLICATE.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1320,9 +2014,12 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn corrcoef_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        ) else {
+            return;
+        };
         let tensor = Tensor::new(
             vec![
                 1.0, 2.0, 3.0, 4.0, //
@@ -1340,10 +2037,9 @@ pub(crate) mod tests {
         )
         .expect("cpu corrcoef");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");
         let options = CorrcoefOptions {
             normalization: CorrcoefNormalization::Unbiased,
@@ -1353,6 +2049,71 @@ pub(crate) mod tests {
         let host = block_on(download_handle_async(provider, &gpu)).expect("download");
         let gathered =
             Tensor::new(host.data.clone(), host.shape.clone()).expect("tensor reconstruction");
-        assert_tensor_close(&gathered, &cpu.data, 1.0e-6);
+        assert_tensor_close(&gathered, &cpu.materialize_f64(), 1.0e-6);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn corrcoef_wgpu_public_vector_and_paired_geometry() {
+        let _guard = test_support::accel_test_lock();
+        let Ok(provider) = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        ) else {
+            return;
+        };
+
+        let row = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![1, 4]).unwrap();
+        let row_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &row.materialize_f64(),
+                shape: &row.shape,
+            })
+            .expect("row upload");
+        let row_result = block_on(corrcoef_builtin(
+            Value::GpuTensor(row_handle.clone()),
+            Vec::new(),
+        ))
+        .expect("row corrcoef");
+        let row_gathered = test_support::gather(row_result).expect("row gather");
+        assert_tensor_close(&row_gathered, &[1.0], 1.0e-6);
+        let _ = provider.free(&row_handle);
+
+        let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let right = Tensor::new(vec![4.0, 1.0, 2.0, 8.0], vec![2, 2]).unwrap();
+        let expected = corrcoef_from_tensors(
+            left.clone(),
+            Some(right.clone()),
+            CorrcoefNormalization::Unbiased,
+            CorrcoefRows::All,
+        )
+        .expect("host pair");
+        let left_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &left.materialize_f64(),
+                shape: &left.shape,
+            })
+            .expect("left upload");
+        let right_handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &right.materialize_f64(),
+                shape: &right.shape,
+            })
+            .expect("right upload");
+        let paired = block_on(corrcoef_builtin(
+            Value::GpuTensor(left_handle.clone()),
+            vec![Value::GpuTensor(right_handle.clone())],
+        ))
+        .expect("paired corrcoef");
+        let paired_gathered = test_support::gather(paired).expect("paired gather");
+        assert_tensor_close(&paired_gathered, &expected.materialize_f64(), 1.0e-6);
+        let left_after =
+            block_on(download_handle_async(provider, &left_handle)).expect("left after corrcoef");
+        let right_after =
+            block_on(download_handle_async(provider, &right_handle)).expect("right after corrcoef");
+        assert_eq!(left_after.shape, vec![2, 2]);
+        assert_eq!(right_after.shape, vec![2, 2]);
+        let _ = provider.free(&left_handle);
+        let _ = provider.free(&right_handle);
     }
 }

@@ -1,6 +1,7 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -55,6 +56,11 @@ pub const ADDLISTENER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ADDLISTENER_ERRORS,
 };
+const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "addlistener accepts an object or handle target, event text, and a callback; numeric values are not listener data or controls and invalid numeric targets are rejected.",
+};
 
 #[runtime_builtin(
     name = "addlistener",
@@ -62,6 +68,7 @@ pub const ADDLISTENER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     summary = "Register callback listeners on object events.",
     keywords = "events,listener,notify,handle,classdef",
     descriptor(crate::builtins::introspection::addlistener::ADDLISTENER_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::addlistener::INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::addlistener"
 )]
 pub async fn addlistener_builtin(

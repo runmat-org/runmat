@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderBandwidth
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, SparseTensor, Tensor, Value,
+    ComplexTensor, IntValue, LogicalArray, NumericStorage, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -350,6 +351,11 @@ enum MatrixInput {
         cols: usize,
         data: Vec<f64>,
     },
+    DenseInteger {
+        rows: usize,
+        cols: usize,
+        data: Vec<IntValue>,
+    },
     DenseComplex {
         rows: usize,
         cols: usize,
@@ -371,6 +377,9 @@ impl MatrixInput {
         match self {
             Self::DenseReal { rows, cols, data } => {
                 dense_real_satisfies(*rows, *cols, data, predicate)
+            }
+            Self::DenseInteger { rows, cols, data } => {
+                dense_integer_satisfies(*rows, *cols, data, predicate)
             }
             Self::DenseComplex { rows, cols, data } => {
                 dense_complex_satisfies(*rows, *cols, data, predicate)
@@ -434,7 +443,7 @@ fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult
     };
     if rows
         .checked_mul(cols)
-        .is_none_or(|len| len > tensor.data.len())
+        .is_none_or(|len| len > tensor_utils::tensor_element_len(&tensor))
     {
         return Err(runtime_error_with_detail(
             ctx,
@@ -442,11 +451,25 @@ fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult
             "tensor shape exceeds backing data length",
         ));
     }
-    Ok(MatrixInput::DenseReal {
-        rows,
-        cols,
-        data: tensor.data,
-    })
+    match tensor
+        .into_numeric_storage()
+        .map_err(|error| runtime_error_with_detail(ctx, ctx.internal, error))?
+    {
+        NumericStorage::F64(data) => Ok(MatrixInput::DenseReal { rows, cols, data }),
+        NumericStorage::F32(data) => Ok(MatrixInput::DenseReal {
+            rows,
+            cols,
+            data: data.into_iter().map(f64::from).collect(),
+        }),
+        storage => Ok(MatrixInput::DenseInteger {
+            rows,
+            cols,
+            data: storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer")
+                .exact_values(),
+        }),
+    }
 }
 
 fn matrix_from_complex_tensor(
@@ -458,7 +481,7 @@ fn matrix_from_complex_tensor(
     };
     if rows
         .checked_mul(cols)
-        .is_none_or(|len| len > tensor.data.len())
+        .is_none_or(|len| len > tensor_utils::complex_tensor_element_len(&tensor))
     {
         return Err(runtime_error_with_detail(
             ctx,
@@ -469,7 +492,10 @@ fn matrix_from_complex_tensor(
     Ok(MatrixInput::DenseComplex {
         rows,
         cols,
-        data: tensor.data,
+        data: tensor_utils::complex_tensor_into_values_complex64(tensor)
+            .into_iter()
+            .map(|value| (value.re, value.im))
+            .collect(),
     })
 }
 
@@ -524,6 +550,20 @@ fn dense_real_satisfies(
     )
 }
 
+fn dense_integer_satisfies(
+    rows: usize,
+    cols: usize,
+    data: &[IntValue],
+    predicate: StructurePredicate,
+) -> bool {
+    scan_dense(
+        rows,
+        cols,
+        |row, col| !data[row + col * rows].is_zero(),
+        predicate,
+    )
+}
+
 fn dense_complex_satisfies(
     rows: usize,
     cols: usize,
@@ -561,8 +601,11 @@ fn sparse_satisfies(sparse: &SparseTensor, predicate: StructurePredicate) -> boo
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
             let row = sparse.row_indices[idx];
-            let value = sparse.values[idx];
-            if is_forbidden_nonzero(row, col, predicate) && (value != 0.0 || value.is_nan()) {
+            let value = sparse
+                .numeric_value_at(idx)
+                .expect("sparse structure keeps value storage aligned");
+            if is_forbidden_nonzero(row, col, predicate) && (!value.is_zero() || !value.is_finite())
+            {
                 return false;
             }
         }
@@ -598,7 +641,9 @@ mod tests {
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, HostTensorOwned, HostTensorView,
     };
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, ResolveContext, Type,
+    };
 
     use crate::builtins::common::test_support;
 
@@ -695,6 +740,56 @@ mod tests {
     }
 
     #[test]
+    fn dense_structure_predicates_read_typed_integer_storage_exactly() {
+        let lower = Tensor::new_integer(
+            IntegerStorage::I16(vec![1, 2, 3, 0, 4, 5, 0, 0, 6]),
+            vec![3, 3],
+        )
+        .unwrap();
+
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(!expect_bool(call_istriu(Value::Tensor(lower)).unwrap()));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_native_single_storage() {
+        let lower = Tensor::from_numeric_storage(
+            NumericStorage::F32(vec![1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 0.0, 0.0, 6.0]),
+            vec![3, 3],
+        )
+        .unwrap();
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::Tensor(lower.clone())).unwrap()
+        ));
+        assert!(!expect_bool(call_istriu(Value::Tensor(lower)).unwrap()));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_wide_integer_storage_without_float_mirror() {
+        let upper = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, 0, 0, u64::MAX, 1_u64 << 63, 0, 0, 1, 1]),
+            vec![3, 3],
+        )
+        .expect("upper triangular integer matrix");
+
+        assert!(!expect_bool(
+            call_isdiag(Value::Tensor(upper.clone())).unwrap()
+        ));
+        assert!(!expect_bool(
+            call_istril(Value::Tensor(upper.clone())).unwrap()
+        ));
+        assert!(expect_bool(call_istriu(Value::Tensor(upper)).unwrap()));
+    }
+
+    #[test]
     fn rectangular_diagonal_matrix_can_be_true() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 2.0, 0.0], vec![3, 2]).unwrap();
         assert!(expect_bool(
@@ -778,6 +873,26 @@ mod tests {
             vec![2, 2],
         )
         .unwrap();
+        assert!(!expect_bool(
+            call_isdiag(Value::ComplexTensor(tensor.clone())).unwrap()
+        ));
+        assert!(expect_bool(
+            call_istril(Value::ComplexTensor(tensor.clone())).unwrap()
+        ));
+        assert!(!expect_bool(
+            call_istriu(Value::ComplexTensor(tensor)).unwrap()
+        ));
+    }
+
+    #[test]
+    fn dense_structure_predicates_read_typed_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 0, 0, 0]),
+            IntegerStorage::I16(vec![0, 2, 0, 0]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
+
         assert!(!expect_bool(
             call_isdiag(Value::ComplexTensor(tensor.clone())).unwrap()
         ));
@@ -982,7 +1097,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .unwrap();
@@ -1010,7 +1125,7 @@ mod tests {
         .unwrap();
         let handle = provider
             .upload(&HostTensorView {
-                data: &lower.data,
+                data: &lower.materialize_f64(),
                 shape: &lower.shape,
             })
             .expect("upload lower");

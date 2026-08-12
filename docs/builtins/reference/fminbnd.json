@@ -15,7 +15,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The solver runs on the host. Callback functions may still call GPU-aware builtins."
+    "notes": "The solver runs on the host and does not provide native gpuArray or tall-array execution. In RunMat extension mode, resident numeric operands and callback results use a separately gated gather fallback. Strict compatibility mode rejects that extension before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -28,9 +28,11 @@
     "unit": "builtins::math::optim::fminbnd::tests",
     "integration": "runmat-vm/tests/closures.rs::fminbnd_accepts_anonymous_function"
   },
-  "description": "`x = fminbnd(fun, x1, x2)` searches the closed interval `[x1, x2]` for a local minimum of scalar function `fun` using Brent's method. Optional outputs return the minimum value, exit flag, and diagnostics, with tolerance and iteration behavior matching MATLAB semantics.",
+  "description": "`x = fminbnd(fun, x1, x2)` searches the closed interval `[x1, x2]` for a local minimum of scalar function `fun` using Brent's method. The documented compatibility contract uses binary64 bounds. Optional outputs return the minimum value, exit flag, and diagnostics.",
   "behaviors": [
     "The function handle must return a finite real scalar for every sampled point in the interval.",
+    "Strict compatibility mode rejects typed-integer or logical bounds and objective values. RunMat extension mode accepts those values when every integer converts exactly to binary64.",
+    "Typed-integer option controls are a separately gated RunMat extension. Structural counts such as `MaxIter` and `MaxFunEvals` are validated as exact nonnegative integers rather than rounded through floating point.",
     "If `x1 > x2`, the bounds are inconsistent and `exitflag = -2`.",
     "If `x1 == x2`, that point is returned with `exitflag = 1`.",
     "Options are supplied as a struct, usually built with `optimset`. `TolX`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted.",

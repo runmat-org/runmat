@@ -39,10 +39,10 @@ pub fn is_valid_varname(name: &str) -> bool {
     let Some(first) = chars.next() else {
         return false;
     };
-    if !first.is_alphabetic() {
+    if !first.is_ascii_alphabetic() {
         return false;
     }
-    chars.all(|ch| ch == '_' || ch.is_alphanumeric())
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 #[cfg(test)]
@@ -61,5 +61,6 @@ mod tests {
     fn valid_varname_uses_namelengthmax() {
         assert!(is_valid_varname(&"a".repeat(MATLAB_NAME_LENGTH_MAX)));
         assert!(!is_valid_varname(&"a".repeat(MATLAB_NAME_LENGTH_MAX + 1)));
+        assert!(!is_valid_varname("éclair"));
     }
 }

@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "The nonlinear solver runs on the host. Callback functions may still call GPU-aware builtins."
+    "notes": "The nonlinear solver runs on the host and does not provide native gpuArray or tall-array execution. In RunMat extension mode, resident numeric operands and callback results use a separately gated gather fallback. Strict compatibility mode rejects that extension before provider access."
   },
   "fusion": {
     "elementwise": false,
@@ -27,12 +27,15 @@
     "unit": "builtins::math::optim::fsolve::tests",
     "integration": "runmat-vm/tests/closures.rs::fsolve_accepts_anonymous_vector_function"
   },
-  "description": "`x = fsolve(fun, x0)` solves `fun(x) = 0` starting from initial guess `x0` using finite-difference Levenberg-Marquardt iterations. Scalar guesses return scalars, and vector/matrix guesses return solutions with the same shape as `x0`, following MATLAB semantics.",
+  "description": "`x = fsolve(fun, x0)` solves `fun(x) = 0` starting from binary64 initial guess `x0` using finite-difference Levenberg-Marquardt iterations. Scalar guesses return scalars, and vector/matrix guesses return solutions with the same shape as `x0`.",
   "behaviors": [
     "The function handle must return a finite real scalar or vector.",
+    "Strict compatibility mode rejects typed-integer or logical initial guesses and residuals. RunMat extension mode accepts those values when every integer converts exactly to binary64.",
+    "Typed-integer option controls are a separately gated RunMat extension. Structural counts such as `MaxIter` and `MaxFunEvals` are validated as exact nonnegative integers rather than rounded through floating point.",
     "Jacobians are estimated with forward finite differences.",
     "The step is chosen with a Levenberg-Marquardt damping parameter and accepted only when it reduces the residual norm.",
-    "Options are supplied as a struct, usually created with `optimset`. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted."
+    "Options are supplied as a struct, usually created with `optimset`. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted.",
+    "Up to five outputs are supported: `x`, `fval`, `exitflag`, `output`, and the final Jacobian. A stationary non-root or exhausted budget is returned with a nonpositive convergence status instead of being raised as an evaluation error."
   ],
   "examples": [
     {

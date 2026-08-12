@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{lookup_option, option_f64, option_usize};
 use crate::builtins::math::optim::type_resolvers::{linear_programming_type, optim_options_type};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -869,7 +870,7 @@ fn optional_field(st: &StructValue, name: &str) -> Option<Value> {
 }
 
 fn is_empty_value(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.data.is_empty())
+    matches!(value, Value::Tensor(t) if tensor::tensor_element_len(t) == 0)
 }
 
 fn empty_value() -> Value {
@@ -908,7 +909,7 @@ async fn numeric_vector(
                     format!("coneprog: {label} must be a vector"),
                 ));
             }
-            tensor.data
+            tensor::tensor_into_values_f64(tensor)
         }
         other => {
             return Err(coneprog_error(
@@ -951,12 +952,11 @@ async fn numeric_matrix(label: &str, value: Value) -> BuiltinResult<Option<Matri
                     format!("coneprog: {label} must be a numeric matrix"),
                 ));
             }
-            validate_numbers(label, &tensor.data, FiniteMode::Finite)?;
-            Ok(Some(MatrixInput {
-                rows: tensor.rows(),
-                cols: tensor.cols(),
-                data: tensor.data,
-            }))
+            let rows = tensor.rows();
+            let cols = tensor.cols();
+            let data = tensor::tensor_into_values_f64(tensor);
+            validate_numbers(label, &data, FiniteMode::Finite)?;
+            Ok(Some(MatrixInput { rows, cols, data }))
         }
         other => Err(coneprog_error(
             &ERROR_INVALID_INPUT,
@@ -1618,9 +1618,15 @@ fn coneprog_error(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     fn empty() -> Value {
@@ -1675,8 +1681,8 @@ mod tests {
         let Value::Tensor(x) = &outputs[0] else {
             panic!("expected x");
         };
-        assert!((x.data[0] - 0.75).abs() < 1.0e-3, "{x:?}");
-        assert!(x.data[1].abs() < 1.0e-3, "{x:?}");
+        assert!((x.materialize_f64()[0] - 0.75).abs() < 1.0e-3, "{x:?}");
+        assert!(x.materialize_f64()[1].abs() < 1.0e-3, "{x:?}");
         assert!(matches!(&outputs[1], Value::Num(fval) if (*fval + 0.75).abs() < 1.0e-3));
         assert!(matches!(&outputs[2], Value::Num(flag) if *flag == 1.0));
         assert!(matches!(&outputs[3], Value::Struct(st) if st.fields.contains_key("algorithm")));
@@ -1686,7 +1692,10 @@ mod tests {
         let Value::Tensor(ineqlin) = lambda.fields.get("ineqlin").unwrap() else {
             panic!("expected ineqlin multipliers");
         };
-        assert!((ineqlin.data[0] - 1.0).abs() < 1.0e-2, "{ineqlin:?}");
+        assert!(
+            (ineqlin.materialize_f64()[0] - 1.0).abs() < 1.0e-2,
+            "{ineqlin:?}"
+        );
         assert!(lambda.fields.contains_key("soc"));
     }
 
@@ -1708,8 +1717,37 @@ mod tests {
         let Value::Tensor(x) = &outputs[0] else {
             panic!("expected x");
         };
-        assert!((x.data[1] + 0.25).abs() < 1.0e-3, "{x:?}");
+        assert!((x.materialize_f64()[1] + 0.25).abs() < 1.0e-3, "{x:?}");
         assert!(matches!(&outputs[2], Value::Num(flag) if *flag == 1.0));
+    }
+
+    #[test]
+    fn coneprog_numeric_parsers_read_typed_integer_storage_exactly() {
+        let f = block_on(numeric_vector(
+            "f",
+            poisoned_integer_tensor(IntegerStorage::I16(vec![1, -2]), vec![2, 1]),
+            FiniteMode::Finite,
+        ))
+        .expect("vector");
+        assert_eq!(f, vec![1.0, -2.0]);
+
+        let bounds = block_on(numeric_vector(
+            "lb",
+            poisoned_integer_tensor(IntegerStorage::I16(vec![-10, 5]), vec![1, 2]),
+            FiniteMode::Bounds,
+        ))
+        .expect("bounds");
+        assert_eq!(bounds, vec![-10.0, 5.0]);
+
+        let matrix = block_on(numeric_matrix(
+            "A",
+            poisoned_integer_tensor(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![2, 2]),
+        ))
+        .expect("matrix")
+        .expect("nonempty matrix");
+        assert_eq!(matrix.rows, 2);
+        assert_eq!(matrix.cols, 2);
+        assert_eq!(matrix.data, vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
@@ -1727,7 +1765,7 @@ mod tests {
             ],
             4,
         );
-        assert!(matches!(&outputs[0], Value::Tensor(t) if t.data.is_empty()));
+        assert!(matches!(&outputs[0], Value::Tensor(t) if t.materialize_f64().is_empty()));
         assert!(matches!(&outputs[2], Value::Num(flag) if *flag == -2.0));
     }
 

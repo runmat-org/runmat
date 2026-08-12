@@ -317,6 +317,7 @@ fn ifft_error_with_message(
     builtin_path = "crate::builtins::math::fft::ifft"
 )]
 async fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "ifft")?;
     let (length, dimension, symmetric) = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => ifft_gpu(handle, length, dimension, symmetric).await,
@@ -565,10 +566,14 @@ pub(crate) mod tests {
                 let host = block_on(provider.download(&handle)).expect("download gpu ifft output");
                 common::host_to_complex_tensor(host, BUILTIN_NAME).expect("decode gpu complex")
             }
-            Value::Tensor(t) => {
-                HostComplexTensor::new(t.data.into_iter().map(|re| (re, 0.0)).collect(), t.shape)
-                    .unwrap()
-            }
+            Value::Tensor(t) => HostComplexTensor::new(
+                t.materialize_f64()
+                    .into_iter()
+                    .map(|re| (re, 0.0))
+                    .collect(),
+                t.shape,
+            )
+            .unwrap(),
             Value::Num(n) => HostComplexTensor::new(vec![(n, 0.0)], vec![1, 1]).unwrap(),
             Value::Int(i) => HostComplexTensor::new(vec![(i.to_f64(), 0.0)], vec![1, 1]).unwrap(),
             other => panic!("unexpected value kind {other:?}"),
@@ -621,7 +626,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![4]);
                 let expected = [(1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0)];
-                for (idx, actual) in ct.data.iter().enumerate() {
+                for (idx, actual) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*actual, expected[idx], 1e-12));
                 }
             }
@@ -642,7 +647,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -657,7 +662,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![0]);
-                assert!(ct.data.is_empty());
+                assert!(ct.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -667,13 +672,13 @@ pub(crate) mod tests {
     #[test]
     fn ifft_dimension_argument_recovers_matrix() {
         let original = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-        let mut spectrum = Vec::with_capacity(original.data.len());
+        let mut spectrum = Vec::with_capacity(original.materialize_f64().len());
         let rows = original.shape[0];
         let cols = original.shape[1];
         for c in 0..cols {
             let mut column = Vec::with_capacity(rows);
             for r in 0..rows {
-                column.push(Complex::new(original.data[r + c * rows], 0.0));
+                column.push(Complex::new(original.materialize_f64()[r + c * rows], 0.0));
             }
             let mut fft = column.clone();
             FftPlanner::<f64>::new()
@@ -688,8 +693,12 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 3]);
-                for (idx, (re, im)) in ct.data.iter().enumerate() {
-                    assert!(approx_eq((*re, *im), (original.data[idx], 0.0), 1e-12));
+                for (idx, (re, im)) in ct.materialize_f64().iter().enumerate() {
+                    assert!(approx_eq(
+                        (*re, *im),
+                        (original.materialize_f64()[idx], 0.0),
+                        1e-12
+                    ));
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -785,7 +794,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![4]);
-                for &(re, im) in &ct.data {
+                for &(re, im) in &ct.materialize_f64() {
                     assert!((re - 1.0).abs() < 1e-12);
                     assert!(im.abs() < 1e-12);
                 }
@@ -813,7 +822,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2]);
-                for ((re, im), expected) in ct.data.iter().zip(expected.iter()) {
+                for ((re, im), expected) in ct.materialize_f64().iter().zip(expected.iter()) {
                     assert!(approx_eq((*re, *im), (expected.re, expected.im), 1e-12));
                 }
             }
@@ -866,7 +875,11 @@ pub(crate) mod tests {
             let gpu_ct = value_as_complex_tensor(gpu);
             let cpu_ct = value_as_complex_tensor(cpu);
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
-            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+            for (a, b) in gpu_ct
+                .materialize_f64()
+                .iter()
+                .zip(cpu_ct.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, 1e-12));
             }
             provider.free(&handle).ok();
@@ -901,9 +914,9 @@ pub(crate) mod tests {
             match gpu {
                 Value::GpuTensor(_) | Value::Tensor(_) => {
                     let gathered = test_support::gather(gpu).expect("gather symmetric real");
-                    assert_eq!(gathered.data.len(), 4);
+                    assert_eq!(gathered.materialize_f64().len(), 4);
                     assert_eq!(gathered.shape.first().copied().unwrap_or(0), 4);
-                    for (idx, value) in gathered.data.iter().enumerate() {
+                    for (idx, value) in gathered.materialize_f64().iter().enumerate() {
                         assert!((*value - (idx as f64 + 1.0)).abs() < 1e-10);
                     }
                 }
@@ -952,7 +965,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
             };
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
-            for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+            for (a, b) in gpu_ct
+                .materialize_f64()
+                .iter()
+                .zip(cpu_ct.materialize_f64().iter())
+            {
                 assert!(approx_eq(*a, *b, tol), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();

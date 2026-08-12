@@ -1,19 +1,23 @@
 //! MATLAB-compatible `nchoosek` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, ResolveContext, Tensor, Type,
-    Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue,
+    IntegerComplexStorage, LogicalArray, NumericDType, NumericStorage, ResolveContext, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
-    gpu_helpers,
     spec::{
         BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
         ReductionNaN, ResidencyPolicy, ShapeRequirements,
     },
+    tensor,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -33,7 +37,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Combination materialisation runs on the host; gpuArray inputs are gathered before constructing the output.",
+    notes:
+        "MATLAB does not expose interactive gpuArray support for nchoosek; GPU inputs are rejected.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::nchoosek")]
@@ -111,7 +116,7 @@ const ERROR_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NCHOOSEK.INTERNAL",
     identifier: Some("RunMat:nchoosek:Internal"),
-    when: "Output allocation, GPU gather, or container construction failed.",
+    when: "Output allocation or container construction failed.",
     message: "nchoosek: internal error",
 };
 
@@ -124,6 +129,63 @@ pub const NCHOOSEK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const COEFFICIENT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "n must be a real nonnegative integer-valued scalar.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "k must be a real nonnegative integer-valued scalar no greater than n.",
+    },
+];
+
+const COMBINATIONS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "v",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "v is a real vector whose integer storage class is preserved in the combinations.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "k",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "k is a real nonnegative integer-valued scalar structural parameter.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = nchoosek(n, k)",
+        inputs: &COEFFICIENT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "The coefficient is computed exactly in the selected nondouble integer class; representability and floating-class limits are form-specific.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = nchoosek(v, k)",
+        inputs: &COMBINATIONS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Rows enumerate combinations without converting integer elements through floating point; materialisation limits can reject oversized results.",
+    },
+];
+
 #[runtime_builtin(
     name = "nchoosek",
     category = "array/creation",
@@ -132,6 +194,7 @@ pub const NCHOOSEK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     accel = "array_construct",
     type_resolver(nchoosek_type),
     descriptor(crate::builtins::array::creation::nchoosek::NCHOOSEK_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::creation::nchoosek::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::creation::nchoosek"
 )]
 async fn nchoosek_builtin(first: Value, k: Value) -> BuiltinResult<Value> {
@@ -139,18 +202,13 @@ async fn nchoosek_builtin(first: Value, k: Value) -> BuiltinResult<Value> {
 }
 
 pub async fn evaluate(first: Value, k: Value) -> BuiltinResult<Value> {
-    let first = gather_if_gpu(first).await?;
-    let k = gather_if_gpu(k).await?;
-    evaluate_host(first, k)
-}
-
-async fn gather_if_gpu(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-            .await
-            .map_err(|e| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {e}"))),
-        other => Ok(other),
+    if matches!(first, Value::GpuTensor(_)) || matches!(k, Value::GpuTensor(_)) {
+        return Err(nchoosek_error_with(
+            &ERROR_INVALID_INPUT,
+            "nchoosek: gpuArray inputs are not supported",
+        ));
     }
+    evaluate_host(first, k)
 }
 
 fn evaluate_host(first: Value, k: Value) -> BuiltinResult<Value> {
@@ -204,10 +262,17 @@ fn scalar_coefficient_mode(value: &Value) -> Option<CoefficientMode> {
             n,
             class: int_class(int),
         }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            parse_nonnegative_integer_f64(tensor.data[0]).map(|n| CoefficientMode {
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
+            let scalar = tensor.numeric_value_at(0)?;
+            if let Some(value) = scalar.into_int_value() {
+                return parse_nonnegative_integer_int(&value).map(|n| CoefficientMode {
+                    n,
+                    class: int_class(&value),
+                });
+            }
+            parse_nonnegative_integer_numeric(scalar).map(|n| CoefficientMode {
                 n,
-                class: tensor_class(tensor.dtype),
+                class: tensor_class(tensor.numeric_dtype()),
             })
         }
         _ => None,
@@ -235,7 +300,7 @@ fn resolve_coefficient_class(
 
 fn is_numeric_scalar(value: &Value) -> bool {
     matches!(value, Value::Num(_) | Value::Int(_))
-        || matches!(value, Value::Tensor(tensor) if tensor.data.len() == 1)
+        || matches!(value, Value::Tensor(tensor) if tensor_element_len(tensor) == 1)
 }
 
 fn coefficient_value(n: usize, k: usize, class: CoefficientClass) -> BuiltinResult<Value> {
@@ -243,7 +308,7 @@ fn coefficient_value(n: usize, k: usize, class: CoefficientClass) -> BuiltinResu
         CoefficientClass::Double => Ok(Value::Num(binomial_f64(n, k))),
         CoefficientClass::Single => {
             let value = binomial_f64(n, k);
-            Tensor::new_with_dtype(vec![value], vec![1, 1], NumericDType::F32)
+            Tensor::from_f32(vec![value as f32], vec![1, 1])
                 .map(Value::Tensor)
                 .map_err(|e| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {e}")))
         }
@@ -355,14 +420,66 @@ fn combinations_value(value: Value, k: usize) -> BuiltinResult<Value> {
 fn combinations_tensor(tensor: Tensor, k: usize) -> BuiltinResult<Value> {
     let n = vector_len(&tensor.shape)?;
     let rows = checked_rows(n, k)?;
-    let data = combination_columns(&tensor.data, rows, k)?;
-    Tensor::new_with_dtype(data, vec![rows, k], tensor.dtype)
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))?;
+    let storage = combination_storage(storage, rows, k)?;
+    Tensor::from_numeric_storage(storage, vec![rows, k])
         .map(Value::Tensor)
         .map_err(|e| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {e}")))
 }
 
+fn combination_storage(
+    storage: NumericStorage,
+    rows: usize,
+    k: usize,
+) -> BuiltinResult<NumericStorage> {
+    macro_rules! combinations {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(combination_columns(&$values, rows, k)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => combinations!(values, F64),
+        NumericStorage::F32(values) => combinations!(values, F32),
+        NumericStorage::I8(values) => combinations!(values, I8),
+        NumericStorage::I16(values) => combinations!(values, I16),
+        NumericStorage::I32(values) => combinations!(values, I32),
+        NumericStorage::I64(values) => combinations!(values, I64),
+        NumericStorage::U8(values) => combinations!(values, U8),
+        NumericStorage::U16(values) => combinations!(values, U16),
+        NumericStorage::U32(values) => combinations!(values, U32),
+        NumericStorage::U64(values) => combinations!(values, U64),
+    })
+}
+
 fn combinations_complex_tensor(tensor: ComplexTensor, k: usize) -> BuiltinResult<Value> {
-    combinations_complex(tensor.data, tensor.shape, k)
+    let n = vector_len(&tensor.shape)?;
+    let rows = checked_rows(n, k)?;
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(combination_columns(&values, rows, k)?),
+        ComplexStorage::F32(values) => ComplexStorage::F32(combination_columns(&values, rows, k)?),
+        ComplexStorage::Integer(storage) => {
+            let real = storage
+                .real
+                .from_exact_values_like(combination_columns(&storage.real.exact_values(), rows, k)?)
+                .map_err(|error| {
+                    nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}"))
+                })?;
+            let imag = storage
+                .imag
+                .from_exact_values_like(combination_columns(&storage.imag.exact_values(), rows, k)?)
+                .map_err(|error| {
+                    nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}"))
+                })?;
+            ComplexStorage::Integer(IntegerComplexStorage::new(real, imag).map_err(|error| {
+                nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}"))
+            })?)
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, vec![rows, k])
+        .map(Value::ComplexTensor)
+        .map_err(|error| nchoosek_error_with(&ERROR_INTERNAL, format!("{NAME}: {error}")))
 }
 
 fn combinations_complex(
@@ -496,16 +613,37 @@ fn parse_k(value: &Value) -> BuiltinResult<ParsedK> {
                 class: int_class(int),
             })
             .ok_or_else(invalid_k),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            parse_nonnegative_integer_f64(tensor.data[0])
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
+            let scalar = tensor.numeric_value_at(0).ok_or_else(invalid_k)?;
+            if let Some(value) = scalar.into_int_value() {
+                let class = int_class(&value);
+                return parse_nonnegative_integer_int(&value)
+                    .map(|value| ParsedK { value, class })
+                    .ok_or_else(invalid_k);
+            }
+            parse_nonnegative_integer_numeric(scalar)
                 .map(|value| ParsedK {
                     value,
-                    class: tensor_class(tensor.dtype),
+                    class: tensor_class(tensor.numeric_dtype()),
                 })
                 .ok_or_else(invalid_k)
         }
         _ => Err(invalid_k()),
     }
+}
+
+fn parse_nonnegative_integer_numeric(value: runmat_builtins::NumericScalar) -> Option<usize> {
+    match value {
+        runmat_builtins::NumericScalar::F64(value) => parse_nonnegative_integer_f64(value),
+        runmat_builtins::NumericScalar::F32(value) => {
+            parse_nonnegative_integer_f64(f64::from(value))
+        }
+        value => parse_nonnegative_integer_int(&value.into_int_value()?),
+    }
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor::tensor_element_len(tensor)
 }
 
 fn invalid_k() -> RuntimeError {
@@ -520,7 +658,10 @@ fn parse_nonnegative_integer_f64(value: f64) -> Option<usize> {
         return None;
     }
     let rounded = value.round();
-    if (value - rounded).abs() > 0.0 || rounded > usize::MAX as f64 {
+    if (value - rounded).abs() > 0.0
+        || rounded > usize::MAX as f64
+        || (usize::BITS == 64 && rounded == usize::MAX as f64)
+    {
         return None;
     }
     Some(rounded as usize)
@@ -556,9 +697,14 @@ fn tensor_class(dtype: NumericDType) -> CoefficientClass {
     match dtype {
         NumericDType::F64 => CoefficientClass::Double,
         NumericDType::F32 => CoefficientClass::Single,
+        NumericDType::I8 => CoefficientClass::I8,
+        NumericDType::I16 => CoefficientClass::I16,
+        NumericDType::I32 => CoefficientClass::I32,
+        NumericDType::I64 => CoefficientClass::I64,
         NumericDType::U8 => CoefficientClass::U8,
         NumericDType::U16 => CoefficientClass::U16,
         NumericDType::U32 => CoefficientClass::U32,
+        NumericDType::U64 => CoefficientClass::U64,
     }
 }
 
@@ -619,6 +765,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn call(first: Value, k: Value) -> BuiltinResult<Value> {
         block_on(evaluate(first, k))
@@ -643,9 +790,12 @@ mod tests {
         else {
             panic!("expected single tensor coefficient");
         };
-        assert_eq!(single_out.dtype, NumericDType::F32);
+        assert_eq!(single_out.numeric_dtype(), NumericDType::F32);
         assert_eq!(single_out.shape, vec![1, 1]);
-        assert_eq!(single_out.data, vec![10.0]);
+        assert_eq!(
+            single_out.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![10.0])
+        );
         let err = call(Value::Int(IntValue::U8(5)), Value::Int(IntValue::U16(2))).unwrap_err();
         assert_eq!(
             err.identifier.as_deref(),
@@ -663,6 +813,8 @@ mod tests {
 
         let err = call(Value::Int(IntValue::U8(20)), Value::Num(10.0)).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:nchoosek:TooLarge"));
+
+        assert!(call(Value::Num(5.0), Value::Num(usize::MAX as f64)).is_err());
     }
 
     #[test]
@@ -673,13 +825,26 @@ mod tests {
         };
         assert_eq!(out.shape, vec![5, 4]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![
                 2.0, 2.0, 2.0, 2.0, 4.0, // col 1
                 4.0, 4.0, 4.0, 6.0, 6.0, // col 2
                 6.0, 6.0, 8.0, 8.0, 8.0, // col 3
                 8.0, 10.0, 10.0, 10.0, 10.0,
             ]
+        );
+    }
+
+    #[test]
+    fn single_vector_combinations_preserve_native_storage() {
+        let vector = Tensor::from_f32(vec![2.0, 4.0, 6.0], vec![1, 3]).unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(vector), Value::Num(2.0)).unwrap() else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.shape, vec![3, 2]);
+        assert_eq!(
+            out.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![2.0, 2.0, 4.0, 4.0, 6.0, 6.0])
         );
     }
 
@@ -691,13 +856,13 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(zero.shape, vec![1, 0]);
-        assert!(zero.data.is_empty());
+        assert!(zero.materialize_f64().is_empty());
 
         let Value::Tensor(too_large) = call(Value::Tensor(vector), Value::Num(4.0)).unwrap() else {
             panic!("expected tensor");
         };
         assert_eq!(too_large.shape, vec![0, 4]);
-        assert!(too_large.data.is_empty());
+        assert!(too_large.materialize_f64().is_empty());
     }
 
     #[test]
@@ -708,9 +873,155 @@ mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::U32);
+        assert_eq!(out.numeric_dtype(), NumericDType::U32);
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![10.0, 10.0, 20.0, 20.0, 30.0, 30.0]
+        );
+    }
+
+    #[test]
+    fn exact_integer_scalars_and_vector_combinations_preserve_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![4, 7, 9]),
+            IntegerStorage::I16(vec![4, 700, 900]),
+            IntegerStorage::I32(vec![4, i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![4, i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![4, 7, u8::MAX]),
+            IntegerStorage::U16(vec![4, 700, u16::MAX]),
+            IntegerStorage::U32(vec![4, 9_007_199, u32::MAX]),
+            IntegerStorage::U64(vec![4, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let scalar = Tensor::new_integer(
+                storage
+                    .from_exact_values_like(vec![values[0].clone()])
+                    .expect("scalar storage"),
+                vec![1, 1],
+            )
+            .expect("scalar tensor");
+            let k = Tensor::new_integer(
+                storage
+                    .from_exact_values_like(vec![one_like(&values[0])])
+                    .expect("k storage"),
+                vec![1, 1],
+            )
+            .expect("k tensor");
+            assert_eq!(
+                call(Value::Tensor(scalar), Value::Tensor(k)).expect("scalar coefficient"),
+                Value::Int(values[0].clone())
+            );
+
+            let expected = storage
+                .from_exact_values_like(vec![
+                    values[0].clone(),
+                    values[0].clone(),
+                    values[1].clone(),
+                    values[1].clone(),
+                    values[2].clone(),
+                    values[2].clone(),
+                ])
+                .expect("expected combinations");
+            let input = Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
+            let Value::Tensor(output) =
+                call(Value::Tensor(input), Value::Num(2.0)).expect("combinations")
+            else {
+                panic!("expected exact integer combinations");
+            };
+            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+
+            let empty = storage
+                .from_exact_values_like(Vec::new())
+                .expect("empty expected storage");
+            for (k, shape) in [(0.0, vec![1, 0]), (4.0, vec![0, 4])] {
+                let input =
+                    Tensor::new_integer(storage.clone(), vec![1, 3]).expect("integer vector");
+                let Value::Tensor(output) =
+                    call(Value::Tensor(input), Value::Num(k)).expect("empty combinations")
+                else {
+                    panic!("expected exact empty combinations");
+                };
+                assert_eq!(output.shape, shape);
+                assert_eq!(output.integer_storage(), Some(&empty));
+            }
+        }
+    }
+
+    #[test]
+    fn exact_complex_integer_vector_combinations_preserve_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![i8::MIN, -2, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, -300, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, -9_007_199, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -9_007_199_254_740_993, i64::MAX]),
+            IntegerStorage::U8(vec![0, 7, u8::MAX]),
+            IntegerStorage::U16(vec![0, 700, u16::MAX]),
+            IntegerStorage::U32(vec![0, 9_007_199, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for real in storages {
+            let real_values = real.exact_values();
+            let imag = real
+                .from_exact_values_like(vec![
+                    real_values[2].clone(),
+                    real_values[1].clone(),
+                    real_values[0].clone(),
+                ])
+                .expect("imaginary storage");
+            let imag_values = imag.exact_values();
+            let expected = IntegerComplexStorage::new(
+                real.from_exact_values_like(vec![
+                    real_values[0].clone(),
+                    real_values[0].clone(),
+                    real_values[1].clone(),
+                    real_values[1].clone(),
+                    real_values[2].clone(),
+                    real_values[2].clone(),
+                ])
+                .expect("expected real storage"),
+                imag.from_exact_values_like(vec![
+                    imag_values[0].clone(),
+                    imag_values[0].clone(),
+                    imag_values[1].clone(),
+                    imag_values[1].clone(),
+                    imag_values[2].clone(),
+                    imag_values[2].clone(),
+                ])
+                .expect("expected imaginary storage"),
+            )
+            .expect("expected complex storage");
+            let input = ComplexTensor::new_integer(
+                IntegerComplexStorage::new(real, imag).expect("complex integer input"),
+                vec![1, 3],
+            )
+            .expect("complex integer tensor");
+
+            let Value::ComplexTensor(output) =
+                call(Value::ComplexTensor(input), Value::Num(2.0)).expect("combinations")
+            else {
+                panic!("expected exact complex integer combinations");
+            };
+            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.integer_storage().cloned(), Some(expected));
+        }
+    }
+
+    fn one_like(value: &IntValue) -> IntValue {
+        match value {
+            IntValue::I8(_) => IntValue::I8(1),
+            IntValue::I16(_) => IntValue::I16(1),
+            IntValue::I32(_) => IntValue::I32(1),
+            IntValue::I64(_) => IntValue::I64(1),
+            IntValue::U8(_) => IntValue::U8(1),
+            IntValue::U16(_) => IntValue::U16(1),
+            IntValue::U32(_) => IntValue::U32(1),
+            IntValue::U64(_) => IntValue::U64(1),
+        }
     }
 
     #[test]
@@ -744,7 +1055,7 @@ mod tests {
         };
         assert_eq!(complex_out.shape, vec![3, 2]);
         assert_eq!(
-            complex_out.data,
+            complex_out.materialize_f64(),
             vec![
                 (1.0, 1.0),
                 (1.0, 1.0),
@@ -780,21 +1091,33 @@ mod tests {
     }
 
     #[test]
-    fn gpu_inputs_are_gathered_before_combining() {
+    fn gpu_inputs_are_rejected() {
         test_support::with_test_provider(|provider| {
             let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &vector.data,
+                    data: &vector.materialize_f64(),
                     shape: &vector.shape,
                 })
                 .expect("upload");
-            let Value::Tensor(out) = call(Value::GpuTensor(handle), Value::Num(2.0)).unwrap()
-            else {
-                panic!("expected tensor");
-            };
-            assert_eq!(out.shape, vec![3, 2]);
-            assert_eq!(out.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+            let error = call(Value::GpuTensor(handle), Value::Num(2.0)).unwrap_err();
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:nchoosek:InvalidInput")
+            );
         });
+    }
+
+    #[test]
+    fn complex_single_vector_preserves_native_storage() {
+        let input =
+            ComplexTensor::from_f32(vec![(1.0, 0.5), (2.0, -0.5), (3.0, 1.0)], vec![1, 3]).unwrap();
+        let Value::ComplexTensor(output) =
+            call(Value::ComplexTensor(input), Value::Num(2.0)).unwrap()
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![3, 2]);
+        assert!(matches!(output.complex_storage(), ComplexStorage::F32(_)));
     }
 }

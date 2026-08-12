@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "cell2mat executes on the host. GPU-resident tensors inside the cell array are gathered before concatenation."
+    "notes": "cell2mat currently executes on the host. Resident numeric elements are gathered, so the documented resident-output behavior remains an explicit implementation gap."
   },
   "fusion": {
     "elementwise": false,
@@ -32,7 +32,8 @@
   },
   "description": "`cell2mat(C)` concatenates numeric, logical, complex, or character blocks stored in cell array `C` into one dense array. Cells must form a rectangular block layout with compatible extents, matching MATLAB and RunMat rules.",
   "behaviors": [
-    "Works for cell arrays whose elements are **numeric**, **logical**, **complex**, or **character** arrays (including scalars and empties). Mixed types are rejected.",
+    "Works for cell arrays whose elements are **numeric**, **logical**, **complex**, or **character** arrays (including scalars and empties). Compatible mixed numeric types follow concatenation conversion rules.",
+    "All eight integer classes retain authoritative native storage. Same-class blocks stay exact; mixed integer blocks use the leftmost integer class with saturating conversion, and scalar doubles may coexist except with `int64` or `uint64`.",
     "RunMat currently represents cell arrays as 2-D grids. The first dimension tiles rows, the second tiles columns, and any higher dimensions inside each element must agree exactly across all cells.",
     "Empty cells contribute zero extent in their tiling dimension while preserving type information.",
     "The output array uses column-major layout for numeric, logical, and complex data, and matches MATLAB character array semantics for text.",

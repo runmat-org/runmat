@@ -1,10 +1,10 @@
 //! MATLAB-compatible `randperm` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -16,11 +16,28 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::Type;
 
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
+
+const RANDPERM_EXPLICIT_DOUBLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randperm-explicit-double",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the explicit randperm \"double\" selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandpermExplicitDoubleExtension"),
+};
+
+const RANDPERM_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "randperm-like",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "the randperm \"like\" prototype selector is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:RandpermLikeExtension"),
+};
+
+pub const RANDPERM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [RANDPERM_EXPLICIT_DOUBLE_EXTENSION, RANDPERM_LIKE_EXTENSION];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -296,6 +313,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "array_construct",
     type_resolver(randperm_type),
     descriptor(crate::builtins::array::creation::randperm::RANDPERM_DESCRIPTOR),
+    extensions(crate::builtins::array::creation::randperm::RANDPERM_EXTENSIONS),
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -346,6 +364,10 @@ impl ParsedRandPerm {
             if let Some(keyword) = keyword_of(&arg) {
                 match keyword.as_str() {
                     "like" => {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &RANDPERM_LIKE_EXTENSION,
+                            "randperm",
+                        )?;
                         if matches!(template, OutputTemplate::Like(_)) {
                             return Err(builtin_error(
                                 "randperm: duplicate 'like' prototype specified",
@@ -359,6 +381,10 @@ impl ParsedRandPerm {
                         continue;
                     }
                     "double" => {
+                        crate::compatibility::ensure_builtin_extension_enabled(
+                            &RANDPERM_EXPLICIT_DOUBLE_EXTENSION,
+                            "randperm",
+                        )?;
                         if matches!(template, OutputTemplate::Like(_)) {
                             return Err(builtin_error(
                                 "randperm: cannot combine 'double' with a 'like' prototype",
@@ -446,11 +472,7 @@ fn randperm_gpu(handle: &GpuTensorHandle, n: usize, k: usize) -> crate::BuiltinR
 
     let tensor = randperm_tensor(n, k)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        if let Ok(device) = provider.upload(&view) {
+        if let Ok(device) = gpu_helpers::upload_tensor(provider, &tensor) {
             return Ok(Value::GpuTensor(device));
         }
     }
@@ -496,7 +518,7 @@ async fn parse_size_argument(
     message: &str,
 ) -> crate::BuiltinResult<usize> {
     let is_vector = match value {
-        Value::Tensor(t) => t.data.len() != 1,
+        Value::Tensor(t) => tensor::tensor_element_len(t) != 1,
         Value::GpuTensor(handle) => tensor::element_count(&handle.shape) != 1,
         _ => false,
     };
@@ -554,6 +576,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::IntegerStorage;
 
     fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::randperm_builtin(args))
@@ -606,7 +630,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 5]);
         let expected = expected_randperm(5, 5);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 
     #[test]
@@ -619,6 +643,29 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn randperm_size_arguments_read_typed_integer_storage_exactly() {
+        let n = Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("n");
+        assert_eq!(
+            block_on(parse_size_argument(
+                &Value::Tensor(n),
+                false,
+                "randperm: N must be a non-negative integer (and <= 2^53)",
+            ))
+            .expect("N"),
+            5
+        );
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("vector");
+        assert!(block_on(parse_size_argument(
+            &Value::Tensor(vector),
+            false,
+            "randperm: N must be a non-negative integer (and <= 2^53)",
+        ))
+        .is_err());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_partial_selection_is_unique_and_sorted() {
@@ -628,7 +675,7 @@ pub(crate) mod tests {
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 4]);
-        let data = gathered.data;
+        let data = gathered.materialize_f64();
         let expected = expected_randperm(10, 4);
         assert_eq!(data, expected);
         let mut sorted = data.clone();
@@ -647,7 +694,7 @@ pub(crate) mod tests {
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 0]);
-        assert!(gathered.data.is_empty());
+        assert!(gathered.materialize_f64().is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -674,9 +721,66 @@ pub(crate) mod tests {
         assert!(err.message().contains("single precision"));
     }
 
+    #[test]
+    fn randperm_extension_selectors_follow_compatibility_mode() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let explicit = randperm_builtin(vec![Value::from(3), Value::from("double")])
+                .expect_err("MATLAB mode rejects explicit double selector");
+            assert_eq!(
+                explicit.identifier(),
+                Some("RunMat:compatibility:RandpermExplicitDoubleExtension")
+            );
+            let like = randperm_builtin(vec![Value::from(3), Value::from("like"), Value::Num(0.0)])
+                .expect_err("MATLAB mode rejects like selector");
+            assert_eq!(
+                like.identifier(),
+                Some("RunMat:compatibility:RandpermLikeExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(
+                randperm_builtin(vec![Value::from(0), Value::from("double")]).is_ok(),
+                "RunMat mode accepts explicit double selector"
+            );
+            assert!(
+                randperm_builtin(vec![Value::from(0), Value::from("like"), Value::Num(0.0),])
+                    .is_ok(),
+                "RunMat mode accepts like selector"
+            );
+        }
+    }
+
+    #[test]
+    fn randperm_integer_counts_always_return_double() {
+        let _guard = random::test_guard();
+        for storage in [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ] {
+            reset_rng_clean();
+            let count = Tensor::new_integer(storage, vec![1, 1]).expect("integer count");
+            let output =
+                randperm_builtin(vec![Value::Tensor(count)]).expect("integer count randperm");
+            let Value::Tensor(output) = output else {
+                panic!("zero-count randperm must return a tensor");
+            };
+            assert_eq!(output.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(output.shape, vec![1, 0]);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_accepts_double_keyword() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
         let args = vec![Value::from(5), Value::from("double")];
@@ -684,12 +788,13 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 5]);
         let expected = expected_randperm(5, 5);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_like_tensor_matches_host_output() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
         let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
@@ -702,18 +807,19 @@ pub(crate) mod tests {
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 4]);
         let expected = expected_randperm(4, 4);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_gpu_like_roundtrip() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &proto_tensor.data,
+                data: &proto_tensor.materialize_f64(),
                 shape: &proto_tensor.shape,
             };
             let proto_handle = provider.upload(&view).expect("upload prototype");
@@ -731,13 +837,14 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             let expected = expected_randperm(6, 3);
-            assert_eq!(gathered.data, expected);
+            assert_eq!(gathered.materialize_f64(), expected);
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randperm_like_requires_prototype() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let args = vec![Value::from(4), Value::from("like")];
         let err = randperm_builtin(args).unwrap_err();
         assert!(err.message().contains("prototype after 'like'"));
@@ -747,6 +854,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn randperm_wgpu_produces_unique_indices() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = random::test_guard();
         random::reset_rng();
         use runmat_accelerate::backend::wgpu::provider::{

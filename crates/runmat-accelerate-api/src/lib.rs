@@ -49,6 +49,8 @@ static HANDLE_CLASS_NAMES: Lazy<RwLock<HashMap<HandleMetadataKey, String>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 static HANDLE_STORAGES: Lazy<RwLock<HashMap<HandleMetadataKey, GpuTensorStorage>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_INTEGER_TYPES: Lazy<RwLock<HashMap<HandleMetadataKey, IntegerElementType>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposeInfo {
@@ -250,6 +252,56 @@ pub enum GpuTensorStorage {
     ComplexInterleaved,
 }
 
+/// Exact native integer element storage for host/device transfer contracts.
+///
+/// This intentionally lives in the acceleration API instead of depending on
+/// `runmat-builtins`, so providers can move integer buffers without first
+/// materializing RunMat's lossy floating compatibility view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IntegerElementType {
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+impl IntegerElementType {
+    pub const fn element_size(self) -> usize {
+        match self {
+            Self::I8 | Self::U8 => 1,
+            Self::I16 | Self::U16 => 2,
+            Self::I32 | Self::U32 => 4,
+            Self::I64 | Self::U64 => 8,
+        }
+    }
+}
+
+/// Record the exact native integer class stored by a GPU tensor handle.
+pub fn set_handle_integer_type(handle: &GpuTensorHandle, element_type: IntegerElementType) {
+    if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
+        guard.insert(handle_metadata_key(handle), element_type);
+    }
+}
+
+/// Look up the exact native integer class stored by a GPU tensor handle.
+pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementType> {
+    HANDLE_INTEGER_TYPES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle_metadata_key(handle)).copied())
+}
+
+/// Clear the native integer class annotation for a released handle.
+pub fn clear_handle_integer_type(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_INTEGER_TYPES.write() {
+        guard.remove(&handle_metadata_key(handle));
+    }
+}
+
 impl Default for GpuTensorStorage {
     fn default() -> Self {
         Self::Real
@@ -259,6 +311,9 @@ impl Default for GpuTensorStorage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuTensorHandle {
     pub shape: Vec<usize>,
+    /// Stable provider/device namespace identifier. Distinct live provider
+    /// instances that can own handles must use distinct identifiers because
+    /// provider routing is keyed by this value.
     pub device_id: u32,
     pub buffer_id: u64,
 }
@@ -1113,6 +1168,9 @@ pub struct UniqueOptions {
     pub rows: bool,
     pub order: UniqueOrder,
     pub occurrence: UniqueOccurrence,
+    pub treat_missing_as_distinct: bool,
+    pub explicit_order: bool,
+    pub explicit_occurrence: bool,
 }
 
 /// Host-resident outputs returned by provider-backed `unique` operations.
@@ -1377,6 +1435,7 @@ pub struct KernelLaunchTelemetry {
 
 pub type AccelProviderFuture<'a, T> = Pin<Box<dyn Future<Output = anyhow::Result<T>> + 'a>>;
 pub type AccelDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostTensorOwned>;
+pub type AccelIntegerDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostIntegerTensorOwned>;
 
 fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, T> {
     Box::pin(async move { Err(anyhow::anyhow!(message)) })
@@ -1386,8 +1445,33 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
 pub trait AccelProvider: Send + Sync {
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
+
+    /// Upload exact native integer storage without converting through f64.
+    /// Providers that do not expose native integer buffers must reject this
+    /// operation rather than silently changing the value class or precision.
+    fn upload_integer(
+        &self,
+        _host: &crate::HostIntegerTensorView,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "provider does not support exact native integer buffers"
+        ))
+    }
+
+    /// Download exact native integer storage without converting through f64.
+    fn download_integer<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
+        Box::pin(async {
+            Err(anyhow::anyhow!(
+                "provider does not support exact native integer buffers"
+            ))
+        })
+    }
+
     fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
     fn device_info(&self) -> String;
+    /// Returns the stable identifier used to route this provider's handles.
+    /// Distinct concurrently registered provider instances must return distinct
+    /// identifiers; reusing an identifier would make handle ownership ambiguous.
     fn device_id(&self) -> u32 {
         0
     }
@@ -1496,6 +1580,19 @@ pub trait AccelProvider: Send + Sync {
     /// Allocate a zero-initialised tensor matching the prototype tensor.
     fn zeros_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         self.zeros(&prototype.shape)
+    }
+
+    /// Allocate an exact native-integer zero buffer using the element class of
+    /// `prototype`. Implementations must reject non-native-integer prototypes
+    /// rather than allocating a floating compatibility buffer.
+    fn zeros_integer_like(
+        &self,
+        _prototype: &GpuTensorHandle,
+        _shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "zeros_integer_like not supported by provider"
+        ))
     }
 
     /// Allocate a tensor filled with a constant value on the device.
@@ -1929,6 +2026,22 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("elem_div not supported by provider")
     }
+    /// Compute an exact MATLAB-style remainder for compatible native integer tensors.
+    fn elem_rem<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_rem not supported by provider")
+    }
+    /// Compute an exact MATLAB-style modulus for compatible native integer tensors.
+    fn elem_mod<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("elem_mod not supported by provider")
+    }
     fn elem_pow<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
@@ -2261,6 +2374,21 @@ pub trait AccelProvider: Send + Sync {
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_exp not supported by provider")
+    }
+    /// Apply an exponential linear unit activation with the supplied alpha.
+    fn activation_elu<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _alpha: f64,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("activation_elu not supported by provider")
+    }
+    /// Normalize each row of a real two-dimensional tensor with stable softmax.
+    fn activation_softmax_rows<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("activation_softmax_rows not supported by provider")
     }
     fn unary_expm1<'a>(
         &'a self,
@@ -2719,6 +2847,23 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_sum_dim not supported by provider")
     }
+    /// Reduce a native integer gpuArray while preserving its exact element
+    /// class. This is intentionally separate from `reduce_sum`, whose MATLAB
+    /// default output semantics are floating point for integer inputs.
+    fn reduce_integer_sum_native<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_sum_native not supported by provider")
+    }
+    /// Dimension form of [`Self::reduce_integer_sum_native`].
+    fn reduce_integer_sum_native_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_sum_native_dim not supported by provider")
+    }
     fn dot<'a>(
         &'a self,
         _lhs: &'a GpuTensorHandle,
@@ -2752,6 +2897,59 @@ pub trait AccelProvider: Send + Sync {
         _dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_prod_dim not supported by provider")
+    }
+    /// Reduce a native integer gpuArray by product while preserving its exact
+    /// element class, distinct from MATLAB's default floating-point output.
+    fn reduce_integer_prod_native<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_prod_native not supported by provider")
+    }
+    /// Dimension form of [`Self::reduce_integer_prod_native`].
+    fn reduce_integer_prod_native_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_prod_native_dim not supported by provider")
+    }
+    /// Compute MATLAB's explicit native-output mean for a native integer
+    /// gpuArray. Providers must avoid floating-point accumulation so int64 and
+    /// uint64 values remain exact before the final class-preserving rounding.
+    fn reduce_integer_mean_native<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_mean_native not supported by provider")
+    }
+    /// Dimension form of [`Self::reduce_integer_mean_native`].
+    fn reduce_integer_mean_native_dim<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_mean_native_dim not supported by provider")
+    }
+    /// Multi-dimension form of [`Self::reduce_integer_mean_native`]. All
+    /// requested zero-based dimensions must be reduced in one logical pass so
+    /// native integer output rounds only once.
+    fn reduce_integer_mean_native_dims<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("reduce_integer_mean_native_dims not supported by provider")
+    }
+    /// Convert a real gpuArray to exact native integer storage while preserving
+    /// device residency. Floating-point inputs use MATLAB-compatible saturating
+    /// rounding; native integer inputs use exact class-to-class clamping.
+    fn cast_to_integer<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _target: IntegerElementType,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("cast_to_integer not supported by provider")
     }
     fn reduce_mean<'a>(
         &'a self,
@@ -2890,6 +3088,16 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cumsum_scan not supported by provider"))
     }
+    fn integer_cumsum_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "integer_cumsum_scan not supported by provider"
+        ))
+    }
     fn trapz_dim(
         &self,
         _input: &GpuTensorHandle,
@@ -2915,6 +3123,16 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cumprod_scan not supported by provider"))
     }
+    fn integer_cumprod_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "integer_cumprod_scan not supported by provider"
+        ))
+    }
     fn cummin_scan(
         &self,
         _input: &GpuTensorHandle,
@@ -2924,6 +3142,16 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<ProviderCumminResult> {
         Err(anyhow::anyhow!("cummin_scan not supported by provider"))
     }
+    fn integer_cummin_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+    ) -> anyhow::Result<ProviderCumminResult> {
+        Err(anyhow::anyhow!(
+            "integer_cummin_scan not supported by provider"
+        ))
+    }
     fn cummax_scan(
         &self,
         _input: &GpuTensorHandle,
@@ -2932,6 +3160,16 @@ pub trait AccelProvider: Send + Sync {
         _nan_mode: ProviderNanMode,
     ) -> anyhow::Result<ProviderCummaxResult> {
         Err(anyhow::anyhow!("cummax_scan not supported by provider"))
+    }
+    fn integer_cummax_scan(
+        &self,
+        _input: &GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+    ) -> anyhow::Result<ProviderCummaxResult> {
+        Err(anyhow::anyhow!(
+            "integer_cummax_scan not supported by provider"
+        ))
     }
 
     fn find(
@@ -3210,6 +3448,8 @@ fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
 ///   (e.g., a `'static` singleton), as the runtime stores a raw reference globally.
 /// - Concurrent callers must ensure registration happens once or is properly
 ///   synchronized; this function does not enforce thread-safety for re-registration.
+/// - Distinct live provider instances that can own handles must not share a
+///   `device_id`; the handle registry uses that identifier as its ownership key.
 pub unsafe fn register_provider(p: &'static dyn AccelProvider) {
     replace_thread_provider(Some(p));
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
@@ -3369,6 +3609,93 @@ pub struct HostTensorOwned {
 pub struct HostTensorView<'a> {
     pub data: &'a [f64],
     pub shape: &'a [usize],
+}
+
+/// Borrowed exact native-integer buffer used for provider transfers.
+#[derive(Debug, Clone, Copy)]
+pub enum HostIntegerDataView<'a> {
+    I8(&'a [i8]),
+    I16(&'a [i16]),
+    I32(&'a [i32]),
+    I64(&'a [i64]),
+    U8(&'a [u8]),
+    U16(&'a [u16]),
+    U32(&'a [u32]),
+    U64(&'a [u64]),
+}
+
+impl HostIntegerDataView<'_> {
+    pub fn element_type(self) -> IntegerElementType {
+        match self {
+            Self::I8(_) => IntegerElementType::I8,
+            Self::I16(_) => IntegerElementType::I16,
+            Self::I32(_) => IntegerElementType::I32,
+            Self::I64(_) => IntegerElementType::I64,
+            Self::U8(_) => IntegerElementType::U8,
+            Self::U16(_) => IntegerElementType::U16,
+            Self::U32(_) => IntegerElementType::U32,
+            Self::U64(_) => IntegerElementType::U64,
+        }
+    }
+
+    pub fn len(self) -> usize {
+        match self {
+            Self::I8(data) => data.len(),
+            Self::I16(data) => data.len(),
+            Self::I32(data) => data.len(),
+            Self::I64(data) => data.len(),
+            Self::U8(data) => data.len(),
+            Self::U16(data) => data.len(),
+            Self::U32(data) => data.len(),
+            Self::U64(data) => data.len(),
+        }
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Borrowed exact integer tensor transfer payload.
+#[derive(Debug, Clone, Copy)]
+pub struct HostIntegerTensorView<'a> {
+    pub data: HostIntegerDataView<'a>,
+    pub shape: &'a [usize],
+}
+
+/// Owned exact native-integer buffer returned by a provider download.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostIntegerDataOwned {
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+impl HostIntegerDataOwned {
+    pub fn element_type(&self) -> IntegerElementType {
+        match self {
+            Self::I8(_) => IntegerElementType::I8,
+            Self::I16(_) => IntegerElementType::I16,
+            Self::I32(_) => IntegerElementType::I32,
+            Self::I64(_) => IntegerElementType::I64,
+            Self::U8(_) => IntegerElementType::U8,
+            Self::U16(_) => IntegerElementType::U16,
+            Self::U32(_) => IntegerElementType::U32,
+            Self::U64(_) => IntegerElementType::U64,
+        }
+    }
+}
+
+/// Exact integer tensor returned by a provider download.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostIntegerTensorOwned {
+    pub data: HostIntegerDataOwned,
+    pub shape: Vec<usize>,
 }
 
 /// Lightweight 1-D axis view used by provider meshgrid hooks.
@@ -3661,6 +3988,8 @@ mod tests {
         set_handle_class_name(&second, "uint64");
         set_handle_storage(&first, GpuTensorStorage::Real);
         set_handle_storage(&second, GpuTensorStorage::ComplexInterleaved);
+        set_handle_integer_type(&first, IntegerElementType::I16);
+        set_handle_integer_type(&second, IntegerElementType::U64);
         set_handle_logical(&first, true);
         record_handle_transpose(&second, 2, 3);
 
@@ -3673,6 +4002,8 @@ mod tests {
             handle_storage(&second),
             GpuTensorStorage::ComplexInterleaved
         );
+        assert_eq!(handle_integer_type(&first), Some(IntegerElementType::I16));
+        assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
         assert!(handle_is_logical(&first));
         assert!(!handle_is_logical(&second));
         assert!(handle_transpose_info(&first).is_none());
@@ -3690,6 +4021,8 @@ mod tests {
         clear_handle_class_name(&second);
         clear_handle_storage(&first);
         clear_handle_storage(&second);
+        clear_handle_integer_type(&first);
+        clear_handle_integer_type(&second);
         clear_handle_logical(&first);
         clear_handle_transpose(&second);
     }

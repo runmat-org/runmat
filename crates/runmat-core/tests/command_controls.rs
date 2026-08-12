@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use runmat_builtins::Value;
-use runmat_core::{ExecutionStreamKind, RunError, RunMatSession};
+use runmat_core::{CompatMode, ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::gc_test_context;
 use std::path::{Path, PathBuf};
 
@@ -96,6 +96,26 @@ fn close_all_command_form_executes_without_lowering_all_as_a_builtin() {
 
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "close all;").unwrap();
     assert!(result.error.is_none());
+}
+
+#[test]
+fn imshow_four_channel_extension_follows_session_compatibility_mode() {
+    let _plot_guard = isolate_plot_test();
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let source = "rgba = cat(3, 1, 0, 0, 0.5); h = imshow(rgba);";
+
+    engine.set_compat_mode(CompatMode::Matlab);
+    let matlab = runmat_core::execute_text_request_for_testing(&mut engine, source)
+        .expect("runtime failure should be returned in the execution outcome");
+    assert_eq!(
+        matlab.error.as_ref().and_then(|error| error.identifier()),
+        Some("RunMat:compatibility:ImshowFourChannelImageExtension")
+    );
+
+    engine.set_compat_mode(CompatMode::RunMat);
+    let runmat = runmat_core::execute_text_request_for_testing(&mut engine, source)
+        .expect("RunMat mode accepts four-channel numeric image data");
+    assert!(runmat.error.is_none(), "{:?}", runmat.error);
 }
 
 #[test]

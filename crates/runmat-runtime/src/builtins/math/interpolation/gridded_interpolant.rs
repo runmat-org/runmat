@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{
     build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
     OBJECT_SUBSREF_METHOD,
@@ -550,10 +551,11 @@ fn text_from_value(value: &Value) -> Option<String> {
 fn numeric_tensor(value: Value, name: &str) -> BuiltinResult<Tensor> {
     match value {
         Value::Num(x) => Tensor::new(vec![x], vec![1, 1]).map_err(internal),
-        Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
-            Ok(tensor)
-        }
-        Value::Tensor(_) => Err(invalid(format!("{name} must be a single or double array"))),
+        Value::Tensor(tensor) => match tensor.numeric_dtype() {
+            NumericDType::F64 | NumericDType::F32 => Ok(tensor),
+            _ => tensor_utils::integer_tensor_to_f64(tensor)
+                .map_err(|err| invalid(format!("{name}: {err}"))),
+        },
         other => Err(invalid(format!(
             "{name} must be a real numeric array, got {other:?}"
         ))),
@@ -563,14 +565,9 @@ fn numeric_tensor(value: Value, name: &str) -> BuiltinResult<Tensor> {
 fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(x) => Ok(vec![x]),
-        Value::Tensor(tensor)
-            if is_vector_shape(&tensor.shape)
-                && matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) =>
-        {
-            Ok(tensor.data)
-        }
         Value::Tensor(tensor) if is_vector_shape(&tensor.shape) => {
-            Err(invalid(format!("{name} must be a single or double vector")))
+            // Grid coordinates are evaluated in the interpolator's f64 domain.
+            Ok(tensor_utils::tensor_into_values_f64(tensor))
         }
         Value::Tensor(_) => Err(invalid(format!("{name} must be a vector"))),
         other => Err(invalid(format!(
@@ -581,8 +578,8 @@ fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
 
 fn normalize_default_values(values: Tensor) -> BuiltinResult<Tensor> {
     if is_vector_shape(&values.shape) && values.shape.first().copied().unwrap_or(1) == 1 {
-        let len = values.data.len();
-        Tensor::new_with_dtype(values.data, vec![len, 1], values.dtype).map_err(internal)
+        let len = tensor_utils::tensor_element_len(&values);
+        values.reshape(vec![len, 1]).map_err(internal)
     } else {
         Ok(values)
     }
@@ -591,10 +588,11 @@ fn normalize_default_values(values: Tensor) -> BuiltinResult<Tensor> {
 fn normalize_values_for_grid(grid_vectors: &[Vec<f64>], values: Tensor) -> BuiltinResult<Tensor> {
     if grid_vectors.len() == 1
         && is_vector_shape(&values.shape)
-        && values.data.len() == grid_vectors[0].len()
+        && tensor_utils::tensor_element_len(&values) == grid_vectors[0].len()
         && values.shape.first().copied().unwrap_or(1) == 1
     {
-        Tensor::new_with_dtype(values.data, vec![grid_vectors[0].len(), 1], values.dtype)
+        values
+            .reshape(vec![grid_vectors[0].len(), 1])
             .map_err(internal)
     } else {
         Ok(values)
@@ -664,11 +662,12 @@ fn full_grid_vectors(grids: Vec<Value>, values: &Tensor) -> BuiltinResult<Vec<Ve
     let mut vectors = Vec::with_capacity(grid_rank);
     for (dim, tensor) in tensors.iter().enumerate() {
         let len = grid_shape[dim];
+        let values = tensor_utils::tensor_values_f64_cow(tensor);
         let mut vector = Vec::with_capacity(len);
         for idx in 0..len {
             let mut subs = vec![0; grid_rank];
             subs[dim] = idx;
-            vector.push(tensor.data[column_major_offset(&subs, &tensor.shape)]);
+            vector.push(values[column_major_offset(&subs, &tensor.shape)]);
         }
         vectors.push(vector);
     }
@@ -689,7 +688,7 @@ fn validate_rectilinear_full_grids(
     for linear in 0..total {
         let subs = unravel_column_major(linear, shape);
         for (dim, tensor) in tensors.iter().enumerate() {
-            let actual = tensor.data[linear];
+            let actual = tensor_utils::tensor_value_f64(tensor, linear);
             let expected = vectors[dim][subs[dim]];
             if actual != expected {
                 return Err(invalid(
@@ -918,19 +917,35 @@ fn evaluate_interpolant(spec: &InterpolantSpec, args: Vec<Value>) -> BuiltinResu
     if out_shape.is_empty() {
         out_shape.push(1);
     }
+    let values = tensor_utils::tensor_values_f64_cow(&spec.values);
     if is_piecewise_method(spec.method) {
-        return evaluate_piecewise_interpolant(spec, &plan, grid_size, extra_count, out_shape);
+        return evaluate_piecewise_interpolant(
+            spec,
+            values.as_ref(),
+            &plan,
+            grid_size,
+            extra_count,
+            out_shape,
+        );
     }
     let mut out = Vec::with_capacity(plan.len() * extra_count);
     for series in 0..extra_count {
         let series_offset = series * grid_size;
-        plan.for_each_point(|point| out.push(interpolate_point(spec, point, series_offset)));
+        plan.for_each_point(|point| {
+            out.push(interpolate_point(
+                spec,
+                values.as_ref(),
+                point,
+                series_offset,
+            ))
+        });
     }
-    finish_interpolant_output(out, out_shape, spec.values.dtype)
+    finish_interpolant_output(out, out_shape, spec.values.numeric_dtype())
 }
 
 fn evaluate_piecewise_interpolant(
     spec: &InterpolantSpec,
+    values: &[f64],
     plan: &QueryPlan,
     grid_size: usize,
     extra_count: usize,
@@ -940,7 +955,7 @@ fn evaluate_piecewise_interpolant(
     let mut out = Vec::with_capacity(plan.len() * extra_count);
     for series in 0..extra_count {
         let series_offset = series * grid_size;
-        let y = spec.values.data[series_offset..series_offset + grid_size].to_vec();
+        let y = values[series_offset..series_offset + grid_size].to_vec();
         let series_data = NumericSeries {
             x: x.clone(),
             y,
@@ -958,31 +973,34 @@ fn evaluate_piecewise_interpolant(
         plan.for_each_point(|point| {
             out.push(evaluate_piecewise_scalar(
                 spec,
+                values,
                 &pp,
                 point[0],
                 series_offset,
             ));
         });
     }
-    finish_interpolant_output(out, out_shape, spec.values.dtype)
+    finish_interpolant_output(out, out_shape, spec.values.numeric_dtype())
 }
 
 fn finish_interpolant_output(
-    mut out: Vec<f64>,
+    out: Vec<f64>,
     out_shape: Vec<usize>,
     dtype: NumericDType,
 ) -> BuiltinResult<Value> {
     if out.len() == 1 && dtype == NumericDType::F64 {
         Ok(Value::Num(out[0]))
     } else {
-        if dtype == NumericDType::F32 {
-            for value in &mut out {
-                *value = *value as f32 as f64;
-            }
+        let tensor = match dtype {
+            NumericDType::F64 => Tensor::new(out, out_shape),
+            NumericDType::F32 => Tensor::from_f32(
+                out.into_iter().map(|value| value as f32).collect(),
+                out_shape,
+            ),
+            _ => Err("interpolant output class must be single or double".to_string()),
         }
-        Tensor::new_with_dtype(out, out_shape, dtype)
-            .map(Value::Tensor)
-            .map_err(internal)
+        .map_err(internal)?;
+        Ok(Value::Tensor(tensor))
     }
 }
 
@@ -1019,10 +1037,11 @@ fn parse_query_plan(grid_vectors: &[Vec<f64>], args: Vec<Value>) -> BuiltinResul
             ));
         }
         let mut points = Vec::with_capacity(tensor.rows());
+        let values = tensor_utils::tensor_values_f64_cow(&tensor);
         for row in 0..tensor.rows() {
             let mut point = Vec::with_capacity(ndim);
             for col in 0..ndim {
-                point.push(tensor.data[row + col * tensor.rows()]);
+                point.push(values[row + col * tensor.rows()]);
             }
             points.push(point);
         }
@@ -1065,8 +1084,14 @@ fn parse_query_plan(grid_vectors: &[Vec<f64>], args: Vec<Value>) -> BuiltinResul
 fn numeric_query_values(value: Value, name: &str) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
     match value {
         Value::Num(x) => Ok((vec![x], vec![1, 1])),
-        Value::Tensor(tensor) if matches!(tensor.dtype, NumericDType::F64 | NumericDType::F32) => {
-            Ok((tensor.data, tensor.shape))
+        Value::Tensor(tensor)
+            if matches!(
+                tensor.numeric_dtype(),
+                NumericDType::F64 | NumericDType::F32
+            ) =>
+        {
+            let shape = tensor.shape.clone();
+            Ok((tensor_utils::tensor_into_values_f64(tensor), shape))
         }
         Value::Tensor(_) => Err(invalid(format!("{name} must be single or double"))),
         other => Err(invalid(format!("{name} must be numeric, got {other:?}"))),
@@ -1089,18 +1114,23 @@ fn full_query_grid(query_vectors: Vec<Vec<f64>>) -> BuiltinResult<QueryPlan> {
     })
 }
 
-fn interpolate_point(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+fn interpolate_point(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    point: &[f64],
+    series_offset: usize,
+) -> f64 {
     if point.iter().any(|value| value.is_nan()) {
         return f64::NAN;
     }
     if point_outside_grid(spec, point) {
-        return extrapolate_point(spec, point, series_offset);
+        return extrapolate_point(spec, values, point, series_offset);
     }
     match spec.method {
-        InterpMethod::Linear => interpolate_linear(spec, point, series_offset),
-        InterpMethod::Nearest => interpolate_nearest(spec, point, series_offset),
-        InterpMethod::Next => interpolate_step(spec, point[0], series_offset, true),
-        InterpMethod::Previous => interpolate_step(spec, point[0], series_offset, false),
+        InterpMethod::Linear => interpolate_linear(spec, values, point, series_offset),
+        InterpMethod::Nearest => interpolate_nearest(spec, values, point, series_offset),
+        InterpMethod::Next => interpolate_step(spec, values, point[0], series_offset, true),
+        InterpMethod::Previous => interpolate_step(spec, values, point[0], series_offset, false),
         InterpMethod::Pchip | InterpMethod::Spline => {
             unreachable!("higher-order methods use evaluate_piecewise_interpolant")
         }
@@ -1114,13 +1144,20 @@ fn point_outside_grid(spec: &InterpolantSpec, point: &[f64]) -> bool {
     })
 }
 
-fn extrapolate_point(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+fn extrapolate_point(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    point: &[f64],
+    series_offset: usize,
+) -> f64 {
     match spec.extrapolation {
         ExtrapolationMethod::None => f64::NAN,
-        ExtrapolationMethod::Linear => interpolate_linear(spec, point, series_offset),
-        ExtrapolationMethod::Nearest => interpolate_nearest(spec, point, series_offset),
-        ExtrapolationMethod::Next => interpolate_step(spec, point[0], series_offset, true),
-        ExtrapolationMethod::Previous => interpolate_step(spec, point[0], series_offset, false),
+        ExtrapolationMethod::Linear => interpolate_linear(spec, values, point, series_offset),
+        ExtrapolationMethod::Nearest => interpolate_nearest(spec, values, point, series_offset),
+        ExtrapolationMethod::Next => interpolate_step(spec, values, point[0], series_offset, true),
+        ExtrapolationMethod::Previous => {
+            interpolate_step(spec, values, point[0], series_offset, false)
+        }
         ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline => {
             unreachable!("piecewise extrapolation uses evaluate_piecewise_interpolant")
         }
@@ -1151,6 +1188,7 @@ fn is_piecewise_extrapolation(method: ExtrapolationMethod) -> bool {
 
 fn evaluate_piecewise_scalar(
     spec: &InterpolantSpec,
+    values: &[f64],
     pp: &PiecewisePolynomial,
     coord: f64,
     series_offset: usize,
@@ -1165,16 +1203,16 @@ fn evaluate_piecewise_scalar(
             ExtrapolationMethod::None => return f64::NAN,
             ExtrapolationMethod::Nearest => {
                 let idx = if coord < grid[0] { 0 } else { grid.len() - 1 };
-                return spec.values.data[series_offset + idx];
+                return values[series_offset + idx];
             }
             ExtrapolationMethod::Next => {
-                return interpolate_step(spec, coord, series_offset, true);
+                return interpolate_step(spec, values, coord, series_offset, true);
             }
             ExtrapolationMethod::Previous => {
-                return interpolate_step(spec, coord, series_offset, false);
+                return interpolate_step(spec, values, coord, series_offset, false);
             }
             ExtrapolationMethod::Linear => {
-                return interpolate_linear(spec, &[coord], series_offset);
+                return interpolate_linear(spec, values, &[coord], series_offset);
             }
             ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline => {}
         }
@@ -1182,7 +1220,12 @@ fn evaluate_piecewise_scalar(
     eval_pp_scalar(pp, 0, coord, &Extrapolation::Extrapolate)
 }
 
-fn interpolate_linear(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+fn interpolate_linear(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    point: &[f64],
+    series_offset: usize,
+) -> f64 {
     let mut brackets = Vec::with_capacity(point.len());
     for (dim, &coord) in point.iter().enumerate() {
         let Some(bracket) = bracket_for_linear(&spec.grid_vectors[dim], coord, spec.extrapolation)
@@ -1208,8 +1251,7 @@ fn interpolate_linear(spec: &InterpolantSpec, point: &[f64], series_offset: usiz
                 subs.push(bracket.hi);
             }
         }
-        acc += weight
-            * spec.values.data[series_offset + column_major_offset(&subs, &spec.values.shape)];
+        acc += weight * values[series_offset + column_major_offset(&subs, &spec.values.shape)];
     }
     acc
 }
@@ -1254,7 +1296,12 @@ fn bracket_for_linear(
     Some(Bracket { lo, hi, t })
 }
 
-fn interpolate_nearest(spec: &InterpolantSpec, point: &[f64], series_offset: usize) -> f64 {
+fn interpolate_nearest(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    point: &[f64],
+    series_offset: usize,
+) -> f64 {
     let mut subs = Vec::with_capacity(point.len());
     for (dim, &coord) in point.iter().enumerate() {
         let Some(idx) = nearest_index(&spec.grid_vectors[dim], coord, spec.extrapolation) else {
@@ -1262,7 +1309,7 @@ fn interpolate_nearest(spec: &InterpolantSpec, point: &[f64], series_offset: usi
         };
         subs.push(idx);
     }
-    spec.values.data[series_offset + column_major_offset(&subs, &spec.values.shape)]
+    values[series_offset + column_major_offset(&subs, &spec.values.shape)]
 }
 
 fn nearest_index(grid: &[f64], coord: f64, extrapolation: ExtrapolationMethod) -> Option<usize> {
@@ -1286,21 +1333,27 @@ fn nearest_index(grid: &[f64], coord: f64, extrapolation: ExtrapolationMethod) -
     }
 }
 
-fn interpolate_step(spec: &InterpolantSpec, coord: f64, series_offset: usize, next: bool) -> f64 {
+fn interpolate_step(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    coord: f64,
+    series_offset: usize,
+    next: bool,
+) -> f64 {
     let grid = &spec.grid_vectors[0];
     if coord < grid[0] || coord > grid[grid.len() - 1] {
         if spec.extrapolation == ExtrapolationMethod::None {
             return f64::NAN;
         }
         let idx = if coord < grid[0] { 0 } else { grid.len() - 1 };
-        return spec.values.data[series_offset + idx];
+        return values[series_offset + idx];
     }
     let idx = match grid.binary_search_by(|probe| probe.partial_cmp(&coord).unwrap()) {
         Ok(idx) => idx,
         Err(idx) if next => idx,
         Err(idx) => idx.saturating_sub(1),
     };
-    spec.values.data[series_offset + idx.min(grid.len() - 1)]
+    values[series_offset + idx.min(grid.len() - 1)]
 }
 
 fn column_major_offset(subs: &[usize], shape: &[usize]) -> usize {
@@ -1353,6 +1406,7 @@ fn extrap_method_name(method: ExtrapolationMethod) -> &'static str {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).unwrap())
@@ -1360,6 +1414,17 @@ mod tests {
 
     fn col(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
+    }
+
+    fn int_col(storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        let tensor = Tensor::new_integer(storage, vec![len, 1]).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1405,10 +1470,10 @@ mod tests {
         match subsref(obj, vec![row(&[-1.0, 0.5, 1.5, 3.0])]).unwrap() {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 4]);
-                assert!(tensor.data[0].is_nan());
-                assert_eq!(tensor.data[1], 5.0);
-                assert_eq!(tensor.data[2], 25.0);
-                assert!(tensor.data[3].is_nan());
+                assert!(tensor.materialize_f64()[0].is_nan());
+                assert_eq!(tensor.materialize_f64()[1], 5.0);
+                assert_eq!(tensor.materialize_f64()[2], 25.0);
+                assert!(tensor.materialize_f64()[3].is_nan());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1422,8 +1487,24 @@ mod tests {
         ])
         .unwrap();
         match subsref(obj, vec![row(&[1.2, 2.6])]).unwrap() {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 40.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![10.0, 40.0]),
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_values_reshape_and_interpolate_in_native_class() {
+        let values = Tensor::from_f32(vec![0.0, 10.0, 40.0], vec![1, 3]).unwrap();
+        let obj = call(vec![Value::Tensor(values)]).unwrap();
+        match subsref(obj, vec![row(&[1.5, 2.5])]).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+                assert_eq!(
+                    tensor.into_numeric_storage().unwrap(),
+                    NumericStorage::F32(vec![5.0, 25.0])
+                );
+            }
+            other => panic!("expected single tensor, got {other:?}"),
         }
     }
 
@@ -1440,10 +1521,41 @@ mod tests {
     }
 
     #[test]
+    fn grid_vectors_values_and_queries_read_typed_integer_storage_exactly() {
+        let grid = CellArray::new_with_shape(
+            vec![
+                int_col(IntegerStorage::I16(vec![0, 1])),
+                int_col(IntegerStorage::U16(vec![0, 2])),
+            ],
+            vec![1, 2],
+        )
+        .unwrap();
+        let values = int_tensor(IntegerStorage::I16(vec![0, 10, 20, 30]), vec![2, 2]);
+        let obj = call(vec![Value::Cell(grid), values]).unwrap();
+        let query = int_tensor(IntegerStorage::I16(vec![0, 1, 0, 2]), vec![2, 2]);
+        match subsref(obj, vec![query]).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.materialize_f64(), vec![0.0, 30.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+
+        let x_grid = int_tensor(IntegerStorage::I16(vec![0, 1, 0, 1]), vec![2, 2]);
+        let y_grid = int_tensor(IntegerStorage::U16(vec![0, 0, 2, 2]), vec![2, 2]);
+        let values = int_tensor(IntegerStorage::I16(vec![0, 10, 20, 30]), vec![2, 2]);
+        let obj = call(vec![x_grid, y_grid, values]).unwrap();
+        match subsref(obj, vec![Value::Num(1.0), Value::Num(2.0)]).unwrap() {
+            Value::Num(value) => assert_eq!(value, 30.0),
+            other => panic!("expected scalar, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn one_dimensional_spline_uses_piecewise_polynomial_path() {
         let obj = call(vec![
             col(&[1.0, 2.0, 3.0]),
-            col(&[1.0, 4.0, 9.0]),
+            int_col(IntegerStorage::I16(vec![1, 4, 9])),
             Value::String("spline".to_string()),
         ])
         .unwrap();
@@ -1457,16 +1569,16 @@ mod tests {
     fn one_dimensional_pchip_preserves_samples_and_nearest_extrapolates() {
         let obj = call(vec![
             col(&[1.0, 2.0, 3.0, 4.0]),
-            col(&[0.0, 1.0, 1.5, 1.75]),
+            int_col(IntegerStorage::I16(vec![0, 10, 15, 18])),
             Value::String("pchip".to_string()),
             Value::String("nearest".to_string()),
         ])
         .unwrap();
         match subsref(obj, vec![row(&[0.0, 3.0, 5.0])]).unwrap() {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.data[0], 0.0);
-                assert_eq!(tensor.data[1], 1.5);
-                assert_eq!(tensor.data[2], 1.75);
+                assert_eq!(tensor.materialize_f64()[0], 0.0);
+                assert_eq!(tensor.materialize_f64()[1], 15.0);
+                assert_eq!(tensor.materialize_f64()[2], 18.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1483,9 +1595,9 @@ mod tests {
         .unwrap();
         match subsref(obj, vec![row(&[-1.0, 0.4, 3.0])]).unwrap() {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.data[0], -10.0);
-                assert_eq!(tensor.data[1], 0.0);
-                assert_eq!(tensor.data[2], 70.0);
+                assert_eq!(tensor.materialize_f64()[0], -10.0);
+                assert_eq!(tensor.materialize_f64()[1], 0.0);
+                assert_eq!(tensor.materialize_f64()[2], 70.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

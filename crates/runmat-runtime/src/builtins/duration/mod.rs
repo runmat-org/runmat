@@ -2,9 +2,14 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef, StringArray, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef,
+    StringArray, Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -19,6 +24,84 @@ const DAYS_FIELD: &str = "__days";
 const FORMAT_FIELD: &str = "Format";
 pub(crate) const DEFAULT_DURATION_FORMAT: &str = "hh:mm:ss";
 const SECONDS_PER_DAY: f64 = 86_400.0;
+
+const DURATION_SHORT_COMPONENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "duration-short-component-form",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "duration with one hour component or two hour/minute components is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DurationShortComponentFormExtension"),
+};
+const DURATION_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "duration-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "duration with resident numeric input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DurationGpuInputExtension"),
+};
+const DURATION_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DURATION_SHORT_COMPONENT_EXTENSION,
+    DURATION_GPU_INPUT_EXTENSION,
+];
+const DURATION_INTEGER_COMPONENT_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    BuiltinIntegerInputCapability {
+        name: "H",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Numeric hour arrays can be scalar-expanded; values enter the duration floating representation.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "MI",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Numeric minute arrays can be scalar-expanded; nonscalars must match the other component sizes.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "S",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Numeric second arrays can be scalar-expanded; nonscalars must match the other component sizes.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "MS",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The optional fourth component contributes milliseconds and follows the same scalar-expansion rule.",
+    },
+];
+const DURATION_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "X must be a numeric matrix with exactly three columns ordered as hours, minutes, and seconds.",
+    }];
+pub const DURATION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = duration(integer_H, integer_MI, integer_S, integer_MS?)",
+        inputs: &DURATION_INTEGER_COMPONENT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "All numeric classes share MATLAB scalar expansion and produce a host duration object backed by binary64 day counts; resident inputs are a separately gated RunMat extension and gather before construction.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "D = duration(integer_X)",
+        inputs: &DURATION_INTEGER_MATRIX_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Each row of the N-by-3 matrix creates one duration; output is an N-by-1 host duration array.",
+    },
+];
 
 thread_local! {
     static DURATION_CLASS_REGISTERED: Cell<bool> = const { Cell::new(false) };
@@ -69,6 +152,36 @@ const DURATION_ARGS_ONLY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor 
     default: None,
     description: "Duration constructor arguments.",
 }];
+const DURATION_FOUR_COMPONENT_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "hours",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Hour component.",
+    },
+    BuiltinParamDescriptor {
+        name: "minutes",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Minute component.",
+    },
+    BuiltinParamDescriptor {
+        name: "seconds",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second component.",
+    },
+    BuiltinParamDescriptor {
+        name: "milliseconds",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Millisecond component.",
+    },
+];
 const DURATION_BINARY_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "lhs",
@@ -139,15 +252,15 @@ const DURATION_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
-const DURATION_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+const DURATION_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
-        label: "t = duration(hours)",
+        label: "t = duration(X)",
         inputs: &[BuiltinParamDescriptor {
-            name: "hours",
+            name: "X",
             ty: BuiltinParamType::NumericArray,
             arity: BuiltinParamArity::Required,
             default: None,
-            description: "Hour component.",
+            description: "N-by-3 matrix of hour, minute, and second components.",
         }],
         outputs: &OUT_DURATION,
     },
@@ -196,6 +309,11 @@ const DURATION_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
                 description: "Second component.",
             },
         ],
+        outputs: &OUT_DURATION,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = duration(hours, minutes, seconds, milliseconds)",
+        inputs: &DURATION_FOUR_COMPONENT_INPUTS,
         outputs: &OUT_DURATION,
     },
     BuiltinSignatureDescriptor {
@@ -366,11 +484,9 @@ fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<Tensor> {
 
 fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor_from_numeric(value, context)?;
-    Tensor::new(
-        tensor.data.clone(),
-        tensor::default_shape_for(&tensor.shape, tensor.data.len()),
-    )
-    .map_err(|err| duration_error(format!("duration: {err}")))
+    let shape = tensor::default_shape_for(&tensor.shape, tensor.len());
+    let values = tensor::tensor_into_values_f64(tensor);
+    Tensor::new(values, shape).map_err(|err| duration_error(format!("duration: {err}")))
 }
 
 fn format_for_object(obj: &ObjectInstance) -> String {
@@ -441,8 +557,8 @@ async fn duration_unit_value(
         .map_err(|err| duration_error(format!("{unit_name}: {}", err.message())))?;
     if is_duration_object(&value) {
         let days = duration_tensor_from_duration_value(&value)?;
-        let data = days
-            .data
+        let day_values = tensor::tensor_values_f64_cow(&days);
+        let data = day_values
             .iter()
             .map(|day| day / days_per_unit)
             .collect::<Vec<_>>();
@@ -452,15 +568,16 @@ async fn duration_unit_value(
             Ok(Value::Tensor(
                 Tensor::new(
                     data,
-                    tensor::default_shape_for(&days.shape, days.data.len()),
+                    tensor::default_shape_for(&days.shape, day_values.len()),
                 )
                 .map_err(|err| duration_error(format!("{unit_name}: {err}")))?,
             ))
         };
     }
     let numeric = component_tensor(value, unit_name)?;
-    let days = numeric
-        .data
+    let shape = tensor::default_shape_for(&numeric.shape, numeric.len());
+    let values = tensor::tensor_into_values_f64(numeric);
+    let days = values
         .iter()
         .map(|value| {
             if !value.is_finite() {
@@ -479,11 +596,7 @@ async fn duration_unit_value(
             }
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    duration_object_from_days(
-        days,
-        tensor::default_shape_for(&numeric.shape, numeric.data.len()),
-        DEFAULT_DURATION_FORMAT,
-    )
+    duration_object_from_days(days, shape, DEFAULT_DURATION_FORMAT)
 }
 
 fn broadcast_component_data(
@@ -494,7 +607,7 @@ fn broadcast_component_data(
     let mut target_len = 1usize;
 
     for array in arrays {
-        let len = array.data.len();
+        let len = array.len();
         if len > 1 {
             let shape = tensor::default_shape_for(&array.shape, len);
             if target_len == 1 {
@@ -510,10 +623,13 @@ fn broadcast_component_data(
 
     let mut broadcasted = Vec::with_capacity(arrays.len());
     for (idx, array) in arrays.iter().enumerate() {
-        if array.data.len() == 1 {
-            broadcasted.push(vec![array.data[0]; target_len]);
-        } else if array.data.len() == target_len {
-            broadcasted.push(array.data.clone());
+        let values = array
+            .as_f64_slice()
+            .expect("duration components are normalized to double storage");
+        if values.len() == 1 {
+            broadcasted.push(vec![values[0]; target_len]);
+        } else if values.len() == target_len {
+            broadcasted.push(values.to_vec());
         } else {
             return Err(duration_error(format!(
                 "duration: {} input size does not match the other components",
@@ -526,12 +642,12 @@ fn broadcast_component_data(
 }
 
 fn build_from_components(args: Vec<Value>, format: Option<String>) -> BuiltinResult<Value> {
-    let labels = ["hours", "minutes", "seconds"];
+    let labels = ["hours", "minutes", "seconds", "milliseconds"];
     let mut arrays = Vec::with_capacity(args.len());
     for (idx, arg) in args.into_iter().enumerate() {
         arrays.push(component_tensor(arg, labels[idx])?);
     }
-    while arrays.len() < 3 {
+    while arrays.len() < 4 {
         arrays.push(Tensor::new(vec![0.0], vec![1, 1]).unwrap());
     }
 
@@ -539,17 +655,57 @@ fn build_from_components(args: Vec<Value>, format: Option<String>) -> BuiltinRes
     let len = broadcasted[0].len();
     let mut days = Vec::with_capacity(len);
     for idx in 0..len {
-        let total_seconds =
-            broadcasted[0][idx] * 3600.0 + broadcasted[1][idx] * 60.0 + broadcasted[2][idx];
-        if !total_seconds.is_finite() {
-            return Err(duration_error("duration: component values must be finite"));
-        }
+        let total_seconds = broadcasted[0][idx] * 3600.0
+            + broadcasted[1][idx] * 60.0
+            + broadcasted[2][idx]
+            + broadcasted[3][idx] / 1000.0;
         days.push(total_seconds / SECONDS_PER_DAY);
     }
 
     duration_object_from_days(
         days,
         shape,
+        format.unwrap_or_else(|| DEFAULT_DURATION_FORMAT.to_string()),
+    )
+}
+
+fn is_public_duration_matrix(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor.shape.len() <= 2 && tensor.cols() == 3,
+        Value::GpuTensor(handle) => {
+            handle.shape.len() <= 2 && handle.shape.get(1).copied().unwrap_or(1) == 3
+        }
+        _ => false,
+    }
+}
+
+fn is_numeric_duration_input(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) | Value::GpuTensor(_)
+    )
+}
+
+fn build_from_matrix(value: Value, format: Option<String>) -> BuiltinResult<Value> {
+    let matrix = component_tensor(value, "X")?;
+    if matrix.shape.len() > 2 || matrix.cols() != 3 {
+        return Err(duration_error(
+            "duration: X must be a numeric matrix with exactly three columns",
+        ));
+    }
+    let rows = matrix.rows();
+    let values = matrix
+        .as_f64_slice()
+        .expect("duration matrix is normalized to double storage");
+    let mut days = Vec::with_capacity(rows);
+    for row in 0..rows {
+        let total_seconds =
+            values[row] * 3600.0 + values[row + rows] * 60.0 + values[row + 2 * rows];
+        days.push(total_seconds / SECONDS_PER_DAY);
+    }
+    duration_object_from_days(
+        days,
+        vec![rows, 1],
         format.unwrap_or_else(|| DEFAULT_DURATION_FORMAT.to_string()),
     )
 }
@@ -575,8 +731,11 @@ fn format_duration_value(days: f64, format: &str) -> BuiltinResult<String> {
     if days.is_nan() {
         return Ok("NaN".to_string());
     }
-    if !days.is_finite() {
-        return Err(duration_error("duration: values must be finite"));
+    if days == f64::INFINITY {
+        return Ok("Inf".to_string());
+    }
+    if days == f64::NEG_INFINITY {
+        return Ok("-Inf".to_string());
     }
 
     let total_seconds = days * SECONDS_PER_DAY;
@@ -629,11 +788,12 @@ pub fn duration_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
     }
     let days = duration_tensor_from_duration_value(value)?;
     let format = format_for_object(obj);
-    let mut strings = Vec::with_capacity(days.data.len());
-    for value in &days.data {
+    let day_values = tensor::tensor_values_f64_cow(&days);
+    let mut strings = Vec::with_capacity(day_values.len());
+    for value in day_values.iter() {
         strings.push(format_duration_value(*value, &format)?);
     }
-    let shape = tensor::default_shape_for(&days.shape, days.data.len());
+    let shape = tensor::default_shape_for(&days.shape, day_values.len());
     let array = StringArray::new(strings, shape)
         .map_err(|err| duration_error(format!("duration: {err}")))?;
     Ok(Some(array))
@@ -686,10 +846,11 @@ pub fn duration_summary(value: &Value) -> BuiltinResult<Option<String>> {
         return Ok(None);
     }
     let days = duration_tensor_from_duration_value(value)?;
-    if days.data.len() == 1 {
+    let len = days.len();
+    if len == 1 {
         return duration_display_text(value);
     }
-    let shape = tensor::default_shape_for(&days.shape, days.data.len());
+    let shape = tensor::default_shape_for(&days.shape, len);
     Ok(Some(format!(
         "[{} duration]",
         shape
@@ -768,8 +929,11 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => tensor,
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
-        Value::Int(value) => Tensor::new(vec![value.to_f64()], vec![1, 1])
-            .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
+        Value::Int(value) => Tensor::new_integer(
+            runmat_builtins::IntegerStorage::from_scalar(value),
+            vec![1, 1],
+        )
+        .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
             .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
         other => {
@@ -778,9 +942,10 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
             )))
         }
     };
-    let indexed = crate::perform_indexing(&Value::Tensor(days), &selector.data)
-        .await
-        .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
+    let indexed =
+        crate::perform_indexing(&Value::Tensor(days), &tensor::tensor_values_f64(&selector))
+            .await
+            .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
     let indexed_days = match indexed {
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
             .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
@@ -802,18 +967,44 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
     summary = "Create duration arrays from hour, minute, and second components.",
     keywords = "duration,time span,elapsed time,Format",
     related = "datetime,string,char,disp",
-    examples = "t = duration(1, 30, 45);"
+    examples = "t = duration(1, 30, 45);",
+    extensions(DURATION_EXTENSIONS),
+    integer_capabilities(DURATION_INTEGER_CAPABILITIES)
 )]
 async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     ensure_duration_class_registered();
+    let (raw_positional_end, _) = parse_trailing_format(&args)?;
+    let raw_positional = &args[..raw_positional_end];
+    if args.iter().any(crate::value_contains_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DURATION_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let short_numeric_form = match raw_positional {
+        [value] => is_numeric_duration_input(value) && !is_public_duration_matrix(value),
+        [first, second] => is_numeric_duration_input(first) && is_numeric_duration_input(second),
+        _ => false,
+    };
+    if short_numeric_form {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DURATION_SHORT_COMPONENT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let args = gather_args(&args).await?;
     let (positional_end, format) = parse_trailing_format(&args)?;
-    let positional = args[..positional_end].to_vec();
+    let mut positional = args[..positional_end].to_vec();
 
     match positional.len() {
-        1..=3 => build_from_components(positional, format),
+        1 if is_public_duration_matrix(&positional[0]) => {
+            build_from_matrix(positional.remove(0), format)
+        }
+        1..=4 if positional.iter().all(is_numeric_duration_input) => {
+            build_from_components(positional, format)
+        }
         _ => Err(duration_error(
-            "duration: unsupported argument pattern; use H/M/S numeric component inputs",
+            "duration: unsupported argument pattern; use X or H/MI/S/MS numeric inputs",
         )),
     }
 }
@@ -1076,6 +1267,10 @@ mod tests {
         futures::executor::block_on(duration_builtin(args)).expect("duration")
     }
 
+    fn integer_tensor(storage: runmat_builtins::IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
     #[test]
     fn duration_descriptor_signatures_cover_constructor_and_methods() {
         let labels: Vec<&str> = DURATION_DESCRIPTOR
@@ -1083,9 +1278,31 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"t = duration(hours)"));
+        assert!(labels.contains(&"t = duration(X)"));
         assert!(labels.contains(&"t = duration(hours, minutes, seconds)"));
+        assert!(labels.contains(&"t = duration(hours, minutes, seconds, milliseconds)"));
         assert!(labels.contains(&"t = duration(___, \"Format\", format)"));
+
+        let four_component = DURATION_DESCRIPTOR
+            .signatures
+            .iter()
+            .find(|signature| {
+                signature.label == "t = duration(hours, minutes, seconds, milliseconds)"
+            })
+            .expect("four-component duration signature");
+        assert_eq!(
+            four_component
+                .inputs
+                .iter()
+                .map(|input| input.name)
+                .collect::<Vec<_>>(),
+            ["hours", "minutes", "seconds", "milliseconds"]
+        );
+        assert!(four_component.inputs.iter().all(|input| {
+            matches!(input.ty, BuiltinParamType::NumericArray)
+                && matches!(input.arity, BuiltinParamArity::Required)
+        }));
+
         assert_eq!(
             DURATION_SUBSREF_DESCRIPTOR.signatures[0].label,
             "out = duration.subsref(obj, kind, payload)"
@@ -1109,12 +1326,154 @@ mod tests {
     fn duration_formats_arrays() {
         let hours = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
         let minutes = Value::Tensor(Tensor::new(vec![15.0, 45.0], vec![1, 2]).unwrap());
-        let value = run_duration(vec![hours, minutes]);
+        let value = run_duration(vec![hours, minutes, Value::Num(0.0)]);
         let rendered = duration_display_text(&value)
             .expect("display")
             .expect("duration text");
         assert!(rendered.contains("01:15:00"));
         assert!(rendered.contains("02:45:00"));
+    }
+
+    #[test]
+    fn duration_typed_integer_components_cross_double_boundary_exactly() {
+        let hours = integer_tensor(runmat_builtins::IntegerStorage::U8(vec![1, 2]), vec![1, 2]);
+        let minutes = integer_tensor(
+            runmat_builtins::IntegerStorage::U16(vec![15, 45]),
+            vec![1, 2],
+        );
+        let seconds = integer_tensor(
+            runmat_builtins::IntegerStorage::I16(vec![0, 30]),
+            vec![1, 2],
+        );
+        let value = run_duration(vec![hours, minutes, seconds]);
+        let rendered = duration_display_text(&value)
+            .expect("display")
+            .expect("duration text");
+        assert!(rendered.contains("01:15:00"));
+        assert!(rendered.contains("02:45:30"));
+    }
+
+    #[test]
+    fn duration_integer_matrix_form_supports_all_classes_and_returns_column() {
+        let storages = [
+            runmat_builtins::IntegerStorage::I8(vec![1, 2, 15, 45, 0, 30]),
+            runmat_builtins::IntegerStorage::I16(vec![1, 2, 15, 45, 0, 30]),
+            runmat_builtins::IntegerStorage::I32(vec![1, 2, 15, 45, 0, 30]),
+            runmat_builtins::IntegerStorage::I64(vec![1, 2, 15, 45, 0, 30]),
+            runmat_builtins::IntegerStorage::U8(vec![1, 2, 15, 45, 0, 30]),
+            runmat_builtins::IntegerStorage::U16(vec![1, 2, 15, 45, 0, 30]),
+            runmat_builtins::IntegerStorage::U32(vec![1, 2, 15, 45, 0, 30]),
+            runmat_builtins::IntegerStorage::U64(vec![1, 2, 15, 45, 0, 30]),
+        ];
+        for storage in storages {
+            let value = run_duration(vec![integer_tensor(storage, vec![2, 3])]);
+            let days = duration_tensor_from_duration_value(&value).expect("duration days");
+            assert_eq!(days.shape, vec![2, 1]);
+            let rendered = duration_display_text(&value)
+                .expect("display")
+                .expect("duration text");
+            assert!(rendered.contains("01:15:00"));
+            assert!(rendered.contains("02:45:30"));
+        }
+    }
+
+    #[test]
+    fn duration_four_component_form_adds_milliseconds() {
+        let value = run_duration(vec![
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Value::Int(runmat_builtins::IntValue::U16(250)),
+        ]);
+        let days = duration_tensor_from_duration_value(&value).expect("duration days");
+        assert_eq!(days.shape, vec![1, 2]);
+        let seconds: Vec<f64> = days
+            .materialize_f64()
+            .into_iter()
+            .map(|days| days * SECONDS_PER_DAY)
+            .collect();
+        assert!((seconds[0] - 1.25).abs() < 1.0e-12);
+        assert!((seconds[1] - 3601.25).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn duration_public_components_preserve_nan_and_infinity() {
+        let value = run_duration(vec![Value::Num(f64::NAN), Value::Num(0.0), Value::Num(0.0)]);
+        assert!(duration_tensor_from_duration_value(&value)
+            .unwrap()
+            .materialize_f64()[0]
+            .is_nan());
+        for infinite in [f64::INFINITY, f64::NEG_INFINITY] {
+            let value = run_duration(vec![Value::Num(infinite), Value::Num(0.0), Value::Num(0.0)]);
+            assert_eq!(
+                duration_tensor_from_duration_value(&value)
+                    .unwrap()
+                    .materialize_f64()[0],
+                infinite
+            );
+            let expected = if infinite.is_sign_negative() {
+                "-Inf"
+            } else {
+                "Inf"
+            };
+            assert_eq!(
+                duration_display_text(&value).expect("display"),
+                Some(expected.to_string())
+            );
+            assert_eq!(
+                duration_string_array(&value)
+                    .expect("string conversion")
+                    .expect("duration string array")
+                    .data,
+                vec![expected.to_string()]
+            );
+            let chars = duration_char_array(&value)
+                .expect("char conversion")
+                .expect("duration char array");
+            assert_eq!(chars.data.iter().collect::<String>(), expected);
+        }
+    }
+
+    #[test]
+    fn duration_short_numeric_forms_are_extension_gated_but_matrix_is_public() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = futures::executor::block_on(duration_builtin(vec![Value::Num(1.0)]))
+            .expect_err("one-component hour extension");
+        assert_eq!(
+            error.identifier(),
+            DURATION_SHORT_COMPONENT_EXTENSION.error_identifier
+        );
+        let matrix = integer_tensor(
+            runmat_builtins::IntegerStorage::U8(vec![1, 30, 0]),
+            vec![1, 3],
+        );
+        futures::executor::block_on(duration_builtin(vec![matrix]))
+            .expect("documented matrix form remains public");
+        drop(strict);
+
+        let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        futures::executor::block_on(duration_builtin(vec![Value::Num(1.0)]))
+            .expect("one-component extension in RunMat mode");
+        futures::executor::block_on(duration_builtin(vec![Value::Num(1.0), Value::Num(30.0)]))
+            .expect("two-component extension in RunMat mode");
+        drop(extensions);
+    }
+
+    #[test]
+    fn duration_gpu_extension_rejects_before_provider_access() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 3],
+            device_id: 0,
+            buffer_id: 9_399_002,
+        });
+        let error = futures::executor::block_on(duration_builtin(vec![resident]))
+            .expect_err("GPU extension gate");
+        assert_eq!(
+            error.identifier(),
+            DURATION_GPU_INPUT_EXTENSION.error_identifier
+        );
+        drop(strict);
     }
 
     #[test]
@@ -1158,7 +1517,7 @@ mod tests {
 
         let year = futures::executor::block_on(years_builtin(Value::Num(1.0))).expect("years");
         let year_days = duration_tensor_from_duration_value(&year).expect("duration tensor");
-        assert!((year_days.data[0] - 365.2425).abs() < 1e-9);
+        assert!((tensor::tensor_value_f64(&year_days, 0) - 365.2425).abs() < 1e-9);
         assert_eq!(
             isduration_builtin(year).expect("isduration"),
             Value::Bool(true)
@@ -1171,8 +1530,33 @@ mod tests {
     }
 
     #[test]
+    fn duration_unit_helpers_read_typed_integer_days_exactly() {
+        let days =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![1, 2]), vec![1, 2])
+                .expect("integer tensor");
+        let value = duration_object_from_days_tensor(days, DEFAULT_DURATION_FORMAT)
+            .expect("duration object");
+
+        let hours = futures::executor::block_on(hours_builtin(value.clone())).expect("hours");
+        assert_eq!(
+            hours,
+            Value::Tensor(Tensor::new(vec![24.0, 48.0], vec![1, 2]).unwrap())
+        );
+
+        let rendered = duration_display_text(&value)
+            .expect("display")
+            .expect("duration text");
+        assert!(rendered.contains("24:00:00"));
+        assert!(rendered.contains("48:00:00"));
+        assert_eq!(
+            duration_summary(&value).expect("summary"),
+            Some("[1x2 duration]".to_string())
+        );
+    }
+
+    #[test]
     fn duration_supports_format_assignment_and_indexing() {
-        let value = run_duration(vec![Value::Num(1.0), Value::Num(5.0)]);
+        let value = run_duration(vec![Value::Num(1.0), Value::Num(5.0), Value::Num(0.0)]);
         let updated = futures::executor::block_on(duration_subsasgn(
             value.clone(),
             ".".to_string(),
@@ -1192,6 +1576,33 @@ mod tests {
         ]);
         let payload =
             Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap());
+        let indexed =
+            futures::executor::block_on(duration_subsref(array, "()".to_string(), payload))
+                .expect("subsref");
+        let text = duration_display_text(&indexed)
+            .expect("display")
+            .expect("duration text");
+        assert_eq!(text, "02:00:00");
+    }
+
+    #[test]
+    fn duration_typed_integer_index_selectors_are_exact() {
+        let array = run_duration(vec![
+            integer_tensor(runmat_builtins::IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
+            Value::Num(0.0),
+            Value::Num(0.0),
+        ]);
+        let payload = Value::Cell(
+            runmat_builtins::CellArray::new(
+                vec![integer_tensor(
+                    runmat_builtins::IntegerStorage::U64(vec![2]),
+                    vec![1, 1],
+                )],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
         let indexed =
             futures::executor::block_on(duration_subsref(array, "()".to_string(), payload))
                 .expect("subsref");

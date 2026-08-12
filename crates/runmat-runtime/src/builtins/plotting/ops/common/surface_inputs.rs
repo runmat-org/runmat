@@ -1,6 +1,7 @@
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_vector};
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
@@ -97,14 +98,8 @@ fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(u
 }
 
 fn default_surface_axis(len: usize) -> Tensor {
-    Tensor {
-        data: (1..=len).map(|i| i as f64).collect(),
-        integer_data: None,
-        shape: vec![len],
-        rows: len,
-        cols: 1,
-        dtype: runmat_builtins::NumericDType::F64,
-    }
+    Tensor::new((1..=len).map(|i| i as f64).collect(), vec![len])
+        .expect("default surface axis shape")
 }
 
 #[cfg(test)]
@@ -113,63 +108,39 @@ mod tests {
 
     #[test]
     fn parse_surface_call_args_supports_z_only_shorthand() {
-        let z = Value::Tensor(Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
+        let z = Value::Tensor(
+            Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("surface matrix"),
+        );
         let (x, y, z_out, rest) = parse_surface_call_args(vec![z.clone()], "surf").unwrap();
         let x = Tensor::try_from(&x).unwrap();
         let y = Tensor::try_from(&y).unwrap();
-        assert_eq!(x.data, vec![1.0, 2.0]);
-        assert_eq!(y.data, vec![1.0, 2.0]);
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0]);
+        assert_eq!(y.materialize_f64(), vec![1.0, 2.0]);
         assert!(rest.is_empty());
         assert_eq!(
-            Tensor::try_from(&z_out).unwrap().data,
-            Tensor::try_from(&z).unwrap().data
+            Tensor::try_from(&z_out).unwrap().materialize_f64(),
+            Tensor::try_from(&z).unwrap().materialize_f64()
         );
     }
 
     #[test]
     fn parse_surface_call_args_matlab_xy_uses_column_then_row_defaults() {
-        let z = Value::Tensor(Tensor {
-            data: (1..=12).map(|v| v as f64).collect(),
-            integer_data: None,
-            shape: vec![3, 4],
-            rows: 3,
-            cols: 4,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
+        let z = Value::Tensor(
+            Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4]).expect("surface matrix"),
+        );
         let (x, y, _, rest) = parse_surface_call_args_matlab_xy(vec![z], "surf").unwrap();
         let x = Tensor::try_from(&x).unwrap();
         let y = Tensor::try_from(&y).unwrap();
-        assert_eq!(x.data, vec![1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(y.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(y.materialize_f64(), vec![1.0, 2.0, 3.0]);
         assert!(rest.is_empty());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn image_axis_sources_expand_two_element_extents() {
-        let x = Value::Tensor(Tensor {
-            data: vec![10.0, 20.0],
-            integer_data: None,
-            shape: vec![2],
-            rows: 2,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
-        let y = Value::Tensor(Tensor {
-            data: vec![1.0, 5.0],
-            integer_data: None,
-            shape: vec![2],
-            rows: 2,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
+        let x = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).expect("x extent"));
+        let y = Value::Tensor(Tensor::new(vec![1.0, 5.0], vec![2]).expect("y extent"));
         let (x_axis, y_axis) = image_axis_sources_from_xy_values(x, y, 3, 4, "image")
             .await
             .unwrap();
@@ -189,22 +160,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn surface_axis_sources_enforce_matlab_vector_lengths() {
-        let x = Value::Tensor(Tensor {
-            data: vec![1.0, 2.0],
-            integer_data: None,
-            shape: vec![2],
-            rows: 2,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
-        let y = Value::Tensor(Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            integer_data: None,
-            shape: vec![4],
-            rows: 4,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        });
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).expect("x axis"));
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).expect("y axis"));
         let err = match surface_axis_sources_from_xy_values(x, y, 3, 4, "surf").await {
             Ok(_) => panic!("expected size(Z) contract validation"),
             Err(err) => err,
@@ -212,6 +169,25 @@ mod tests {
         assert!(err
             .to_string()
             .contains("X must have length 4 and Y must have length 3"));
+    }
+
+    fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(values),
+            vec![rows, cols],
+        )
+        .expect("integer matrix")
+    }
+
+    #[test]
+    fn meshgrid_axes_read_typed_integer_storage_exactly() {
+        let x = int_matrix(vec![10, 10, 20, 20], 2, 2);
+        let y = int_matrix(vec![1, 2, 1, 2], 2, 2);
+
+        assert_eq!(
+            extract_meshgrid_axes_from_xy_matrices(&x, &y, 2, 2, "surf").unwrap(),
+            (vec![10.0, 20.0], vec![1.0, 2.0])
+        );
     }
 }
 
@@ -280,7 +256,7 @@ pub async fn axis_sources_from_xy_values(
                 other => Tensor::try_from(&other)
                     .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?,
             };
-            if x_tensor.data.is_empty() || y_tensor.data.is_empty() {
+            if x_tensor.is_empty() || y_tensor.is_empty() {
                 return Err(plotting_error(
                     builtin,
                     format!("{builtin}: axis vectors must be non-empty"),
@@ -437,7 +413,9 @@ fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
         for col in 0..cols {
             let idx0 = rows * col;
             let idx = row + rows * col;
-            if tensor.data[idx] != tensor.data[idx0] {
+            if tensor_utils::tensor_value_f64(tensor, idx)
+                != tensor_utils::tensor_value_f64(tensor, idx0)
+            {
                 return false;
             }
         }
@@ -455,7 +433,9 @@ fn matrix_cols_are_identical(tensor: &Tensor) -> bool {
         for row in 0..rows {
             let idx0 = row;
             let idx = row + rows * col;
-            if tensor.data[idx] != tensor.data[idx0] {
+            if tensor_utils::tensor_value_f64(tensor, idx)
+                != tensor_utils::tensor_value_f64(tensor, idx0)
+            {
                 return false;
             }
         }
@@ -484,11 +464,11 @@ pub fn extract_meshgrid_axes_from_xy_matrices(
     }
     let mut x_vec = Vec::with_capacity(cols);
     for col in 0..cols {
-        x_vec.push(x.data[rows * col]);
+        x_vec.push(tensor_utils::tensor_value_f64(x, rows * col));
     }
     let mut y_vec = Vec::with_capacity(rows);
     for row in 0..rows {
-        y_vec.push(y.data[row]);
+        y_vec.push(tensor_utils::tensor_value_f64(y, row));
     }
     Ok((x_vec, y_vec))
 }

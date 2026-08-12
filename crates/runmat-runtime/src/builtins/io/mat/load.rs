@@ -9,8 +9,8 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, SparseTensor,
-    StringArray, StructValue, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, NumericStorage, SparseTensor, StringArray, StructValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -25,7 +25,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::object_serialization::restore_value_from_mat_load;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const LOAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -693,7 +693,7 @@ fn parse_matrix(buffer: &[u8], endian: Endian) -> BuiltinResult<ParsedMatrix> {
         .ok_or_else(|| load_error("load: unsupported MATLAB class"))?;
     let is_logical = (flags0 & FLAG_LOGICAL) != 0;
     let has_imag = (flags0 & FLAG_COMPLEX) != 0;
-    if is_logical {
+    if is_logical && class != MatClass::Sparse {
         class = MatClass::Logical;
     }
 
@@ -755,7 +755,7 @@ fn parse_matrix(buffer: &[u8], endian: Endian) -> BuiltinResult<ParsedMatrix> {
         MatClass::Char => parse_char_array(&mut cursor, dims, endian)?,
         MatClass::Cell => parse_cell_array(&mut cursor, dims, endian)?,
         MatClass::Struct => parse_struct(&mut cursor, dims, endian)?,
-        MatClass::Sparse => parse_sparse_array(&mut cursor, dims, has_imag, endian)?,
+        MatClass::Sparse => parse_sparse_array(&mut cursor, dims, has_imag, is_logical, endian)?,
     };
 
     Ok(ParsedMatrix { name, array })
@@ -771,37 +771,55 @@ fn parse_numeric_array(
     let real_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: numeric array missing real component"))?;
     if class_is_integer(class) {
-        if has_imag {
-            return Err(load_error(
-                "load: complex integer MAT arrays require typed complex integer storage",
-            ));
-        }
+        let storage = decode_integer_storage(&real_elem, class, endian)?;
+        let imag = if has_imag {
+            let imag_elem = read_tagged(cursor, false, endian)?.ok_or_else(|| {
+                load_error("load: complex integer array missing imaginary component")
+            })?;
+            Some(decode_integer_storage(&imag_elem, class, endian)?)
+        } else {
+            None
+        };
         return Ok(MatArray {
             class,
             dims,
-            data: MatData::Integer {
-                storage: decode_integer_storage(&real_elem, class, endian)?,
+            data: MatData::Numeric {
+                real: storage.into(),
+                imag: imag.map(Into::into),
             },
         });
     }
 
-    let real = decode_numeric_values(&real_elem, endian)?;
+    let real = decode_numeric_storage(&real_elem, class, endian)?;
 
     let imag = if has_imag {
         let imag_elem = read_tagged(cursor, false, endian)?
             .ok_or_else(|| load_error("load: numeric array missing imaginary component"))?;
-        Some(decode_numeric_values(&imag_elem, endian)?)
+        Some(decode_numeric_storage(&imag_elem, class, endian)?)
     } else {
         None
     };
 
-    let data = if class == MatClass::Double {
-        MatData::Double { real, imag }
-    } else {
-        MatData::Numeric { real, imag }
-    };
+    Ok(MatArray {
+        class,
+        dims,
+        data: MatData::Numeric { real, imag },
+    })
+}
 
-    Ok(MatArray { class, dims, data })
+fn decode_numeric_storage(
+    element: &TaggedData,
+    class: MatClass,
+    endian: Endian,
+) -> BuiltinResult<NumericStorage> {
+    let values = decode_numeric_values(element, endian)?;
+    match class {
+        MatClass::Double => Ok(NumericStorage::F64(values)),
+        MatClass::Single => Ok(NumericStorage::F32(
+            values.into_iter().map(|value| value as f32).collect(),
+        )),
+        _ => Err(load_error("load: unsupported floating numeric class")),
+    }
 }
 
 fn class_is_integer(class: MatClass) -> bool {
@@ -1020,6 +1038,7 @@ fn parse_sparse_array(
     cursor: &mut Cursor<&[u8]>,
     dims: Vec<usize>,
     has_imag: bool,
+    logical: bool,
     endian: Endian,
 ) -> BuiltinResult<MatArray> {
     if has_imag {
@@ -1040,7 +1059,16 @@ fn parse_sparse_array(
 
     let real_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: sparse array missing values"))?;
-    let values = decode_numeric_values(&real_elem, endian)?;
+    let values = match decode_sparse_integer_storage(&real_elem, endian)? {
+        Some(storage) => NumericStorage::from(storage),
+        None if real_elem.data_type == MI_SINGLE => NumericStorage::F32(
+            decode_numeric_values(&real_elem, endian)?
+                .into_iter()
+                .map(|value| value as f32)
+                .collect(),
+        ),
+        None => NumericStorage::F64(decode_numeric_values(&real_elem, endian)?),
+    };
 
     Ok(MatArray {
         class: MatClass::Sparse,
@@ -1051,8 +1079,27 @@ fn parse_sparse_array(
             col_ptrs,
             row_indices,
             values,
+            logical,
         },
     })
+}
+
+fn decode_sparse_integer_storage(
+    elem: &TaggedData,
+    endian: Endian,
+) -> BuiltinResult<Option<IntegerStorage>> {
+    let class = match elem.data_type {
+        MI_INT8 => MatClass::Int8,
+        MI_UINT8 => MatClass::UInt8,
+        MI_INT16 => MatClass::Int16,
+        MI_UINT16 => MatClass::UInt16,
+        MI_INT32 => MatClass::Int32,
+        MI_UINT32 => MatClass::UInt32,
+        MI_INT64 => MatClass::Int64,
+        MI_UINT64 => MatClass::UInt64,
+        _ => return Ok(None),
+    };
+    decode_integer_storage(elem, class, endian).map(Some)
 }
 
 fn decode_numeric_values(elem: &TaggedData, endian: Endian) -> BuiltinResult<Vec<f64>> {
@@ -1208,69 +1255,67 @@ fn ensure_data_width(data: &[u8], width: usize, label: &str) -> BuiltinResult<()
 
 fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
     match array.data {
-        MatData::Double { real, imag } => {
-            let len = real.len();
-            if let Some(imag) = imag {
-                if imag.len() != len {
-                    return Err(load_error(
-                        "load: complex data has mismatched real/imag parts",
-                    ));
-                }
-                if len == 1 {
-                    Ok(Value::Complex(real[0], imag[0]))
-                } else {
-                    let mut pairs = Vec::with_capacity(len);
-                    for i in 0..len {
-                        pairs.push((real[i], imag[i]));
-                    }
-                    let tensor = ComplexTensor::new(pairs, array.dims.clone())
-                        .map_err(|e| load_error(format!("load: {e}")))?;
-                    Ok(Value::ComplexTensor(tensor))
-                }
-            } else if len == 1 {
-                Ok(Value::Num(real[0]))
-            } else {
-                let tensor = Tensor::new(real, array.dims.clone())
-                    .map_err(|e| load_error(format!("load: {e}")))?;
-                Ok(Value::Tensor(tensor))
-            }
-        }
         MatData::Numeric { real, imag } => {
             let len = real.len();
             if let Some(imag) = imag {
-                if imag.len() != len {
+                if imag.len() != len || imag.numeric_dtype() != real.numeric_dtype() {
                     return Err(load_error(
-                        "load: complex data has mismatched real/imag parts",
+                        "load: complex data has mismatched real/imaginary components",
                     ));
                 }
-                if len == 1 {
-                    return Ok(Value::Complex(real[0], imag[0]));
+                return match (real, imag) {
+                    (NumericStorage::F64(real), NumericStorage::F64(imag)) => {
+                        if len == 1 {
+                            Ok(Value::Complex(real[0], imag[0]))
+                        } else {
+                            let pairs = real.into_iter().zip(imag).collect();
+                            ComplexTensor::new(pairs, array.dims)
+                                .map(Value::ComplexTensor)
+                                .map_err(|error| load_error(format!("load: {error}")))
+                        }
+                    }
+                    (NumericStorage::F32(real), NumericStorage::F32(imag)) => {
+                        let pairs = real.into_iter().zip(imag).collect();
+                        ComplexTensor::from_f32(pairs, array.dims)
+                            .map(Value::ComplexTensor)
+                            .map_err(|error| load_error(format!("load: {error}")))
+                    }
+                    (real, imag) => {
+                        let real = real
+                            .into_integer_storage()
+                            .map_err(|_| load_error("load: unsupported complex numeric storage"))?;
+                        let imag = imag
+                            .into_integer_storage()
+                            .map_err(|_| load_error("load: unsupported complex numeric storage"))?;
+                        let storage = IntegerComplexStorage::new(real, imag)
+                            .map_err(|error| load_error(format!("load: {error}")))?;
+                        ComplexTensor::new_integer(storage, array.dims)
+                            .map(Value::ComplexTensor)
+                            .map_err(|error| load_error(format!("load: {error}")))
+                    }
+                };
+            }
+            match real {
+                NumericStorage::F64(real) if len == 1 => Ok(Value::Num(real[0])),
+                NumericStorage::F64(real) => Tensor::new(real, array.dims)
+                    .map(Value::Tensor)
+                    .map_err(|error| load_error(format!("load: {error}"))),
+                NumericStorage::F32(real) => Tensor::from_f32(real, array.dims)
+                    .map(Value::Tensor)
+                    .map_err(|error| load_error(format!("load: {error}"))),
+                storage => {
+                    let storage = storage
+                        .into_integer_storage()
+                        .map_err(|_| load_error("load: unsupported real numeric storage"))?;
+                    if len == 1 {
+                        Ok(Value::Int(integer_storage_scalar(&storage, 0)))
+                    } else {
+                        Tensor::new_integer(storage, array.dims)
+                            .map(Value::Tensor)
+                            .map_err(|error| load_error(format!("load: {error}")))
+                    }
                 }
-                let pairs: Vec<(f64, f64)> = real.into_iter().zip(imag).collect();
-                let tensor = ComplexTensor::new(pairs, array.dims.clone())
-                    .map_err(|e| load_error(format!("load: {e}")))?;
-                return Ok(Value::ComplexTensor(tensor));
             }
-
-            if len == 1 {
-                if let Some(value) = numeric_scalar_to_int_value(array.class, real[0]) {
-                    return Ok(value);
-                }
-                return Ok(Value::Num(real[0]));
-            }
-
-            let dtype = numeric_tensor_dtype(array.class);
-            let tensor = Tensor::new_with_dtype(real, array.dims.clone(), dtype)
-                .map_err(|e| load_error(format!("load: {e}")))?;
-            Ok(Value::Tensor(tensor))
-        }
-        MatData::Integer { storage } => {
-            if storage.len() == 1 {
-                return Ok(Value::Int(integer_storage_scalar(&storage, 0)));
-            }
-            let tensor = Tensor::new_integer(storage, array.dims.clone())
-                .map_err(|e| load_error(format!("load: {e}")))?;
-            Ok(Value::Tensor(tensor))
         }
         MatData::Logical { data } => {
             let total: usize = array
@@ -1290,15 +1335,13 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             }
         }
         MatData::Char { data } => {
-            let rows = array.dims.first().copied().unwrap_or(1);
-            let cols = array.dims.get(1).copied().unwrap_or(1);
-            let mut chars = Vec::with_capacity(rows.saturating_mul(cols));
+            let mut chars = Vec::with_capacity(data.len());
             for code in data {
                 let ch = char::from_u32(code as u32).unwrap_or('\u{FFFD}');
                 chars.push(ch);
             }
-            let char_array =
-                CharArray::new(chars, rows, cols).map_err(|e| load_error(format!("load: {e}")))?;
+            let char_array = CharArray::from_column_major(chars, array.dims.clone())
+                .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::CharArray(char_array))
         }
         MatData::Cell { elements } => {
@@ -1307,14 +1350,11 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
                     .map_err(|e| load_error(format!("load: {e}")))?;
                 return Ok(Value::StringArray(string_array));
             }
-            if array.dims.len() != 2 {
-                return Err(load_error(
-                    "load: cell arrays with more than two dimensions are not supported yet",
-                ));
-            }
-            let rows = array.dims[0];
-            let cols = array.dims[1];
-            let expected = rows.saturating_mul(cols);
+            let expected = array
+                .dims
+                .iter()
+                .try_fold(1usize, |product, &dim| product.checked_mul(dim))
+                .ok_or_else(|| load_error("load: cell array shape exceeds platform limits"))?;
             if elements.len() != expected {
                 return Err(load_error("load: cell array element count mismatch"));
             }
@@ -1322,15 +1362,9 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             for elem in elements {
                 converted.push(mat_array_to_value(elem)?);
             }
-            let mut row_major = vec![Value::Num(0.0); expected];
-            for col in 0..cols {
-                for row in 0..rows {
-                    let cm_idx = col * rows + row;
-                    let rm_idx = row * cols + col;
-                    row_major[rm_idx] = converted[cm_idx].clone();
-                }
-            }
-            make_cell(row_major, rows, cols).map_err(|err| load_error(format!("load: {err}")))
+            CellArray::from_column_major(converted, array.dims.clone())
+                .map(Value::Cell)
+                .map_err(|err| load_error(format!("load: {err}")))
         }
         MatData::Struct {
             field_names,
@@ -1352,9 +1386,44 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             col_ptrs,
             row_indices,
             values,
+            logical,
         } => {
-            let sparse = SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
-                .map_err(|e| load_error(format!("load: {e}")))?;
+            let sparse = if logical {
+                let mut filtered_col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+                let mut filtered_row_indices = Vec::new();
+                filtered_col_ptrs.push(0);
+                for col in 0..cols {
+                    for index in col_ptrs[col]..col_ptrs[col + 1] {
+                        let value = values.value_at(index).ok_or_else(|| {
+                            load_error("load: logical sparse value count does not match structure")
+                        })?;
+                        if !value.is_zero() {
+                            filtered_row_indices.push(row_indices[index]);
+                        }
+                    }
+                    filtered_col_ptrs.push(filtered_row_indices.len());
+                }
+                SparseTensor::new_logical(rows, cols, filtered_col_ptrs, filtered_row_indices)
+            } else {
+                match values {
+                    NumericStorage::F64(values) => {
+                        SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+                    }
+                    NumericStorage::F32(values) => {
+                        SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
+                    }
+                    storage => SparseTensor::new_integer(
+                        rows,
+                        cols,
+                        col_ptrs,
+                        row_indices,
+                        storage
+                            .into_integer_storage()
+                            .expect("non-floating sparse MAT storage is integer"),
+                    ),
+                }
+            }
+            .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::SparseTensor(sparse))
         }
     }
@@ -1370,29 +1439,6 @@ fn integer_storage_scalar(storage: &IntegerStorage, index: usize) -> IntValue {
         IntegerStorage::U16(values) => IntValue::U16(values[index]),
         IntegerStorage::U32(values) => IntValue::U32(values[index]),
         IntegerStorage::U64(values) => IntValue::U64(values[index]),
-    }
-}
-
-fn numeric_scalar_to_int_value(class: MatClass, value: f64) -> Option<Value> {
-    match class {
-        MatClass::Int8 => Some(Value::Int(IntValue::I8(value as i8))),
-        MatClass::UInt8 => Some(Value::Int(IntValue::U8(value as u8))),
-        MatClass::Int16 => Some(Value::Int(IntValue::I16(value as i16))),
-        MatClass::UInt16 => Some(Value::Int(IntValue::U16(value as u16))),
-        MatClass::Int32 => Some(Value::Int(IntValue::I32(value as i32))),
-        MatClass::UInt32 => Some(Value::Int(IntValue::U32(value as u32))),
-        MatClass::Int64 => Some(Value::Int(IntValue::I64(value as i64))),
-        MatClass::UInt64 => Some(Value::Int(IntValue::U64(value as u64))),
-        _ => None,
-    }
-}
-
-fn numeric_tensor_dtype(class: MatClass) -> NumericDType {
-    match class {
-        MatClass::Single => NumericDType::F32,
-        MatClass::UInt8 => NumericDType::U8,
-        MatClass::UInt16 => NumericDType::U16,
-        _ => NumericDType::F64,
     }
 }
 
@@ -1590,7 +1636,7 @@ pub(crate) mod tests {
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
     use futures::executor::block_on;
-    use runmat_builtins::{IntegerStorage, StringArray};
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, NumericDType, StringArray};
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1701,7 +1747,7 @@ pub(crate) mod tests {
                 match sv.fields.get("A").unwrap() {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 2]);
-                        assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0]);
+                        assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0]);
                     }
                     other => panic!("expected tensor, got {other:?}"),
                 }
@@ -1827,6 +1873,37 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn load_save_nd_char_and_cell_roundtrip_preserves_shape_and_order() {
+        let _guard = workspace_guard();
+        ensure_test_resolver();
+        let chars =
+            CharArray::new_with_shape("abcd".chars().collect(), vec![1, 2, 2]).expect("chars");
+        let cells =
+            CellArray::new_with_shape(vec![Value::Num(1.0), Value::Num(2.0)], vec![1, 1, 2])
+                .expect("cells");
+        set_workspace(&[
+            ("chars", Value::CharArray(chars.clone())),
+            ("cells", Value::Cell(cells.clone())),
+        ]);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nd_char_cell.mat");
+        let save_arg = Value::from(path.to_string_lossy().to_string());
+        block_on(crate::call_builtin_async(
+            "save",
+            std::slice::from_ref(&save_arg),
+        ))
+        .expect("save nd values");
+
+        let eval = block_on(evaluate(&[Value::from(path.to_string_lossy().to_string())]))
+            .expect("load nd values");
+        let Value::Struct(output) = eval.first_output() else {
+            panic!("expected struct");
+        };
+        assert_eq!(output.fields.get("chars"), Some(&Value::CharArray(chars)));
+        assert_eq!(output.fields.get("cells"), Some(&Value::Cell(cells)));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn load_compressed_level5_payload() {
@@ -1853,10 +1930,15 @@ pub(crate) mod tests {
     fn load_preserves_supported_numeric_mat_classes() {
         let single = Tensor::new_with_dtype(vec![1.5, 2.5], vec![1, 2], NumericDType::F32)
             .expect("single tensor");
+        let single_scalar = Tensor::from_f32(vec![0.1], vec![1, 1]).expect("single scalar");
+        let complex_single = ComplexTensor::from_f32(vec![(0.1, -0.2), (3.5, 4.25)], vec![1, 2])
+            .expect("complex single tensor");
         let uint16 = Tensor::new_with_dtype(vec![10.0, 20.0], vec![1, 2], NumericDType::U16)
             .expect("uint16 tensor");
         let bytes = block_on(encode_workspace_to_mat_bytes(&[
             ("s".to_string(), Value::Tensor(single)),
+            ("ss".to_string(), Value::Tensor(single_scalar)),
+            ("cs".to_string(), Value::ComplexTensor(complex_single)),
             ("u16".to_string(), Value::Tensor(uint16)),
             ("i".to_string(), Value::Int(IntValue::I16(-7))),
         ]))
@@ -1866,20 +1948,37 @@ pub(crate) mod tests {
         let values: HashMap<_, _> = entries.into_iter().collect();
         match values.get("s").unwrap() {
             Value::Tensor(t) => {
-                assert_eq!(t.dtype, NumericDType::F32);
-                assert_eq!(t.data, vec![1.5, 2.5]);
+                assert_eq!(t.numeric_dtype(), NumericDType::F32);
+                assert_eq!(t.materialize_f64(), vec![1.5, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match values.get("u16").unwrap() {
             Value::Tensor(t) => {
-                assert_eq!(
-                    t.integer_storage(),
-                    Some(&IntegerStorage::U16(vec![10, 20]))
-                );
-                assert_eq!(t.data, vec![10.0, 20.0]);
+                assert_eq!(t.numeric_dtype(), NumericDType::U16);
+                assert_eq!(t.materialize_f64(), vec![10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+        match values.get("ss").unwrap() {
+            Value::Tensor(t) => {
+                assert_eq!(t.numeric_dtype(), NumericDType::F32);
+                assert_eq!(
+                    t.clone().into_numeric_storage(),
+                    Ok(NumericStorage::F32(vec![0.1_f32]))
+                );
+            }
+            other => panic!("expected single scalar tensor, got {other:?}"),
+        }
+        match values.get("cs").unwrap() {
+            Value::ComplexTensor(t) => {
+                assert_eq!(t.numeric_dtype(), NumericDType::F32);
+                assert_eq!(
+                    t.as_f32_slice(),
+                    Some(&[(0.1_f32, -0.2_f32), (3.5_f32, 4.25_f32)][..])
+                );
+            }
+            other => panic!("expected complex single tensor, got {other:?}"),
         }
         assert_eq!(values.get("i"), Some(&Value::Int(IntValue::I16(-7))));
     }
@@ -1937,13 +2036,80 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn load_save_roundtrip_preserves_every_complex_integer_tensor_class_exactly() {
+        let cases = vec![
+            (
+                "i8",
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                IntegerStorage::I8(vec![1, -2]),
+            ),
+            (
+                "u8",
+                IntegerStorage::U8(vec![0, u8::MAX]),
+                IntegerStorage::U8(vec![3, 4]),
+            ),
+            (
+                "i16",
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                IntegerStorage::I16(vec![5, -6]),
+            ),
+            (
+                "u16",
+                IntegerStorage::U16(vec![0, u16::MAX]),
+                IntegerStorage::U16(vec![7, 8]),
+            ),
+            (
+                "i32",
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                IntegerStorage::I32(vec![9, -10]),
+            ),
+            (
+                "u32",
+                IntegerStorage::U32(vec![0, u32::MAX]),
+                IntegerStorage::U32(vec![11, 12]),
+            ),
+            (
+                "i64",
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntegerStorage::I64(vec![13, i64::MIN]),
+            ),
+            (
+                "u64",
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                IntegerStorage::U64(vec![u64::MAX, 14]),
+            ),
+        ];
+        let mut entries = Vec::new();
+        for (name, real, imag) in &cases {
+            let storage =
+                IntegerComplexStorage::new(real.clone(), imag.clone()).expect("components");
+            let tensor = ComplexTensor::new_integer(storage, vec![2, 1]).expect("typed complex");
+            entries.push(((*name).to_string(), Value::ComplexTensor(tensor)));
+        }
+
+        let bytes = block_on(encode_workspace_to_mat_bytes(&entries)).expect("encode MAT bytes");
+        let values: HashMap<_, _> = load_entries_from_bytes(bytes).into_iter().collect();
+
+        for (name, real, imag) in cases {
+            match values.get(name).expect("loaded typed complex tensor") {
+                Value::ComplexTensor(tensor) => assert_eq!(
+                    tensor.integer_storage().cloned(),
+                    Some(IntegerComplexStorage::new(real, imag).expect("components"))
+                ),
+                other => panic!("expected typed complex tensor for {name}, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn load_save_roundtrip_preserves_nested_integer_tensors() {
         let unsigned =
             Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
                 .expect("unsigned tensor");
         let signed = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
             .expect("signed tensor");
-        let cell = make_cell(
+        let cell = crate::make_cell(
             vec![
                 Value::Tensor(unsigned.clone()),
                 Value::Tensor(signed.clone()),
@@ -2009,6 +2175,226 @@ pub(crate) mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "S");
         assert_eq!(entries[0].1, Value::SparseTensor(sparse));
+    }
+
+    #[test]
+    fn load_save_native_single_sparse_roundtrip_preserves_dtype_and_values() {
+        let sparse =
+            SparseTensor::new_f32(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2], vec![4.25, 5.5, 6.75])
+                .expect("single sparse");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "single_sparse".to_string(),
+            Value::SparseTensor(sparse.clone()),
+        )]))
+        .expect("save single sparse");
+        let entries = load_entries_from_bytes(bytes);
+        assert_eq!(
+            entries,
+            vec![("single_sparse".to_string(), Value::SparseTensor(sparse))]
+        );
+    }
+
+    #[test]
+    fn load_save_logical_sparse_roundtrip_preserves_pattern_and_class() {
+        let sparse =
+            SparseTensor::new_logical(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2]).expect("logical");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "logical_sparse".to_string(),
+            Value::SparseTensor(sparse.clone()),
+        )]))
+        .expect("save logical sparse");
+        let entries = load_entries_from_bytes(bytes);
+        assert_eq!(
+            entries,
+            vec![("logical_sparse".to_string(), Value::SparseTensor(sparse))]
+        );
+    }
+
+    #[test]
+    fn registered_load_gates_restored_sparse_integer_by_compatibility_mode() {
+        let sparse = SparseTensor::new_integer(
+            1,
+            1,
+            vec![0, 1],
+            vec![0],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("sparse integer");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "S".to_string(),
+            Value::SparseTensor(sparse),
+        )]))
+        .expect("encode sparse integer");
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("sparse_integer.mat");
+        std::fs::write(&path, bytes).expect("write MAT file");
+        let args = [Value::String(path.to_string_lossy().into_owned())];
+
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = crate::dispatcher::call_builtin("load", &args)
+                .expect_err("MATLAB mode must reject restored sparse integer");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SparseIntegerExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let restored =
+                crate::dispatcher::call_builtin("load", &args).expect("RunMat mode load");
+            assert!(matches!(
+                restored,
+                Value::Struct(ref fields)
+                    if matches!(
+                        fields.fields.get("S"),
+                        Some(Value::SparseTensor(sparse))
+                            if sparse.integer_storage()
+                                == Some(&IntegerStorage::U64(vec![u64::MAX]))
+                    )
+            ));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_save_sparse_integer_roundtrips_preserve_every_dtype_and_exact_values() {
+        let cases = [
+            (
+                "i8",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                )
+                .expect("int8 sparse"),
+            ),
+            (
+                "u8",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::U8(vec![0, u8::MAX]),
+                )
+                .expect("uint8 sparse"),
+            ),
+            (
+                "i16",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                )
+                .expect("int16 sparse"),
+            ),
+            (
+                "u16",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::U16(vec![0, u16::MAX]),
+                )
+                .expect("uint16 sparse"),
+            ),
+            (
+                "i32",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                )
+                .expect("int32 sparse"),
+            ),
+            (
+                "u32",
+                SparseTensor::new_integer(
+                    2,
+                    1,
+                    vec![0, 2],
+                    vec![0, 1],
+                    IntegerStorage::U32(vec![0, u32::MAX]),
+                )
+                .expect("uint32 sparse"),
+            ),
+            (
+                "i64",
+                SparseTensor::new_integer(
+                    4,
+                    3,
+                    vec![0, 1, 1, 3],
+                    vec![0, 1, 3],
+                    IntegerStorage::I64(vec![i64::MIN + 1, i64::MAX, -(1_i64 << 54)]),
+                )
+                .expect("int64 sparse"),
+            ),
+            (
+                "u64",
+                SparseTensor::new_integer(
+                    2,
+                    4,
+                    vec![0, 0, 1, 2, 2],
+                    vec![1, 0],
+                    IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                )
+                .expect("uint64 sparse"),
+            ),
+        ];
+
+        let workspace: Vec<_> = cases
+            .iter()
+            .map(|(name, sparse)| (name.to_string(), Value::SparseTensor(sparse.clone())))
+            .collect();
+        let bytes = block_on(encode_workspace_to_mat_bytes(&workspace)).expect("encode MAT bytes");
+        let entries: HashMap<_, _> = load_entries_from_bytes(bytes).into_iter().collect();
+
+        for (name, expected) in cases {
+            let Value::SparseTensor(actual) = entries.get(name).expect("loaded sparse") else {
+                panic!("expected sparse matrix");
+            };
+            assert_eq!(actual.shape(), expected.shape());
+            assert_eq!(actual.col_ptrs, expected.col_ptrs);
+            assert_eq!(actual.row_indices, expected.row_indices);
+            assert_eq!(actual.integer_storage(), expected.integer_storage());
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_save_empty_sparse_integer_roundtrip_preserves_dtype_and_shape() {
+        let sparse = SparseTensor::new_integer(
+            0,
+            5,
+            vec![0, 0, 0, 0, 0, 0],
+            Vec::new(),
+            IntegerStorage::U64(Vec::new()),
+        )
+        .expect("empty sparse");
+        let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "empty".to_string(),
+            Value::SparseTensor(sparse),
+        )]))
+        .expect("encode MAT bytes");
+
+        let entries = load_entries_from_bytes(bytes);
+        let Value::SparseTensor(actual) = &entries[0].1 else {
+            panic!("expected sparse matrix");
+        };
+        assert_eq!(actual.shape(), vec![0, 5]);
+        assert_eq!(actual.col_ptrs, vec![0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            actual.integer_storage(),
+            Some(&IntegerStorage::U64(Vec::new()))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2125,7 +2511,7 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload tensor");
@@ -2146,7 +2532,7 @@ pub(crate) mod tests {
             Value::Struct(sv) => match sv.fields.get("gpu_var") {
                 Some(Value::Tensor(t)) => {
                     assert_eq!(t.shape, vec![2, 2]);
-                    assert_eq!(t.data, tensor.data);
+                    assert_eq!(t.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor, got {other:?}"),
             },

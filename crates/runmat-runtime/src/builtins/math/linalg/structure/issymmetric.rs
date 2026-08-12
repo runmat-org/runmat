@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderSymmetryKind};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::linalg::structure::integer_symmetry;
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -193,6 +194,7 @@ fn issymmetric_error_with_detail(
 )]
 async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mode, tol) = parse_optional_args(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "issymmetric")?;
     match value {
         Value::GpuTensor(handle) => issymmetric_gpu(handle, mode, tol).await,
         other => {
@@ -374,7 +376,7 @@ fn parse_tolerance_value(value: &Value) -> BuiltinResult<f64> {
     let raw = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => t.data[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => scalar_tensor_f64(t),
         Value::Bool(b) => {
             if *b {
                 1.0
@@ -409,6 +411,16 @@ fn parse_tolerance_value(value: &Value) -> BuiltinResult<f64> {
         ));
     }
     Ok(raw)
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    if let Some(integer) = tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(0))
+    {
+        return integer.to_f64();
+    }
+    tensor::tensor_value_f64(tensor, 0)
 }
 
 fn matrix_dimensions_for(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
@@ -462,18 +474,19 @@ fn is_symmetric_real(tensor: &Tensor, mode: SymmetryMode, tol: f64) -> bool {
     let rows = tensor.rows();
     let cols = tensor.cols();
     debug_assert_eq!(rows, cols, "is_symmetric_real requires a square matrix");
-    let data = &tensor.data;
-
+    if let Some(storage) = tensor.integer_storage() {
+        return is_symmetric_integer(storage, rows, cols, mode, tol);
+    }
     for col in 0..cols {
         if matches!(mode, SymmetryMode::Skew) {
-            let diag = data[col + col * rows];
+            let diag = floating_value_at(tensor, col + col * rows);
             if !real_within(diag, 0.0, tol) {
                 return false;
             }
         }
         for row in 0..col {
-            let a = data[row + col * rows];
-            let b = data[col + row * rows];
+            let a = floating_value_at(tensor, row + col * rows);
+            let b = floating_value_at(tensor, col + row * rows);
             let (diff, reference) = match mode {
                 SymmetryMode::Symmetric => (a, b),
                 SymmetryMode::Skew => (a, -b),
@@ -486,11 +499,52 @@ fn is_symmetric_real(tensor: &Tensor, mode: SymmetryMode, tol: f64) -> bool {
     true
 }
 
+fn floating_value_at(tensor: &Tensor, index: usize) -> f64 {
+    match tensor
+        .numeric_value_at(index)
+        .expect("tensor storage length matches shape")
+    {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        _ => unreachable!("integer storage dispatches before floating comparison"),
+    }
+}
+
+fn is_symmetric_integer(
+    storage: &IntegerStorage,
+    rows: usize,
+    cols: usize,
+    mode: SymmetryMode,
+    tol: f64,
+) -> bool {
+    let values = storage.exact_values();
+    for col in 0..cols {
+        if matches!(mode, SymmetryMode::Skew) {
+            let diag = &values[col + col * rows];
+            if !integer_symmetry::zero_within(diag, tol) {
+                return false;
+            }
+        }
+        for row in 0..col {
+            let a = &values[row + col * rows];
+            let b = &values[col + row * rows];
+            let ok = match mode {
+                SymmetryMode::Symmetric => integer_symmetry::equal_within(a, b, tol),
+                SymmetryMode::Skew => integer_symmetry::negated_equal_within(a, b, tol),
+            };
+            if !ok {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn is_symmetric_complex(tensor: &ComplexTensor, mode: SymmetryMode, tol: f64) -> bool {
     let rows = tensor.rows;
     let cols = tensor.cols;
     debug_assert_eq!(rows, cols, "is_symmetric_complex requires a square matrix");
-    let data = &tensor.data;
+    let data = &tensor.materialize_f64();
 
     for col in 0..cols {
         if matches!(mode, SymmetryMode::Skew) {
@@ -608,7 +662,10 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericStorage,
+        ResolveContext, Type,
+    };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -680,6 +737,63 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[test]
+    fn issymmetric_uses_exact_integer_storage_above_f64_precision() {
+        let lossy_left = 9_007_199_254_740_992_u64;
+        let lossy_right = 9_007_199_254_740_993_u64;
+        assert_eq!(lossy_left as f64, lossy_right as f64);
+
+        let exact_mismatch = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, lossy_left, lossy_right, 1]),
+            vec![2, 2],
+        )
+        .expect("typed uint64 matrix");
+        let result =
+            issymmetric_builtin(Value::Tensor(exact_mismatch), Vec::new()).expect("issymmetric");
+        assert_eq!(result, Value::Bool(false));
+
+        let exact_match = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, lossy_right, lossy_right, 1]),
+            vec![2, 2],
+        )
+        .expect("typed uint64 matrix");
+        let result =
+            issymmetric_builtin(Value::Tensor(exact_match), Vec::new()).expect("issymmetric");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn issymmetric_reads_native_single_storage() {
+        let tensor =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0, 2.0, 2.0, 3.0]), vec![2, 2])
+                .unwrap();
+        assert_eq!(
+            issymmetric_builtin(Value::Tensor(tensor), Vec::new()).unwrap(),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn issymmetric_skew_uses_exact_signed_integer_negation() {
+        let matrix = Tensor::new_integer(
+            IntegerStorage::I64(vec![0, i64::MIN, i64::MAX, 0]),
+            vec![2, 2],
+        )
+        .expect("typed int64 matrix");
+        let result = issymmetric_builtin(Value::Tensor(matrix), vec![Value::from("skew")])
+            .expect("issymmetric skew");
+        assert_eq!(result, Value::Bool(false));
+
+        let matrix = Tensor::new_integer(
+            IntegerStorage::I64(vec![0, i64::MAX, -i64::MAX, 0]),
+            vec![2, 2],
+        )
+        .expect("typed int64 matrix");
+        let result = issymmetric_builtin(Value::Tensor(matrix), vec![Value::from("skew")])
+            .expect("issymmetric skew");
+        assert_eq!(result, Value::Bool(true));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tolerance_allows_small_deviations() {
@@ -687,6 +801,38 @@ pub(crate) mod tests {
         let result = issymmetric_builtin(Value::Tensor(tensor), vec![Value::Num(1e-9)])
             .expect("issymmetric");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn tolerance_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new(vec![1.0, 5.0, 4.0, 1.0], vec![2, 2]).unwrap();
+        let tolerance =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("tolerance");
+
+        let result = issymmetric_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)])
+            .expect("issymmetric");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn tolerance_uses_all_integer_storage_classes_without_mirror() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let tolerance = Tensor::new_integer(storage, vec![1, 1]).expect("tolerance");
+            assert_eq!(
+                parse_tolerance_value(&Value::Tensor(tolerance)).unwrap(),
+                1.0
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -795,6 +941,20 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn negative_typed_integer_tensor_tolerance_errors() {
+        let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+        let tolerance =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tolerance");
+        let err =
+            issymmetric_builtin(Value::Tensor(tensor), vec![Value::Tensor(tolerance)]).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("tolerance must be >= 0"),
+            "unexpected error message: {message}"
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scalar_inputs_follow_rules() {
@@ -806,13 +966,29 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[test]
+    fn issymmetric_rejects_typed_complex_integer_inputs() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+        let err = issymmetric_builtin(Value::ComplexTensor(tensor), Vec::new())
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issymmetric_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![2.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -833,7 +1009,7 @@ pub(crate) mod tests {
         let cpu = issymmetric_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().unwrap();
@@ -848,7 +1024,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let view_skew = runmat_accelerate_api::HostTensorView {
-            data: &skew.data,
+            data: &skew.materialize_f64(),
             shape: &skew.shape,
         };
         let handle_skew = provider.upload(&view_skew).unwrap();

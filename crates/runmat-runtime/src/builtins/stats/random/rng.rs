@@ -8,12 +8,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 
 use log::debug;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    StructValue, Tensor, Value,
+    IntValue, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
@@ -414,16 +415,12 @@ fn parse_generator_keyword(keyword: &str) -> BuiltinResult<RngAlgorithm> {
 
 fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
     match value {
-        Value::Int(i) => {
-            let v = i.to_i64();
-            if v < 0 {
-                return Err(rng_error_with(
-                    &RNG_ERROR_SEED_NONNEGATIVE,
-                    format!("{label}: seed must be non-negative"),
-                ));
-            }
-            Ok(v as u64)
-        }
+        Value::Int(i) => i.try_to_u64().ok_or_else(|| {
+            rng_error_with(
+                &RNG_ERROR_SEED_NONNEGATIVE,
+                format!("{label}: seed must be non-negative"),
+            )
+        }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(rng_error_with(
@@ -452,7 +449,18 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
             }
             Ok(rounded as u64)
         }
-        Value::Tensor(t) if t.data.len() == 1 => parse_seed_scalar(&Value::Num(t.data[0]), label),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                int.try_to_u64().ok_or_else(|| {
+                    rng_error_with(
+                        &RNG_ERROR_SEED_NONNEGATIVE,
+                        format!("{label}: seed must be non-negative"),
+                    )
+                })
+            } else {
+                parse_seed_scalar(&Value::Num(tensor::tensor_value_f64(t, 0)), label)
+            }
+        }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Err(rng_error_with(
             &RNG_ERROR_INVALID_ARGUMENT,
             format!("{label}: expected a numeric seed"),
@@ -466,12 +474,44 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
 
 fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
     match value {
-        Value::Tensor(t) => match t.data.len() {
-            1 => parse_state_scalar(&Value::Num(t.data[0])),
+        Value::Tensor(t) => match tensor::element_count(&t.shape) {
+            1 => {
+                if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                    int.try_to_u64().ok_or_else(|| {
+                        rng_error_with(
+                            &RNG_ERROR_INVALID_ARGUMENT,
+                            "rng: State must be non-negative",
+                        )
+                    })
+                } else {
+                    parse_state_scalar(&Value::Num(tensor::tensor_value_f64(t, 0)))
+                }
+            }
             2 => {
-                let lo = parse_state_word(t.data[0], "rng: State[1]")?;
-                let hi = parse_state_word(t.data[1], "rng: State[2]")?;
-                Ok(lo | ((hi as u64) << 32))
+                let (lo, hi) = if let Some(storage) = t.integer_storage() {
+                    let lo = storage.value_at(0).ok_or_else(|| {
+                        rng_error_with(
+                            &RNG_ERROR_INVALID_ARGUMENT,
+                            "rng: State tensor must contain one or two elements",
+                        )
+                    })?;
+                    let hi = storage.value_at(1).ok_or_else(|| {
+                        rng_error_with(
+                            &RNG_ERROR_INVALID_ARGUMENT,
+                            "rng: State tensor must contain one or two elements",
+                        )
+                    })?;
+                    (
+                        parse_state_word_int(lo, "rng: State[1]")?,
+                        parse_state_word_int(hi, "rng: State[2]")?,
+                    )
+                } else {
+                    (
+                        parse_state_word(tensor::tensor_value_f64(t, 0), "rng: State[1]")?,
+                        parse_state_word(tensor::tensor_value_f64(t, 1), "rng: State[2]")?,
+                    )
+                };
+                Ok(lo | (hi << 32))
             }
             _ => Err(rng_error_with(
                 &RNG_ERROR_INVALID_ARGUMENT,
@@ -500,22 +540,33 @@ fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
             }
             Ok(rounded as u64)
         }
-        Value::Int(i) => {
-            let v = i.to_i64();
-            if v < 0 {
-                Err(rng_error_with(
-                    &RNG_ERROR_INVALID_ARGUMENT,
-                    "rng: State must be non-negative",
-                ))
-            } else {
-                Ok(v as u64)
-            }
-        }
+        Value::Int(i) => i.try_to_u64().ok_or_else(|| {
+            rng_error_with(
+                &RNG_ERROR_INVALID_ARGUMENT,
+                "rng: State must be non-negative",
+            )
+        }),
         other => Err(rng_error_with(
             &RNG_ERROR_INVALID_ARGUMENT,
             format!("rng: unsupported State value {other:?}"),
         )),
     }
+}
+
+fn parse_state_word_int(value: IntValue, label: &str) -> BuiltinResult<u64> {
+    let word = value.try_to_u64().ok_or_else(|| {
+        rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            format!("{label}: must be non-negative"),
+        )
+    })?;
+    if word > u32::MAX as u64 {
+        return Err(rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            format!("{label}: must fit in uint32"),
+        ));
+    }
+    Ok(word)
 }
 
 fn parse_state_word(value: f64, label: &str) -> BuiltinResult<u64> {
@@ -578,7 +629,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{random, test_support};
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -617,6 +668,58 @@ pub(crate) mod tests {
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
         let seq2 = random::generate_uniform(5, "rng test").expect("uniform");
         assert_eq!(seq1, seq2);
+    }
+
+    #[test]
+    fn rng_integer_seed_and_state_preserve_full_uint64_range() {
+        assert_eq!(
+            parse_seed_scalar(&Value::Int(IntValue::U64(u64::MAX)), "rng: seed")
+                .expect("uint64 seed"),
+            u64::MAX
+        );
+        assert_eq!(
+            parse_state_scalar(&Value::Int(IntValue::U64(u64::MAX))).expect("uint64 state"),
+            u64::MAX
+        );
+        assert!(parse_seed_scalar(&Value::Int(IntValue::I64(-1)), "rng: seed").is_err());
+    }
+
+    #[test]
+    fn rng_typed_integer_tensor_seed_and_state_are_exact() {
+        let seed =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("seed");
+        assert_eq!(
+            parse_seed_scalar(&Value::Tensor(seed), "rng: seed").expect("typed seed"),
+            u64::MAX
+        );
+
+        let scalar_state =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("state");
+        assert_eq!(
+            parse_state_scalar(&Value::Tensor(scalar_state)).expect("typed state"),
+            u64::MAX
+        );
+
+        let word_state = Tensor::new_integer(
+            IntegerStorage::U64(vec![u32::MAX as u64, u32::MAX as u64]),
+            vec![1, 2],
+        )
+        .expect("state words");
+        assert_eq!(
+            parse_state_scalar(&Value::Tensor(word_state)).expect("typed state words"),
+            u64::MAX
+        );
+
+        let negative_seed =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("seed");
+        assert!(parse_seed_scalar(&Value::Tensor(negative_seed), "rng: seed").is_err());
+
+        let wide_word = Tensor::new_integer(
+            IntegerStorage::U64(vec![u32::MAX as u64 + 1, 0]),
+            vec![1, 2],
+        )
+        .expect("state word");
+        assert!(parse_state_scalar(&Value::Tensor(wide_word)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

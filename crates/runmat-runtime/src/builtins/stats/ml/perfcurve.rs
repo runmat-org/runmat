@@ -9,6 +9,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor;
 use crate::{
     build_runtime_error, gather_if_needed_async, output_count, BuiltinResult, RuntimeError,
 };
@@ -591,8 +592,8 @@ fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
     if tensor.shape.as_slice() != [2, 2] {
         return Err(invalid("perfcurve: Cost must be a 2-by-2 numeric matrix"));
     }
-    if tensor
-        .data
+    let values = tensor::tensor_values_f64(tensor);
+    if values
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
     {
@@ -600,17 +601,14 @@ fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
             "perfcurve: Cost entries must be finite and nonnegative",
         ));
     }
-    Ok([
-        [tensor.data[0], tensor.data[2]],
-        [tensor.data[1], tensor.data[3]],
-    ])
+    Ok([[values[0], values[2]], [values[1], values[3]]])
 }
 
 fn score_vector(value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape, "scores")?;
-            Ok(tensor.data)
+            Ok(tensor::tensor_into_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
@@ -624,7 +622,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape, name)?;
-            Ok(tensor.data.clone())
+            Ok(tensor::tensor_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
@@ -639,7 +637,8 @@ fn scalar_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
         Value::Bool(value) => Ok(*value),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Int(value) => Ok(value.to_i64() != 0),
+        Value::Int(value) if value.is_zero() => Ok(false),
+        Value::Int(value) if value.try_to_u64() == Some(1) => Ok(true),
         _ => match canonical(&scalar_text(value, name)?).as_str() {
             "true" | "on" | "yes" => Ok(true),
             "false" | "off" | "no" => Ok(false),
@@ -792,7 +791,7 @@ fn coerce_label_to_kind(label: Label, kind: LabelKind, name: &str) -> BuiltinRes
 
 fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
     ensure_vector_shape(&tensor.shape, name)?;
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn ensure_vector_shape(shape: &[usize], name: &str) -> BuiltinResult<()> {
@@ -1470,7 +1469,7 @@ fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect::<String>()),
         Value::Num(value) if value.is_finite() => Ok(format_number(*value)),
-        Value::Int(value) => Ok(value.to_i64().to_string()),
+        Value::Int(value) => Ok(value.decimal_string()),
         Value::Bool(value) => Ok(value.to_string()),
         other => Err(invalid(format!(
             "perfcurve: {name} must be text scalar; got {other:?}"
@@ -1511,10 +1510,36 @@ fn tensor_row(data: Vec<f64>) -> BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::StringArray;
+    use runmat_builtins::{IntegerStorage, StringArray};
+
+    #[test]
+    fn perfcurve_scalar_text_preserves_exact_uint64() {
+        assert_eq!(
+            scalar_text(
+                &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+                "option"
+            )
+            .expect("scalar text"),
+            "18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn perfcurve_scalar_bool_rejects_wide_uint64_option() {
+        assert!(scalar_bool(
+            &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            "option"
+        )
+        .is_err());
+    }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), shape.to_vec()).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: &[usize]) -> Value {
+        let tensor = Tensor::new_integer(storage, shape.to_vec()).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn output_tensor(value: &Value, index: usize) -> &Tensor {
@@ -1555,13 +1580,39 @@ mod tests {
         assert_eq!(y.shape, vec![5, 1]);
         assert_eq!(thresholds.shape, vec![5, 1]);
         assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
-        assert_eq!(x.data[0], 0.0);
-        assert_eq!(y.data[0], 0.0);
-        assert_eq!(thresholds.data[0], thresholds.data[1]);
-        assert_eq!(x.data[4], 1.0);
-        assert_eq!(y.data[4], 1.0);
+        assert_eq!(x.materialize_f64()[0], 0.0);
+        assert_eq!(y.materialize_f64()[0], 0.0);
+        assert_eq!(
+            thresholds.materialize_f64()[0],
+            thresholds.materialize_f64()[1]
+        );
+        assert_eq!(x.materialize_f64()[4], 1.0);
+        assert_eq!(y.materialize_f64()[4], 1.0);
         let opt = output_tensor(&result, 4);
         assert_eq!(opt.shape, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn perfcurve_accepts_typed_integer_labels_scores_and_weights() {
+        let _guard = output_count::push_output_count(Some(4));
+        let result = perfcurve_builtin(
+            int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), &[4, 1]),
+            int_tensor(IntegerStorage::U16(vec![9, 8, 4, 1]), &[4, 1]),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+            vec![
+                Value::String("Weights".into()),
+                int_tensor(IntegerStorage::U8(vec![1, 2, 1, 1]), &[4, 1]),
+                Value::String("Prior".into()),
+                int_tensor(IntegerStorage::U8(vec![1, 1]), &[1, 2]),
+                Value::String("Cost".into()),
+                int_tensor(IntegerStorage::U8(vec![0, 1, 1, 0]), &[2, 2]),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(output_tensor(&result, 0).shape, vec![5, 1]);
+        assert_eq!(output_tensor(&result, 1).shape, vec![5, 1]);
+        assert!(output_num(&result, 3).is_finite());
     }
 
     #[tokio::test]
@@ -1602,7 +1653,10 @@ mod tests {
         let suby = output_tensor(&result, 5);
         assert_eq!(x.shape, vec![4, 1]);
         assert_eq!(suby.shape, vec![4, 1]);
-        assert!(y.data.iter().any(|value| (*value - 0.5).abs() < 1.0e-12));
+        assert!(y
+            .materialize_f64()
+            .iter()
+            .any(|value| (*value - 0.5).abs() < 1.0e-12));
         match &result {
             Value::OutputList(values) => match &values[6] {
                 Value::Cell(names) => assert_eq!(
@@ -1628,7 +1682,7 @@ mod tests {
         .unwrap();
         let x = output_tensor(&result, 0);
         assert_eq!(x.shape, vec![2, 1]);
-        assert_eq!(x.data, vec![0.5, 0.0]);
+        assert_eq!(x.materialize_f64(), vec![0.5, 0.0]);
         assert!(output_num(&result, 3).is_finite());
 
         let result = perfcurve_builtin(
@@ -1644,7 +1698,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(output_tensor(&result, 0).data, vec![0.0, 0.5]);
+        assert_eq!(output_tensor(&result, 0).materialize_f64(), vec![0.0, 0.5]);
     }
 
     #[tokio::test]
@@ -1704,8 +1758,11 @@ mod tests {
         .await
         .unwrap();
         let y = output_tensor(&result, 1);
-        assert!(y.data.iter().any(|value| (*value - 0.5).abs() < 1.0e-12));
+        assert!(y
+            .materialize_f64()
+            .iter()
+            .any(|value| (*value - 0.5).abs() < 1.0e-12));
         let opt = output_tensor(&result, 4);
-        assert!(opt.data.iter().all(|value| value.is_nan()));
+        assert!(opt.materialize_f64().iter().all(|value| value.is_nan()));
     }
 }

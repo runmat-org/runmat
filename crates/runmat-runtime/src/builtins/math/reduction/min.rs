@@ -5,9 +5,13 @@ use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexStorage, ComplexTensor, NumericDType, NumericStorage,
+    ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -157,7 +161,7 @@ const MIN_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 4] = [
     MIN_PARAM_OPTION_VALUE,
 ];
 
-const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
+const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 19] = [
     BuiltinSignatureDescriptor {
         label: "M = min(A)",
         inputs: &MIN_INPUTS_A,
@@ -172,11 +176,6 @@ const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
         label: "M = min(A, B)",
         inputs: &MIN_INPUTS_A_B,
         outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, B)",
-        inputs: &MIN_INPUTS_A_B,
-        outputs: &MIN_OUTPUT_MI,
     },
     BuiltinSignatureDescriptor {
         label: "M = min(A, [], dim)",
@@ -244,11 +243,6 @@ const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
         outputs: &MIN_OUTPUT_M,
     },
     BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, B, \"ComparisonMethod\", method)",
-        inputs: &MIN_INPUTS_A_B_COMPARISON,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
         label: "M = min(A, [], optionName, optionValue, ...)",
         inputs: &MIN_INPUTS_A_EMPTY_OPTIONS,
         outputs: &MIN_OUTPUT_M,
@@ -262,11 +256,6 @@ const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
         label: "M = min(A, B, optionName, optionValue, ...)",
         inputs: &MIN_INPUTS_A_B_OPTIONS,
         outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, B, optionName, optionValue, ...)",
-        inputs: &MIN_INPUTS_A_B_OPTIONS,
-        outputs: &MIN_OUTPUT_MI,
     },
 ];
 
@@ -311,6 +300,63 @@ pub const MIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &MIN_ERRORS,
 };
+
+const REDUCTION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Ordinary real reduction data accepts every integer storage class; complex-integer ordering remains a separately tracked conformance question.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim_or_vecdim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage.",
+    },
+];
+
+const PAIRWISE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "An integer array may pair with the same integer class or a scalar double in either operand position.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Two integer arrays must share one class; mixed integer classes and nonscalar floating arrays are rejected.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[M, I] = min(A, [], dim_or_vecdim, missingflag)",
+        inputs: &REDUCTION_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Minimum values preserve the integer input class and one-based indices are double; supported provider reductions retain resident values and indices.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "C = min(A, B, missingflag)",
+        inputs: &PAIRWISE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Pairwise minimum applies compatible-size expansion and preserves the integer operand class, including exact comparison against an allowed scalar double.",
+    },
+];
 
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -439,11 +485,21 @@ impl MinEvaluation {
     accel = "reduction",
     type_resolver(min_type),
     descriptor(crate::builtins::math::reduction::min::MIN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::reduction::min::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::reduction::min"
 )]
 pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(eval) = crate::builtins::table::categorical_min_evaluate(&value, &rest).await {
         return crate::builtins::table::categorical_extrema_to_value(eval?);
+    }
+    if crate::output_count::current_output_count().unwrap_or(1) > 1
+        && rest
+            .first()
+            .is_some_and(|value| !is_empty_placeholder(value))
+    {
+        return Err(min_invalid_argument(
+            "min: pairwise element-wise form has exactly one output",
+        ));
     }
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
@@ -464,6 +520,11 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(min_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     match parse_call(rest).await? {
         ParsedCall::Elementwise(args) => elementwise_min(value, args).await,
         ParsedCall::Reduction(args) => reduction_min(value, args).await,
@@ -537,7 +598,7 @@ async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
 
 fn is_empty_placeholder(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
         Value::StringArray(sa) => sa.data.is_empty(),
         Value::CharArray(ca) => ca.data.is_empty(),
@@ -545,6 +606,10 @@ fn is_empty_placeholder(value: &Value) -> bool {
         Value::String(s) => s.is_empty(),
         _ => false,
     }
+}
+
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor::tensor_element_len(tensor)
 }
 
 async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
@@ -807,7 +872,7 @@ async fn reduction_min_gpu(
         log::trace!("min: gpu path disabled (linear_index=true)");
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider() {
+    let provider = match runmat_accelerate_api::provider_for_handle(&handle) {
         Some(p) => p,
         None => {
             log::trace!(
@@ -937,6 +1002,24 @@ enum InputData {
     Complex(ComplexTensor),
 }
 
+fn real_tensor_from_f64(
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+) -> Result<Tensor, String> {
+    match dtype {
+        NumericDType::F64 => Tensor::new(values, shape),
+        NumericDType::F32 => Tensor::from_f32(
+            values.into_iter().map(|value| value as f32).collect(),
+            shape,
+        ),
+        dtype => Err(format!(
+            "min: unexpected {} storage in floating reduction",
+            dtype.class_name()
+        )),
+    }
+}
+
 fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
     match value {
         Value::Tensor(t) => Ok(InputData::Real(t)),
@@ -999,9 +1082,14 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
 
 fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<MinEvaluation> {
     let shape = tensor.shape.clone();
-    if tensor.data.is_empty() {
+    let dtype = tensor.numeric_dtype();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| min_internal_error(format!("min: {e}")))?;
+    let data = storage.materialize_f64();
+    if data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
-        let values = Tensor::new(Vec::new(), output_shape.clone())
+        let values = real_tensor_from_f64(Vec::new(), output_shape.clone(), dtype)
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
@@ -1015,7 +1103,7 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Min
     let output_len = tensor::element_count(&output_shape);
 
     if output_len == 0 {
-        let values = Tensor::new(Vec::new(), output_shape.clone())
+        let values = real_tensor_from_f64(Vec::new(), output_shape.clone(), dtype)
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
@@ -1032,7 +1120,7 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Min
 
     let mut best = vec![BestReal::new(); output_len];
     let mut coords = vec![0usize; shape.len()];
-    for &value in &tensor.data {
+    for &value in &data {
         let out_idx = map_output_index(&coords, &output_strides, &dims_mask);
         let reduce_idx = map_reduce_index(
             &coords,
@@ -1083,7 +1171,7 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Min
         };
     }
 
-    let value_tensor = Tensor::new(values, output_shape.clone())
+    let value_tensor = real_tensor_from_f64(values, output_shape.clone(), dtype)
         .map_err(|e| min_internal_error(format!("min: {e}")))?;
     let index_tensor =
         Tensor::new(indices, output_shape).map_err(|e| min_internal_error(format!("min: {e}")))?;
@@ -1099,10 +1187,13 @@ fn reduce_complex_tensor(
     args: &ReductionArgs,
 ) -> BuiltinResult<MinEvaluation> {
     let shape = tensor.shape.clone();
-    if tensor.data.is_empty() {
+    let dtype = tensor.numeric_dtype();
+    let data = tensor.materialize_f64();
+    if data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
-        let values = ComplexTensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| min_internal_error(format!("min: {e}")))?;
+        let values =
+            ComplexTensor::from_f64_values_with_dtype(Vec::new(), output_shape.clone(), dtype)
+                .map_err(|e| min_internal_error(format!("min: {e}")))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
@@ -1116,8 +1207,9 @@ fn reduce_complex_tensor(
     let output_len = tensor::element_count(&output_shape);
 
     if output_len == 0 {
-        let values = ComplexTensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| min_internal_error(format!("min: {e}")))?;
+        let values =
+            ComplexTensor::from_f64_values_with_dtype(Vec::new(), output_shape.clone(), dtype)
+                .map_err(|e| min_internal_error(format!("min: {e}")))?;
         let indices = Tensor::new(Vec::new(), output_shape)
             .map_err(|e| min_internal_error(format!("min: {e}")))?;
         return Ok(MinEvaluation {
@@ -1134,7 +1226,7 @@ fn reduce_complex_tensor(
     let mut best = vec![BestComplex::new(); output_len];
     let mut coords = vec![0usize; shape.len()];
 
-    for &(re, im) in &tensor.data {
+    for &(re, im) in &data {
         let out_idx = map_output_index(&coords, &output_strides, &dims_mask);
         let reduce_idx = map_reduce_index(
             &coords,
@@ -1184,8 +1276,9 @@ fn reduce_complex_tensor(
         };
     }
 
-    let value_tensor = ComplexTensor::new(values, output_shape.clone())
-        .map_err(|e| min_internal_error(format!("min: {e}")))?;
+    let value_tensor =
+        ComplexTensor::from_f64_values_with_dtype(values, output_shape.clone(), dtype)
+            .map_err(|e| min_internal_error(format!("min: {e}")))?;
     let index_tensor =
         Tensor::new(indices, output_shape).map_err(|e| min_internal_error(format!("min: {e}")))?;
     Ok(MinEvaluation {
@@ -1622,6 +1715,35 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 
 async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<MinEvaluation> {
     let ElementwiseArgs { other, comparison } = args;
+    let integer_comparison = match comparison {
+        ComparisonMethod::Auto | ComparisonMethod::Real => {
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural
+        }
+        ComparisonMethod::Abs => {
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Absolute
+        }
+    };
+    if let Some(eval) = crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
+        &value,
+        &other,
+        crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
+        integer_comparison,
+        false,
+    )
+    .map_err(|error| min_size_mismatch(format!("min: {error}")))?
+    {
+        return Ok(MinEvaluation {
+            values: eval.values,
+            indices: eval.indices,
+        });
+    }
+    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&value)
+        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&other)
+    {
+        return Err(min_invalid_input(
+            "min: integer pairwise inputs require the same integer class or a scalar double",
+        ));
+    }
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             if let Some(eval) = elementwise_min_gpu_pair(&handle_a, &handle_b, comparison).await {
@@ -1670,7 +1792,10 @@ async fn elementwise_min_gpu_pair(
     if comparison != ComparisonMethod::Auto {
         return None;
     }
-    let provider = runmat_accelerate_api::provider()?;
+    if a.device_id != b.device_id {
+        return None;
+    }
+    let provider = runmat_accelerate_api::provider_for_handle(a)?;
     // Equal-shape fast path
     if a.shape == b.shape {
         let values = provider.elem_min(a, b).await.ok()?;
@@ -1678,8 +1803,9 @@ async fn elementwise_min_gpu_pair(
         if let Ok(mask) = provider.elem_le(a, b).await {
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);
-            let mut indices = Vec::with_capacity(mask_host.data.len());
-            for &m in &mask_host.data {
+            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
+            let mut indices = Vec::with_capacity(mask_values.len());
+            for &m in mask_values.iter() {
                 indices.push(if m != 0.0 { 1.0 } else { 2.0 });
             }
             let index_tensor = Tensor::new(indices, mask_host.shape.clone()).ok()?;
@@ -1691,9 +1817,11 @@ async fn elementwise_min_gpu_pair(
             // Host indices only
             let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
             let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
-            let mut indices = Vec::with_capacity(ta.data.len());
-            for i in 0..ta.data.len() {
-                indices.push(if ta.data[i] <= tb.data[i] { 1.0 } else { 2.0 });
+            let a_values = tensor::tensor_values_f64_cow(&ta);
+            let b_values = tensor::tensor_values_f64_cow(&tb);
+            let mut indices = Vec::with_capacity(a_values.len());
+            for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
+                indices.push(if a_value <= b_value { 1.0 } else { 2.0 });
             }
             let index_tensor = Tensor::new(indices, ta.shape.clone()).ok()?;
             return Some(MinEvaluation {
@@ -1730,8 +1858,9 @@ async fn elementwise_min_gpu_pair(
     let index_tensor = if let Some(mask) = mask {
         let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
         let _ = provider.free(&mask);
-        let mut indices = Vec::with_capacity(mask_host.data.len());
-        for &m in &mask_host.data {
+        let mask_values = tensor::tensor_values_f64_cow(&mask_host);
+        let mut indices = Vec::with_capacity(mask_values.len());
+        for &m in mask_values.iter() {
             indices.push(if m != 0.0 { 1.0 } else { 2.0 });
         }
         Tensor::new(indices, out_shape).ok()?
@@ -1739,9 +1868,11 @@ async fn elementwise_min_gpu_pair(
         // Host indices fallback
         let ta = gpu_helpers::gather_tensor_async(&a_exp).await.ok()?;
         let tb = gpu_helpers::gather_tensor_async(&b_exp).await.ok()?;
-        let mut indices = Vec::with_capacity(ta.data.len());
-        for i in 0..ta.data.len() {
-            indices.push(if ta.data[i] <= tb.data[i] { 1.0 } else { 2.0 });
+        let a_values = tensor::tensor_values_f64_cow(&ta);
+        let b_values = tensor::tensor_values_f64_cow(&tb);
+        let mut indices = Vec::with_capacity(a_values.len());
+        for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
+            indices.push(if a_value <= b_value { 1.0 } else { 2.0 });
         }
         Tensor::new(indices, out_shape).ok()?
     };
@@ -1754,12 +1885,8 @@ async fn elementwise_min_gpu_pair(
 fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
     let rank = a.len().max(b.len()).max(1);
     let mut out = vec![1usize; rank];
-    let mut aa = vec![1usize; rank];
-    let mut bb = vec![1usize; rank];
-    for i in 0..rank {
-        aa[i] = *a.get(i).unwrap_or(&1);
-        bb[i] = *b.get(i).unwrap_or(&1);
-    }
+    let aa = crate::builtins::common::broadcast::align_shape(a, rank);
+    let bb = crate::builtins::common::broadcast::align_shape(b, rank);
     for i in 0..rank {
         let (ad, bd) = (aa[i], bb[i]);
         if ad == bd {
@@ -1789,7 +1916,7 @@ async fn elementwise_min_gpu_scalar_left(
     if comparison != ComparisonMethod::Auto {
         return None;
     }
-    let provider = runmat_accelerate_api::provider()?;
+    let provider = runmat_accelerate_api::provider_for_handle(a)?;
     let scalar = extract_scalar(other)?;
     let values = provider.scalar_min(a, scalar).ok()?;
     // Try device mask; if unavailable, compute on host
@@ -1798,24 +1925,27 @@ async fn elementwise_min_gpu_scalar_left(
             let _ = provider.free(&fill);
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);
-            let mut indices = Vec::with_capacity(mask_host.data.len());
-            for &m in &mask_host.data {
+            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
+            let mut indices = Vec::with_capacity(mask_values.len());
+            for &m in mask_values.iter() {
                 indices.push(if m != 0.0 { 1.0 } else { 2.0 });
             }
             Tensor::new(indices, mask_host.shape.clone()).ok()?
         } else {
             let _ = provider.free(&fill);
             let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
-            let mut indices = Vec::with_capacity(ta.data.len());
-            for &v in &ta.data {
+            let values = tensor::tensor_values_f64_cow(&ta);
+            let mut indices = Vec::with_capacity(values.len());
+            for &v in values.iter() {
                 indices.push(if v <= scalar { 1.0 } else { 2.0 });
             }
             Tensor::new(indices, ta.shape.clone()).ok()?
         }
     } else {
         let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
-        let mut indices = Vec::with_capacity(ta.data.len());
-        for &v in &ta.data {
+        let values = tensor::tensor_values_f64_cow(&ta);
+        let mut indices = Vec::with_capacity(values.len());
+        for &v in values.iter() {
             indices.push(if v <= scalar { 1.0 } else { 2.0 });
         }
         Tensor::new(indices, ta.shape.clone()).ok()?
@@ -1834,7 +1964,7 @@ async fn elementwise_min_gpu_scalar_right(
     if comparison != ComparisonMethod::Auto {
         return None;
     }
-    let provider = runmat_accelerate_api::provider()?;
+    let provider = runmat_accelerate_api::provider_for_handle(b)?;
     let scalar = extract_scalar(other)?;
     let values = provider.scalar_min(b, scalar).ok()?;
     // Try device mask; if unavailable, compute on host
@@ -1843,24 +1973,27 @@ async fn elementwise_min_gpu_scalar_right(
             let _ = provider.free(&fill);
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
             let _ = provider.free(&mask);
-            let mut indices = Vec::with_capacity(mask_host.data.len());
-            for &m in &mask_host.data {
+            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
+            let mut indices = Vec::with_capacity(mask_values.len());
+            for &m in mask_values.iter() {
                 indices.push(if m != 0.0 { 1.0 } else { 2.0 });
             }
             Tensor::new(indices, mask_host.shape.clone()).ok()?
         } else {
             let _ = provider.free(&fill);
             let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
-            let mut indices = Vec::with_capacity(tb.data.len());
-            for &v in &tb.data {
+            let values = tensor::tensor_values_f64_cow(&tb);
+            let mut indices = Vec::with_capacity(values.len());
+            for &v in values.iter() {
                 indices.push(if scalar <= v { 1.0 } else { 2.0 });
             }
             Tensor::new(indices, tb.shape.clone()).ok()?
         }
     } else {
         let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
-        let mut indices = Vec::with_capacity(tb.data.len());
-        for &v in &tb.data {
+        let values = tensor::tensor_values_f64_cow(&tb);
+        let mut indices = Vec::with_capacity(values.len());
+        for &v in values.iter() {
             indices.push(if scalar <= v { 1.0 } else { 2.0 });
         }
         Tensor::new(indices, tb.shape.clone()).ok()?
@@ -1876,7 +2009,7 @@ fn extract_scalar(v: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }
@@ -1910,7 +2043,10 @@ fn elementwise_real_or_complex(
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Some((value.re, value.im))
+        }
         _ => None,
     }
 }
@@ -1945,18 +2081,74 @@ fn elementwise_real_min(
 ) -> BuiltinResult<MinEvaluation> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| min_size_mismatch(format!("min: {err}")))?;
-    let mut values = vec![0.0f64; plan.len()];
     let mut indices = vec![0.0f64; plan.len()];
+    let lhs_storage = lhs
+        .into_numeric_storage()
+        .map_err(|e| min_internal_error(format!("min: {e}")))?;
+    let rhs_storage = rhs
+        .into_numeric_storage()
+        .map_err(|e| min_internal_error(format!("min: {e}")))?;
 
-    for (offset, index_a, index_b) in plan.iter() {
-        let a = lhs.data.get(index_a).copied().unwrap_or(f64::NAN);
-        let b = rhs.data.get(index_b).copied().unwrap_or(f64::NAN);
-        let (value, origin) = choose_real_elementwise(a, b, comparison);
-        values[offset] = value;
-        indices[offset] = origin;
+    macro_rules! select_same_class {
+        ($left:expr, $right:expr, $variant:ident) => {{
+            let mut values = Vec::with_capacity(plan.len());
+            for (offset, index_a, index_b) in plan.iter() {
+                let a = $left[index_a];
+                let b = $right[index_b];
+                let (_, origin) = choose_real_elementwise(a as f64, b as f64, comparison);
+                values.push(if origin == 1.0 { a } else { b });
+                indices[offset] = origin;
+            }
+            NumericStorage::$variant(values)
+        }};
     }
 
-    let value_tensor = Tensor::new(values, plan.output_shape().to_vec())
+    let values = match (lhs_storage, rhs_storage) {
+        (NumericStorage::F64(left), NumericStorage::F64(right)) => {
+            select_same_class!(left, right, F64)
+        }
+        (NumericStorage::F32(left), NumericStorage::F32(right)) => {
+            select_same_class!(left, right, F32)
+        }
+        (NumericStorage::I8(left), NumericStorage::I8(right)) => {
+            select_same_class!(left, right, I8)
+        }
+        (NumericStorage::I16(left), NumericStorage::I16(right)) => {
+            select_same_class!(left, right, I16)
+        }
+        (NumericStorage::I32(left), NumericStorage::I32(right)) => {
+            select_same_class!(left, right, I32)
+        }
+        (NumericStorage::I64(left), NumericStorage::I64(right)) => {
+            select_same_class!(left, right, I64)
+        }
+        (NumericStorage::U8(left), NumericStorage::U8(right)) => {
+            select_same_class!(left, right, U8)
+        }
+        (NumericStorage::U16(left), NumericStorage::U16(right)) => {
+            select_same_class!(left, right, U16)
+        }
+        (NumericStorage::U32(left), NumericStorage::U32(right)) => {
+            select_same_class!(left, right, U32)
+        }
+        (NumericStorage::U64(left), NumericStorage::U64(right)) => {
+            select_same_class!(left, right, U64)
+        }
+        (left, right) => {
+            let left = left.materialize_f64();
+            let right = right.materialize_f64();
+            let mut values = Vec::with_capacity(plan.len());
+            for (offset, index_a, index_b) in plan.iter() {
+                let (value, origin) =
+                    choose_real_elementwise(left[index_a], right[index_b], comparison);
+                values.push(value);
+                indices[offset] = origin;
+            }
+            NumericStorage::F64(values)
+        }
+    };
+
+    let value_tensor = Tensor::from_numeric_storage(values, plan.output_shape().to_vec())
         .map_err(|e| min_internal_error(format!("min: {e}")))?;
     let index_tensor = Tensor::new(indices, plan.output_shape().to_vec())
         .map_err(|e| min_internal_error(format!("min: {e}")))?;
@@ -1974,26 +2166,50 @@ fn elementwise_complex_min(
 ) -> BuiltinResult<MinEvaluation> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
         .map_err(|err| min_size_mismatch(format!("min: {err}")))?;
-    let mut values = vec![(0.0f64, 0.0f64); plan.len()];
     let mut indices = vec![0.0f64; plan.len()];
+    let lhs_storage = lhs.into_complex_storage();
+    let rhs_storage = rhs.into_complex_storage();
 
-    for (offset, index_a, index_b) in plan.iter() {
-        let a = lhs
-            .data
-            .get(index_a)
-            .copied()
-            .unwrap_or((f64::NAN, f64::NAN));
-        let b = rhs
-            .data
-            .get(index_b)
-            .copied()
-            .unwrap_or((f64::NAN, f64::NAN));
-        let (value, origin) = choose_complex_elementwise(a, b, comparison);
-        values[offset] = value;
-        indices[offset] = origin;
+    macro_rules! select_same_class {
+        ($left:expr, $right:expr, $variant:ident) => {{
+            let mut values = Vec::with_capacity(plan.len());
+            for (offset, index_a, index_b) in plan.iter() {
+                let a = $left[index_a];
+                let b = $right[index_b];
+                let (_, origin) = choose_complex_elementwise(
+                    (f64::from(a.0), f64::from(a.1)),
+                    (f64::from(b.0), f64::from(b.1)),
+                    comparison,
+                );
+                values.push(if origin == 1.0 { a } else { b });
+                indices[offset] = origin;
+            }
+            ComplexStorage::$variant(values)
+        }};
     }
 
-    let value_tensor = ComplexTensor::new(values, plan.output_shape().to_vec())
+    let values = match (lhs_storage, rhs_storage) {
+        (ComplexStorage::F64(left), ComplexStorage::F64(right)) => {
+            select_same_class!(left, right, F64)
+        }
+        (ComplexStorage::F32(left), ComplexStorage::F32(right)) => {
+            select_same_class!(left, right, F32)
+        }
+        (left, right) => {
+            let left = left.materialize_f64();
+            let right = right.materialize_f64();
+            let mut values = Vec::with_capacity(plan.len());
+            for (offset, index_a, index_b) in plan.iter() {
+                let (value, origin) =
+                    choose_complex_elementwise(left[index_a], right[index_b], comparison);
+                values.push(value);
+                indices[offset] = origin;
+            }
+            ComplexStorage::F64(values)
+        }
+    };
+
+    let value_tensor = ComplexTensor::from_complex_storage(values, plan.output_shape().to_vec())
         .map_err(|e| min_internal_error(format!("min: {e}")))?;
     let index_tensor = Tensor::new(indices, plan.output_shape().to_vec())
         .map_err(|e| min_internal_error(format!("min: {e}")))?;
@@ -2005,18 +2221,24 @@ fn elementwise_complex_min(
 }
 
 fn promote_real_tensor_to_complex(tensor: Tensor) -> ComplexTensor {
-    let data = tensor
-        .data
-        .iter()
-        .copied()
-        .map(|re| (re, 0.0))
-        .collect::<Vec<_>>();
-    ComplexTensor {
-        data,
-        shape: tensor.shape.clone(),
-        rows: tensor.rows,
-        cols: tensor.cols,
-    }
+    let shape = tensor.shape.clone();
+    let storage = match tensor
+        .into_numeric_storage()
+        .expect("real extrema input has numeric storage")
+    {
+        NumericStorage::F32(values) => {
+            ComplexStorage::F32(values.into_iter().map(|re| (re, 0.0)).collect())
+        }
+        storage => ComplexStorage::F64(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(|re| (re, 0.0))
+                .collect(),
+        ),
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
+        .expect("real tensor shape remains valid after promotion")
 }
 
 fn choose_real_elementwise(a: f64, b: f64, comparison: ComparisonMethod) -> (f64, f64) {
@@ -2062,8 +2284,12 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor, Value};
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
+    };
 
     fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::min_builtin(value, rest))
@@ -2088,6 +2314,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"M = min(A)"));
         assert!(labels.contains(&"[M, I] = min(A)"));
         assert!(labels.contains(&"M = min(A, B)"));
+        assert!(!labels.contains(&"[M, I] = min(A, B)"));
         assert!(labels.contains(&"M = min(A, [], dim)"));
         assert!(labels.contains(&"M = min(A, [], \"all\")"));
         assert!(labels.contains(&"M = min(A, [], nanflag)"));
@@ -2128,6 +2355,21 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         assert_eq!(values, Value::Num(1.0));
         assert_eq!(indices, Value::Num(2.0));
+    }
+
+    #[test]
+    fn min_reduction_preserves_native_single_storage() {
+        let tensor = Tensor::from_f32(vec![3.0, 1.0, 4.0, 2.0], vec![2, 2]).unwrap();
+        let (values, _) = evaluate(Value::Tensor(tensor), &[])
+            .expect("min")
+            .into_pair();
+        let Value::Tensor(values) = values else {
+            panic!("expected tensor values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().expect("single storage"),
+            runmat_builtins::NumericStorage::F32(vec![1.0, 2.0])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2234,7 +2476,10 @@ pub(crate) mod tests {
         let tensor = Tensor::from_f32(vec![3.0, 1.0, 5.0], vec![1, 3]).unwrap();
         let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
         let (values, indices) = eval.into_pair();
-        assert_eq!(values, Value::Num(1.0));
+        assert_eq!(
+            values,
+            Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap())
+        );
         assert_eq!(indices, Value::Num(2.0));
     }
 
@@ -2251,9 +2496,15 @@ pub(crate) mod tests {
         match value {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 1);
-                assert_eq!(values[0], Value::Num(1.0));
+                assert_eq!(
+                    values[0],
+                    Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap())
+                );
             }
-            other => assert_eq!(other, Value::Num(1.0)),
+            other => assert_eq!(
+                other,
+                Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap())
+            ),
         }
     }
 
@@ -2266,13 +2517,13 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![3.0, 1.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 1.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2342,13 +2593,13 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![1.0, -2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, -2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 1.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
         }
@@ -2377,6 +2628,23 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn min_reduction_preserves_native_complex_single_storage() {
+        let tensor =
+            ComplexTensor::from_f32(vec![(1.0, 2.0), (0.5, 5.0)], vec![2, 1]).expect("tensor");
+        let values = evaluate(Value::ComplexTensor(tensor), &[])
+            .expect("evaluate")
+            .into_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected typed complex scalar tensor");
+        };
+        assert_eq!(
+            values.into_complex_storage(),
+            ComplexStorage::F32(vec![(1.0, 2.0)])
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn min_elementwise_broadcast() {
         let lhs = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
         let rhs = Tensor::new(vec![2.0, 3.0, 5.0], vec![3, 1]).unwrap();
@@ -2385,21 +2653,193 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert_eq!([t.data[0], t.data[3], t.data[6]], [1.0, 2.0, 2.0]);
-                assert_eq!([t.data[1], t.data[4], t.data[7]], [1.0, 3.0, 3.0]);
-                assert_eq!([t.data[2], t.data[5], t.data[8]], [1.0, 4.0, 5.0]);
+                assert_eq!(
+                    [
+                        t.materialize_f64()[0],
+                        t.materialize_f64()[3],
+                        t.materialize_f64()[6]
+                    ],
+                    [1.0, 2.0, 2.0]
+                );
+                assert_eq!(
+                    [
+                        t.materialize_f64()[1],
+                        t.materialize_f64()[4],
+                        t.materialize_f64()[7]
+                    ],
+                    [1.0, 3.0, 3.0]
+                );
+                assert_eq!(
+                    [
+                        t.materialize_f64()[2],
+                        t.materialize_f64()[5],
+                        t.materialize_f64()[8]
+                    ],
+                    [1.0, 4.0, 5.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 3]);
-                assert_eq!([t.data[0], t.data[3], t.data[6]], [1.0, 2.0, 2.0]);
-                assert_eq!([t.data[1], t.data[4], t.data[7]], [1.0, 2.0, 2.0]);
-                assert_eq!([t.data[2], t.data[5], t.data[8]], [1.0, 1.0, 2.0]);
+                assert_eq!(
+                    [
+                        t.materialize_f64()[0],
+                        t.materialize_f64()[3],
+                        t.materialize_f64()[6]
+                    ],
+                    [1.0, 2.0, 2.0]
+                );
+                assert_eq!(
+                    [
+                        t.materialize_f64()[1],
+                        t.materialize_f64()[4],
+                        t.materialize_f64()[7]
+                    ],
+                    [1.0, 2.0, 2.0]
+                );
+                assert_eq!(
+                    [
+                        t.materialize_f64()[2],
+                        t.materialize_f64()[5],
+                        t.materialize_f64()[8]
+                    ],
+                    [1.0, 1.0, 2.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_elementwise_preserves_native_single_storage() {
+        let lhs = Tensor::from_f32(vec![3.5, -2.0], vec![2, 1]).expect("lhs");
+        let rhs = Tensor::from_f32(vec![1.25, 4.0], vec![2, 1]).expect("rhs");
+        let (values, indices) = evaluate(Value::Tensor(lhs), &[Value::Tensor(rhs)])
+            .expect("evaluate")
+            .into_pair();
+        let Value::Tensor(values) = values else {
+            panic!("expected tensor values");
+        };
+        assert_eq!(
+            values.into_numeric_storage().expect("storage"),
+            NumericStorage::F32(vec![1.25, -2.0])
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![2, 1]).expect("indices"))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_elementwise_preserves_native_complex_single_storage() {
+        let lhs = ComplexTensor::from_f32(vec![(3.0, 4.0), (1.0, 0.0)], vec![2, 1]).expect("lhs");
+        let rhs = ComplexTensor::from_f32(vec![(4.0, 0.0), (0.0, 2.0)], vec![2, 1]).expect("rhs");
+        let values = evaluate(Value::ComplexTensor(lhs), &[Value::ComplexTensor(rhs)])
+            .expect("evaluate")
+            .into_value();
+        let Value::ComplexTensor(values) = values else {
+            panic!("expected complex tensor values");
+        };
+        assert_eq!(
+            values.into_complex_storage(),
+            ComplexStorage::F32(vec![(4.0, 0.0), (1.0, 0.0)])
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_pairwise_public_form_rejects_second_output() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let error = min_builtin(Value::Num(1.0), vec![Value::Num(2.0)])
+            .expect_err("pairwise min has one output");
+        assert_eq!(error.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_elementwise_abs_keeps_uint64_comparison_exact() {
+        let lhs = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+            .expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_992]), vec![1, 1])
+            .expect("rhs");
+        let args = vec![
+            Value::Tensor(rhs),
+            Value::from("ComparisonMethod"),
+            Value::from("abs"),
+        ];
+        let (values, indices) = evaluate(Value::Tensor(lhs), &args)
+            .expect("evaluate")
+            .into_pair();
+        assert_eq!(values, Value::Int(IntValue::U64(9_007_199_254_740_992)));
+        assert_eq!(indices, Value::Num(2.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_integer_scalar_double_compares_before_integer_conversion() {
+        let lhs = Tensor::new_integer(IntegerStorage::U8(vec![2, 4]), vec![1, 2]).expect("lhs");
+        let (values, indices) = evaluate(Value::Tensor(lhs), &[Value::Num(2.5)])
+            .expect("evaluate")
+            .into_pair();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U8(vec![2, 3]), vec![1, 2]).expect("values")
+            )
+        );
+        assert_eq!(
+            indices,
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("indices"))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_integer_scalar_double_is_exact_above_flintmax() {
+        let lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("lhs");
+        let values = evaluate(Value::Tensor(lhs), &[Value::Num(9_007_199_254_740_992.0)])
+            .expect("evaluate")
+            .into_value();
+        assert_eq!(
+            values,
+            Value::Tensor(
+                Tensor::new_integer(
+                    IntegerStorage::U64(vec![9_007_199_254_740_992, 9_007_199_254_740_992]),
+                    vec![1, 2],
+                )
+                .expect("values")
+            )
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn min_integer_pairwise_rejects_incompatible_classes_and_float_shapes() {
+        let integer =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("integer");
+        let mixed =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("mixed");
+        let error = evaluate(Value::Tensor(integer.clone()), &[Value::Tensor(mixed)])
+            .expect_err("mixed integer classes reject");
+        assert_eq!(error.identifier(), MIN_ERROR_INVALID_INPUT.identifier);
+
+        let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single");
+        let error = evaluate(Value::Tensor(integer.clone()), &[Value::Tensor(single)])
+            .expect_err("scalar single rejects");
+        assert_eq!(error.identifier(), MIN_ERROR_INVALID_INPUT.identifier);
+
+        let doubles = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("doubles");
+        let error = evaluate(Value::Tensor(integer), &[Value::Tensor(doubles)])
+            .expect_err("nonscalar double rejects");
+        assert_eq!(error.identifier(), MIN_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2416,13 +2856,13 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.5, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.5, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2532,7 +2972,7 @@ pub(crate) mod tests {
 
         test_support::with_test_provider(|provider| {
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -2553,9 +2993,71 @@ pub(crate) mod tests {
                 other => panic!("expected tensor indices from cpu eval, got {other:?}"),
             };
             assert_eq!(gathered_vals.shape, expected_vals.shape);
-            assert_eq!(gathered_vals.data, expected_vals.data);
+            assert_eq!(
+                gathered_vals.materialize_f64(),
+                expected_vals.materialize_f64()
+            );
             assert_eq!(gathered_idx.shape, expected_idx.shape);
-            assert_eq!(gathered_idx.data, expected_idx.data);
+            assert_eq!(
+                gathered_idx.materialize_f64(),
+                expected_idx.materialize_f64()
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn min_gpu_uint64_reduction_matches_cpu_and_preserves_residency() {
+        let data = [1_u64 << 63, 1_u64 << 63, 7, 7];
+        let tensor = Tensor::new_integer(IntegerStorage::U64(data.to_vec()), vec![2, 2])
+            .expect("uint64 tensor");
+        let (values_cpu, indices_cpu) = evaluate(Value::Tensor(tensor), &[])
+            .expect("cpu min")
+            .into_pair();
+        assert_eq!(
+            values_cpu,
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, 7]), vec![1, 2],)
+                    .expect("expected values")
+            )
+        );
+        assert_eq!(
+            indices_cpu,
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("expected indices"))
+        );
+
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&data),
+                    shape: &[2, 2],
+                })
+                .expect("upload exact uint64");
+            let (values_gpu, indices_gpu) = evaluate(Value::GpuTensor(handle), &[])
+                .expect("gpu min")
+                .into_pair();
+            let Value::GpuTensor(values_handle) = &values_gpu else {
+                panic!("expected resident uint64 values, got {values_gpu:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(values_handle),
+                Some(IntegerElementType::U64)
+            );
+            assert!(matches!(indices_gpu, Value::GpuTensor(_)));
+            assert_eq!(
+                test_support::gather(values_gpu).expect("gather values"),
+                match values_cpu {
+                    Value::Tensor(values) => values,
+                    other => panic!("expected CPU tensor values, got {other:?}"),
+                }
+            );
+            assert_eq!(
+                test_support::gather(indices_gpu).expect("gather indices"),
+                match indices_cpu {
+                    Value::Tensor(indices) => indices,
+                    other => panic!("expected CPU tensor indices, got {other:?}"),
+                }
+            );
         });
     }
 
@@ -2569,13 +3071,13 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![1.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2599,6 +3101,19 @@ pub(crate) mod tests {
         let args = vec![Value::Num(2.0)];
         let result = min_builtin(Value::Num(3.0), args).expect("min");
         assert_eq!(result, Value::Num(2.0));
+    }
+
+    #[test]
+    fn min_scalar_complex_value_reads_typed_integer_complex_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![5]), IntegerStorage::I16(vec![-1]))
+                .expect("complex integer storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+
+        assert_eq!(
+            scalar_complex_value(&Value::ComplexTensor(tensor)),
+            Some((5.0, -1.0))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

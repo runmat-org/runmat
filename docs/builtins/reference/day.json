@@ -5,9 +5,12 @@
     "day",
     "datetime",
     "date component",
-    "day of month"
+    "day of month",
+    "day of week",
+    "day of year",
+    "ISO weekday"
   ],
-  "summary": "Extract day-of-month numbers from datetime values in MATLAB and RunMat.",
+  "summary": "Extract calendar-day numbers or weekday names from datetime and legacy date inputs.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -18,19 +21,19 @@
   "fusion": {
     "elementwise": false,
     "reduction": false,
-    "max_inputs": 1,
+    "max_inputs": 2,
     "constants": "inline"
   },
   "requires_feature": null,
   "tested": {
-    "integration": "runmat-ignition/tests/datetime.rs"
+    "integration": "runmat-vm/tests/datetime.rs"
   },
-  "description": "`day` extracts day-of-month values from datetime scalars or arrays and returns doubles with matching shape, consistent with MATLAB behavior.",
+  "description": "`day` supports `dayofmonth`, `dayofweek`, `iso-dayofweek`, `dayofyear`, `name`, and `shortname` for datetime inputs. Numeric modes return host doubles with matching shape; name modes return same-shaped cell arrays of character vectors. Legacy serial-number and text inputs are retained for compatibility and return day-of-month values.",
   "behaviors": [
-    "`day(t)` accepts datetime scalars and datetime arrays.",
-    "The output shape matches the input shape.",
-    "Day values reflect the calendar day stored in the datetime object.",
-    "Passing a non-datetime value raises a datetime-specific error."
+    "`day(t)` defaults to day-of-month. `day(t, dayType)` accepts `dayofmonth`, `dayofweek` with Sunday equal to 1, `iso-dayofweek` with Monday equal to 1, `dayofyear`, `name`, and `shortname`.",
+    "Numeric output is double and preserves input shape. Name output is a same-shaped cell array of character vectors; NaT yields NaN numerically and an empty character vector in name modes.",
+    "Legacy serial date numbers accept single, double, and all eight integer classes. Legacy date text may provide its datestr-style input format as the second argument; in that dialect lowercase `mm` denotes month, as in `day(\"2021/28/09\", \"yyyy/dd/mm\")`.",
+    "Logical and resident numeric legacy inputs are not part of the public compatibility surface. They are rejected in MATLAB-compatible mode before any resident provider access and are available only through declared RunMat extensions."
   ],
   "examples": [
     {
@@ -42,12 +45,22 @@
       "description": "Extract days from a datetime array",
       "input": "t = datetime([2024 2025], [1 6], [15 20]);\nd = day(t)",
       "output": "d =\n    15    20"
+    },
+    {
+      "description": "Extract ISO weekday numbers",
+      "input": "t = datetime(2024, 4, 9);\nd = day(t, 'iso-dayofweek')",
+      "output": "d = 2"
+    },
+    {
+      "description": "Extract short weekday names",
+      "input": "n = day(datetime(2024, 4, 9), 'shortname')",
+      "output": "n = {'Tue'}"
     }
   ],
   "faqs": [
     {
       "question": "What day does `day` return?",
-      "answer": "It returns the calendar day-of-month, such as `9` for April 9."
+      "answer": "It returns day-of-month by default. The optional day type selects weekday numbering, ISO weekday numbering, day-of-year, or full and abbreviated weekday names."
     },
     {
       "question": "Does `day` preserve the input shape?",

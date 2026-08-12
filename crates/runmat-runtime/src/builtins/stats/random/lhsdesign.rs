@@ -181,6 +181,16 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<LhsOptions> {
 }
 
 fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "lhsdesign: {label} must be a positive integer scalar"
+                ))
+            });
+    }
     let number = scalar_f64(value).ok_or_else(|| {
         invalid(format!(
             "lhsdesign: {label} must be a positive integer scalar"
@@ -191,7 +201,7 @@ fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
             "lhsdesign: {label} must be a positive integer scalar"
         )));
     }
-    if number > usize::MAX as f64 {
+    if number > usize::MAX as f64 || (usize::BITS == 64 && number == usize::MAX as f64) {
         return Err(invalid(format!("lhsdesign: {label} is too large")));
     }
     Ok(number as usize)
@@ -202,7 +212,9 @@ fn scalar_f64(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -213,6 +225,15 @@ fn parse_on_off_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
             "on" | "true" => Ok(true),
             "off" | "false" => Ok(false),
             _ => Err(invalid(format!("lhsdesign: {label} must be 'on' or 'off'"))),
+        };
+    }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid(format!(
+                "lhsdesign: {label} must be 'on', 'off', or logical"
+            ))),
         };
     }
     let number = scalar_f64(value).ok_or_else(|| {
@@ -403,6 +424,7 @@ fn sum_squared_column_correlations(data: &[f64], n: usize, p: usize) -> f64 {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(value: Value) -> Tensor {
         match value {
@@ -417,16 +439,24 @@ mod tests {
         guard
     }
 
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
     #[test]
     fn basic_design_has_latin_bins_per_column() {
         let _guard = reset_rng();
         let out = block_on(lhsdesign_builtin(vec![Value::Num(6.0), Value::Num(3.0)])).unwrap();
         let tensor = tensor(out);
         assert_eq!(tensor.shape, vec![6, 3]);
-        assert!(tensor.data.iter().all(|value| *value > 0.0 && *value < 1.0));
+        assert!(tensor
+            .materialize_f64()
+            .iter()
+            .all(|value| *value > 0.0 && *value < 1.0));
         for col in 0..3 {
             let mut bins = (0..6)
-                .map(|row| (tensor.data[row + col * 6] * 6.0).floor() as usize)
+                .map(|row| (tensor.materialize_f64()[row + col * 6] * 6.0).floor() as usize)
                 .collect::<Vec<_>>();
             bins.sort_unstable();
             assert_eq!(bins, vec![0, 1, 2, 3, 4, 5]);
@@ -446,7 +476,7 @@ mod tests {
         ]))
         .unwrap();
         let tensor = tensor(out);
-        for value in tensor.data {
+        for value in tensor.materialize_f64() {
             let scaled = value * 4.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
         }
@@ -466,9 +496,49 @@ mod tests {
         .unwrap();
         let tensor = tensor(out);
         assert_eq!(tensor.shape, vec![8, 3]);
-        for value in tensor.data {
+        for value in tensor.materialize_f64() {
             let scaled = value * 8.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn typed_integer_scalar_arguments_are_exact() {
+        let _guard = reset_rng();
+        let out = block_on(lhsdesign_builtin(vec![
+            poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+            poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+            Value::from("Smooth"),
+            poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+            Value::from("Criterion"),
+            Value::from("correlation"),
+            Value::from("Iterations"),
+            poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+        ]))
+        .expect("lhsdesign");
+        let tensor = tensor(out);
+        assert_eq!(tensor.shape, vec![4, 2]);
+        for value in tensor.materialize_f64() {
+            let scaled = value * 4.0;
+            assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn smooth_reads_every_integer_storage_variant_not_the_float_mirror() {
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ] {
+            assert!(
+                parse_on_off_bool(&poisoned_int_tensor(storage, vec![1, 1]), "Smooth").unwrap()
+            );
         }
     }
 
@@ -505,5 +575,16 @@ mod tests {
         ]))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:lhsdesign:InvalidArgument"));
+    }
+
+    #[test]
+    fn typed_integer_counts_are_exact_and_lossy_f64_is_rejected() {
+        assert_eq!(
+            positive_usize(&Value::Int(runmat_builtins::IntValue::U16(3)), "n").unwrap(),
+            3
+        );
+        assert!(positive_usize(&Value::Int(runmat_builtins::IntValue::I8(-1)), "n").is_err());
+        assert!(positive_usize(&Value::Num(1.5), "n").is_err());
+        assert!(positive_usize(&Value::Num(usize::MAX as f64 + 1.0), "n").is_err());
     }
 }

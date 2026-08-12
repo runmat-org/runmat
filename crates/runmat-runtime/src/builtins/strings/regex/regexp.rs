@@ -1143,7 +1143,7 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 4.0, 6.0, 8.0, 11.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 6.0, 8.0, 11.0]);
             }
             Value::Num(_) => panic!("expected tensor"),
             other => panic!("unexpected output {other:?}"),
@@ -1263,7 +1263,7 @@ pub(crate) mod tests {
         match &outputs[0] {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
-                assert_eq!(t.data, vec![1.0, 6.0, 9.0, 4.0, 7.0, 10.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 6.0, 9.0, 4.0, 7.0, 10.0]);
             }
             other => panic!("expected token extent matrix, got {other:?}"),
         }
@@ -1334,7 +1334,7 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Num(n) => assert_eq!(*n, 2.0),
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0]),
             other => panic!("unexpected output {other:?}"),
         }
     }
@@ -1351,11 +1351,11 @@ pub(crate) mod tests {
         let outputs = eval.outputs_for_multi().unwrap();
         assert_eq!(outputs.len(), 3);
         match &outputs[0] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
             other => panic!("unexpected output {other:?}"),
         }
         match &outputs[1] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 5.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 5.0]),
             other => panic!("unexpected output {other:?}"),
         }
         match &outputs[2] {
@@ -1380,7 +1380,7 @@ pub(crate) mod tests {
         .unwrap();
         let outputs = eval.outputs_for_single().unwrap();
         match &outputs[0] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]),
             Value::Num(n) => assert_eq!(*n, 1.0),
             other => panic!("unexpected output {other:?}"),
         }
@@ -1452,12 +1452,12 @@ pub(crate) mod tests {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![3, 2]);
                         // Starts should be 1,6,9 (1-based); ends 4,7,10
-                        assert_eq!(t.data[0], 1.0);
-                        assert_eq!(t.data[1], 6.0);
-                        assert_eq!(t.data[2], 9.0);
-                        assert_eq!(t.data[3], 4.0);
-                        assert_eq!(t.data[4], 7.0);
-                        assert_eq!(t.data[5], 10.0);
+                        assert_eq!(t.materialize_f64()[0], 1.0);
+                        assert_eq!(t.materialize_f64()[1], 6.0);
+                        assert_eq!(t.materialize_f64()[2], 9.0);
+                        assert_eq!(t.materialize_f64()[3], 4.0);
+                        assert_eq!(t.materialize_f64()[4], 7.0);
+                        assert_eq!(t.materialize_f64()[5], 10.0);
                     }
                     other => panic!("unexpected token extent value {other:?}"),
                 }
@@ -1484,7 +1484,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.data.len(), 1);
                 let inner = &ca.data[0];
                 match inner {
-                    Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 4.0]),
+                    Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
                     other => panic!("unexpected inner value {other:?}"),
                 }
             }
@@ -1637,7 +1637,7 @@ pub(crate) mod tests {
         let outputs = eval.outputs_for_single().unwrap();
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![7.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![7.0]),
             Value::Num(n) => assert_eq!(*n, 7.0),
             Value::Cell(_) => panic!("expected numeric output"),
             other => panic!("unexpected output {other:?}"),

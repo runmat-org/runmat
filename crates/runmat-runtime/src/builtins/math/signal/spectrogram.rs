@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::signal::common::{
     centered_frequency_offset, centered_shift, gpu_vector_len, parse_nonnegative_integer,
     parse_scalar_f64, selected_frequency_len, value_to_complex_vector,
@@ -332,6 +333,10 @@ async fn spectrogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value>
 pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     if rest.len() > 9 {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_ARG_COUNT));
+    }
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
     if let Value::GpuTensor(handle) = &x {
         let signal_len = gpu_vector_len(BUILTIN_NAME, "x", handle).map_err(|err| {
@@ -680,8 +685,8 @@ async fn parse_frequency_grid(value: Value) -> BuiltinResult<FrequencyGrid> {
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
-        Value::ComplexTensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(value) => tensor::is_scalar_tensor(value),
+        Value::ComplexTensor(value) => tensor::is_scalar_complex_tensor(value),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -1012,8 +1017,8 @@ fn angular_frequency(frequency: f64, units: FrequencyUnits) -> f64 {
 
 fn is_empty(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => t.len() == 0,
+        Value::ComplexTensor(t) => t.materialize_f64().is_empty(),
         _ => false,
     }
 }
@@ -1042,7 +1047,7 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
 
     fn empty() -> Value {
         Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())
@@ -1058,6 +1063,17 @@ mod tests {
             panic!("expected output list");
         };
         values
+    }
+
+    #[test]
+    fn spectrogram_scalar_detector_reads_typed_integer_storage_without_mirror() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::I16(vec![16]), vec![1, 1]).expect("scalar");
+        let vector =
+            Tensor::new_integer(IntegerStorage::I16(vec![16, 32]), vec![1, 2]).expect("vector");
+
+        assert!(is_scalar_numeric(&Value::Tensor(scalar)));
+        assert!(!is_scalar_numeric(&Value::Tensor(vector)));
     }
 
     #[test]
@@ -1100,9 +1116,9 @@ mod tests {
         };
         assert_eq!(s.shape, vec![17, 3]);
         assert_eq!(ps.shape, vec![17, 3]);
-        assert_eq!(f.data[4], 4.0);
-        assert_eq!(t.data, vec![0.5, 1.0, 1.5]);
-        let first_column_peak = ps.data[..17]
+        assert_eq!(f.materialize_f64()[4], 4.0);
+        assert_eq!(t.materialize_f64(), vec![0.5, 1.0, 1.5]);
+        let first_column_peak = ps.materialize_f64()[..17]
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
@@ -1156,7 +1172,7 @@ mod tests {
         let ps =
             crate::builtins::common::test_support::gather(values[3].clone()).expect("gather ps");
         assert_eq!(ps.shape, vec![17, 3]);
-        let peak = ps.data[..17]
+        let peak = ps.materialize_f64()[..17]
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
@@ -1179,7 +1195,7 @@ mod tests {
         };
         assert_eq!(default_window(1024).len(), 227);
         assert_eq!(s.shape[0], 129);
-        assert_eq!(s.shape[1], t.data.len());
+        assert_eq!(s.shape[1], t.materialize_f64().len());
     }
 
     #[test]
@@ -1230,7 +1246,7 @@ mod tests {
             panic!("expected f");
         };
         assert_eq!(s.shape, vec![2, 3]);
-        assert_eq!(f.data, vec![0.0, std::f64::consts::PI]);
+        assert_eq!(f.materialize_f64(), vec![0.0, std::f64::consts::PI]);
     }
 
     #[test]
@@ -1252,7 +1268,7 @@ mod tests {
         let Value::Tensor(ps) = &values[3] else {
             panic!("expected ps");
         };
-        assert!((ps.data[0] - 1.0).abs() < 1e-12);
+        assert!((ps.materialize_f64()[0] - 1.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1271,8 +1287,8 @@ mod tests {
         let Value::Tensor(t) = &values[2] else {
             panic!("expected t");
         };
-        assert_eq!(f.data[1], 1.0 / 256.0);
-        assert_eq!(t.data[0], 2.0);
+        assert_eq!(f.materialize_f64()[1], 1.0 / 256.0);
+        assert_eq!(t.materialize_f64()[0], 2.0);
     }
 
     #[test]
@@ -1288,7 +1304,7 @@ mod tests {
         let Value::Tensor(t) = &values[2] else {
             panic!("expected t");
         };
-        assert!((t.data[0] - (1.0 / std::f64::consts::PI)).abs() < 1e-12);
+        assert!((t.materialize_f64()[0] - (1.0 / std::f64::consts::PI)).abs() < 1e-12);
     }
 
     #[test]
@@ -1310,7 +1326,7 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f");
         };
-        assert_eq!(f.data, vec![-1.0, 0.0, 1.0, 2.0]);
+        assert_eq!(f.materialize_f64(), vec![-1.0, 0.0, 1.0, 2.0]);
     }
 
     #[test]

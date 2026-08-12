@@ -3,12 +3,14 @@
 use std::collections::{HashMap, HashSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray,
+    ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::dependencies::{
     dependency_details_from_object, dependency_heads_from_object,
@@ -159,6 +161,18 @@ pub const ADD_SENTENCE_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ADD_SENTENCE_DETAILS_ERRORS,
 };
+const ADD_TYPE_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "addTypeDetails accepts a tokenizedDocument plus text collections and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores categorical token types.",
+    };
+const ADD_SENTENCE_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "addSentenceDetails accepts a tokenizedDocument plus text collections and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores sentence numbers as double metadata.",
+    };
 
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
@@ -192,6 +206,9 @@ pub(in crate::builtins::strings::text_analytics) async fn token_details_builtin(
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::details::ADD_TYPE_DETAILS_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::strings::text_analytics::details::ADD_TYPE_DETAILS_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::details"
 )]
 async fn add_type_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -231,6 +248,9 @@ async fn add_type_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::details::ADD_SENTENCE_DETAILS_DESCRIPTOR),
+    integer_audit(
+        crate::builtins::strings::text_analytics::details::ADD_SENTENCE_DETAILS_INTEGER_AUDIT
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::details"
 )]
 pub(in crate::builtins::strings::text_analytics) async fn add_sentence_details_builtin(
@@ -1135,7 +1155,7 @@ fn sentence_numbers_from_object(
                 format!("{fn_name}: tokenizedDocument object has invalid SentenceNumbers entry"),
             ));
         };
-        out.push(tensor.data.clone());
+        out.push(tensor_utils::tensor_values_f64(tensor));
     }
     Ok(Some(out))
 }
@@ -1143,19 +1163,12 @@ fn sentence_numbers_from_object(
 fn logical_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
-        Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
-            0.0 => Ok(false),
-            1.0 => Ok(true),
-            other => Err(text_analytics_error(
-                fn_name,
-                format!("{fn_name}: logical scalar option must be true or false, got {other}"),
-            )),
-        },
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         other => Err(text_analytics_error(
             fn_name,
-            format!("{fn_name}: logical scalar option must be true or false, got {other:?}"),
+            format!(
+                "{fn_name}: logical scalar option must be a logical true or false, got {other:?}"
+            ),
         )),
     }
 }
@@ -1167,7 +1180,7 @@ mod tests {
     use crate::builtins::table::{
         categorical_from_args, table_variable_names_from_object, table_variables,
     };
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray};
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tokenized_document_builtin(args))
@@ -1210,9 +1223,54 @@ mod tests {
 
     fn numeric_column(table: &ObjectInstance, name: &str) -> Vec<f64> {
         match table_column(table, name) {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected numeric column {name}, got {other:?}"),
         }
+    }
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_integer_vector(storage: IntegerStorage, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn logical_scalar_rejects_typed_integer_storage() {
+        for value in [
+            poisoned_integer_scalar(IntegerStorage::U64(vec![1])),
+            poisoned_integer_scalar(IntegerStorage::I16(vec![0])),
+        ] {
+            let err = logical_scalar(&value, "addSentenceDetails")
+                .expect_err("typed integer is not logical");
+            assert!(err.message().contains("must be a logical true or false"));
+        }
+    }
+
+    #[test]
+    fn sentence_numbers_from_object_reads_typed_integer_storage_exactly() {
+        let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
+        object.properties.insert(
+            SENTENCE_NUMBERS_PROPERTY.to_string(),
+            Value::Cell(
+                CellArray::new(
+                    vec![poisoned_integer_vector(IntegerStorage::I16(vec![2, 3]), 2)],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            ),
+        );
+
+        assert_eq!(
+            sentence_numbers_from_object(&object, "tokenDetails")
+                .expect("numbers")
+                .expect("stored"),
+            vec![vec![2.0, 3.0]]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

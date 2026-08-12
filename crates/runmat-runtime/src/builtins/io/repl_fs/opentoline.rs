@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor::scalar_f64_from_value_async;
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "opentoline";
@@ -246,28 +246,38 @@ async fn positive_integer_arg(value: &Value, label: &str) -> BuiltinResult<usize
     if let Some(text) = text_without_gather(value) {
         return parse_positive_integer_text(&text, label);
     }
-    let raw = scalar_f64_from_value_async(value)
+    let gathered = gather_if_needed_async(value)
         .await
-        .map_err(|err| opentoline_error(&ERROR_POSITION, format!("opentoline: {err}")))?
-        .ok_or_else(|| {
-            opentoline_error(
+        .map_err(|err| opentoline_flow_error("opentoline", err))?;
+    if let Value::Int(integer) = &gathered {
+        return integer
+            .try_to_usize()
+            .filter(|position| *position > 0)
+            .ok_or_else(|| {
+                opentoline_error(
+                    &ERROR_POSITION,
+                    format!("opentoline: {label} must be a positive integer scalar"),
+                )
+            });
+    }
+    let Some(position) = (match gathered {
+        Value::Num(value) => position_value_to_usize(value),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            position_tensor_to_usize(&tensor)
+        }
+        _ => {
+            return Err(opentoline_error(
                 &ERROR_POSITION,
                 format!("opentoline: {label} must be a numeric scalar"),
-            )
-        })?;
-    if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > f64::EPSILON {
+            ))
+        }
+    }) else {
         return Err(opentoline_error(
             &ERROR_POSITION,
             format!("opentoline: {label} must be a positive integer scalar"),
         ));
-    }
-    if raw > usize::MAX as f64 {
-        return Err(opentoline_error(
-            &ERROR_POSITION,
-            format!("opentoline: {label} is too large"),
-        ));
-    }
-    Ok(raw as usize)
+    };
+    Ok(position)
 }
 
 fn text_without_gather(value: &Value) -> Option<String> {
@@ -300,6 +310,26 @@ fn parse_positive_integer_text(text: &str, label: &str) -> BuiltinResult<usize> 
         ));
     }
     Ok(value)
+}
+
+fn position_value_to_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 1.0 || value.fract().abs() > f64::EPSILON {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
+}
+
+fn position_tensor_to_usize(tensor: &Tensor) -> Option<usize> {
+    if let Some(storage) = tensor.integer_storage() {
+        return storage
+            .value_at(0)
+            .and_then(|value| value.try_to_usize())
+            .filter(|position| *position > 0);
+    }
+    position_value_to_usize(tensor::tensor_value_f64(tensor, 0))
 }
 
 async fn resolve_file(name: &str) -> BuiltinResult<PathBuf> {
@@ -351,6 +381,7 @@ fn opentoline_flow_error(context: &str, err: RuntimeError) -> RuntimeError {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
     use tempfile::tempdir;
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -370,6 +401,57 @@ mod tests {
         .expect("opentoline");
 
         assert_eq!(result, empty_array());
+    }
+
+    #[test]
+    fn opentoline_typed_positions_preserve_integer_bounds() {
+        assert_eq!(
+            block_on(positive_integer_arg(&Value::Int(IntValue::U16(7)), "line")).unwrap(),
+            7
+        );
+        assert!(block_on(positive_integer_arg(&Value::Int(IntValue::I8(-1)), "line")).is_err());
+        assert!(block_on(positive_integer_arg(&Value::Int(IntValue::U8(0)), "column")).is_err());
+
+        let large = 9_007_199_254_740_993_u64;
+        let parsed = block_on(positive_integer_arg(
+            &Value::Int(IntValue::U64(large)),
+            "line",
+        ));
+        if usize::BITS == 64 {
+            assert_eq!(parsed.unwrap(), large as usize);
+        } else {
+            assert!(parsed.is_err());
+        }
+    }
+
+    #[test]
+    fn opentoline_double_positions_reject_unrepresentable_platform_bounds() {
+        let boundary = block_on(positive_integer_arg(&Value::Num(usize::MAX as f64), "line"));
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(block_on(positive_integer_arg(
+            &Value::Num((usize::MAX as f64) + 1.0),
+            "line"
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn opentoline_tensor_positions_read_integer_storage_exactly() {
+        let line =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(vec![9]), vec![1, 1]).unwrap();
+
+        assert_eq!(
+            block_on(positive_integer_arg(&Value::Tensor(line), "line")).unwrap(),
+            9
+        );
+
+        let zero =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
+        assert!(block_on(positive_integer_arg(&Value::Tensor(zero), "line")).is_err());
     }
 
     #[test]

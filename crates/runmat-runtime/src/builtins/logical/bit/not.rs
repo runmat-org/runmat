@@ -176,7 +176,7 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
             shape: vec![1, 1],
         }),
         Value::Int(i) => Ok(LogicalBuffer {
-            data: vec![if i.to_i64() != 0 { 1 } else { 0 }],
+            data: vec![u8::from(!i.is_zero())],
             shape: vec![1, 1],
         }),
         Value::Complex(re, im) => Ok(LogicalBuffer {
@@ -204,10 +204,16 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
 }
 
 fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
-    let Tensor { data, shape, .. } = tensor;
-    let mapped = data
-        .into_iter()
-        .map(|v| if v != 0.0 { 1 } else { 0 })
+    let shape = tensor.shape.clone();
+    let mapped = (0..tensor.len())
+        .map(|index| {
+            u8::from(
+                !tensor
+                    .numeric_value_at(index)
+                    .expect("tensor storage is structurally valid")
+                    .is_zero(),
+            )
+        })
         .collect();
     Ok(LogicalBuffer {
         data: mapped,
@@ -216,10 +222,14 @@ fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
 }
 
 fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<LogicalBuffer> {
-    let ComplexTensor { data, shape, .. } = tensor;
-    let mapped = data
-        .into_iter()
-        .map(|(re, im)| if re != 0.0 || im != 0.0 { 1 } else { 0 })
+    let shape = tensor.shape.clone();
+    let mapped = (0..tensor.len())
+        .map(|index| {
+            let (real, imag) = tensor
+                .numeric_value_at(index)
+                .expect("complex tensor storage is structurally valid");
+            u8::from(!real.is_zero() || !imag.is_zero())
+        })
         .collect();
     Ok(LogicalBuffer {
         data: mapped,
@@ -228,14 +238,14 @@ fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<Logi
 }
 
 fn char_array_to_logical_buffer(array: CharArray) -> BuiltinResult<LogicalBuffer> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray { data, shape, .. } = array;
     let mapped = data
         .into_iter()
         .map(|ch| if ch == '\0' { 0 } else { 1 })
         .collect();
     Ok(LogicalBuffer {
         data: mapped,
-        shape: vec![rows, cols],
+        shape,
     })
 }
 
@@ -285,7 +295,9 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{CharArray, ComplexTensor, IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, Tensor,
+    };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -345,14 +357,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = run_not(Value::GpuTensor(handle)).expect("not on gpu");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 1.0, 0.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]);
         });
     }
 
@@ -361,6 +373,29 @@ pub(crate) mod tests {
     fn not_accepts_int_inputs() {
         let value = Value::Int(IntValue::I32(0));
         assert_eq!(run_not(value).unwrap(), Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn not_reads_typed_integer_storage_exactly_for_truth_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+            vec![1, 3],
+        )
+        .unwrap();
+        let result = run_not(Value::Tensor(tensor)).unwrap();
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![1, 3]);
+                assert_eq!(array.data, vec![1, 0, 0]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+
+        assert_eq!(
+            run_not(Value::Int(IntValue::U64(u64::MAX))).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -434,7 +469,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 3.0, 0.0, -1.0], vec![2, 2]).unwrap();
         let cpu = run_not_host(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -449,7 +484,11 @@ pub(crate) mod tests {
             ProviderPrecision::F64 => 1e-12,
             ProviderPrecision::F32 => 1e-5,
         };
-        for (expected, actual) in cpu_tensor.data.iter().zip(gathered.data.iter()) {
+        for (expected, actual) in cpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(gathered.materialize_f64().iter())
+        {
             assert!((*expected - *actual).abs() < tol, "{expected} vs {actual}");
         }
     }

@@ -1,10 +1,13 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{ComplexTensor, LogicalArray, SymbolicArray, SymbolicExpr, Tensor, Value};
+use runmat_builtins::{
+    ComplexTensor, IntValue, IntegerStorage, LogicalArray, SymbolicArray, SymbolicExpr, Tensor,
+    Value,
+};
+use runmat_runtime::builtins::common::tensor::is_scalar_tensor;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
 pub fn pack_to_row(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeError> {
-    let mut vals: Vec<f64> = Vec::with_capacity(count);
     let mut tmp: Vec<Value> = Vec::with_capacity(count);
     for _ in 0..count {
         tmp.push(
@@ -14,17 +17,12 @@ pub fn pack_to_row(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeEr
         );
     }
     tmp.reverse();
-    for v in tmp {
-        let n: f64 = (&v).try_into()?;
-        vals.push(n);
-    }
-    let tens = Tensor::new(vals, vec![1, count]).map_err(|e| format!("PackToRow: {e}"))?;
+    let tens = pack_numeric_values(tmp, vec![1, count], "PackToRow")?;
     stack.push(Value::Tensor(tens));
     Ok(())
 }
 
 pub fn pack_to_col(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeError> {
-    let mut vals: Vec<f64> = Vec::with_capacity(count);
     let mut tmp: Vec<Value> = Vec::with_capacity(count);
     for _ in 0..count {
         tmp.push(
@@ -34,11 +32,7 @@ pub fn pack_to_col(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeEr
         );
     }
     tmp.reverse();
-    for v in tmp {
-        let n: f64 = (&v).try_into()?;
-        vals.push(n);
-    }
-    let tens = Tensor::new(vals, vec![count, 1]).map_err(|e| format!("PackToCol: {e}"))?;
+    let tens = pack_numeric_values(tmp, vec![count, 1], "PackToCol")?;
     stack.push(Value::Tensor(tens));
     Ok(())
 }
@@ -94,6 +88,20 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         let matrix = ComplexTensor::new_2d(data, rows, cols)
             .map_err(|e| format!("Complex matrix creation error: {e}"))?;
         stack.push(Value::ComplexTensor(matrix));
+    } else if let Some(target) = leftmost_integer_target(&row_major) {
+        let zero = target.cast_f64_assignment(0.0);
+        let mut values = vec![zero; total_elements];
+        for r in 0..rows {
+            for c in 0..cols {
+                values[r + c * rows] = scalar_to_integer(&row_major[r * cols + c], &target)?;
+            }
+        }
+        let storage = target
+            .from_same_class_values(values)
+            .map_err(|e| format!("Integer matrix creation error: {e}"))?;
+        let matrix = Tensor::new_integer(storage, vec![rows, cols])
+            .map_err(|e| format!("Integer matrix creation error: {e}"))?;
+        stack.push(Value::Tensor(matrix));
     } else {
         let mut data = vec![0.0; total_elements];
         for r in 0..rows {
@@ -106,6 +114,58 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         stack.push(Value::Tensor(matrix));
     }
     Ok(())
+}
+
+fn pack_numeric_values(
+    values: Vec<Value>,
+    shape: Vec<usize>,
+    context: &str,
+) -> Result<Tensor, RuntimeError> {
+    if let Some(target) = leftmost_integer_target(&values) {
+        let converted = values
+            .iter()
+            .map(|value| scalar_to_integer(value, &target))
+            .collect::<Result<Vec<_>, _>>()?;
+        let storage = target
+            .from_same_class_values(converted)
+            .map_err(|e| format!("{context}: {e}"))?;
+        return Tensor::new_integer(storage, shape).map_err(|e| format!("{context}: {e}").into());
+    }
+
+    let vals = values
+        .iter()
+        .map(scalar_to_real)
+        .collect::<Result<Vec<_>, _>>()?;
+    Tensor::new(vals, shape).map_err(|e| format!("{context}: {e}").into())
+}
+
+fn leftmost_integer_target(values: &[Value]) -> Option<IntegerStorage> {
+    values.iter().find_map(|value| match value {
+        Value::Int(value) => Some(IntegerStorage::from_scalar(value.clone()).zeros_like(0)),
+        // Typed integer tensors may deliberately omit their lossy f64 mirror.
+        // Shape/storage, rather than the mirror length, determines scalarity.
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .map(|storage| storage.zeros_like(0)),
+        _ => None,
+    })
+}
+
+fn scalar_to_integer(value: &Value, target: &IntegerStorage) -> Result<IntValue, RuntimeError> {
+    if let Some(exact) = scalar_integer_value(value) {
+        return Ok(target.cast_exact_assignment(&exact));
+    }
+    Ok(target.cast_f64_assignment(scalar_to_real(value)?))
+}
+
+fn scalar_integer_value(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
 }
 
 fn scalar_to_complex(value: &Value) -> Result<(f64, f64), RuntimeError> {
@@ -232,4 +292,89 @@ pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeErr
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pack_to_row_preserves_leftmost_integer_class_exactly() {
+        let mut stack = vec![
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Num(3.5),
+            Value::Int(IntValue::U8(9)),
+        ];
+
+        pack_to_row(&mut stack, 3).expect("pack row");
+
+        let Value::Tensor(output) = stack.pop().expect("output") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 4, 9]))
+        );
+    }
+
+    #[test]
+    fn pack_to_col_preserves_leftmost_integer_class_exactly() {
+        let mut stack = vec![
+            Value::Int(IntValue::I8(12)),
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Num(-200.0),
+        ];
+
+        pack_to_col(&mut stack, 3).expect("pack col");
+
+        let Value::Tensor(output) = stack.pop().expect("output") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::I8(vec![12, i8::MAX, i8::MIN]))
+        );
+    }
+
+    #[test]
+    fn create_matrix_preserves_exact_integer_storage_column_major() {
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1])
+            .expect("scalar integer tensor");
+        let mut stack = vec![
+            Value::Tensor(scalar),
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Num(7.4),
+            Value::Int(IntValue::U16(11)),
+        ];
+
+        create_matrix(&mut stack, 2, 2).expect("create matrix");
+
+        let Value::Tensor(output) = stack.pop().expect("output") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 63, 7, u64::MAX, 11]))
+        );
+    }
+
+    #[test]
+    fn pack_uses_cleared_typed_scalar_storage_for_class_and_value() {
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("scalar integer tensor");
+        let mut stack = vec![Value::Tensor(scalar), Value::Num(3.5)];
+
+        pack_to_row(&mut stack, 2).expect("pack row");
+
+        let Value::Tensor(output) = stack.pop().expect("output") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX, 4]))
+        );
+    }
 }

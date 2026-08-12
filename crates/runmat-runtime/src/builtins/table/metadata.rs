@@ -274,6 +274,137 @@ const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Name-value options or conversion arguments.",
     },
 ];
+const ARRAY2TABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "T",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Table whose variables are the columns of A.",
+}];
+const ARRAY2TABLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Homogeneous array to split into table variables by column.",
+}];
+const ARRAY2TABLE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into table variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "VariableNames, RowNames, or DimensionNames options.",
+    },
+];
+const ARRAY2TIMETABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "TT",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Timetable whose variables are the columns of X.",
+}];
+const ARRAY2TIMETABLE_INPUTS_ROW_TIMES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "rowTimes",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Datetime or duration column vector labeling the rows.",
+    },
+];
+const ARRAY2TIMETABLE_INPUTS_SAMPLE_RATE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "Fs",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive sample rate in samples per second.",
+    },
+];
+const ARRAY2TIMETABLE_INPUTS_TIME_STEP: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "dt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive duration or calendarDuration scalar time step.",
+    },
+];
+const ARRAY2TIMETABLE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Timing, StartTime, VariableNames, or DimensionNames options.",
+    },
+];
+const ARRAY_DATASTORE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "arrds",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "ArrayDatastore object retaining the in-memory data and read properties.",
+}];
+const ARRAY_DATASTORE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "In-memory array managed by the datastore.",
+}];
+const ARRAY_DATASTORE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "In-memory array managed by the datastore.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "ReadSize, IterationDimension, or OutputType options.",
+    },
+];
 const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
     ty: BuiltinParamType::Any,
@@ -332,6 +463,55 @@ const DETECT_IMPORT_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &DETECT_IMPORT_OPTIONS_OUTPUT,
     },
 ];
+const DICTIONARY_KEYS_VALUES_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "keys",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Uniform or cell-wrapped dictionary keys.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Uniform, scalar-expanded, or cell-wrapped dictionary values.",
+    },
+];
+const DICTIONARY_PAIR_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "keyValuePair1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First key/value argument pair.",
+    },
+    BuiltinParamDescriptor {
+        name: "keyValuePairN",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional key/value argument pairs.",
+    },
+];
+const DICTIONARY_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "d = dictionary()",
+        inputs: &[],
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = dictionary(keys, values)",
+        inputs: &DICTIONARY_KEYS_VALUES_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = dictionary(k1, v1, ..., kN, vN)",
+        inputs: &DICTIONARY_PAIR_INPUTS,
+        outputs: &ANY_OUTPUT,
+    },
+];
 const PARQUETREAD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "T = parquetread(filename)",
@@ -354,6 +534,52 @@ const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     inputs: &TABLE_INPUTS_VALUES,
     outputs: &ANY_OUTPUT,
 }];
+const ARRAY2TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "T = array2table(A)",
+        inputs: &ARRAY2TABLE_INPUT,
+        outputs: &ARRAY2TABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "T = array2table(A, nameValuePairs...)",
+        inputs: &ARRAY2TABLE_INPUTS_NAME_VALUE,
+        outputs: &ARRAY2TABLE_OUTPUT,
+    },
+];
+const ARRAY2TIMETABLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "TT = array2timetable(X, \"RowTimes\", rowTimes)",
+        inputs: &ARRAY2TIMETABLE_INPUTS_ROW_TIMES,
+        outputs: &ARRAY2TIMETABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TT = array2timetable(X, \"SampleRate\", Fs)",
+        inputs: &ARRAY2TIMETABLE_INPUTS_SAMPLE_RATE,
+        outputs: &ARRAY2TIMETABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TT = array2timetable(X, \"TimeStep\", dt)",
+        inputs: &ARRAY2TIMETABLE_INPUTS_TIME_STEP,
+        outputs: &ARRAY2TIMETABLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "TT = array2timetable(X, nameValuePairs...)",
+        inputs: &ARRAY2TIMETABLE_INPUTS_NAME_VALUE,
+        outputs: &ARRAY2TIMETABLE_OUTPUT,
+    },
+];
+const ARRAY_DATASTORE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "arrds = arrayDatastore(A)",
+        inputs: &ARRAY_DATASTORE_INPUT,
+        outputs: &ARRAY_DATASTORE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "arrds = arrayDatastore(A, nameValuePairs...)",
+        inputs: &ARRAY_DATASTORE_INPUTS_NAME_VALUE,
+        outputs: &ARRAY_DATASTORE_OUTPUT,
+    },
+];
 const GROUPSUMMARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "G = groupsummary(T, groupvars, method, datavars)",
     inputs: &GROUPSUMMARY_INPUTS,
@@ -473,6 +699,12 @@ pub const DETECT_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescripto
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
 };
+pub const DICTIONARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DICTIONARY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
 pub const PARQUETREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PARQUETREAD_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -487,6 +719,24 @@ pub const PARQUETINFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &TABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const ARRAY2TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ARRAY2TABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const ARRAY2TIMETABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ARRAY2TIMETABLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TABLE_ERRORS,
+};
+pub const ARRAY_DATASTORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ARRAY_DATASTORE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,

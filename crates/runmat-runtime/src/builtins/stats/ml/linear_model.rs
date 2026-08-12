@@ -2,9 +2,14 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor, Type, Value,
+    CharArray, NumericScalar, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -272,6 +277,86 @@ pub const FITLM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &FITLM_ERRORS,
 };
 
+macro_rules! fitlm_integer_extension {
+    ($name:ident, $id:literal, $description:literal, $error:literal) => {
+        const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+            id: $id,
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: $description,
+            error_identifier: Some($error),
+        };
+    };
+}
+fitlm_integer_extension!(
+    FITLM_INTEGER_PREDICTOR_EXTENSION,
+    "fitlm-integer-predictor-data",
+    "fitlm with typed-integer predictor data is a RunMat extension",
+    "RunMat:compatibility:FitlmIntegerPredictorExtension"
+);
+fitlm_integer_extension!(
+    FITLM_INTEGER_RESPONSE_EXTENSION,
+    "fitlm-integer-response-data",
+    "fitlm with typed-integer response data is a RunMat extension",
+    "RunMat:compatibility:FitlmIntegerResponseExtension"
+);
+fitlm_integer_extension!(
+    FITLM_INTEGER_WEIGHTS_EXTENSION,
+    "fitlm-integer-weights",
+    "fitlm with typed-integer observation weights is a RunMat extension",
+    "RunMat:compatibility:FitlmIntegerWeightsExtension"
+);
+fitlm_integer_extension!(
+    FITLM_INTEGER_SELECTOR_EXTENSION,
+    "fitlm-integer-selectors",
+    "fitlm with typed-integer Exclude or selector controls is a RunMat extension",
+    "RunMat:compatibility:FitlmIntegerSelectorExtension"
+);
+fitlm_integer_extension!(
+    FITLM_INTEGER_CONTROL_EXTENSION,
+    "fitlm-integer-controls",
+    "fitlm with a typed-integer Intercept control is a RunMat extension",
+    "RunMat:compatibility:FitlmIntegerControlExtension"
+);
+fitlm_integer_extension!(
+    FITLM_RESIDENT_FALLBACK_EXTENSION,
+    "fitlm-resident-fallback",
+    "fitlm gathers resident inputs and returns a host linear-model object",
+    "RunMat:compatibility:FitlmResidentFallbackExtension"
+);
+pub const FITLM_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    FITLM_INTEGER_PREDICTOR_EXTENSION,
+    FITLM_INTEGER_RESPONSE_EXTENSION,
+    FITLM_INTEGER_WEIGHTS_EXTENSION,
+    FITLM_INTEGER_SELECTOR_EXTENSION,
+    FITLM_INTEGER_CONTROL_EXTENSION,
+    FITLM_RESIDENT_FALLBACK_EXTENSION,
+];
+
+macro_rules! fitlm_integer_input {
+    ($name:ident, $role:literal, $notes:literal) => {
+        const $name: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+            name: $role,
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: $notes,
+        }];
+    };
+}
+fitlm_integer_input!(FITLM_INTEGER_PREDICTOR_INPUT, "X or active table predictors", "R2026a documents single or double predictors. RunMat mode admits all eight integer classes at an exact binary64 fitting boundary.");
+fitlm_integer_input!(FITLM_INTEGER_RESPONSE_INPUT, "y or active table response", "R2026a documents single or double matrix responses and numeric/logical table responses, but not typed integers. RunMat mode requires exact binary64 representation.");
+fitlm_integer_input!(FITLM_INTEGER_WEIGHTS_INPUT, "Weights", "R2026a documents single or double weights. RunMat mode admits typed integers only at an exact binary64 weighting boundary.");
+fitlm_integer_input!(FITLM_INTEGER_SELECTOR_INPUT, "Exclude and numeric selectors", "Typed-integer structural selectors are parsed exactly as one-based indices or logical-style masks after independent extension admission.");
+fitlm_integer_input!(FITLM_INTEGER_CONTROL_INPUT, "Intercept", "A typed-integer Intercept scalar is a RunMat-only exact zero/nonzero control and does not cross through binary64.");
+
+pub const FITLM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
+    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(integer_X,y,...) or fitlm(table_with_integer_predictors,...)", inputs: &FITLM_INTEGER_PREDICTOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Predictors are gated before provider access; admitted resident data gathers exactly and the returned model is currently host-resident with binary64 properties." },
+    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(X,integer_y,...) or fitlm(table_with_integer_response,...)", inputs: &FITLM_INTEGER_RESPONSE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Responses are independently gated and checked before binary64 least-squares computation." },
+    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(...,Weights=integer_weights)", inputs: &FITLM_INTEGER_WEIGHTS_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Integer weights remain authoritative through admission and must be nonnegative, finite, shape-matched, and exactly representable as double." },
+    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(...,Exclude=integer_indices,...) ", inputs: &FITLM_INTEGER_SELECTOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "One-based integer selectors are decoded from exact storage without a floating mirror." },
+    BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(...,Intercept=integer_scalar)", inputs: &FITLM_INTEGER_CONTROL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Zero disables and every nonzero exact integer enables the intercept." },
+];
+
 pub const PREDICT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PREDICT_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
@@ -433,9 +518,13 @@ struct OlsFit {
     keywords = "fitlm,linear model,regression,least squares,statistics,machine learning",
     type_resolver(fitlm_type),
     descriptor(crate::builtins::stats::ml::linear_model::FITLM_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::linear_model::FITLM_EXTENSIONS),
+    integer_capabilities(crate::builtins::stats::ml::linear_model::FITLM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::ml::linear_model"
 )]
 async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_fitlm_integer_extensions(&first, &rest)?;
+    ensure_fitlm_resident_fallback_extension(&first, &rest)?;
     let first = gather(first)
         .await
         .map_err(|err| fitlm_invalid(err.message))?;
@@ -445,6 +534,163 @@ async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let spec = build_fit_spec(first, rest)?;
     let fit = fit_ols(&spec)?;
     model_object(spec, fit).map(Value::Object)
+}
+
+fn ensure_fitlm_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    let option_start = if is_table_value(first) {
+        usize::from(
+            rest.first()
+                .is_some_and(|value| !is_name_value_option(value)),
+        )
+    } else {
+        if is_typed_integer_value(first) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FITLM_INTEGER_PREDICTOR_EXTENSION,
+                FITLM_NAME,
+            )?;
+        }
+        if rest.first().is_some_and(is_typed_integer_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FITLM_INTEGER_RESPONSE_EXTENSION,
+                FITLM_NAME,
+            )?;
+        }
+        1 + usize::from(
+            rest.get(1)
+                .is_some_and(|value| !is_name_value_option(value)),
+        )
+    };
+
+    let option_values = rest.get(option_start..).unwrap_or(&[]);
+    let mut response_name: Option<String> = None;
+    let mut predictor_names: Option<Vec<String>> = None;
+    let mut weights_name: Option<String> = None;
+    for pair in option_values.chunks_exact(2) {
+        let Some(name) = scalar_text(&pair[0]) else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("Weights") {
+            if is_typed_integer_value(&pair[1]) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FITLM_INTEGER_WEIGHTS_EXTENSION,
+                    FITLM_NAME,
+                )?;
+            }
+            weights_name = scalar_text(&pair[1]);
+        } else if name.eq_ignore_ascii_case("Exclude") {
+            if is_typed_integer_value(&pair[1]) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FITLM_INTEGER_SELECTOR_EXTENSION,
+                    FITLM_NAME,
+                )?;
+            }
+        } else if name.eq_ignore_ascii_case("ResponseVar") {
+            response_name = scalar_text(&pair[1]);
+        } else if name.eq_ignore_ascii_case("PredictorVars") {
+            predictor_names = text_list(&pair[1], "PredictorVars").ok();
+        } else if name.eq_ignore_ascii_case("Intercept") && is_typed_integer_value(&pair[1]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FITLM_INTEGER_CONTROL_EXTENSION,
+                FITLM_NAME,
+            )?;
+        }
+    }
+
+    if is_table_value(first) {
+        let Value::Object(object) = first else {
+            unreachable!("table values are objects")
+        };
+        let names = table_variable_names_from_object(object)
+            .map_err(|error| fitlm_invalid(format!("fitlm: {error}")))?;
+        let positional = rest.first().and_then(scalar_text);
+        if response_name.is_none() {
+            response_name = positional.as_ref().and_then(|text| {
+                if let Some((lhs, _)) = text.split_once('~') {
+                    Some(lhs.trim().to_string())
+                } else if is_known_model_spec(text) {
+                    None
+                } else {
+                    Some(text.clone())
+                }
+            });
+        }
+        let response_name = response_name.or_else(|| names.last().cloned());
+        let mut active_predictors = predictor_names.unwrap_or_else(|| {
+            if let Some(formula) = positional.as_ref().filter(|text| text.contains('~')) {
+                let rhs = formula
+                    .split_once('~')
+                    .map(|(_, rhs)| rhs)
+                    .unwrap_or_default();
+                formula_rhs_tokens(rhs)
+                    .into_iter()
+                    .filter_map(|term| {
+                        let term = term.trim();
+                        names
+                            .iter()
+                            .any(|name| name == term)
+                            .then(|| term.to_string())
+                    })
+                    .collect()
+            } else {
+                names
+                    .iter()
+                    .filter(|name| Some(*name) != response_name.as_ref())
+                    .cloned()
+                    .collect()
+            }
+        });
+        if let Some(weights_name) = &weights_name {
+            active_predictors.retain(|name| name != weights_name);
+        }
+        let variables =
+            table_variables(object).map_err(|error| fitlm_invalid(format!("fitlm: {error}")))?;
+        for (name, value) in &variables.fields {
+            if !is_typed_integer_value(value) {
+                continue;
+            }
+            let extension = if response_name.as_ref() == Some(name) {
+                &FITLM_INTEGER_RESPONSE_EXTENSION
+            } else if weights_name.as_ref() == Some(name) {
+                &FITLM_INTEGER_WEIGHTS_EXTENSION
+            } else if active_predictors.iter().any(|predictor| predictor == name) {
+                &FITLM_INTEGER_PREDICTOR_EXTENSION
+            } else {
+                continue;
+            };
+            crate::compatibility::ensure_builtin_extension_enabled(extension, FITLM_NAME)?;
+        }
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn ensure_fitlm_resident_fallback_extension(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    let mut resident = matches!(first, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)));
+    if is_table_value(first) {
+        let Value::Object(object) = first else {
+            unreachable!("table values are objects")
+        };
+        resident |= table_variables(object)
+            .map_err(|error| fitlm_invalid(format!("fitlm: {error}")))?
+            .fields
+            .values()
+            .any(|value| matches!(value, Value::GpuTensor(_)));
+    }
+    if resident {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FITLM_RESIDENT_FALLBACK_EXTENSION,
+            FITLM_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -505,11 +751,13 @@ fn build_matrix_fit_spec(
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITLM_NAME, x_value)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
+    ensure_exact_fitlm_integer_tensor_boundary(&x, "X")?;
     if x.shape.len() > 2 {
         return Err(fitlm_invalid("fitlm: X must be a 2-D numeric matrix"));
     }
     let y_tensor = tensor::value_into_tensor_for(FITLM_NAME, y_value)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
+    ensure_exact_fitlm_integer_tensor_boundary(&y_tensor, "y")?;
     let y = vector_values(&y_tensor, "y")?;
     if y.len() != x.rows {
         return Err(fitlm_invalid(
@@ -659,6 +907,7 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
         .ok_or_else(|| fitlm_invalid("fitlm: response variable missing from table"))?;
     let y_tensor = tensor::value_into_tensor_for(FITLM_NAME, y_value.clone())
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
+    ensure_exact_fitlm_integer_tensor_boundary(&y_tensor, &response_name)?;
     let y = vector_values(&y_tensor, &response_name)?;
     let x = if predictor_names.is_empty() {
         Tensor::new(Vec::new(), vec![y.len(), 0])
@@ -672,6 +921,7 @@ fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec
                 .ok_or_else(|| fitlm_invalid(format!("fitlm: predictor '{name}' missing")))?;
             let tensor = tensor::value_into_tensor_for(FITLM_NAME, value.clone())
                 .map_err(|_| fitlm_invalid(format!("fitlm: predictor '{name}' must be numeric")))?;
+            ensure_exact_fitlm_integer_tensor_boundary(&tensor, name)?;
             let values = vector_values(&tensor, name)?;
             if values.len() != y.len() {
                 return Err(fitlm_invalid(format!(
@@ -1521,7 +1771,7 @@ fn terms_from_object(object: &ObjectInstance) -> BuiltinResult<Vec<Vec<u32>>> {
 
 fn numeric_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
     match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) => Ok(tensor.data.clone()),
+        Some(Value::Tensor(tensor)) => Ok(tensor::tensor_values_f64(tensor)),
         Some(Value::Num(value)) => Ok(vec![*value]),
         _ => Err(predict_invalid(format!(
             "predict: model is missing numeric property '{name}'"
@@ -1531,7 +1781,9 @@ fn numeric_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f6
 
 fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
     match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) if tensor.rows == tensor.cols => Ok(tensor.data.clone()),
+        Some(Value::Tensor(tensor)) if tensor.rows == tensor.cols => {
+            Ok(tensor::tensor_values_f64(tensor))
+        }
         _ => Err(predict_invalid(format!(
             "predict: model is missing matrix property '{name}'"
         ))),
@@ -1541,7 +1793,9 @@ fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64
 fn numeric_scalar_property(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
     match object.properties.get(name) {
         Some(Value::Num(value)) => Ok(*value),
-        Some(Value::Tensor(tensor)) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         _ => Err(predict_invalid(format!(
             "predict: model is missing scalar property '{name}'"
         ))),
@@ -1570,7 +1824,36 @@ fn vector_values(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
         return Err(fitlm_invalid(format!("fitlm: {label} must be a vector")));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
+}
+
+fn ensure_exact_fitlm_integer_tensor_boundary(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
+    let Some(storage) = tensor.integer_storage() else {
+        return Ok(());
+    };
+    for integer in storage.exact_values() {
+        if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+            return Err(fitlm_invalid(format!(
+                "fitlm: integer {role} values must be exactly representable as double"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_exact_fitlm_integer_scalar_boundary(
+    value: NumericScalar,
+    role: &str,
+) -> BuiltinResult<()> {
+    let Some(integer) = value.into_int_value() else {
+        return Ok(());
+    };
+    if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&integer) {
+        return Err(fitlm_invalid(format!(
+            "fitlm: integer {role} values must be exactly representable as double"
+        )));
+    }
+    Ok(())
 }
 
 fn vector_values_predict(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
@@ -1579,21 +1862,33 @@ fn vector_values_predict(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>
             "predict: {label} must be a vector"
         )));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
-        Value::Tensor(tensor) => vector_values(tensor, name),
+        Value::Int(value) => {
+            ensure_exact_fitlm_integer_scalar_boundary(NumericScalar::from(value.clone()), name)?;
+            Ok(vec![value.to_f64()])
+        }
+        Value::Tensor(tensor) => {
+            ensure_exact_fitlm_integer_tensor_boundary(tensor, name)?;
+            vector_values(tensor, name)
+        }
         _ => Err(fitlm_invalid(format!("fitlm: {name} must be numeric"))),
     }
 }
 
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(integer.to_f64());
+    }
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         _ => Err(fitlm_invalid(format!("fitlm: {name} must be a scalar"))),
     }
 }
@@ -1604,15 +1899,27 @@ fn exclude_spec(value: &Value) -> BuiltinResult<ExcludeSpec> {
         Value::LogicalArray(array) => Ok(ExcludeSpec::Mask(
             array.data.iter().map(|value| *value != 0).collect(),
         )),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            let indices = tensor
+                .integer_storage()
+                .expect("integer storage checked above")
+                .exact_values()
+                .iter()
+                .map(|value| value.try_to_usize().filter(|value| *value > 0))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| fitlm_invalid("fitlm: Exclude indices must be positive integers"))?;
+            Ok(ExcludeSpec::Indices(indices))
+        }
         Value::Tensor(tensor) => {
-            let mut indices = Vec::with_capacity(tensor.data.len());
-            for value in &tensor.data {
-                if *value < 1.0 || value.fract().abs() > EPS {
+            let values = tensor::tensor_values_f64(tensor);
+            let mut indices = Vec::with_capacity(values.len());
+            for value in values {
+                if value < 1.0 || value.fract().abs() > EPS {
                     return Err(fitlm_invalid(
                         "fitlm: Exclude indices must be positive integers",
                     ));
                 }
-                indices.push(*value as usize);
+                indices.push(value as usize);
             }
             Ok(ExcludeSpec::Indices(indices))
         }
@@ -1652,10 +1959,15 @@ fn exclude_mask(spec: Option<&ExcludeSpec>, rows: usize) -> BuiltinResult<Option
 }
 
 fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(!integer.is_zero());
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0] != 0.0)
+        }
         _ => Err(fitlm_invalid(format!(
             "fitlm: {name} must be logical scalar"
         ))),
@@ -1744,7 +2056,7 @@ fn columns_to_tensor_predict(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
 }
 
 fn x_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor.data[col * tensor.rows + row]
+    tensor::tensor_value_f64(tensor, col * tensor.rows + row)
 }
 
 fn terms_tensor(terms: &[Vec<u32>]) -> BuiltinResult<Value> {
@@ -1794,9 +2106,50 @@ fn has_intercept(terms: &[Vec<u32>]) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn all_fitlm_integer_storages() -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(vec![1, 2, 3]),
+            IntegerStorage::I16(vec![1, 2, 3]),
+            IntegerStorage::I32(vec![1, 2, 3]),
+            IntegerStorage::I64(vec![1, 2, 3]),
+            IntegerStorage::U8(vec![1, 2, 3]),
+            IntegerStorage::U16(vec![1, 2, 3]),
+            IntegerStorage::U32(vec![1, 2, 3]),
+            IntegerStorage::U64(vec![1, 2, 3]),
+        ]
+    }
+
+    #[test]
+    fn scalar_option_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, 1, 1);
+            assert_eq!(numeric_scalar(&value, "Alpha").unwrap(), 1.0);
+            assert!(bool_scalar(&value, "RobustOpts").unwrap());
+            assert!(
+                matches!(exclude_spec(&value), Ok(ExcludeSpec::Indices(indices)) if indices == vec![1])
+            );
+        }
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -1828,8 +2181,8 @@ mod tests {
             other => panic!("coefficients {other:?}"),
         };
         let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
-        assert!((estimates.data[0] - 1.0).abs() < 1.0e-10);
-        assert!((estimates.data[1] - 2.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
         let predicted = block_on(predict_builtin(
             model,
             tensor_value(vec![4.0, 5.0], 2, 1),
@@ -1838,8 +2191,219 @@ mod tests {
         .unwrap();
         let ypred = tensor(&predicted);
         assert_eq!(ypred.shape, vec![2, 1]);
-        assert!((ypred.data[0] - 9.0).abs() < 1.0e-10);
-        assert!((ypred.data[1] - 11.0).abs() < 1.0e-10);
+        assert!((ypred.materialize_f64()[0] - 9.0).abs() < 1.0e-10);
+        assert!((ypred.materialize_f64()[1] - 11.0).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn fitlm_and_predict_read_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let model = block_on(fitlm_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 99]), 4, 1),
+            vec![
+                poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 999]), 4, 1),
+                Value::from("Weights"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), 4, 1),
+                Value::from("Exclude"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![4]), 1, 1),
+                Value::from("Intercept"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+            ],
+        ))
+        .unwrap();
+        let predicted = block_on(predict_builtin(
+            model,
+            poisoned_int_tensor(IntegerStorage::I16(vec![3, 4]), 2, 1),
+            Vec::new(),
+        ))
+        .unwrap();
+        let ypred = tensor(&predicted);
+        assert_eq!(ypred.shape, vec![2, 1]);
+        assert!((ypred.materialize_f64()[0] - 7.0).abs() < 1.0e-10);
+        assert!((ypred.materialize_f64()[1] - 9.0).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn fitlm_runmat_mode_admits_all_integer_classes_by_role() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_fitlm_integer_storages() {
+            let model = block_on(fitlm_builtin(
+                poisoned_int_tensor(storage.clone(), 3, 1),
+                vec![
+                    poisoned_int_tensor(storage.clone(), 3, 1),
+                    Value::from("Weights"),
+                    poisoned_int_tensor(storage, 3, 1),
+                    Value::from("Exclude"),
+                    poisoned_int_tensor(IntegerStorage::U8(Vec::new()), 0, 1),
+                    Value::from("Intercept"),
+                    poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                ],
+            ))
+            .expect("all-class integer fitlm roles");
+            assert!(matches!(model, Value::Object(_)));
+        }
+    }
+
+    #[test]
+    fn fitlm_strict_mode_rejects_each_integer_role_independently() {
+        let x = || tensor_value(vec![1.0, 2.0, 3.0], 3, 1);
+        let y = || tensor_value(vec![1.0, 2.0, 3.0], 3, 1);
+        let integer = || poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), 3, 1);
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+        let cases = [
+            (
+                block_on(fitlm_builtin(integer(), vec![y()])).unwrap_err(),
+                "RunMat:compatibility:FitlmIntegerPredictorExtension",
+            ),
+            (
+                block_on(fitlm_builtin(x(), vec![integer()])).unwrap_err(),
+                "RunMat:compatibility:FitlmIntegerResponseExtension",
+            ),
+            (
+                block_on(fitlm_builtin(
+                    x(),
+                    vec![y(), Value::from("Weights"), integer()],
+                ))
+                .unwrap_err(),
+                "RunMat:compatibility:FitlmIntegerWeightsExtension",
+            ),
+            (
+                block_on(fitlm_builtin(
+                    x(),
+                    vec![
+                        y(),
+                        Value::from("Exclude"),
+                        poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                    ],
+                ))
+                .unwrap_err(),
+                "RunMat:compatibility:FitlmIntegerSelectorExtension",
+            ),
+            (
+                block_on(fitlm_builtin(
+                    x(),
+                    vec![
+                        y(),
+                        Value::from("Intercept"),
+                        poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+                    ],
+                ))
+                .unwrap_err(),
+                "RunMat:compatibility:FitlmIntegerControlExtension",
+            ),
+        ];
+        for (error, identifier) in cases {
+            assert_eq!(error.identifier(), Some(identifier));
+        }
+    }
+
+    #[test]
+    fn fitlm_rejects_inexact_floating_roles_but_keeps_selectors_structural() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        ensure_exact_fitlm_integer_scalar_boundary(NumericScalar::U64(1_u64 << 54), "test")
+            .expect("wide powers of two remain exactly representable");
+        let wide = (1_u64 << 53) + 1;
+        let predictor_error = block_on(fitlm_builtin(
+            poisoned_int_tensor(IntegerStorage::U64(vec![1, 2, wide]), 3, 1),
+            vec![tensor_value(vec![1.0, 2.0, 3.0], 3, 1)],
+        ))
+        .unwrap_err();
+        assert!(predictor_error
+            .message()
+            .contains("exactly representable as double"));
+
+        let response_error = block_on(fitlm_builtin(
+            tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
+            vec![poisoned_int_tensor(
+                IntegerStorage::U64(vec![1, 2, wide]),
+                3,
+                1,
+            )],
+        ))
+        .unwrap_err();
+        assert!(response_error
+            .message()
+            .contains("exactly representable as double"));
+
+        let weights_error = block_on(fitlm_builtin(
+            tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
+            vec![
+                tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
+                Value::from("Weights"),
+                poisoned_int_tensor(IntegerStorage::U64(vec![1, 2, wide]), 3, 1),
+            ],
+        ))
+        .unwrap_err();
+        assert!(weights_error
+            .message()
+            .contains("exactly representable as double"));
+
+        let selector_error = block_on(fitlm_builtin(
+            tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
+            vec![
+                tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
+                Value::from("Exclude"),
+                poisoned_int_tensor(IntegerStorage::U64(vec![wide]), 1, 1),
+            ],
+        ))
+        .unwrap_err();
+        assert!(selector_error.message().contains("exceeds observations"));
+        assert!(!selector_error
+            .message()
+            .contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn fitlm_strict_mode_gates_resident_fallback_before_gather() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1])
+                .expect("integer predictors");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+
+            let floating = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("predictors");
+            let floating_handle =
+                gpu_helpers::upload_tensor(provider, &floating).expect("floating upload");
+            let resident_error = block_on(fitlm_builtin(
+                Value::GpuTensor(floating_handle.clone()),
+                vec![tensor_value(vec![1.0, 2.0, 3.0], 3, 1)],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                resident_error.identifier(),
+                Some("RunMat:compatibility:FitlmResidentFallbackExtension")
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&floating_handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            let resident_option_error = block_on(fitlm_builtin(
+                tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
+                vec![
+                    tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
+                    Value::from("Weights"),
+                    Value::GpuTensor(floating_handle.clone()),
+                ],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                resident_option_error.identifier(),
+                Some("RunMat:compatibility:FitlmResidentFallbackExtension")
+            );
+
+            let error = block_on(fitlm_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![tensor_value(vec![1.0, 2.0, 3.0], 3, 1)],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:FitlmIntegerPredictorExtension")
+            );
+            assert!(runmat_accelerate_api::provider_for_handle(&handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+        });
     }
 
     #[test]
@@ -1882,9 +2446,9 @@ mod tests {
         };
         let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
         assert_eq!(estimates.shape, vec![3, 1]);
-        assert!((estimates.data[0] - 1.0).abs() < 1.0e-10);
-        assert!(estimates.data[1].abs() < 1.0e-10);
-        assert!((estimates.data[2] - 2.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
+        assert!(estimates.materialize_f64()[1].abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[2] - 2.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -1916,10 +2480,10 @@ mod tests {
             other => panic!("expected tensor or output list, got {other:?}"),
         };
         assert_eq!(yci.shape, vec![2, 2]);
-        assert!(yci.data[0] < yci.data[1]);
-        assert!(yci.data[2] < yci.data[3]);
-        assert!(yci.data[0] < yci.data[2]);
-        assert!(yci.data[1] < yci.data[3]);
+        assert!(yci.materialize_f64()[0] < yci.materialize_f64()[1]);
+        assert!(yci.materialize_f64()[2] < yci.materialize_f64()[3]);
+        assert!(yci.materialize_f64()[0] < yci.materialize_f64()[2]);
+        assert!(yci.materialize_f64()[1] < yci.materialize_f64()[3]);
     }
 
     #[test]
@@ -1945,7 +2509,7 @@ mod tests {
         };
         let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
         assert_eq!(estimates.shape, vec![1, 1]);
-        assert!((estimates.data[0] - 2.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[0] - 2.0).abs() < 1.0e-10);
 
         let intercept_only =
             object(block_on(fitlm_builtin(table, vec![Value::String("Y ~ 1".into())])).unwrap());
@@ -1955,7 +2519,7 @@ mod tests {
         };
         let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
         assert_eq!(estimates.shape, vec![1, 1]);
-        assert!((estimates.data[0] - 4.0).abs() < 1.0e-10);
+        assert!((estimates.materialize_f64()[0] - 4.0).abs() < 1.0e-10);
     }
 
     #[test]
@@ -1980,7 +2544,7 @@ mod tests {
         let predicted = block_on(predict_builtin(model, xnew, Vec::new())).unwrap();
         let yhat = tensor(&predicted);
         assert_eq!(yhat.shape, vec![2, 1]);
-        assert_eq!(yhat.data, vec![4.0, 4.0]);
+        assert_eq!(yhat.materialize_f64(), vec![4.0, 4.0]);
     }
 
     #[test]

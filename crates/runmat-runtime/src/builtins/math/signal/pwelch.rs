@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::signal::common::{
     gpu_matrix_shape, parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector,
 };
@@ -295,6 +296,10 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     if rest.len() > 7 {
         return Err(pwelch_error(&PWELCH_ERROR_ARG_COUNT));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     if let Value::GpuTensor(handle) = &x {
         let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle)
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err.message()))?;
@@ -543,9 +548,9 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
     let rows = tensor.rows();
     let cols = tensor.cols();
     if rows == 1 || cols == 1 {
+        let values = tensor_utils::tensor_into_values_f64(tensor);
         return Ok(SignalColumns {
-            columns: vec![tensor
-                .data
+            columns: vec![values
                 .into_iter()
                 .map(|value| Complex::new(value, 0.0))
                 .collect()],
@@ -558,7 +563,10 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
     for col in 0..cols {
         let mut column = Vec::with_capacity(rows);
         for row in 0..rows {
-            column.push(Complex::new(tensor.data[row + col * rows], 0.0));
+            column.push(Complex::new(
+                tensor_utils::tensor_value_f64(&tensor, row + col * rows),
+                0.0,
+            ));
         }
         columns.push(column);
     }
@@ -581,11 +589,14 @@ fn complex_tensor_to_signal_columns(
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let is_complex = tensor.data.iter().any(|(_, im)| im.abs() > EPS);
+    let is_complex = tensor
+        .materialize_f64()
+        .iter()
+        .any(|(_, im)| im.abs() > EPS);
     if rows == 1 || cols == 1 {
         return Ok(SignalColumns {
             columns: vec![tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Complex::new(re, im))
                 .collect()],
@@ -598,7 +609,7 @@ fn complex_tensor_to_signal_columns(
     for col in 0..cols {
         let mut column = Vec::with_capacity(rows);
         for row in 0..rows {
-            let (re, im) = tensor.data[row + col * rows];
+            let (re, im) = tensor.materialize_f64()[row + col * rows];
             column.push(Complex::new(re, im));
         }
         columns.push(column);
@@ -769,8 +780,8 @@ async fn parse_frequency_grid(value: Value, window_len: usize) -> BuiltinResult<
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
-        Value::ComplexTensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
+        Value::ComplexTensor(tensor) => tensor_utils::is_scalar_complex_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -787,7 +798,7 @@ async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
             }
             return Ok(hamming_window(len));
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
+        Value::Tensor(t) if tensor_utils::is_scalar_tensor(t) => {
             let len = parse_nonnegative_integer(BUILTIN_NAME, "window", &value).map_err(|err| {
                 pwelch_error_with_detail(&PWELCH_ERROR_INVALID_WINDOW, err.message())
             })?;
@@ -1054,8 +1065,8 @@ fn hamming_window(len: usize) -> Vec<f64> {
 
 fn is_empty(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_utils::tensor_element_len(t) == 0,
+        Value::ComplexTensor(t) => tensor_utils::complex_tensor_element_len(t) == 0,
         _ => false,
     }
 }
@@ -1084,7 +1095,7 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
 
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
@@ -1101,7 +1112,7 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f tensor");
         };
-        (pxx.data.clone(), f.data.clone())
+        (pxx.materialize_f64().clone(), f.materialize_f64().clone())
     }
 
     fn output_pair_with_pxx_shape(value: Value) -> (Vec<f64>, Vec<usize>, Vec<f64>) {
@@ -1114,7 +1125,15 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f tensor");
         };
-        (pxx.data.clone(), pxx.shape.clone(), f.data.clone())
+        (
+            pxx.materialize_f64().clone(),
+            pxx.shape.clone(),
+            f.materialize_f64().clone(),
+        )
+    }
+
+    fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor")
     }
 
     #[test]
@@ -1175,6 +1194,66 @@ mod tests {
             .unwrap();
         assert_eq!(peak_idx, 4);
         assert_eq!(f[peak_idx], 4.0);
+    }
+
+    #[test]
+    fn pwelch_reads_typed_integer_vector_storage_exactly() {
+        let out = call(
+            Value::Tensor(integer_tensor(
+                vec![0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0, 1, 0, -1],
+                vec![1, 16],
+            )),
+            &[
+                Value::Num(16.0),
+                Value::Num(0.0),
+                Value::Num(16.0),
+                Value::Num(16.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, f) = output_pair(out);
+        let (peak_idx, _) = pxx
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap();
+        assert_eq!(peak_idx, 4);
+        assert_eq!(f[peak_idx], 4.0);
+    }
+
+    #[test]
+    fn pwelch_scalar_window_reads_typed_integer_storage_length_exactly() {
+        let window =
+            Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("window length");
+
+        let out = call(
+            Value::Tensor(Tensor::new(vec![1.0; 16], vec![1, 16]).unwrap()),
+            &[
+                Value::Tensor(window),
+                Value::Num(0.0),
+                Value::Num(8.0),
+                Value::Num(8.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, f) = output_pair(out);
+        assert_eq!(pxx.len(), 5);
+        assert_eq!(f.len(), 5);
+    }
+
+    #[test]
+    fn pwelch_scalar_detector_reads_typed_complex_integer_storage_without_mirror() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![8]),
+            IntegerStorage::I16(vec![0]),
+        )
+        .expect("complex integer storage");
+        let scalar =
+            runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 1]).expect("scalar");
+
+        assert!(is_scalar_numeric(&Value::ComplexTensor(scalar)));
     }
 
     #[test]
@@ -1248,6 +1327,25 @@ mod tests {
         let x = Tensor::new(data, vec![8, 2]).unwrap();
         let out = call(
             Value::Tensor(x),
+            &[Value::Num(8.0), Value::Num(0.0), Value::Num(8.0)],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, shape, f) = output_pair_with_pxx_shape(out);
+        assert_eq!(shape, vec![5, 2]);
+        assert_eq!(pxx.len(), 10);
+        assert_eq!(f.len(), 5);
+        assert!(pxx[0] > pxx[5]);
+    }
+
+    #[test]
+    fn pwelch_reads_typed_integer_matrix_storage_exactly() {
+        let data = vec![
+            1, 1, 1, 1, 0, 0, 0, 0, //
+            0, 1, 0, -1, 0, 1, 0, -1,
+        ];
+        let out = call(
+            Value::Tensor(integer_tensor(data, vec![8, 2])),
             &[Value::Num(8.0), Value::Num(0.0), Value::Num(8.0)],
             Some(2),
         )
@@ -1388,8 +1486,8 @@ mod tests {
 
         assert_eq!(gpu_pxx.shape, vec![17, 2]);
         assert_eq!(gpu_f.shape, vec![17, 1]);
-        assert_eq!(gpu_f.data, cpu_f);
-        for (actual, expected) in gpu_pxx.data.iter().zip(cpu_pxx.iter()) {
+        assert_eq!(gpu_f.materialize_f64(), cpu_f);
+        for (actual, expected) in gpu_pxx.materialize_f64().iter().zip(cpu_pxx.iter()) {
             assert!(
                 (actual - expected).abs() <= 1.0e-5,
                 "actual={actual} expected={expected}"

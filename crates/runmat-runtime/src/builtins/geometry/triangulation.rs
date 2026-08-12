@@ -4,13 +4,19 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, NumericDType, ObjectInstance, PropertyDef, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ClassDef, IntegerStorage, MethodDef, NumericScalar, ObjectInstance,
+    PropertyDef, Tensor, Value,
 };
 use runmat_geometry_ops::{boundary_edges, delaunay_2d, nearest_neighbor_indices, point_locations};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{
     build_runtime_error, current_requested_outputs, gather_if_needed_async, BuiltinResult,
 };
@@ -23,6 +29,29 @@ const LEGACY_POINTS_PROPERTY: &str = "X";
 const LEGACY_CONNECTIVITY_PROPERTY: &str = "Triangulation";
 const CONSTRAINTS_PROPERTY: &str = "Constraints";
 const DIMENSION_PROPERTY: &str = "Dimension";
+
+const INTEGER_COORDINATES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "delaunaytri-integer-coordinates",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "DelaunayTri construction, object points, or queries with typed-integer coordinates are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension"),
+};
+
+const INTEGER_TOPOLOGY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "delaunaytri-integer-topology",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "DelaunayTri constraints or object connectivity with typed-integer topology are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DelaunayTriIntegerTopologyExtension"),
+};
+
+pub const CONSTRUCTOR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [INTEGER_COORDINATES_EXTENSION, INTEGER_TOPOLOGY_EXTENSION];
+pub const COORDINATE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INTEGER_COORDINATES_EXTENSION];
+pub const TOPOLOGY_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INTEGER_TOPOLOGY_EXTENSION];
+pub const POINT_LOCATION_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [INTEGER_COORDINATES_EXTENSION, INTEGER_TOPOLOGY_EXTENSION];
 
 const OUTPUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "dt",
@@ -154,6 +183,106 @@ pub const POINT_LOCATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const CONSTRUCTOR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "coordinates",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer point matrices or coordinate vectors are gated by delaunaytri-integer-coordinates before entering the documented double geometry domain.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "constraints",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer constraint/connectivity identifiers are gated by delaunaytri-integer-topology and parsed exactly through platform bounds.",
+    },
+];
+
+pub const CONSTRUCTOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "dt = DelaunayTri(X, C)",
+        inputs: &CONSTRUCTOR_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed coordinates/topology are RunMat-only; geometry and public object properties use documented double arrays.",
+    }];
+
+const TOPOLOGY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dt.ConnectivityList",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly.",
+    }];
+
+pub const FREE_BOUNDARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "E = freeBoundary(dt)",
+        inputs: &TOPOLOGY_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed topology is a RunMat-only object state; returned boundary vertex indices are documented double.",
+    }];
+
+const COORDINATE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "coordinates",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer object/query coordinates are gated by delaunaytri-integer-coordinates before conversion to the double geometry domain.",
+    }];
+
+pub const NEAREST_NEIGHBOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "vi = nearestNeighbor(dt, q)",
+        inputs: &COORDINATE_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed coordinates are RunMat-only; nearest-vertex indices are documented double.",
+    }];
+
+const POINT_LOCATION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "coordinates",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer object/query coordinates are gated by delaunaytri-integer-coordinates.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dt.ConnectivityList",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Typed-integer object connectivity is gated by delaunaytri-integer-topology and parsed exactly.",
+    },
+];
+
+pub const POINT_LOCATION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[ti, bc] = pointLocation(dt, q)",
+        inputs: &POINT_LOCATION_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Typed coordinates/topology are RunMat-only; triangle indices and barycentric coordinates are documented double.",
+    }];
+
 #[runtime_builtin(
     name = "DelaunayTri",
     category = "geometry/triangulation",
@@ -161,11 +290,18 @@ pub const POINT_LOCATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "DelaunayTri,delaunay,triangulation,geometry,mesh",
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::DELAUNAY_TRI_DESCRIPTOR),
+    extensions(crate::builtins::geometry::triangulation::CONSTRUCTOR_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::CONSTRUCTOR_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_registered();
+    ensure_resident_constructor_extensions(&args)?;
     let parsed = parse_constructor_args(args).await?;
+    ensure_coordinate_extension(parsed.integer_coordinates)?;
+    ensure_topology_extension(parsed.integer_topology)?;
     Ok(Value::Object(delaunay_object(parsed)?))
 }
 
@@ -176,6 +312,10 @@ pub async fn delaunay_tri_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     keywords = "freeBoundary,DelaunayTri,triangulation,boundary,mesh",
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::HELPER_DESCRIPTOR),
+    extensions(crate::builtins::geometry::triangulation::TOPOLOGY_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::FREE_BOUNDARY_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
@@ -189,6 +329,10 @@ pub async fn free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
     keywords = "freeBoundary,DelaunayTri,triangulation,boundary,mesh",
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::HELPER_DESCRIPTOR),
+    extensions(crate::builtins::geometry::triangulation::TOPOLOGY_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::FREE_BOUNDARY_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_free_boundary_builtin(dt: Value) -> BuiltinResult<Value> {
@@ -202,6 +346,10 @@ pub async fn delaunay_tri_free_boundary_builtin(dt: Value) -> BuiltinResult<Valu
     keywords = "nearestNeighbor,DelaunayTri,triangulation,geometry",
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::HELPER_DESCRIPTOR),
+    extensions(crate::builtins::geometry::triangulation::COORDINATE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::NEAREST_NEIGHBOR_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn nearest_neighbor_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -215,6 +363,10 @@ pub async fn nearest_neighbor_builtin(dt: Value, rest: Vec<Value>) -> BuiltinRes
     keywords = "nearestNeighbor,DelaunayTri,triangulation,geometry",
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::HELPER_DESCRIPTOR),
+    extensions(crate::builtins::geometry::triangulation::COORDINATE_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::NEAREST_NEIGHBOR_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_nearest_neighbor_builtin(
@@ -231,6 +383,10 @@ pub async fn delaunay_tri_nearest_neighbor_builtin(
     keywords = "pointLocation,DelaunayTri,triangulation,barycentric,geometry",
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::POINT_LOCATION_DESCRIPTOR),
+    extensions(crate::builtins::geometry::triangulation::POINT_LOCATION_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::POINT_LOCATION_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn point_location_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -244,6 +400,10 @@ pub async fn point_location_builtin(dt: Value, rest: Vec<Value>) -> BuiltinResul
     keywords = "pointLocation,DelaunayTri,triangulation,barycentric,geometry",
     accel = "cpu",
     descriptor(crate::builtins::geometry::triangulation::POINT_LOCATION_DESCRIPTOR),
+    extensions(crate::builtins::geometry::triangulation::POINT_LOCATION_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::geometry::triangulation::POINT_LOCATION_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::geometry::triangulation"
 )]
 pub async fn delaunay_tri_point_location_builtin(
@@ -311,6 +471,8 @@ fn ensure_registered() {
 struct ParsedDelaunay {
     points: Vec<[f64; 2]>,
     constraints: Vec<[usize; 2]>,
+    integer_coordinates: bool,
+    integer_topology: bool,
 }
 
 async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<ParsedDelaunay> {
@@ -319,10 +481,14 @@ async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<ParsedDelauna
         [] => Ok(ParsedDelaunay {
             points: Vec::new(),
             constraints: Vec::new(),
+            integer_coordinates: false,
+            integer_topology: false,
         }),
         [points] => Ok(ParsedDelaunay {
             points: matrix_points(points, BUILTIN_NAME)?,
             constraints: Vec::new(),
+            integer_coordinates: is_typed_integer_numeric_value(points),
+            integer_topology: false,
         }),
         [first, second] if looks_like_point_matrix(first) && !is_vector_value(first) => {
             let constraints = constraints_from_value(second)?;
@@ -334,11 +500,16 @@ async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<ParsedDelauna
             Ok(ParsedDelaunay {
                 points: matrix_points(first, BUILTIN_NAME)?,
                 constraints,
+                integer_coordinates: is_typed_integer_numeric_value(first),
+                integer_topology: is_typed_integer_numeric_value(second),
             })
         }
         [x, y] => Ok(ParsedDelaunay {
             points: vector_points(x, y, BUILTIN_NAME)?,
             constraints: Vec::new(),
+            integer_coordinates: is_typed_integer_numeric_value(x)
+                || is_typed_integer_numeric_value(y),
+            integer_topology: false,
         }),
         [x, y, third] => {
             if looks_like_constraints(third) {
@@ -351,6 +522,9 @@ async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<ParsedDelauna
                 Ok(ParsedDelaunay {
                     points: vector_points(x, y, BUILTIN_NAME)?,
                     constraints,
+                    integer_coordinates: is_typed_integer_numeric_value(x)
+                        || is_typed_integer_numeric_value(y),
+                    integer_topology: is_typed_integer_numeric_value(third),
                 })
             } else {
                 Err(unsupported(
@@ -370,6 +544,82 @@ async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
         gathered.push(gather_if_needed_async(&value).await?);
     }
     Ok(gathered)
+}
+
+fn ensure_resident_constructor_extensions(args: &[Value]) -> BuiltinResult<()> {
+    match args {
+        [points] => ensure_resident_coordinate_values(std::slice::from_ref(points)),
+        [first, second] if looks_like_point_matrix(first) && !is_vector_value(first) => {
+            ensure_resident_coordinate_values(std::slice::from_ref(first))?;
+            ensure_resident_topology_values(std::slice::from_ref(second))
+        }
+        [x, y] => ensure_resident_coordinate_values(&[x.clone(), y.clone()]),
+        [x, y, topology] => {
+            ensure_resident_coordinate_values(&[x.clone(), y.clone()])?;
+            ensure_resident_topology_values(std::slice::from_ref(topology))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn ensure_resident_coordinate_values(values: &[Value]) -> BuiltinResult<()> {
+    if values.iter().any(is_resident_typed_integer_value) {
+        ensure_coordinate_extension(true)?;
+    }
+    Ok(())
+}
+
+fn ensure_resident_topology_values(values: &[Value]) -> BuiltinResult<()> {
+    if values.iter().any(is_resident_typed_integer_value) {
+        ensure_topology_extension(true)?;
+    }
+    Ok(())
+}
+
+fn ensure_coordinate_extension(enabled: bool) -> BuiltinResult<()> {
+    if enabled {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_COORDINATES_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_topology_extension(enabled: bool) -> BuiltinResult<()> {
+    if enabled {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_TOPOLOGY_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_numeric_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || is_resident_typed_integer_value(value)
+}
+
+fn is_resident_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn object_coordinates_are_typed_integer(object: &ObjectInstance) -> bool {
+    object
+        .properties
+        .get(POINTS_PROPERTY)
+        .or_else(|| object.properties.get(LEGACY_POINTS_PROPERTY))
+        .is_some_and(is_typed_integer_numeric_value)
+}
+
+fn object_topology_is_typed_integer(object: &ObjectInstance) -> bool {
+    object
+        .properties
+        .get(CONNECTIVITY_PROPERTY)
+        .or_else(|| object.properties.get(LEGACY_CONNECTIVITY_PROPERTY))
+        .is_some_and(is_typed_integer_numeric_value)
 }
 
 fn delaunay_object(parsed: ParsedDelaunay) -> BuiltinResult<ObjectInstance> {
@@ -402,15 +652,22 @@ fn delaunay_object(parsed: ParsedDelaunay) -> BuiltinResult<ObjectInstance> {
 
 fn free_boundary_value(dt: Value) -> BuiltinResult<Value> {
     let object = require_delaunay_object(&dt)?;
+    let integer_topology = object_topology_is_typed_integer(object);
     let triangles = object_triangles(object, None)?;
+    ensure_topology_extension(integer_topology)?;
     let edges = boundary_edges(&triangles);
     edges_tensor(&edges)
 }
 
 async fn nearest_neighbor_value(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let object = require_delaunay_object(&dt)?;
+    let object_integer_coordinates = object_coordinates_are_typed_integer(object);
     let points = object_points(object)?;
-    let queries = parse_query_points(gather_values(rest).await?, "nearestNeighbor")?;
+    ensure_resident_coordinate_values(&rest)?;
+    let gathered = gather_values(rest).await?;
+    let query_integer_coordinates = gathered.iter().any(is_typed_integer_numeric_value);
+    let queries = parse_query_points(gathered, "nearestNeighbor")?;
+    ensure_coordinate_extension(object_integer_coordinates || query_integer_coordinates)?;
     let indices = nearest_neighbor_indices(&points, &queries)
         .into_iter()
         .map(|idx| idx.map_or(f64::NAN, |idx| idx as f64 + 1.0))
@@ -422,9 +679,16 @@ async fn nearest_neighbor_value(dt: Value, rest: Vec<Value>) -> BuiltinResult<Va
 
 async fn point_location_value(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let object = require_delaunay_object(&dt)?;
+    let object_integer_coordinates = object_coordinates_are_typed_integer(object);
+    let object_integer_topology = object_topology_is_typed_integer(object);
     let points = object_points(object)?;
     let triangles = object_triangles(object, Some(points.len()))?;
-    let queries = parse_query_points(gather_values(rest).await?, "pointLocation")?;
+    ensure_resident_coordinate_values(&rest)?;
+    let gathered = gather_values(rest).await?;
+    let query_integer_coordinates = gathered.iter().any(is_typed_integer_numeric_value);
+    let queries = parse_query_points(gathered, "pointLocation")?;
+    ensure_coordinate_extension(object_integer_coordinates || query_integer_coordinates)?;
+    ensure_topology_extension(object_integer_topology)?;
     let locations = point_locations(&points, &triangles, &queries);
     let indices = locations
         .iter()
@@ -498,10 +762,11 @@ fn matrix_points(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<[f64
             "{builtin}: points must be an N-by-2 matrix"
         )));
     }
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     let mut points = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
-        let x = tensor.data[row];
-        let y = tensor.data[row + tensor.rows];
+        let x = values[row];
+        let y = values[row + tensor.rows];
         if !x.is_finite() || !y.is_finite() {
             return Err(invalid(format!("{builtin}: points must be finite")));
         }
@@ -513,14 +778,16 @@ fn matrix_points(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<[f64
 fn vector_points(x: &Value, y: &Value, builtin: &'static str) -> BuiltinResult<Vec<[f64; 2]>> {
     let x = numeric_tensor(x, builtin)?;
     let y = numeric_tensor(y, builtin)?;
-    if !is_vector(&x) || !is_vector(&y) || x.data.len() != y.data.len() {
+    if !is_vector(&x) || !is_vector(&y) || x.len() != y.len() {
         return Err(invalid(format!(
             "{builtin}: x and y must be vectors with the same length"
         )));
     }
-    x.data
+    let x_values = tensor_utils::tensor_values_f64_cow(&x);
+    let y_values = tensor_utils::tensor_values_f64_cow(&y);
+    x_values
         .iter()
-        .zip(&y.data)
+        .zip(y_values.iter())
         .map(|(x, y)| {
             if !x.is_finite() || !y.is_finite() {
                 Err(invalid(format!("{builtin}: points must be finite")))
@@ -533,7 +800,7 @@ fn vector_points(x: &Value, y: &Value, builtin: &'static str) -> BuiltinResult<V
 
 fn constraints_from_value(value: &Value) -> BuiltinResult<Vec<[usize; 2]>> {
     let tensor = numeric_tensor(value, BUILTIN_NAME)?;
-    if tensor.data.is_empty() || tensor.rows == 0 {
+    if tensor.is_empty() || tensor.rows == 0 {
         return Ok(Vec::new());
     }
     if tensor.cols != 2 {
@@ -542,8 +809,8 @@ fn constraints_from_value(value: &Value) -> BuiltinResult<Vec<[usize; 2]>> {
     let mut constraints = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         constraints.push([
-            positive_index(tensor.data[row], usize::MAX)?,
-            positive_index(tensor.data[row + tensor.rows], usize::MAX)?,
+            tensor_positive_index(&tensor, row, usize::MAX)?,
+            tensor_positive_index(&tensor, row + tensor.rows, usize::MAX)?,
         ]);
     }
     Ok(constraints)
@@ -560,9 +827,9 @@ fn connectivity_from_value(
     let mut triangles = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
         triangles.push([
-            positive_index(tensor.data[row], usize::MAX)? - 1,
-            positive_index(tensor.data[row + tensor.rows], usize::MAX)? - 1,
-            positive_index(tensor.data[row + 2 * tensor.rows], usize::MAX)? - 1,
+            tensor_positive_index(&tensor, row, usize::MAX)? - 1,
+            tensor_positive_index(&tensor, row + tensor.rows, usize::MAX)? - 1,
+            tensor_positive_index(&tensor, row + 2 * tensor.rows, usize::MAX)? - 1,
         ]);
     }
     if let Some(point_count) = point_count {
@@ -581,7 +848,10 @@ fn numeric_tensor(value: &Value, builtin: &'static str) -> BuiltinResult<Tensor>
     match value {
         Value::Tensor(tensor) => Ok(tensor.clone()),
         Value::Num(value) => Tensor::new(vec![*value], vec![1, 1]).map_err(invalid),
-        Value::Int(value) => Tensor::new(vec![value.to_f64()], vec![1, 1]).map_err(invalid),
+        Value::Int(value) => {
+            Tensor::new_integer(IntegerStorage::from_scalar(value.clone()), vec![1, 1])
+                .map_err(invalid)
+        }
         other => Err(invalid(format!(
             "{builtin}: expected numeric input, got {other:?}"
         ))),
@@ -590,6 +860,7 @@ fn numeric_tensor(value: &Value, builtin: &'static str) -> BuiltinResult<Tensor>
 
 fn looks_like_point_matrix(value: &Value) -> bool {
     matches!(value, Value::Tensor(tensor) if tensor.cols >= 2)
+        || matches!(value, Value::GpuTensor(handle) if handle.shape.get(1).copied().unwrap_or(1) >= 2)
 }
 
 fn looks_like_constraints(value: &Value) -> bool {
@@ -598,6 +869,7 @@ fn looks_like_constraints(value: &Value) -> bool {
 
 fn is_vector_value(value: &Value) -> bool {
     matches!(value, Value::Tensor(tensor) if is_vector(tensor))
+        || matches!(value, Value::GpuTensor(handle) if handle.shape.first().copied().unwrap_or(1) == 1 || handle.shape.get(1).copied().unwrap_or(1) == 1)
         || matches!(value, Value::Num(_) | Value::Int(_))
 }
 
@@ -624,9 +896,9 @@ fn triangles_tensor(triangles: &[[usize; 3]]) -> BuiltinResult<Value> {
             data.push(tri[col] as f64 + 1.0);
         }
     }
-    let mut tensor = Tensor::new_2d(data, triangles.len(), 3).map_err(invalid)?;
-    tensor.dtype = NumericDType::F64;
-    Ok(Value::Tensor(tensor))
+    Tensor::new_2d(data, triangles.len(), 3)
+        .map(Value::Tensor)
+        .map_err(invalid)
 }
 
 fn constraints_tensor(constraints: &[[usize; 2]]) -> BuiltinResult<Value> {
@@ -664,6 +936,29 @@ fn positive_index(value: f64, max: usize) -> BuiltinResult<usize> {
     Ok(idx)
 }
 
+fn tensor_positive_index(tensor: &Tensor, index: usize, max: usize) -> BuiltinResult<usize> {
+    let value = tensor
+        .numeric_value_at(index)
+        .ok_or_else(|| invalid("index is out of range"))?;
+    if let Some(integer) = value.into_int_value() {
+        let idx = integer
+            .try_to_usize()
+            .ok_or_else(|| invalid("index is out of range"))?;
+        if idx == 0 {
+            return Err(invalid("indices must be positive finite integers"));
+        }
+        if idx > max {
+            return Err(invalid("index is out of range"));
+        }
+        return Ok(idx);
+    }
+    match value {
+        NumericScalar::F64(value) => positive_index(value, max),
+        NumericScalar::F32(value) => positive_index(f64::from(value), max),
+        _ => unreachable!("integer scalar returned by into_int_value"),
+    }
+}
+
 fn invalid(detail: impl AsRef<str>) -> crate::RuntimeError {
     error(&ERROR_INVALID_ARGUMENT, detail)
 }
@@ -688,14 +983,11 @@ mod tests {
     use futures::executor::block_on;
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new_2d(data.to_vec(), rows, cols).expect("test tensor"))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor"))
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -757,6 +1049,196 @@ mod tests {
     }
 
     #[test]
+    fn point_parsers_read_typed_integer_storage_exactly() {
+        let points = matrix_points(
+            &integer_tensor(IntegerStorage::U16(vec![0, 1, 0, 0, 0, 1]), 3, 2),
+            BUILTIN_NAME,
+        )
+        .expect("matrix points");
+        assert_eq!(points, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+
+        let vector_points = vector_points(
+            &integer_tensor(IntegerStorage::I16(vec![0, 1, 0]), 1, 3),
+            &integer_tensor(IntegerStorage::I16(vec![0, 0, 1]), 1, 3),
+            BUILTIN_NAME,
+        )
+        .expect("vector points");
+        assert_eq!(vector_points, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+    }
+
+    #[test]
+    fn topology_parsers_read_typed_integer_storage_exactly() {
+        let constraints =
+            constraints_from_value(&integer_tensor(IntegerStorage::U16(vec![1, 2, 2, 3]), 2, 2))
+                .expect("constraints");
+        assert_eq!(constraints, vec![[1, 2], [2, 3]]);
+
+        let connectivity = connectivity_from_value(
+            &integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), 1, 3),
+            Some(3),
+        )
+        .expect("connectivity");
+        assert_eq!(connectivity, vec![[0, 1, 2]]);
+    }
+
+    #[test]
+    fn delaunaytri_integer_extensions_follow_compatibility_mode() {
+        let points = || integer_tensor(IntegerStorage::U16(vec![0, 1, 0, 0, 0, 1]), 3, 2);
+        let empty_topology = || integer_tensor(IntegerStorage::U16(Vec::new()), 0, 2);
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(delaunay_tri_builtin(vec![points()]))
+                .expect_err("MATLAB mode rejects typed-integer constructor coordinates");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension")
+            );
+
+            let error = block_on(delaunay_tri_builtin(vec![
+                tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
+                empty_topology(),
+            ]))
+            .expect_err("MATLAB mode rejects typed-integer constructor topology");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DelaunayTriIntegerTopologyExtension")
+            );
+
+            let resident_points = runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![3, 2],
+                device_id: 0,
+                buffer_id: 9_307_001,
+            };
+            runmat_accelerate_api::set_handle_integer_type(
+                &resident_points,
+                runmat_accelerate_api::IntegerElementType::U16,
+            );
+            let error = block_on(delaunay_tri_builtin(vec![Value::GpuTensor(
+                resident_points.clone(),
+            )]))
+            .expect_err("MATLAB mode rejects resident integer coordinates before gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension")
+            );
+            runmat_accelerate_api::clear_handle_integer_type(&resident_points);
+
+            let resident_topology = runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![0, 2],
+                device_id: 0,
+                buffer_id: 9_307_002,
+            };
+            runmat_accelerate_api::set_handle_integer_type(
+                &resident_topology,
+                runmat_accelerate_api::IntegerElementType::U16,
+            );
+            let error = block_on(delaunay_tri_builtin(vec![
+                tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
+                Value::GpuTensor(resident_topology.clone()),
+            ]))
+            .expect_err("MATLAB mode rejects resident integer topology before gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DelaunayTriIntegerTopologyExtension")
+            );
+            runmat_accelerate_api::clear_handle_integer_type(&resident_topology);
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(block_on(delaunay_tri_builtin(vec![points()])).is_ok());
+            assert!(block_on(delaunay_tri_builtin(vec![
+                tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
+                empty_topology(),
+            ]))
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn delaunaytri_object_and_query_extensions_follow_compatibility_mode() {
+        let make_object = || {
+            object(
+                block_on(delaunay_tri_builtin(vec![tensor(
+                    &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                    3,
+                    2,
+                )]))
+                .expect("double constructor"),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+
+            let mut integer_points = make_object();
+            integer_points.properties.insert(
+                POINTS_PROPERTY.to_string(),
+                integer_tensor(IntegerStorage::U16(vec![0, 1, 0, 0, 0, 1]), 3, 2),
+            );
+            let error = block_on(nearest_neighbor_builtin(
+                Value::Object(integer_points),
+                vec![tensor(&[0.1, 0.1], 1, 2)],
+            ))
+            .expect_err("MATLAB mode rejects integer object points");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension")
+            );
+
+            let object = Value::Object(make_object());
+            let error = block_on(nearest_neighbor_builtin(
+                object,
+                vec![integer_tensor(IntegerStorage::U16(vec![0, 0]), 1, 2)],
+            ))
+            .expect_err("MATLAB mode rejects integer query points");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension")
+            );
+
+            let mut integer_topology = make_object();
+            integer_topology.properties.insert(
+                CONNECTIVITY_PROPERTY.to_string(),
+                integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), 1, 3),
+            );
+            let error = block_on(free_boundary_builtin(Value::Object(integer_topology)))
+                .expect_err("MATLAB mode rejects integer object topology");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:DelaunayTriIntegerTopologyExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let object = Value::Object(make_object());
+            assert!(block_on(nearest_neighbor_builtin(
+                object,
+                vec![integer_tensor(IntegerStorage::U16(vec![0, 0]), 1, 2)],
+            ))
+            .is_ok());
+
+            let mut integer_topology = make_object();
+            integer_topology.properties.insert(
+                CONNECTIVITY_PROPERTY.to_string(),
+                integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), 1, 3),
+            );
+            assert!(block_on(free_boundary_builtin(Value::Object(integer_topology))).is_ok());
+        }
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn topology_index_parser_preserves_wide_integer_values_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide index");
+        assert_eq!(
+            tensor_positive_index(&tensor, 0, usize::MAX).expect("exact wide index"),
+            wide as usize
+        );
+        assert!(tensor_positive_index(&tensor, 0, (wide - 1) as usize).is_err());
+    }
+
+    #[test]
     fn delaunaytri_empty_constructor_returns_empty_topology() {
         let dt = object(block_on(delaunay_tri_builtin(vec![])).unwrap());
         let Value::Tensor(points) = dt.properties.get("X").unwrap() else {
@@ -807,7 +1289,7 @@ mod tests {
         .unwrap() else {
             panic!("expected nearest tensor")
         };
-        assert_eq!(nn.data, vec![3.0]);
+        assert_eq!(nn.materialize_f64(), vec![3.0]);
 
         let location = block_on(point_location_builtin(
             dt,
@@ -819,7 +1301,7 @@ mod tests {
         };
         assert_eq!(ti.rows, 1);
         assert_eq!(ti.cols, 1);
-        assert_eq!(ti.data, vec![1.0]);
+        assert_eq!(ti.materialize_f64(), vec![1.0]);
     }
 
     #[test]

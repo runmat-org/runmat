@@ -16,7 +16,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to the host while providers gain native tolerance-membership support."
+    "notes": "Documented GPU inputs use authoritative typed gather fallback and ordinary logical/index outputs are restored to the owning provider."
   },
   "fusion": {
     "elementwise": false,
@@ -27,7 +27,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::array::sorting_sets::ismembertol::tests",
-    "integration": "builtins::array::sorting_sets::ismembertol::tests::gpu_inputs_gather_to_host"
+    "integration": "builtins::array::sorting_sets::ismembertol::tests::documented_resident_integer_outputs_restore_and_excess_arity_rejects"
   },
   "description": "`ismembertol(A, B)` returns logical membership flags for real numeric values in `A` that are within tolerance of values in `B`. Optional outputs return first or all matching one-based indices into `B`.",
   "behaviors": [
@@ -39,7 +39,7 @@
     "The optional second output `LocB` contains the first one-based index in `B` for each match and `0` when absent.",
     "`OutputAllIndices`, true makes `LocB` a cell array whose cells contain all matching one-based indices, or `[0]` when no match exists.",
     "`NaN` values do not match. Exact equalities, including equal infinities, match before tolerance subtraction is considered.",
-    "Complex, sparse, string, character, cell, struct, and object inputs are rejected; `ismembertol` is limited to real full numeric inputs. RunMat also accepts logical values by promoting them to numeric 0/1 values."
+    "Complex, sparse, string, character, cell, struct, and object inputs are rejected. The documented host data and tolerance domains are `single` and `double`; RunMat mode additionally accepts host integer/logical data and typed integer/logical tolerance controls through declared compatibility extensions."
   ],
   "examples": [
     {
@@ -96,7 +96,7 @@
     },
     {
       "question": "Will `ismembertol` run on the GPU automatically?",
-      "answer": "GPU inputs are accepted and gathered automatically today. RunMat also supports `ByRows` and `OutputAllIndices` after gathering; that option support is a RunMat compatibility extension beyond MATLAB's current gpuArray restrictions."
+      "answer": "Documented gpuArray input includes integer classes through 32 bits but excludes 64-bit integers, `ByRows`, and `OutputAllIndices`. RunMat preserves those additional forms behind explicit compatibility gates."
     }
   ],
   "links": [
@@ -138,8 +138,8 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/sorting_sets/ismembertol.rs"
   },
   "gpu_behavior": [
-    "`ismembertol` is registered as a sink builtin. When either input tensor lives on the GPU the runtime gathers it to host memory and performs tolerance matching there.",
-    "After gathering, RunMat supports the same host options, including `ByRows` and `OutputAllIndices`. This is an intentional RunMat extension over MATLAB's currently narrower gpuArray option support.",
-    "The result is host-resident logical/index data. This preserves MATLAB-compatible tolerance scaling, row matching, and all-indices cell output while providers lack a dedicated kernel."
+    "`ismembertol` is registered as a sink builtin. When either input tensor lives on the GPU the runtime gathers authoritative typed storage to host memory and performs tolerance matching there.",
+    "Documented ordinary logical and double-index outputs are restored to the first resident input handle's owning provider. Integer gpuArray inputs through 32 bits retain their documented support across the fallback.",
+    "Resident 64-bit integer input and enabled `ByRows` or `OutputAllIndices` are RunMat-only extensions checked before gather. The extended all-indices cell result remains host materialized because the public GPU form excludes that output."
   ]
 }

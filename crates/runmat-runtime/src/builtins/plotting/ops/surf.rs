@@ -641,14 +641,7 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("surf test vector")
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -658,14 +651,7 @@ pub(crate) mod tests {
         let res = futures::executor::block_on(surf_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0])),
-            Value::Tensor(Tensor {
-                data: vec![0.0],
-                integer_data: None,
-                shape: vec![1],
-                rows: 1,
-                cols: 1,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![0.0], vec![1]).expect("scalar grid")),
         ]));
         assert!(res.is_err());
     }
@@ -706,33 +692,14 @@ pub(crate) mod tests {
         // Column-major storage for X:
         // X = [0 1 2;
         //      0 1 2]
-        let x = Tensor {
-            data: vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
-            integer_data: None,
-            shape: vec![2, 3],
-            rows: 2,
-            cols: 3,
-            dtype: runmat_builtins::NumericDType::F64,
-        };
+        let x = Tensor::new(vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0], vec![2, 3]).expect("meshgrid x");
         // Y = [10 10 10;
         //      20 20 20]
-        let y = Tensor {
-            data: vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0],
-            integer_data: None,
-            shape: vec![2, 3],
-            rows: 2,
-            cols: 3,
-            dtype: runmat_builtins::NumericDType::F64,
-        };
+        let y =
+            Tensor::new(vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0], vec![2, 3]).expect("meshgrid y");
         // Z is 2x3 surface heights (any values), column-major.
-        let z = Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            integer_data: None,
-            shape: vec![2, 3],
-            rows: 2,
-            cols: 3,
-            dtype: runmat_builtins::NumericDType::F64,
-        };
+        let z =
+            Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("surface heights");
 
         let (x_axis, y_axis) = crate::builtins::plotting::op_common::surface_inputs::extract_meshgrid_axes_from_xy_matrices(&x, &y, z.rows, z.cols, BUILTIN_NAME).expect("axes");
         assert_eq!(x_axis.len(), 3);
@@ -749,65 +716,65 @@ pub(crate) mod tests {
     #[test]
     fn surf_z_only_shorthand_builds_surface_with_default_axes() {
         setup_plot_tests();
-        let out = futures::executor::block_on(surf_builtin(vec![Value::Tensor(Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })]));
+        let out = futures::executor::block_on(surf_builtin(vec![Value::Tensor(
+            Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("square surface"),
+        )]));
         assert!(out.is_ok() || out.is_err());
         let (x, y, z, rest) =
             crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args_matlab_xy(
-                vec![Value::Tensor(Tensor {
-                    data: vec![1.0, 2.0, 3.0, 4.0],
-        integer_data: None,
-                    shape: vec![2, 2],
-                    rows: 2,
-                    cols: 2,
-                    dtype: runmat_builtins::NumericDType::F64,
-                })],
+                vec![Value::Tensor(
+                    Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])
+                        .expect("square surface"),
+                )],
                 BUILTIN_NAME,
             )
             .unwrap();
         assert!(rest.is_empty());
-        assert_eq!(Tensor::try_from(&x).unwrap().data, vec![1.0, 2.0]);
-        assert_eq!(Tensor::try_from(&y).unwrap().data, vec![1.0, 2.0]);
-        assert_eq!(Tensor::try_from(&z).unwrap().data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            Tensor::try_from(&x).unwrap().materialize_f64(),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            Tensor::try_from(&y).unwrap().materialize_f64(),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            Tensor::try_from(&z).unwrap().materialize_f64(),
+            vec![1.0, 2.0, 3.0, 4.0]
+        );
     }
 
     #[test]
     fn surf_z_only_shorthand_uses_matlab_xy_for_non_square_grid() {
         let (x, y, _, rest) =
             crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args_matlab_xy(
-                vec![Value::Tensor(Tensor {
-                    data: (1..=12).map(|v| v as f64).collect(),
-        integer_data: None,
-                    shape: vec![3, 4],
-                    rows: 3,
-                    cols: 4,
-                    dtype: runmat_builtins::NumericDType::F64,
-                })],
+                vec![Value::Tensor(
+                    Tensor::new(
+                        (1..=12).map(|v| v as f64).collect(),
+                        vec![3, 4],
+                    )
+                    .expect("nonsquare surface"),
+                )],
                 BUILTIN_NAME,
             )
             .unwrap();
         assert!(rest.is_empty());
-        assert_eq!(Tensor::try_from(&x).unwrap().data, vec![1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(Tensor::try_from(&y).unwrap().data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(
+            Tensor::try_from(&x).unwrap().materialize_f64(),
+            vec![1.0, 2.0, 3.0, 4.0]
+        );
+        assert_eq!(
+            Tensor::try_from(&y).unwrap().materialize_f64(),
+            vec![1.0, 2.0, 3.0]
+        );
     }
 
     #[test]
     fn surf_returns_surface_handle() {
         setup_plot_tests();
-        let handle = futures::executor::block_on(surf_builtin(vec![Value::Tensor(Tensor {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })]))
+        let handle = futures::executor::block_on(surf_builtin(vec![Value::Tensor(
+            Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("square surface"),
+        )]))
         .expect("surf should return a handle");
         assert!(handle.is_finite());
     }

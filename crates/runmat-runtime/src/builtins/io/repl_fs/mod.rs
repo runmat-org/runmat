@@ -31,6 +31,9 @@ pub mod uigetfile;
 pub mod uiputfile;
 pub mod xml;
 use once_cell::sync::Lazy;
+use runmat_builtins::Tensor;
+
+use crate::builtins::common::tensor;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -38,4 +41,65 @@ pub static REPL_FS_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub(crate) fn is_rooted_path(path: &Path) -> bool {
     path.is_absolute() || path.has_root()
+}
+
+pub(crate) fn tensor_char_codes_to_string(value: &Tensor) -> Option<String> {
+    if let Some(storage) = value.integer_storage() {
+        let mut text = String::with_capacity(storage.len());
+        for code in storage.exact_values() {
+            let code = u32::try_from(code.try_to_usize()?).ok()?;
+            text.push(char::from_u32(code)?);
+        }
+        return Some(text);
+    }
+
+    let codes = tensor::tensor_values_f64(value);
+    let mut text = String::with_capacity(codes.len());
+    for code in codes {
+        if !code.is_finite() {
+            return None;
+        }
+        let rounded = code.round();
+        if (code - rounded).abs() > 1e-6 {
+            return None;
+        }
+        let int_code = rounded as i64;
+        if !(0..=0x10FFFF).contains(&int_code) {
+            return None;
+        }
+        text.push(char::from_u32(int_code as u32)?);
+    }
+    Some(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn tensor_char_codes_to_string_reads_typed_integer_storage_exactly() {
+        let storages = [
+            IntegerStorage::I8(vec![82, 77]),
+            IntegerStorage::I16(vec![82, 77]),
+            IntegerStorage::I32(vec![82, 77]),
+            IntegerStorage::I64(vec![82, 77]),
+            IntegerStorage::U8(vec![82, 77]),
+            IntegerStorage::U16(vec![82, 77]),
+            IntegerStorage::U32(vec![82, 77]),
+            IntegerStorage::U64(vec![82, 77]),
+        ];
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("tensor");
+            assert_eq!(tensor_char_codes_to_string(&tensor).as_deref(), Some("RM"));
+        }
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("tensor");
+        assert!(tensor_char_codes_to_string(&negative).is_none());
+
+        let invalid =
+            Tensor::new_integer(IntegerStorage::U32(vec![0x11_0000]), vec![1, 1]).expect("tensor");
+        assert!(tensor_char_codes_to_string(&invalid).is_none());
+    }
 }

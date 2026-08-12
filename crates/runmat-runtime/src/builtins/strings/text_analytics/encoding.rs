@@ -11,6 +11,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     documents_from_object, TOKENIZED_DOCUMENT_CLASS,
@@ -806,7 +807,7 @@ fn numeric_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Numer
             shape: vec![1, 1],
         }),
         Value::Tensor(tensor) => Ok(NumericInput {
-            values: tensor.data.clone(),
+            values: tensor_utils::tensor_values_f64(tensor),
             shape: tensor.shape.clone(),
         }),
         other => Err(encoding_error(
@@ -851,7 +852,9 @@ fn numeric_scalar(value: &Value, fn_name: &str, option: &str) -> BuiltinResult<f
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(int_value_to_f64(value)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(encoding_error(
             fn_name,
             format!("{fn_name}: {option} must be a numeric scalar, got {other:?}"),
@@ -863,14 +866,31 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
-            0.0 => Ok(false),
-            1.0 => Ok(true),
-            other => Err(encoding_error(
-                fn_name,
-                format!("{fn_name}: logical scalar option must be true or false, got {other}"),
-            )),
-        },
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return match value.try_to_u64() {
+                    Some(0) => Ok(false),
+                    Some(1) => Ok(true),
+                    _ => Err(encoding_error(
+                        fn_name,
+                        format!(
+                            "{fn_name}: logical scalar option must be true or false, got {value:?}"
+                        ),
+                    )),
+                };
+            }
+            match tensor_utils::tensor_value_f64(tensor, 0) {
+                0.0 => Ok(false),
+                1.0 => Ok(true),
+                other => Err(encoding_error(
+                    fn_name,
+                    format!("{fn_name}: logical scalar option must be true or false, got {other}"),
+                )),
+            }
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         other => Err(encoding_error(
             fn_name,
@@ -913,7 +933,17 @@ fn encoding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, IntegerStorage};
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_integer_vector(storage: IntegerStorage, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
 
     fn tokenized_document_object(rows: Vec<Vec<&str>>) -> ObjectInstance {
         let values = rows
@@ -936,6 +966,41 @@ mod tests {
             .properties
             .insert("Documents".to_string(), Value::Cell(documents));
         object
+    }
+
+    #[test]
+    fn scalar_option_parsers_read_typed_integer_storage_exactly() {
+        assert_eq!(
+            numeric_scalar(
+                &poisoned_integer_scalar(IntegerStorage::U16(vec![12])),
+                "wordEncoding",
+                "MaxNumWords"
+            )
+            .expect("numeric"),
+            12.0
+        );
+        assert!(parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::U8(vec![1])),
+            "wordEncoding"
+        )
+        .expect("bool"));
+        assert!(!parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::I16(vec![0])),
+            "wordEncoding"
+        )
+        .expect("bool"));
+    }
+
+    #[test]
+    fn numeric_input_reads_typed_integer_storage_exactly() {
+        let input = numeric_input_from_value(
+            &poisoned_integer_vector(IntegerStorage::I16(vec![2, 3]), 2),
+            "ind2word",
+        )
+        .expect("numeric");
+
+        assert_eq!(input.values, vec![2.0, 3.0]);
+        assert_eq!(input.shape, vec![1, 2]);
     }
 
     #[tokio::test]
@@ -1025,10 +1090,10 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(indices.shape, vec![2, 2]);
-        assert_eq!(indices.data[0], 2.0);
-        assert!(indices.data[1].is_nan());
-        assert_eq!(indices.data[2], 1.0);
-        assert_eq!(indices.data[3], 1.0);
+        assert_eq!(indices.materialize_f64()[0], 2.0);
+        assert!(indices.materialize_f64()[1].is_nan());
+        assert_eq!(indices.materialize_f64()[2], 1.0);
+        assert_eq!(indices.materialize_f64()[3], 1.0);
     }
 
     #[tokio::test]

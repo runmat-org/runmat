@@ -289,6 +289,12 @@ pub async fn evaluate(
     degree: Value,
     rest: &[Value],
 ) -> BuiltinResult<PolyfitEval> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, "polyfit")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&y, "polyfit")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&degree, "polyfit")?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, "polyfit")?;
+    }
     let deg = parse_degree(&degree)?;
 
     if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest).await? {
@@ -465,16 +471,12 @@ impl PolyfitEval {
 }
 
 fn parse_degree(value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            polyfit_argument_error("polyfit: degree must be a non-negative integer")
+        });
+    }
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(polyfit_argument_error(
-                    "polyfit: degree must be a non-negative integer",
-                ));
-            }
-            Ok(raw as usize)
-        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(polyfit_argument_error("polyfit: degree must be finite"));
@@ -488,9 +490,16 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
                     "polyfit: degree must be a non-negative integer",
                 ));
             }
+            if !fits_platform_usize(rounded) {
+                return Err(polyfit_argument_error(
+                    "polyfit: degree exceeds platform limits",
+                ));
+            }
             Ok(rounded as usize)
         }
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => parse_degree(&Value::Num(t.data[0])),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            parse_degree(&Value::Num(tensor::tensor_value_f64(t, 0)))
+        }
         Value::LogicalArray(l) if l.len() == 1 => {
             parse_degree(&Value::Num(if l.data[0] != 0 { 1.0 } else { 0.0 }))
         }
@@ -500,17 +509,21 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
     }
 }
 
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
+}
+
 #[async_recursion::async_recursion(?Send)]
 async fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
-        Value::Tensor(mut tensor) => {
+        Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
-            Ok(tensor.data.drain(..).collect())
+            Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
-            Ok(tensor.data)
+            Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::Num(n) => Ok(vec![n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
@@ -536,21 +549,23 @@ async fn complex_vector(
     value: Value,
 ) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
-        Value::Tensor(mut tensor) => {
+        Value::Tensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
             let all_real = true;
-            let data = tensor
-                .data
-                .drain(..)
+            let data = tensor::tensor_values_f64(&tensor)
+                .into_iter()
                 .map(|x| Complex64::new(x, 0.0))
                 .collect();
             Ok((data, all_real))
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(context, label, &tensor.shape)?;
-            let is_complex = tensor.data.iter().any(|&(_, im)| im.abs() > EPS);
+            let is_complex = tensor
+                .materialize_f64()
+                .iter()
+                .any(|&(_, im)| im.abs() > EPS);
             let data = tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Complex64::new(re, im))
                 .collect::<Vec<_>>();
@@ -560,8 +575,7 @@ async fn complex_vector(
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
             ensure_vector_shape(context, label, &tensor.shape)?;
             Ok((
-                tensor
-                    .data
+                tensor::tensor_values_f64(&tensor)
                     .iter()
                     .map(|&x| Complex64::new(x, 0.0))
                     .collect(),
@@ -1017,8 +1031,41 @@ pub fn polyfit_host_real_for_provider(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn degree_parser_preserves_representable_uint64() {
+        assert_eq!(
+            parse_degree(&Value::Int(IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_degree(&Value::Int(IntValue::I64(-1))).is_err());
+    }
+
+    #[test]
+    fn degree_parser_reads_typed_integer_scalar_storage_exactly() {
+        let degree =
+            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("typed degree");
+
+        assert_eq!(parse_degree(&Value::Tensor(degree)).unwrap(), 3);
+
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative degree");
+        assert!(parse_degree(&Value::Tensor(negative)).is_err());
+    }
+
+    #[test]
+    fn degree_parser_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_degree(&Value::Num(boundary)).is_err());
+    }
+
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -1026,6 +1073,29 @@ pub(crate) mod tests {
             "expected error containing '{needle}', got '{}'",
             err.message()
         );
+    }
+
+    #[test]
+    fn polyfit_rejects_typed_complex_integer_inputs() {
+        let typed_complex = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I64(vec![i64::MAX]),
+                    IntegerStorage::I64(vec![-1]),
+                )
+                .expect("storage"),
+                vec![1, 1],
+            )
+            .expect("tensor"),
+        );
+        let err = evaluate(
+            typed_complex,
+            Value::Num(1.0),
+            Value::Int(IntValue::I32(0)),
+            &[],
+        )
+        .expect_err("typed complex integer input must reject");
+        assert_error_contains(err, "complex numbers with integer types");
     }
 
     fn evaluate(
@@ -1081,8 +1151,33 @@ pub(crate) mod tests {
         match eval.coefficients() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 1.5).abs() < 1e-10);
-                assert!((t.data[1] - 2.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[0] - 1.5).abs() < 1e-10);
+                assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
+            }
+            other => panic!("expected tensor coefficients, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn polyfit_typed_integer_vectors_degree_and_weights_cross_double_boundary_exactly() {
+        let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![4, 1]).unwrap();
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![2, 4, 6, 8]), vec![4, 1]).unwrap();
+        let degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        let weights =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 1, 1, 1]), vec![1, 4]).unwrap();
+        let eval = evaluate(
+            Value::Tensor(x),
+            Value::Tensor(y),
+            Value::Tensor(degree),
+            &[Value::Tensor(weights)],
+        )
+        .expect("polyfit");
+        match eval.coefficients() {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert!((t.materialize_f64()[0] - 2.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
+                assert!(t.integer_storage().is_none());
             }
             other => panic!("expected tensor coefficients, got {other:?}"),
         }
@@ -1111,8 +1206,8 @@ pub(crate) mod tests {
         match eval.mu() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0]).abs() < 1e-10);
-                assert!(t.data[1].abs() > 0.0);
+                assert!((t.materialize_f64()[0]).abs() < 1e-10);
+                assert!(t.materialize_f64()[1].abs() > 0.0);
             }
             other => panic!("expected tensor mu, got {other:?}"),
         }
@@ -1191,12 +1286,12 @@ pub(crate) mod tests {
             let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let x_handle = provider.upload(&view).expect("upload");
             let view_y = runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             };
             let y_handle = provider.upload(&view_y).expect("upload");
@@ -1220,15 +1315,15 @@ pub(crate) mod tests {
             let weights = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
 
             let x_view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let y_view = runmat_accelerate_api::HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             };
             let w_view = runmat_accelerate_api::HostTensorView {
-                data: &weights.data,
+                data: &weights.materialize_f64(),
                 shape: &weights.shape,
             };
 
@@ -1287,11 +1382,11 @@ pub(crate) mod tests {
 
         let trait_provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let x_view = runmat_accelerate_api::HostTensorView {
-            data: &x.data,
+            data: &x.materialize_f64(),
             shape: &x.shape,
         };
         let y_view = runmat_accelerate_api::HostTensorView {
-            data: &y.data,
+            data: &y.materialize_f64(),
             shape: &y.shape,
         };
         let x_handle = trait_provider.upload(&x_view).expect("upload x");
@@ -1317,7 +1412,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor coefficients, got {other:?}"),
         };
         assert_eq!(cpu_coeff.shape, gpu_coeff.shape);
-        for (a, b) in cpu_coeff.data.iter().zip(gpu_coeff.data.iter()) {
+        for (a, b) in cpu_coeff
+            .materialize_f64()
+            .iter()
+            .zip(gpu_coeff.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "coeff mismatch {a} vs {b}");
         }
 
@@ -1330,7 +1429,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor mu, got {other:?}"),
         };
         assert_eq!(cpu_mu.shape, gpu_mu.shape);
-        for (a, b) in cpu_mu.data.iter().zip(gpu_mu.data.iter()) {
+        for (a, b) in cpu_mu
+            .materialize_f64()
+            .iter()
+            .zip(gpu_mu.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "mu mismatch {a} vs {b}");
         }
 
@@ -1351,7 +1454,11 @@ pub(crate) mod tests {
             other => panic!("expected tensor R, got {other:?}"),
         };
         assert_eq!(cpu_r.shape, gpu_r.shape);
-        for (a, b) in cpu_r.data.iter().zip(gpu_r.data.iter()) {
+        for (a, b) in cpu_r
+            .materialize_f64()
+            .iter()
+            .zip(gpu_r.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-9, "R mismatch {a} vs {b}");
         }
         let cpu_df = match cpu_stats.fields.get("df").expect("df present") {

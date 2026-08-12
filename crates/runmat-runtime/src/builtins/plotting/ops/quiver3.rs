@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_helpers;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -718,22 +719,8 @@ fn default_quiver3_grid_from_value(value: &Value) -> crate::BuiltinResult<(Tenso
         y.push((row + 1) as f64);
     }
     Ok((
-        Tensor {
-            data: x,
-            integer_data: None,
-            shape: vec![len],
-            rows: len,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        },
-        Tensor {
-            data: y,
-            integer_data: None,
-            shape: vec![len],
-            rows: len,
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        },
+        Tensor::new(x, vec![len]).expect("implicit quiver3 x grid"),
+        Tensor::new(y, vec![len]).expect("implicit quiver3 y grid"),
     ))
 }
 
@@ -748,7 +735,11 @@ fn tensor_shape_from_value(value: &Value) -> crate::BuiltinResult<(usize, usize,
         _ => {
             let tensor = Tensor::try_from(value)
                 .map_err(|err| plotting_error(BUILTIN_NAME, format!("quiver3: {err}")))?;
-            Ok((tensor.rows.max(1), tensor.cols.max(1), tensor.data.len()))
+            Ok((
+                tensor.rows.max(1),
+                tensor.cols.max(1),
+                tensor_helpers::tensor_element_len(&tensor),
+            ))
         }
     }
 }
@@ -761,55 +752,79 @@ fn materialize_quiver3_components(
     v: Tensor,
     w: Tensor,
 ) -> crate::BuiltinResult<Quiver3Components> {
-    if u.rows != v.rows
-        || u.cols != v.cols
-        || u.data.len() != v.data.len()
-        || u.shape != v.shape
-        || u.rows != w.rows
-        || u.cols != w.cols
-        || u.data.len() != w.data.len()
-        || u.shape != w.shape
+    let x_len = tensor_helpers::tensor_element_len(&x);
+    let y_len = tensor_helpers::tensor_element_len(&y);
+    let z_len = tensor_helpers::tensor_element_len(&z);
+    let u_len = tensor_helpers::tensor_element_len(&u);
+    let v_len = tensor_helpers::tensor_element_len(&v);
+    let w_len = tensor_helpers::tensor_element_len(&w);
+    let z_rows = z.rows;
+    let z_cols = z.cols;
+    let z_shape = z.shape.clone();
+    let u_rows = u.rows;
+    let u_cols = u.cols;
+    let u_shape = u.shape.clone();
+    let v_rows = v.rows;
+    let v_cols = v.cols;
+    let v_shape = v.shape.clone();
+    let w_rows = w.rows;
+    let w_cols = w.cols;
+    let w_shape = w.shape.clone();
+    let x_values = tensor_helpers::tensor_into_values_f64(x);
+    let y_values = tensor_helpers::tensor_into_values_f64(y);
+    let z_values = tensor_helpers::tensor_into_values_f64(z);
+    let u_values = tensor_helpers::tensor_into_values_f64(u);
+    let v_values = tensor_helpers::tensor_into_values_f64(v);
+    let w_values = tensor_helpers::tensor_into_values_f64(w);
+
+    if u_rows != v_rows
+        || u_cols != v_cols
+        || u_len != v_len
+        || u_shape != v_shape
+        || u_rows != w_rows
+        || u_cols != w_cols
+        || u_len != w_len
+        || u_shape != w_shape
     {
         return Err(plotting_error(
             BUILTIN_NAME,
             "quiver3: U, V, and W inputs must have identical size",
         ));
     }
-    if z.rows != u.rows || z.cols != u.cols || z.data.len() != u.data.len() || z.shape != u.shape {
+    if z_rows != u_rows || z_cols != u_cols || z_len != u_len || z_shape != u_shape {
         return Err(plotting_error(
             BUILTIN_NAME,
             "quiver3: Z, U, V, and W inputs must have identical size",
         ));
     }
-    if x.data.len() == u.data.len() && y.data.len() == u.data.len() {
-        return Ok((x.data, y.data, z.data, u.data, v.data, w.data));
+    if x_len == u_len && y_len == u_len {
+        return Ok((x_values, y_values, z_values, u_values, v_values, w_values));
     }
-    let u_is_matrix = u.rows > 1 && u.cols > 1;
+    let u_is_matrix = u_rows > 1 && u_cols > 1;
     if !u_is_matrix {
-        let len = u.data.len();
-        if x.data.len() != len || y.data.len() != len {
+        if x_len != u_len || y_len != u_len {
             return Err(plotting_error(
                 BUILTIN_NAME,
                 "quiver3: X, Y, Z, U, V, and W vectors must have the same length",
             ));
         }
-        return Ok((x.data, y.data, z.data, u.data, v.data, w.data));
+        return Ok((x_values, y_values, z_values, u_values, v_values, w_values));
     }
-    let rows = u.rows;
-    let cols = u.cols;
-    if x.data.len() == rows * cols && y.data.len() == rows * cols {
-        return Ok((x.data, y.data, z.data, u.data, v.data, w.data));
+    let rows = u_rows;
+    let cols = u_cols;
+    if x_len == rows * cols && y_len == rows * cols {
+        return Ok((x_values, y_values, z_values, u_values, v_values, w_values));
     }
-    if x.data.len() == cols && y.data.len() == rows {
+    if x_len == cols && y_len == rows {
         let mut out_x = Vec::with_capacity(rows * cols);
         let mut out_y = Vec::with_capacity(rows * cols);
         for col in 0..cols {
             for row in 0..rows {
-                out_x.push(x.data[col]);
-                out_y.push(y.data[row]);
+                out_x.push(x_values[col]);
+                out_y.push(y_values[row]);
             }
         }
-        return Ok((out_x, out_y, z.data, u.data, v.data, w.data));
+        return Ok((out_x, out_y, z_values, u_values, v_values, w_values));
     }
     Err(plotting_error(
         BUILTIN_NAME,
@@ -850,39 +865,24 @@ mod tests {
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
 
     fn vec_tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("quiver3 test vector")
+    }
+
+    fn int_vec_tensor(data: Vec<i16>) -> Tensor {
+        Tensor::new_integer(IntegerStorage::I16(data.clone()), vec![data.len()])
+            .expect("integer tensor")
     }
 
     fn mat_tensor(rows: usize, cols: usize, data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![rows, cols]).expect("quiver3 test matrix")
     }
 
     fn nd_tensor(shape: Vec<usize>, data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            rows: shape.first().copied().unwrap_or(data.len()).max(1),
-            cols: shape.get(1).copied().unwrap_or(1).max(1),
-            shape,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), shape).expect("quiver3 test tensor")
     }
 
     #[test]
@@ -977,7 +977,49 @@ mod tests {
         let Value::Tensor(z_data) = z_data else {
             panic!("expected tensor zdata");
         };
-        assert_eq!(z_data.data, vec![4.0, 5.0]);
+        assert_eq!(z_data.materialize_f64(), vec![4.0, 5.0]);
+    }
+
+    #[test]
+    fn quiver3_explicit_vectors_read_typed_integer_storage_exactly() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        let _ = clear_figure(None);
+        let handle = futures::executor::block_on(quiver3_builtin(vec![
+            Value::Tensor(int_vec_tensor(vec![0, 1])),
+            Value::Tensor(int_vec_tensor(vec![2, 3])),
+            Value::Tensor(int_vec_tensor(vec![4, 5])),
+            Value::Tensor(int_vec_tensor(vec![6, 7])),
+            Value::Tensor(int_vec_tensor(vec![8, 9])),
+            Value::Tensor(int_vec_tensor(vec![10, 11])),
+        ]))
+        .unwrap();
+        assert!(handle.is_finite());
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Quiver(quiver) = fig.plots().next().unwrap() else {
+            panic!("expected quiver plot");
+        };
+        assert_eq!(quiver.x, vec![0.0, 1.0]);
+        assert_eq!(quiver.y, vec![2.0, 3.0]);
+        assert_eq!(quiver.z.as_ref().unwrap(), &vec![4.0, 5.0]);
+        assert_eq!(quiver.u, vec![6.0, 7.0]);
+        assert_eq!(quiver.v, vec![8.0, 9.0]);
+        assert_eq!(quiver.w.as_ref().unwrap(), &vec![10.0, 11.0]);
+    }
+
+    #[test]
+    fn quiver3_rejects_mismatched_typed_integer_vector_lengths() {
+        let err = materialize_quiver3_components(
+            int_vec_tensor(vec![0, 1]),
+            int_vec_tensor(vec![2]),
+            int_vec_tensor(vec![4, 5]),
+            int_vec_tensor(vec![6, 7]),
+            int_vec_tensor(vec![8, 9]),
+            int_vec_tensor(vec![10, 11]),
+        )
+        .expect_err("mismatched typed vectors should reject");
+
+        assert!(format!("{err:?}").contains("same length"));
     }
 
     #[test]

@@ -34,12 +34,14 @@
     "Single output `d = eig(A)` returns the eigenvalues as an `n × 1` column vector (values may be complex even when `A` is real).",
     "Two outputs `[V,D] = eig(A)` return the eigenvectors (columns of `V`) and the diagonal eigenvalue matrix `D`.",
     "Three outputs `[V,D,W] = eig(A)` additionally return the left eigenvectors `W` satisfying `W' * A = D * W'`.",
-    "Generalized calls `d = eig(A,B)`, `[V,D] = eig(A,B)`, and `[V,D,W] = eig(A,B)` solve `A*V = B*V*D` for square, same-size numeric or logical matrices. Native BLAS/LAPACK builds use `ZGGEV` and can return infinite eigenvalues for singular pencils; non-LAPACK builds support the nonsingular `B` case.",
+    "Generalized calls `d = eig(A,B)`, `[V,D] = eig(A,B)`, and `[V,D,W] = eig(A,B)` solve `A*V = B*V*D` for square, same-size single or double matrices. Native BLAS/LAPACK builds use `ZGGEV` and can return infinite eigenvalues for singular pencils; non-LAPACK builds support the nonsingular `B` case.",
     "The selector `'vector'` may be supplied (`eig(A,'vector')`, `eig(A,B,'vector')`, `[V,d] = eig(A,'vector')`) to request the eigenvalues as a column vector even when two outputs are requested. `'matrix'` resets the second output to the diagonal-matrix form.",
-    "Logical and integer inputs are promoted to double precision. Complex inputs remain complex throughout the factorisation.",
+    "Logical and typed-integer coefficient matrices are a named RunMat-only extension. Strict modes reject them before provider access; RunMat mode promotes them to double only after every integer coefficient passes an exact binary64-representability check.",
+    "Single host and gpuArray inputs retain single output storage. Complex inputs remain complex throughout the factorisation.",
     "Empty and scalar matrices follow MATLAB’s shape conventions (`eig([])` returns `[]`, `eig(5)` returns `5`).",
     "When the BLAS/LAPACK feature is unavailable and `B` is singular, RunMat detects that the fallback path would need full QZ support and raises a clear error instead of returning a partial factorization.",
-    "Optional balancing keywords (`'balance'`, `'nobalance'`) are accepted. Balancing defaults to on; the current implementation leaves balancing as a no-op while retaining the option for forward compatibility."
+    "Optional balancing keywords (`'balance'`, `'nobalance'`) are accepted. Balancing defaults to on; true balancing remains an explicit numerical-compatibility gap in the current implementation.",
+    "Explicit generalized `'chol'` and `'qz'` selectors and MATLAB's limited real-symmetric sparse eig form remain explicit implementation gaps rather than advertised completed behavior."
   ],
   "examples": [
     {
@@ -104,7 +106,7 @@
     },
     {
       "question": "What about the optional balancing keywords?",
-      "answer": "`'balance'` (default) and `'nobalance'` are accepted. The current release treats balancing as a no-op; the option remains so future releases can introduce a true balancing implementation without breaking user code."
+      "answer": "`'balance'` (default) and `'nobalance'` are accepted, but true balancing is not implemented yet. This is a documented numerical-compatibility gap."
     },
     {
       "question": "Are generalized eigenvalue problems supported?",
@@ -116,11 +118,11 @@
     },
     {
       "question": "Does `eig` participate in fusion or auto-offload?",
-      "answer": "No. Eigenvalue decomposition executes eagerly and acts as a residency sink. The fusion planner will gather any GPU-resident inputs before factorisation."
+      "answer": "No. Eigenvalue decomposition executes eagerly and terminates fusion. Resident inputs remain available to the builtin for provider dispatch or an explicit owning-provider gather fallback."
     },
     {
       "question": "How can I continue on the GPU after calling `eig` today?",
-      "answer": "When the active provider implements the standard `eig(A)` hook (the WGPU backend does for real spectra), the outputs remain on the GPU automatically. If the decomposition falls back to the CPU—because the call is generalized, the spectrum is complex, or `'nobalance'` was requested—call `gpuArray` on whichever results you need on the device."
+      "answer": "When the input provider implements the standard `eig(A)` hook, validated outputs remain resident. Generalized, complex, `'nobalance'`, and unsupported-provider paths gather through the input owner, compute on the host, and upload eligible numeric results back to that same owner."
     },
     {
       "question": "What happens if the eigenvector matrix is singular?",
@@ -140,7 +142,7 @@
     },
     {
       "question": "When should I use `eig` versus `eigs`?",
-      "answer": "Use `eig` for dense matrices when you want the full spectrum. Use `eigs` for sparse or very large matrices when you only need a few eigenvalues (for example the `k` largest or smallest), since it uses iterative Arnoldi/Lanczos methods instead of a full factorization."
+      "answer": "Use `eig` for dense matrices when you want the full spectrum. The current RunMat `eigs` implementation selects a subset from the dense `eig` fallback; a true iterative Arnoldi/Lanczos provider path remains future work."
     }
   ],
   "links": [
@@ -189,8 +191,8 @@
   },
   "gpu_behavior": [
     "The WGPU provider implements the reserved standard `eig(A)` hook by downloading the input, running the same CPU decomposition used by the host path, and immediately re-uploading the double-precision eigenvalues, eigenvectors, and diagonal matrix. When the spectrum is real, the outputs therefore remain on the GPU without any user intervention.",
-    "If any output requires complex storage, you pass generalized `eig(A,B)`, or you pass `'nobalance'`, RunMat automatically falls back to the host implementation and returns CPU-resident arrays. The `'vector'` selector also triggers this transparent host fallback today. Reapply `gpuArray` if you want to continue on the device after such a fallback.",
-    "Because `eig` is a residency sink, the fusion planner treats it as a barrier and does not attempt to fuse surrounding elementwise work."
+    "If the provider hook cannot serve a call, including generalized or complex problems and calls using `'nobalance'` or `'vector'`, RunMat gathers through the input handle's owning provider, computes with the host implementation, and uploads eligible numeric outputs back through that same owner. Floating-point outputs therefore retain accelerator residency across these transparent fallbacks.",
+    "The fusion planner treats `eig` as an allocation boundary: its result handles are not fused into the decomposition itself, but eligible floating-point outputs remain available to subsequent accelerator work without an explicit `gpuArray` round trip."
   ],
   "validation": {
     "summary": "`eig` uses a dense complex Schur decomposition for standard problems. Generalized `eig(A,B)` uses LAPACK `ZGGEV` when the native BLAS/LAPACK feature is enabled, including singular pencils with infinite eigenvalues; otherwise it solves the equivalent standard problem `B\\A` for nonsingular `B` and rejects singular fallback cases with a descriptive QZ-required error. CPU correctness is exercised by the in-module tests linked below; GPU residency is validated at the host-fallback boundary described above rather than via a separate GPU eigensolver.",

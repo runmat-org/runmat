@@ -4,23 +4,24 @@ use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, CorrcoefOptions, CovarianceOptions,
-    FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
-    HostTensorView, ImfilterOptions, PagefunRequest, ProviderAdamUpdateRequest,
-    ProviderAdamUpdateResult, ProviderBandwidth, ProviderBitModulationRequest,
-    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
-    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
-    ProviderCovarianceToCorrelationResult, ProviderCrossentropyMode, ProviderCrossentropyRequest,
-    ProviderCrossentropyResult, ProviderEigResult, ProviderFindResult, ProviderHermitianKind,
-    ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInterp1Extrapolation,
-    ProviderInterp1Method, ProviderInterp1Request, ProviderInvOptions, ProviderLinsolveOptions,
-    ProviderLinsolveResult, ProviderLuResult, ProviderModulationRequest,
-    ProviderMovingWindowEndpoints, ProviderMovingWindowOp, ProviderMovingWindowRequest,
-    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
-    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrResult, ProviderScanDirection, ProviderStdNormalization,
-    ProviderSymmetryKind, ProviderTrapezoidSpacing, SetdiffOptions, SetdiffResult, SortComparison,
-    SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    AccelDownloadFuture, AccelIntegerDownloadFuture, AccelProvider, AccelProviderFuture,
+    CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle,
+    GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned,
+    HostIntegerTensorView, HostTensorOwned, HostTensorView, ImfilterOptions, IntegerElementType,
+    PagefunRequest, ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
+    ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
+    ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
+    ProviderCrossentropyMode, ProviderCrossentropyRequest, ProviderCrossentropyResult,
+    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
+    ProviderIirFilterResult, ProviderInterp1Extrapolation, ProviderInterp1Method,
+    ProviderInterp1Request, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
+    ProviderLuResult, ProviderModulationRequest, ProviderMovingWindowEndpoints,
+    ProviderMovingWindowOp, ProviderMovingWindowRequest, ProviderNanMode, ProviderNdgridRequest,
+    ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
+    ProviderStdNormalization, ProviderSymmetryKind, ProviderTrapezoidSpacing, SetdiffOptions,
+    SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -63,10 +64,961 @@ const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 
 static REGISTRY: OnceCell<Mutex<HashMap<u64, Vec<f64>>>> = OnceCell::new();
+static INTEGER_REGISTRY: OnceCell<Mutex<HashMap<u64, HostIntegerDataOwned>>> = OnceCell::new();
 static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
 
 fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn integer_registry() -> &'static Mutex<HashMap<u64, HostIntegerDataOwned>> {
+    INTEGER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn owned_integer_data(data: HostIntegerDataView<'_>) -> HostIntegerDataOwned {
+    match data {
+        HostIntegerDataView::I8(values) => HostIntegerDataOwned::I8(values.to_vec()),
+        HostIntegerDataView::I16(values) => HostIntegerDataOwned::I16(values.to_vec()),
+        HostIntegerDataView::I32(values) => HostIntegerDataOwned::I32(values.to_vec()),
+        HostIntegerDataView::I64(values) => HostIntegerDataOwned::I64(values.to_vec()),
+        HostIntegerDataView::U8(values) => HostIntegerDataOwned::U8(values.to_vec()),
+        HostIntegerDataView::U16(values) => HostIntegerDataOwned::U16(values.to_vec()),
+        HostIntegerDataView::U32(values) => HostIntegerDataOwned::U32(values.to_vec()),
+        HostIntegerDataView::U64(values) => HostIntegerDataOwned::U64(values.to_vec()),
+    }
+}
+
+fn cast_f64_to_integer_data(values: &[f64], target: IntegerElementType) -> HostIntegerDataOwned {
+    match target {
+        IntegerElementType::I8 => HostIntegerDataOwned::I8(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_signed(value, i8::MIN as f64, i8::MAX as f64) as i8)
+                .collect(),
+        ),
+        IntegerElementType::I16 => HostIntegerDataOwned::I16(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_signed(value, i16::MIN as f64, i16::MAX as f64) as i16)
+                .collect(),
+        ),
+        IntegerElementType::I32 => HostIntegerDataOwned::I32(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_signed(value, i32::MIN as f64, i32::MAX as f64) as i32)
+                .collect(),
+        ),
+        IntegerElementType::I64 => HostIntegerDataOwned::I64(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_signed(value, i64::MIN as f64, i64::MAX as f64))
+                .collect(),
+        ),
+        IntegerElementType::U8 => HostIntegerDataOwned::U8(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_unsigned(value, u8::MAX as f64) as u8)
+                .collect(),
+        ),
+        IntegerElementType::U16 => HostIntegerDataOwned::U16(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_unsigned(value, u16::MAX as f64) as u16)
+                .collect(),
+        ),
+        IntegerElementType::U32 => HostIntegerDataOwned::U32(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_unsigned(value, u32::MAX as f64) as u32)
+                .collect(),
+        ),
+        IntegerElementType::U64 => HostIntegerDataOwned::U64(
+            values
+                .iter()
+                .map(|&value| cast_f64_to_unsigned(value, u64::MAX as f64))
+                .collect(),
+        ),
+    }
+}
+
+fn cast_integer_data_to_integer(
+    data: &HostIntegerDataOwned,
+    target: IntegerElementType,
+) -> HostIntegerDataOwned {
+    match target {
+        IntegerElementType::I8 => HostIntegerDataOwned::I8(
+            integer_data_as_i128(data)
+                .into_iter()
+                .map(|value| value.clamp(i8::MIN as i128, i8::MAX as i128) as i8)
+                .collect(),
+        ),
+        IntegerElementType::I16 => HostIntegerDataOwned::I16(
+            integer_data_as_i128(data)
+                .into_iter()
+                .map(|value| value.clamp(i16::MIN as i128, i16::MAX as i128) as i16)
+                .collect(),
+        ),
+        IntegerElementType::I32 => HostIntegerDataOwned::I32(
+            integer_data_as_i128(data)
+                .into_iter()
+                .map(|value| value.clamp(i32::MIN as i128, i32::MAX as i128) as i32)
+                .collect(),
+        ),
+        IntegerElementType::I64 => HostIntegerDataOwned::I64(
+            integer_data_as_i128(data)
+                .into_iter()
+                .map(|value| value.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
+                .collect(),
+        ),
+        IntegerElementType::U8 => HostIntegerDataOwned::U8(
+            integer_data_as_u128(data)
+                .into_iter()
+                .map(|value| value.min(u8::MAX as u128) as u8)
+                .collect(),
+        ),
+        IntegerElementType::U16 => HostIntegerDataOwned::U16(
+            integer_data_as_u128(data)
+                .into_iter()
+                .map(|value| value.min(u16::MAX as u128) as u16)
+                .collect(),
+        ),
+        IntegerElementType::U32 => HostIntegerDataOwned::U32(
+            integer_data_as_u128(data)
+                .into_iter()
+                .map(|value| value.min(u32::MAX as u128) as u32)
+                .collect(),
+        ),
+        IntegerElementType::U64 => HostIntegerDataOwned::U64(
+            integer_data_as_u128(data)
+                .into_iter()
+                .map(|value| value.min(u64::MAX as u128) as u64)
+                .collect(),
+        ),
+    }
+}
+
+fn integer_data_as_i128(data: &HostIntegerDataOwned) -> Vec<i128> {
+    match data {
+        HostIntegerDataOwned::I8(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::I16(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::I32(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::I64(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::U8(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::U16(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::U32(values) => values.iter().map(|&value| value as i128).collect(),
+        HostIntegerDataOwned::U64(values) => values
+            .iter()
+            .map(|&value| (value as u128).min(i128::MAX as u128) as i128)
+            .collect(),
+    }
+}
+
+fn integer_data_as_u128(data: &HostIntegerDataOwned) -> Vec<u128> {
+    match data {
+        HostIntegerDataOwned::I8(values) => {
+            values.iter().map(|&value| value.max(0) as u128).collect()
+        }
+        HostIntegerDataOwned::I16(values) => {
+            values.iter().map(|&value| value.max(0) as u128).collect()
+        }
+        HostIntegerDataOwned::I32(values) => {
+            values.iter().map(|&value| value.max(0) as u128).collect()
+        }
+        HostIntegerDataOwned::I64(values) => {
+            values.iter().map(|&value| value.max(0) as u128).collect()
+        }
+        HostIntegerDataOwned::U8(values) => values.iter().map(|&value| value as u128).collect(),
+        HostIntegerDataOwned::U16(values) => values.iter().map(|&value| value as u128).collect(),
+        HostIntegerDataOwned::U32(values) => values.iter().map(|&value| value as u128).collect(),
+        HostIntegerDataOwned::U64(values) => values.iter().map(|&value| value as u128).collect(),
+    }
+}
+
+fn cast_f64_to_signed(value: f64, min: f64, max: f64) -> i64 {
+    if value.is_nan() {
+        0
+    } else if value.is_infinite() {
+        if value.is_sign_negative() {
+            min as i64
+        } else {
+            max as i64
+        }
+    } else {
+        value.round().clamp(min, max) as i64
+    }
+}
+
+fn cast_f64_to_unsigned(value: f64, max: f64) -> u64 {
+    if value.is_nan() || value.is_sign_negative() {
+        0
+    } else if value.is_infinite() {
+        max as u64
+    } else {
+        value.round().clamp(0.0, max) as u64
+    }
+}
+
+fn integer_data_bytes(data: &HostIntegerDataOwned) -> u64 {
+    match data {
+        HostIntegerDataOwned::I8(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::I16(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::I32(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::I64(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::U8(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::U16(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::U32(values) => std::mem::size_of_val(values.as_slice()) as u64,
+        HostIntegerDataOwned::U64(values) => std::mem::size_of_val(values.as_slice()) as u64,
+    }
+}
+
+fn integer_data_len(data: &HostIntegerDataOwned) -> usize {
+    match data {
+        HostIntegerDataOwned::I8(values) => values.len(),
+        HostIntegerDataOwned::I16(values) => values.len(),
+        HostIntegerDataOwned::I32(values) => values.len(),
+        HostIntegerDataOwned::I64(values) => values.len(),
+        HostIntegerDataOwned::U8(values) => values.len(),
+        HostIntegerDataOwned::U16(values) => values.len(),
+        HostIntegerDataOwned::U32(values) => values.len(),
+        HostIntegerDataOwned::U64(values) => values.len(),
+    }
+}
+
+fn gather_integer_data(
+    data: &HostIntegerDataOwned,
+    indices: &[u32],
+) -> Result<HostIntegerDataOwned> {
+    macro_rules! gather {
+        ($values:expr, $owned:ident) => {{
+            let mut out = Vec::with_capacity(indices.len());
+            for (pos, &idx) in indices.iter().enumerate() {
+                let lin = idx as usize;
+                let value = $values.get(lin).copied().ok_or_else(|| {
+                    anyhow!(
+                        "gather_linear: integer index {} (position {}) out of bounds (logical_len={})",
+                        lin,
+                        pos,
+                        $values.len()
+                    )
+                })?;
+                out.push(value);
+            }
+            Ok(HostIntegerDataOwned::$owned(out))
+        }};
+    }
+
+    match data {
+        HostIntegerDataOwned::I8(values) => gather!(values, I8),
+        HostIntegerDataOwned::I16(values) => gather!(values, I16),
+        HostIntegerDataOwned::I32(values) => gather!(values, I32),
+        HostIntegerDataOwned::I64(values) => gather!(values, I64),
+        HostIntegerDataOwned::U8(values) => gather!(values, U8),
+        HostIntegerDataOwned::U16(values) => gather!(values, U16),
+        HostIntegerDataOwned::U32(values) => gather!(values, U32),
+        HostIntegerDataOwned::U64(values) => gather!(values, U64),
+    }
+}
+
+fn scatter_integer_data(
+    target: &mut HostIntegerDataOwned,
+    indices: &[u32],
+    values: &HostIntegerDataOwned,
+) -> Result<()> {
+    macro_rules! scatter {
+        ($target:expr, $values:expr) => {{
+            ensure!(
+                $values.len() == indices.len(),
+                "scatter_linear: integer values length {} does not match index count {}",
+                $values.len(),
+                indices.len()
+            );
+            let target_len = $target.len();
+            for (pos, &idx) in indices.iter().enumerate() {
+                let lin = idx as usize;
+                let target = $target.get_mut(lin).ok_or_else(|| {
+                    anyhow!(
+                        "scatter_linear: integer index {} (position {}) out of bounds for target logical len {}",
+                        lin,
+                        pos,
+                        target_len
+                    )
+                })?;
+                *target = $values[pos];
+            }
+            Ok(())
+        }};
+    }
+
+    match (target, values) {
+        (HostIntegerDataOwned::I8(target), HostIntegerDataOwned::I8(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::I16(target), HostIntegerDataOwned::I16(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::I32(target), HostIntegerDataOwned::I32(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::I64(target), HostIntegerDataOwned::I64(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::U8(target), HostIntegerDataOwned::U8(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::U16(target), HostIntegerDataOwned::U16(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::U32(target), HostIntegerDataOwned::U32(values)) => {
+            scatter!(target, values)
+        }
+        (HostIntegerDataOwned::U64(target), HostIntegerDataOwned::U64(values)) => {
+            scatter!(target, values)
+        }
+        (target, values) => Err(anyhow!(
+            "scatter_linear: integer storage mismatch target={:?} values={:?}",
+            target.element_type(),
+            values.element_type()
+        )),
+    }
+}
+
+fn reduce_integer_data_dim(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dim: usize,
+    is_product: bool,
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    ensure!(
+        dim < shape.len(),
+        "native integer reduction: dimension out of bounds"
+    );
+    let expected_len = shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer reduction: shape too large"))
+    })?;
+    ensure!(
+        integer_data_len(data) == expected_len,
+        "native integer reduction: data length does not match shape"
+    );
+    let mut output_shape = shape.to_vec();
+    output_shape[dim] = 1;
+    let output_len = output_shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer reduction: output shape too large"))
+    })?;
+    let mut output_strides = vec![1usize; output_shape.len()];
+    let mut stride = 1usize;
+    for (index, &extent) in output_shape.iter().enumerate() {
+        output_strides[index] = stride;
+        stride = stride
+            .checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer reduction: output strides too large"))?;
+    }
+    macro_rules! reduce {
+        ($values:expr, $owned:ident, $zero:expr, $one:expr) => {{
+            let identity = if is_product { $one } else { $zero };
+            let mut out = vec![identity; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    if extent == 0 {
+                        coords[axis] = 0;
+                    } else {
+                        coords[axis] = remainder % extent;
+                        remainder /= extent;
+                    }
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if axis != dim {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                out[out_index] = if is_product {
+                    out[out_index].saturating_mul(value)
+                } else {
+                    out[out_index].saturating_add(value)
+                };
+            }
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    Ok(match data {
+        HostIntegerDataOwned::I8(values) => reduce!(values, I8, 0_i8, 1_i8),
+        HostIntegerDataOwned::I16(values) => reduce!(values, I16, 0_i16, 1_i16),
+        HostIntegerDataOwned::I32(values) => reduce!(values, I32, 0_i32, 1_i32),
+        HostIntegerDataOwned::I64(values) => reduce!(values, I64, 0_i64, 1_i64),
+        HostIntegerDataOwned::U8(values) => reduce!(values, U8, 0_u8, 1_u8),
+        HostIntegerDataOwned::U16(values) => reduce!(values, U16, 0_u16, 1_u16),
+        HostIntegerDataOwned::U32(values) => reduce!(values, U32, 0_u32, 1_u32),
+        HostIntegerDataOwned::U64(values) => reduce!(values, U64, 0_u64, 1_u64),
+    })
+}
+
+/// Reduce an exact integer buffer along one matrix dimension without routing
+/// values through the provider's f64 registry.  The index output deliberately
+/// remains f64 because MATLAB reduction indices are double-valued.
+fn reduce_integer_extrema_data_dim(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dim: usize,
+    is_min: bool,
+) -> Result<(HostIntegerDataOwned, Vec<f64>, Vec<usize>)> {
+    ensure!(
+        shape.len() == 2,
+        "native integer extrema: only 2D tensors supported"
+    );
+    ensure!(
+        dim <= 1,
+        "native integer extrema: only dims 0 or 1 supported"
+    );
+    let rows = shape[0];
+    let cols = shape[1];
+    ensure!(
+        integer_data_len(data) == rows.saturating_mul(cols),
+        "native integer extrema: data length does not match shape"
+    );
+    ensure!(
+        rows != 0 && cols != 0,
+        "native integer extrema: empty inputs use the host fallback"
+    );
+    let output_shape = if dim == 0 {
+        vec![1, cols]
+    } else {
+        vec![rows, 1]
+    };
+    macro_rules! reduce {
+        ($values:expr, $owned:ident) => {{
+            let output_len = if dim == 0 { cols } else { rows };
+            let mut out = vec![$values[0]; output_len];
+            let mut indices = vec![1.0; output_len];
+            if dim == 0 {
+                for col in 0..cols {
+                    let mut best = $values[col * rows];
+                    for row in 1..rows {
+                        let value = $values[row + col * rows];
+                        if (is_min && value < best) || (!is_min && value > best) {
+                            best = value;
+                            indices[col] = (row + 1) as f64;
+                        }
+                    }
+                    out[col] = best;
+                }
+            } else {
+                for row in 0..rows {
+                    let mut best = $values[row];
+                    for col in 1..cols {
+                        let value = $values[row + col * rows];
+                        if (is_min && value < best) || (!is_min && value > best) {
+                            best = value;
+                            indices[row] = (col + 1) as f64;
+                        }
+                    }
+                    out[row] = best;
+                }
+            }
+            (
+                HostIntegerDataOwned::$owned(out),
+                indices,
+                output_shape.clone(),
+            )
+        }};
+    }
+    Ok(match data {
+        HostIntegerDataOwned::I8(values) => reduce!(values, I8),
+        HostIntegerDataOwned::I16(values) => reduce!(values, I16),
+        HostIntegerDataOwned::I32(values) => reduce!(values, I32),
+        HostIntegerDataOwned::I64(values) => reduce!(values, I64),
+        HostIntegerDataOwned::U8(values) => reduce!(values, U8),
+        HostIntegerDataOwned::U16(values) => reduce!(values, U16),
+        HostIntegerDataOwned::U32(values) => reduce!(values, U32),
+        HostIntegerDataOwned::U64(values) => reduce!(values, U64),
+    })
+}
+
+fn reduce_integer_mean_data_dim(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dim: usize,
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    ensure!(
+        dim < shape.len(),
+        "native integer mean: dimension out of bounds"
+    );
+    let expected_len = shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer mean: shape too large"))
+    })?;
+    ensure!(
+        integer_data_len(data) == expected_len,
+        "native integer mean: data length does not match shape"
+    );
+    let mut output_shape = shape.to_vec();
+    output_shape[dim] = 1;
+    let output_len = output_shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer mean: output shape too large"))
+    })?;
+    let mut output_strides = vec![1usize; output_shape.len()];
+    let mut stride = 1usize;
+    for (index, &extent) in output_shape.iter().enumerate() {
+        output_strides[index] = stride;
+        stride = stride
+            .checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer mean: output strides too large"))?;
+    }
+    let rows = shape[dim];
+
+    macro_rules! reduce_signed {
+        ($values:expr, $owned:ident, $ty:ty) => {{
+            let mut sums = vec![0i128; output_len];
+            let mut counts = vec![0usize; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    if extent == 0 {
+                        coords[axis] = 0;
+                    } else {
+                        coords[axis] = remainder % extent;
+                        remainder /= extent;
+                    }
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if axis != dim {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                sums[out_index] += value as i128;
+                counts[out_index] += 1;
+            }
+            let out = sums
+                .into_iter()
+                .zip(counts)
+                .map(|(sum, count)| rounded_signed_mean_i128(sum, count) as $ty)
+                .collect();
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    macro_rules! reduce_unsigned {
+        ($values:expr, $owned:ident, $ty:ty) => {{
+            let mut sums = vec![0u128; output_len];
+            let mut counts = vec![0usize; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    if extent == 0 {
+                        coords[axis] = 0;
+                    } else {
+                        coords[axis] = remainder % extent;
+                        remainder /= extent;
+                    }
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if axis != dim {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                sums[out_index] += value as u128;
+                counts[out_index] += 1;
+            }
+            let out = sums
+                .into_iter()
+                .zip(counts)
+                .map(|(sum, count)| rounded_unsigned_mean_u128(sum, count) as $ty)
+                .collect();
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    if rows == 0 || output_len == 0 {
+        return Ok(match data {
+            HostIntegerDataOwned::I8(_) => {
+                (HostIntegerDataOwned::I8(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::I16(_) => {
+                (HostIntegerDataOwned::I16(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::I32(_) => {
+                (HostIntegerDataOwned::I32(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::I64(_) => {
+                (HostIntegerDataOwned::I64(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::U8(_) => {
+                (HostIntegerDataOwned::U8(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::U16(_) => {
+                (HostIntegerDataOwned::U16(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::U32(_) => {
+                (HostIntegerDataOwned::U32(vec![0; output_len]), output_shape)
+            }
+            HostIntegerDataOwned::U64(_) => {
+                (HostIntegerDataOwned::U64(vec![0; output_len]), output_shape)
+            }
+        });
+    }
+    Ok(match data {
+        HostIntegerDataOwned::I8(values) => reduce_signed!(values, I8, i8),
+        HostIntegerDataOwned::I16(values) => reduce_signed!(values, I16, i16),
+        HostIntegerDataOwned::I32(values) => reduce_signed!(values, I32, i32),
+        HostIntegerDataOwned::I64(values) => reduce_signed!(values, I64, i64),
+        HostIntegerDataOwned::U8(values) => reduce_unsigned!(values, U8, u8),
+        HostIntegerDataOwned::U16(values) => reduce_unsigned!(values, U16, u16),
+        HostIntegerDataOwned::U32(values) => reduce_unsigned!(values, U32, u32),
+        HostIntegerDataOwned::U64(values) => reduce_unsigned!(values, U64, u64),
+    })
+}
+
+fn reduce_integer_mean_data_dims(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dims: &[usize],
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    if dims.len() == 1 {
+        return reduce_integer_mean_data_dim(data, shape, dims[0]);
+    }
+    let mut reduced = vec![false; shape.len()];
+    for &dim in dims {
+        ensure!(
+            dim < shape.len(),
+            "native integer mean: dimension out of bounds"
+        );
+        reduced[dim] = true;
+    }
+    if !reduced.iter().any(|&value| value) {
+        return Ok((data.clone(), shape.to_vec()));
+    }
+    let expected_len = shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer mean: shape too large"))
+    })?;
+    ensure!(
+        integer_data_len(data) == expected_len,
+        "native integer mean: data length does not match shape"
+    );
+    let mut output_shape = shape.to_vec();
+    for (dim, extent) in output_shape.iter_mut().enumerate() {
+        if reduced[dim] {
+            *extent = 1;
+        }
+    }
+    let output_len = output_shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer mean: output shape too large"))
+    })?;
+    let mut output_strides = vec![1usize; output_shape.len()];
+    let mut stride = 1usize;
+    for (index, &extent) in output_shape.iter().enumerate() {
+        output_strides[index] = stride;
+        stride = stride
+            .checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer mean: output strides too large"))?;
+    }
+    macro_rules! reduce_signed {
+        ($values:expr, $owned:ident, $ty:ty) => {{
+            let mut sums = vec![0i128; output_len];
+            let mut counts = vec![0usize; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    coords[axis] = if extent == 0 {
+                        0
+                    } else {
+                        let coord = remainder % extent;
+                        remainder /= extent;
+                        coord
+                    };
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if !reduced[axis] {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                sums[out_index] += value as i128;
+                counts[out_index] += 1;
+            }
+            let out = sums
+                .into_iter()
+                .zip(counts)
+                .map(|(sum, count)| rounded_signed_mean_i128(sum, count) as $ty)
+                .collect();
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    macro_rules! reduce_unsigned {
+        ($values:expr, $owned:ident, $ty:ty) => {{
+            let mut sums = vec![0u128; output_len];
+            let mut counts = vec![0usize; output_len];
+            let mut coords = vec![0usize; shape.len()];
+            for (linear, &value) in $values.iter().enumerate() {
+                let mut remainder = linear;
+                for (axis, &extent) in shape.iter().enumerate() {
+                    coords[axis] = if extent == 0 {
+                        0
+                    } else {
+                        let coord = remainder % extent;
+                        remainder /= extent;
+                        coord
+                    };
+                }
+                let mut out_index = 0usize;
+                for (axis, &coord) in coords.iter().enumerate() {
+                    if !reduced[axis] {
+                        out_index += coord * output_strides[axis];
+                    }
+                }
+                sums[out_index] += value as u128;
+                counts[out_index] += 1;
+            }
+            let out = sums
+                .into_iter()
+                .zip(counts)
+                .map(|(sum, count)| rounded_unsigned_mean_u128(sum, count) as $ty)
+                .collect();
+            (HostIntegerDataOwned::$owned(out), output_shape.clone())
+        }};
+    }
+    Ok(match data {
+        HostIntegerDataOwned::I8(values) => reduce_signed!(values, I8, i8),
+        HostIntegerDataOwned::I16(values) => reduce_signed!(values, I16, i16),
+        HostIntegerDataOwned::I32(values) => reduce_signed!(values, I32, i32),
+        HostIntegerDataOwned::I64(values) => reduce_signed!(values, I64, i64),
+        HostIntegerDataOwned::U8(values) => reduce_unsigned!(values, U8, u8),
+        HostIntegerDataOwned::U16(values) => reduce_unsigned!(values, U16, u16),
+        HostIntegerDataOwned::U32(values) => reduce_unsigned!(values, U32, u32),
+        HostIntegerDataOwned::U64(values) => reduce_unsigned!(values, U64, u64),
+    })
+}
+
+fn rounded_signed_mean_i128(sum: i128, count: usize) -> i128 {
+    if count == 0 {
+        return 0;
+    }
+    let divisor = count as i128;
+    let quotient = sum / divisor;
+    let remainder = sum % divisor;
+    if remainder.unsigned_abs() * 2 >= count as u128 {
+        quotient + remainder.signum()
+    } else {
+        quotient
+    }
+}
+
+fn rounded_unsigned_mean_u128(sum: u128, count: usize) -> u128 {
+    if count == 0 {
+        return 0;
+    }
+    let divisor = count as u128;
+    let quotient = sum / divisor;
+    let remainder = sum % divisor;
+    if remainder * 2 >= divisor {
+        quotient + 1
+    } else {
+        quotient
+    }
+}
+
+fn scan_integer_data_dim(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    dim: usize,
+    op: u32,
+    direction: ProviderScanDirection,
+) -> Result<(HostIntegerDataOwned, Option<Vec<f64>>)> {
+    ensure!(
+        dim < shape.len(),
+        "native integer cumulative scan: dimension out of bounds"
+    );
+    ensure!(op <= 3, "native integer cumulative scan: invalid operation");
+    let expected_len = shape.iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent)
+            .ok_or_else(|| anyhow!("native integer cumulative scan: shape too large"))
+    })?;
+    ensure!(
+        integer_data_len(data) == expected_len,
+        "native integer cumulative scan: data length does not match shape"
+    );
+    if expected_len == 0 {
+        let empty = match data {
+            HostIntegerDataOwned::I8(_) => HostIntegerDataOwned::I8(Vec::new()),
+            HostIntegerDataOwned::I16(_) => HostIntegerDataOwned::I16(Vec::new()),
+            HostIntegerDataOwned::I32(_) => HostIntegerDataOwned::I32(Vec::new()),
+            HostIntegerDataOwned::I64(_) => HostIntegerDataOwned::I64(Vec::new()),
+            HostIntegerDataOwned::U8(_) => HostIntegerDataOwned::U8(Vec::new()),
+            HostIntegerDataOwned::U16(_) => HostIntegerDataOwned::U16(Vec::new()),
+            HostIntegerDataOwned::U32(_) => HostIntegerDataOwned::U32(Vec::new()),
+            HostIntegerDataOwned::U64(_) => HostIntegerDataOwned::U64(Vec::new()),
+        };
+        return Ok((empty, (op >= 2).then(Vec::new)));
+    }
+
+    let segment_len = shape[dim];
+    if segment_len == 0 {
+        let empty = match data {
+            HostIntegerDataOwned::I8(_) => HostIntegerDataOwned::I8(Vec::new()),
+            HostIntegerDataOwned::I16(_) => HostIntegerDataOwned::I16(Vec::new()),
+            HostIntegerDataOwned::I32(_) => HostIntegerDataOwned::I32(Vec::new()),
+            HostIntegerDataOwned::I64(_) => HostIntegerDataOwned::I64(Vec::new()),
+            HostIntegerDataOwned::U8(_) => HostIntegerDataOwned::U8(Vec::new()),
+            HostIntegerDataOwned::U16(_) => HostIntegerDataOwned::U16(Vec::new()),
+            HostIntegerDataOwned::U32(_) => HostIntegerDataOwned::U32(Vec::new()),
+            HostIntegerDataOwned::U64(_) => HostIntegerDataOwned::U64(Vec::new()),
+        };
+        return Ok((empty, (op >= 2).then(Vec::new)));
+    }
+    let stride_before = shape[..dim].iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer cumulative scan: stride overflow"))
+    })?;
+    let stride_after = shape[dim + 1..].iter().try_fold(1usize, |acc, &extent| {
+        acc.checked_mul(extent.max(1))
+            .ok_or_else(|| anyhow!("native integer cumulative scan: stride overflow"))
+    })?;
+    let block = stride_before
+        .checked_mul(segment_len)
+        .ok_or_else(|| anyhow!("native integer cumulative scan: block overflow"))?;
+
+    macro_rules! scan_arithmetic {
+        ($values:expr, $owned:ident, $zero:expr, $one:expr, $method:ident) => {{
+            let identity = if op == 1 { $one } else { $zero };
+            let mut output = vec![identity; $values.len()];
+            for after in 0..stride_after {
+                let base = after * block;
+                for before in 0..stride_before {
+                    let mut accumulator = identity;
+                    match direction {
+                        ProviderScanDirection::Forward => {
+                            for offset in 0..segment_len {
+                                let index = base + before + offset * stride_before;
+                                accumulator = accumulator.$method($values[index]);
+                                output[index] = accumulator;
+                            }
+                        }
+                        ProviderScanDirection::Reverse => {
+                            for offset in (0..segment_len).rev() {
+                                let index = base + before + offset * stride_before;
+                                accumulator = accumulator.$method($values[index]);
+                                output[index] = accumulator;
+                            }
+                        }
+                    }
+                }
+            }
+            (HostIntegerDataOwned::$owned(output), None)
+        }};
+    }
+
+    macro_rules! scan_extrema {
+        ($values:expr, $owned:ident) => {{
+            let mut output = vec![$values[0]; $values.len()];
+            let mut indices = vec![0.0f64; $values.len()];
+            for after in 0..stride_after {
+                let base = after * block;
+                for before in 0..stride_before {
+                    let mut current_index = 0usize;
+                    let mut has_value = false;
+                    macro_rules! step {
+                        ($offset:expr) => {{
+                            let index = base + before + $offset * stride_before;
+                            if !has_value
+                                || if op == 2 {
+                                    $values[index] < $values[current_index]
+                                } else {
+                                    $values[index] > $values[current_index]
+                                }
+                            {
+                                current_index = index;
+                                has_value = true;
+                            }
+                            output[index] = $values[current_index];
+                            indices[index] =
+                                ((current_index - base - before) / stride_before + 1) as f64;
+                        }};
+                    }
+                    match direction {
+                        ProviderScanDirection::Forward => {
+                            for offset in 0..segment_len {
+                                step!(offset);
+                            }
+                        }
+                        ProviderScanDirection::Reverse => {
+                            for offset in (0..segment_len).rev() {
+                                step!(offset);
+                            }
+                        }
+                    }
+                }
+            }
+            (HostIntegerDataOwned::$owned(output), Some(indices))
+        }};
+    }
+
+    Ok(match (data, op) {
+        (HostIntegerDataOwned::I8(values), 0) => {
+            scan_arithmetic!(values, I8, 0_i8, 1_i8, saturating_add)
+        }
+        (HostIntegerDataOwned::I16(values), 0) => {
+            scan_arithmetic!(values, I16, 0_i16, 1_i16, saturating_add)
+        }
+        (HostIntegerDataOwned::I32(values), 0) => {
+            scan_arithmetic!(values, I32, 0_i32, 1_i32, saturating_add)
+        }
+        (HostIntegerDataOwned::I64(values), 0) => {
+            scan_arithmetic!(values, I64, 0_i64, 1_i64, saturating_add)
+        }
+        (HostIntegerDataOwned::U8(values), 0) => {
+            scan_arithmetic!(values, U8, 0_u8, 1_u8, saturating_add)
+        }
+        (HostIntegerDataOwned::U16(values), 0) => {
+            scan_arithmetic!(values, U16, 0_u16, 1_u16, saturating_add)
+        }
+        (HostIntegerDataOwned::U32(values), 0) => {
+            scan_arithmetic!(values, U32, 0_u32, 1_u32, saturating_add)
+        }
+        (HostIntegerDataOwned::U64(values), 0) => {
+            scan_arithmetic!(values, U64, 0_u64, 1_u64, saturating_add)
+        }
+        (HostIntegerDataOwned::I8(values), 1) => {
+            scan_arithmetic!(values, I8, 0_i8, 1_i8, saturating_mul)
+        }
+        (HostIntegerDataOwned::I16(values), 1) => {
+            scan_arithmetic!(values, I16, 0_i16, 1_i16, saturating_mul)
+        }
+        (HostIntegerDataOwned::I32(values), 1) => {
+            scan_arithmetic!(values, I32, 0_i32, 1_i32, saturating_mul)
+        }
+        (HostIntegerDataOwned::I64(values), 1) => {
+            scan_arithmetic!(values, I64, 0_i64, 1_i64, saturating_mul)
+        }
+        (HostIntegerDataOwned::U8(values), 1) => {
+            scan_arithmetic!(values, U8, 0_u8, 1_u8, saturating_mul)
+        }
+        (HostIntegerDataOwned::U16(values), 1) => {
+            scan_arithmetic!(values, U16, 0_u16, 1_u16, saturating_mul)
+        }
+        (HostIntegerDataOwned::U32(values), 1) => {
+            scan_arithmetic!(values, U32, 0_u32, 1_u32, saturating_mul)
+        }
+        (HostIntegerDataOwned::U64(values), 1) => {
+            scan_arithmetic!(values, U64, 0_u64, 1_u64, saturating_mul)
+        }
+        (HostIntegerDataOwned::I8(values), 2 | 3) => scan_extrema!(values, I8),
+        (HostIntegerDataOwned::I16(values), 2 | 3) => scan_extrema!(values, I16),
+        (HostIntegerDataOwned::I32(values), 2 | 3) => scan_extrema!(values, I32),
+        (HostIntegerDataOwned::I64(values), 2 | 3) => scan_extrema!(values, I64),
+        (HostIntegerDataOwned::U8(values), 2 | 3) => scan_extrema!(values, U8),
+        (HostIntegerDataOwned::U16(values), 2 | 3) => scan_extrema!(values, U16),
+        (HostIntegerDataOwned::U32(values), 2 | 3) => scan_extrema!(values, U32),
+        (HostIntegerDataOwned::U64(values), 2 | 3) => scan_extrema!(values, U64),
+        _ => return Err(anyhow!("native integer cumulative scan: invalid operation")),
+    })
 }
 
 const POLYDER_EPS: f64 = 1.0e-12;
@@ -106,7 +1058,9 @@ fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64
                         WindowKind::Hann => 0.5 - 0.5 * phase.cos(),
                         WindowKind::Hamming => 0.54 - 0.46 * phase.cos(),
                         WindowKind::Blackman => {
-                            0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos()
+                            let first = 2.0 * idx as f64 / denom;
+                            let second = 4.0 * idx as f64 / denom;
+                            0.42 - 0.5 * window_cospi(first) + 0.08 * window_cospi(second)
                         }
                     }
                 })
@@ -117,6 +1071,22 @@ fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64
             data
         }
     }
+}
+
+fn window_cospi(value: f64) -> f64 {
+    let doubled = value * 2.0;
+    let rounded = doubled.round();
+    if doubled == rounded {
+        return match rounded.rem_euclid(4.0) {
+            0.0 => 1.0,
+            1.0 | 3.0 => 0.0,
+            2.0 => -1.0,
+            _ => unreachable!("finite half turn has a modulo-four residue"),
+        };
+    }
+    let cycle = value.rem_euclid(2.0);
+    let reduced = if cycle > 1.0 { 2.0 - cycle } else { cycle };
+    (std::f64::consts::PI * reduced).cos()
 }
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 
@@ -634,14 +1604,14 @@ fn tensor_to_weight_vector(tensor: &Tensor) -> Result<Vec<f64>> {
             cols
         ));
     }
+    let values = tensor.materialize_f64();
     ensure!(
-        tensor
-            .data
+        values
             .iter()
             .all(|value| value.is_finite() && *value >= 0.0),
         "covariance: weights must be non-negative finite values"
     );
-    Ok(tensor.data.clone())
+    Ok(values)
 }
 
 fn next_uniform(state: &mut u64) -> f64 {
@@ -726,6 +1696,39 @@ impl InProcessProvider {
             &handle,
             runmat_accelerate_api::ProviderPrecision::F64,
         );
+        handle
+    }
+
+    fn allocate_integer_tensor(
+        &self,
+        data: HostIntegerDataOwned,
+        shape: Vec<usize>,
+    ) -> GpuTensorHandle {
+        let element_type = data.element_type();
+        let bytes = integer_data_bytes(&data);
+        let id = self
+            .next_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current < self.id_limit {
+                    current.checked_add(1)
+                } else {
+                    None
+                }
+            })
+            .expect("in-process provider id range exhausted");
+        integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
+        self.telemetry.record_upload_bytes(bytes);
+        let handle = GpuTensorHandle {
+            shape,
+            device_id: self.device_id,
+            buffer_id: id,
+        };
+        runmat_accelerate_api::set_handle_integer_type(&handle, element_type);
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+        runmat_accelerate_api::set_handle_logical(&handle, false);
         handle
     }
 
@@ -1642,12 +2645,12 @@ fn states_to_column_major(
     out
 }
 
-fn permute_data(
-    data: &[f64],
+fn permute_data<T: Copy + Default>(
+    data: &[T],
     shape: &[usize],
     order: &[usize],
     lane_factor: usize,
-) -> Result<(Vec<f64>, Vec<usize>)> {
+) -> Result<(Vec<T>, Vec<usize>)> {
     ensure!(!order.is_empty(), "permute: order must not be empty");
     ensure!(lane_factor > 0, "permute: lane factor must be positive");
     let rank = order.len();
@@ -1709,7 +2712,7 @@ fn permute_data(
     let kernel_rank = kernel_order.len();
     let src_strides = compute_strides(&kernel_src_shape);
     let dst_total = product(&kernel_dst_shape);
-    let mut out = vec![0.0f64; dst_total];
+    let mut out = vec![T::default(); dst_total];
     let mut dst_coords = vec![0usize; kernel_rank];
     let mut src_coords = vec![0usize; kernel_rank];
 
@@ -1736,7 +2739,30 @@ fn permute_data(
     Ok((out, dst_shape))
 }
 
-fn flip_data(data: &[f64], shape: &[usize], axes: &[usize]) -> Result<Vec<f64>> {
+fn permute_integer_data(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    order: &[usize],
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    macro_rules! permute {
+        ($values:expr, $kind:ident) => {
+            permute_data($values, shape, order, 1)
+                .map(|(values, shape)| (HostIntegerDataOwned::$kind(values), shape))
+        };
+    }
+    match data {
+        HostIntegerDataOwned::I8(values) => permute!(values, I8),
+        HostIntegerDataOwned::I16(values) => permute!(values, I16),
+        HostIntegerDataOwned::I32(values) => permute!(values, I32),
+        HostIntegerDataOwned::I64(values) => permute!(values, I64),
+        HostIntegerDataOwned::U8(values) => permute!(values, U8),
+        HostIntegerDataOwned::U16(values) => permute!(values, U16),
+        HostIntegerDataOwned::U32(values) => permute!(values, U32),
+        HostIntegerDataOwned::U64(values) => permute!(values, U64),
+    }
+}
+
+fn flip_data<T: Copy>(data: &[T], shape: &[usize], axes: &[usize]) -> Result<Vec<T>> {
     if axes.is_empty() || data.is_empty() {
         return Ok(data.to_vec());
     }
@@ -1775,6 +2801,28 @@ fn flip_data(data: &[f64], shape: &[usize], axes: &[usize]) -> Result<Vec<f64>> 
         out.push(data[src_idx]);
     }
     Ok(out)
+}
+
+fn flip_integer_data(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    axes: &[usize],
+) -> Result<HostIntegerDataOwned> {
+    macro_rules! flip {
+        ($values:expr, $kind:ident) => {
+            flip_data($values, shape, axes).map(HostIntegerDataOwned::$kind)
+        };
+    }
+    match data {
+        HostIntegerDataOwned::I8(values) => flip!(values, I8),
+        HostIntegerDataOwned::I16(values) => flip!(values, I16),
+        HostIntegerDataOwned::I32(values) => flip!(values, I32),
+        HostIntegerDataOwned::I64(values) => flip!(values, I64),
+        HostIntegerDataOwned::U8(values) => flip!(values, U8),
+        HostIntegerDataOwned::U16(values) => flip!(values, U16),
+        HostIntegerDataOwned::U32(values) => flip!(values, U32),
+        HostIntegerDataOwned::U64(values) => flip!(values, U64),
+    }
 }
 
 fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {
@@ -1816,7 +2864,7 @@ fn apply_conv_mode_real(
             if len_a == 0 {
                 return Vec::new();
             }
-            let start = if len_b == 0 { 0 } else { (len_b - 1) / 2 };
+            let start = if len_b == 0 { 0 } else { len_b / 2 };
             let end = (start + len_a).min(full.len());
             if start >= end {
                 Vec::new()
@@ -1825,6 +2873,9 @@ fn apply_conv_mode_real(
             }
         }
         ProviderConvMode::Valid => {
+            if len_b == 0 {
+                return vec![0.0; len_a];
+            }
             if len_a < len_b {
                 Vec::new()
             } else {
@@ -1861,12 +2912,11 @@ fn conv2d_full_real(
             }
             for kc in 0..kernel_cols {
                 let out_c = sc + kc;
-                let kcol = kernel_cols - 1 - kc;
                 for kr in 0..kernel_rows {
                     let out_r = sr + kr;
-                    let krow = kernel_rows - 1 - kr;
-                    // Convolution flips the kernel (rotate 180°).
-                    let kval = kernel[kcol * kernel_rows + krow];
+                    // The output-index sum already implements the convolution
+                    // formula; reversing the kernel here would compute correlation.
+                    let kval = kernel[kc * kernel_rows + kr];
                     out[out_c * full_rows + out_r] += aval * kval;
                 }
             }
@@ -1921,8 +2971,8 @@ fn apply_conv2_mode_real_2d(
             if a_rows == 0 || a_cols == 0 {
                 return (Vec::new(), a_rows, a_cols);
             }
-            let row_start = if b_rows == 0 { 0 } else { (b_rows - 1) / 2 };
-            let col_start = if b_cols == 0 { 0 } else { (b_cols - 1) / 2 };
+            let row_start = b_rows / 2;
+            let col_start = b_cols / 2;
             slice_matrix_real(
                 full,
                 full_rows,
@@ -1957,11 +3007,14 @@ fn apply_conv2_mode_real_2d(
 
 fn tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
     match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Err(anyhow!(
+            "{label}: native integer tensor requires a typed provider result path; refusing f64 fallback"
+        )),
         Value::Tensor(tensor) => Ok(tensor),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}")),
-        Value::Int(i) => {
-            Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| anyhow!("{label}: {e}"))
-        }
+        Value::Int(_) => Err(anyhow!(
+            "{label}: native integer scalar requires a typed provider result path; refusing f64 fallback"
+        )),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
             .map_err(|e| anyhow!("{label}: {e}")),
         Value::ComplexTensor(_) => Err(anyhow!(
@@ -2080,7 +3133,11 @@ fn triu_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
     Ok(out)
 }
 
-fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec<f64>> {
+fn circshift_data<T: Copy + Default>(
+    data: &[T],
+    shape: &[usize],
+    shifts: &[isize],
+) -> Result<Vec<T>> {
     ensure!(
         shape.len() == shifts.len(),
         "circshift: shift vector length must match tensor rank"
@@ -2119,7 +3176,7 @@ fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec
     }
 
     let strides = compute_strides(shape);
-    let mut out = vec![0.0f64; data.len()];
+    let mut out = vec![T::default(); data.len()];
     for (idx, out_value) in out.iter_mut().enumerate() {
         let coords = unravel_index(idx, shape);
         let mut src_idx = 0usize;
@@ -2137,6 +3194,28 @@ fn circshift_data(data: &[f64], shape: &[usize], shifts: &[isize]) -> Result<Vec
         *out_value = data[src_idx];
     }
     Ok(out)
+}
+
+fn circshift_integer_data(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    shifts: &[isize],
+) -> Result<HostIntegerDataOwned> {
+    macro_rules! circshift {
+        ($values:expr, $kind:ident) => {
+            circshift_data($values, shape, shifts).map(HostIntegerDataOwned::$kind)
+        };
+    }
+    match data {
+        HostIntegerDataOwned::I8(values) => circshift!(values, I8),
+        HostIntegerDataOwned::I16(values) => circshift!(values, I16),
+        HostIntegerDataOwned::I32(values) => circshift!(values, I32),
+        HostIntegerDataOwned::I64(values) => circshift!(values, I64),
+        HostIntegerDataOwned::U8(values) => circshift!(values, U8),
+        HostIntegerDataOwned::U16(values) => circshift!(values, U16),
+        HostIntegerDataOwned::U32(values) => circshift!(values, U32),
+        HostIntegerDataOwned::U64(values) => circshift!(values, U64),
+    }
 }
 
 fn unravel_index(mut index: usize, shape: &[usize]) -> Vec<usize> {
@@ -2171,7 +3250,11 @@ fn checked_total(shape: &[usize]) -> Result<usize> {
     })
 }
 
-fn repmat_numeric(data: &[f64], shape: &[usize], reps: &[usize]) -> Result<(Vec<f64>, Vec<usize>)> {
+fn repmat_numeric<T: Copy>(
+    data: &[T],
+    shape: &[usize],
+    reps: &[usize],
+) -> Result<(Vec<T>, Vec<usize>)> {
     ensure!(
         !reps.is_empty(),
         "repmat: replication factors must be specified"
@@ -2238,6 +3321,29 @@ fn repmat_numeric(data: &[f64], shape: &[usize], reps: &[usize]) -> Result<(Vec<
         out.push(data[src_index]);
     }
     Ok((out, new_shape))
+}
+
+fn repmat_integer_data(
+    data: &HostIntegerDataOwned,
+    shape: &[usize],
+    reps: &[usize],
+) -> Result<(HostIntegerDataOwned, Vec<usize>)> {
+    macro_rules! repmat {
+        ($values:expr, $kind:ident) => {
+            repmat_numeric($values, shape, reps)
+                .map(|(values, shape)| (HostIntegerDataOwned::$kind(values), shape))
+        };
+    }
+    match data {
+        HostIntegerDataOwned::I8(values) => repmat!(values, I8),
+        HostIntegerDataOwned::I16(values) => repmat!(values, I16),
+        HostIntegerDataOwned::I32(values) => repmat!(values, I32),
+        HostIntegerDataOwned::I64(values) => repmat!(values, I64),
+        HostIntegerDataOwned::U8(values) => repmat!(values, U8),
+        HostIntegerDataOwned::U16(values) => repmat!(values, U16),
+        HostIntegerDataOwned::U32(values) => repmat!(values, U32),
+        HostIntegerDataOwned::U64(values) => repmat!(values, U64),
+    }
 }
 
 fn repmat_complex_interleaved(
@@ -2612,6 +3718,47 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
+        if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(source) {
+            let output_len = output_shape
+                .iter()
+                .try_fold(1usize, |acc, &extent| acc.checked_mul(extent))
+                .ok_or_else(|| anyhow!("gather_linear: integer output shape product overflow"))?;
+            ensure!(
+                output_len == indices.len(),
+                "gather_linear: integer index count {} does not match output size {}",
+                indices.len(),
+                output_len
+            );
+            let data = {
+                let guard = integer_registry().lock().unwrap_or_else(|e| e.into_inner());
+                guard.get(&source.buffer_id).cloned().ok_or_else(|| {
+                    anyhow!("gather_linear: unknown integer buffer {}", source.buffer_id)
+                })?
+            };
+            ensure!(
+                data.element_type() == integer_type,
+                "gather_linear: integer metadata {:?} does not match buffer {:?}",
+                integer_type,
+                data.element_type()
+            );
+            let out = gather_integer_data(&data, indices)?;
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            self.telemetry.record_upload_bytes(integer_data_bytes(&out));
+            integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id, out);
+            let handle = GpuTensorHandle {
+                shape: output_shape.to_vec(),
+                device_id: self.device_id,
+                buffer_id: id,
+            };
+            runmat_accelerate_api::set_handle_integer_type(&handle, integer_type);
+            runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+            runmat_accelerate_api::set_handle_logical(&handle, false);
+            return Ok(handle);
+        }
+
         let storage = runmat_accelerate_api::handle_storage(source);
         let lane_factor = match storage {
             GpuTensorStorage::Real => 1usize,
@@ -2659,6 +3806,56 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         values: &GpuTensorHandle,
     ) -> Result<()> {
+        match (
+            runmat_accelerate_api::handle_integer_type(target),
+            runmat_accelerate_api::handle_integer_type(values),
+        ) {
+            (Some(target_type), Some(values_type)) => {
+                ensure!(
+                    target_type == values_type,
+                    "scatter_linear: integer type mismatch target={:?} values={:?}",
+                    target_type,
+                    values_type
+                );
+                let values_data = {
+                    let guard = integer_registry().lock().unwrap_or_else(|e| e.into_inner());
+                    guard.get(&values.buffer_id).cloned().ok_or_else(|| {
+                        anyhow!(
+                            "scatter_linear: unknown integer values buffer {}",
+                            values.buffer_id
+                        )
+                    })?
+                };
+                ensure!(
+                    values_data.element_type() == values_type,
+                    "scatter_linear: integer values metadata {:?} does not match buffer {:?}",
+                    values_type,
+                    values_data.element_type()
+                );
+                let mut guard = integer_registry().lock().unwrap_or_else(|e| e.into_inner());
+                let target_data = guard.get_mut(&target.buffer_id).ok_or_else(|| {
+                    anyhow!(
+                        "scatter_linear: unknown integer target buffer {}",
+                        target.buffer_id
+                    )
+                })?;
+                ensure!(
+                    target_data.element_type() == target_type,
+                    "scatter_linear: integer target metadata {:?} does not match buffer {:?}",
+                    target_type,
+                    target_data.element_type()
+                );
+                scatter_integer_data(target_data, indices, &values_data)?;
+                return Ok(());
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                return Err(anyhow!(
+                    "scatter_linear: cannot mix exact integer and floating buffers"
+                ));
+            }
+            (None, None) => {}
+        }
+
         let target_storage = runmat_accelerate_api::handle_storage(target);
         let values_storage = runmat_accelerate_api::handle_storage(values);
         ensure!(
@@ -2750,6 +3947,43 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let data = owned_integer_data(host.data);
+        let bytes = integer_data_bytes(&data);
+        integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
+        self.telemetry.record_upload_bytes(bytes);
+        let handle = GpuTensorHandle {
+            shape: host.shape.to_vec(),
+            device_id: self.device_id,
+            buffer_id: id,
+        };
+        runmat_accelerate_api::set_handle_integer_type(&handle, host.data.element_type());
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::Real);
+        runmat_accelerate_api::set_handle_logical(&handle, false);
+        Ok(handle)
+    }
+
+    fn download_integer<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&h.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", h.buffer_id))?;
+            self.telemetry
+                .record_download_bytes(integer_data_bytes(&data));
+            Ok(HostIntegerTensorOwned {
+                data,
+                shape: h.shape.clone(),
+            })
+        })
+    }
+
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         if h.device_id != self.device_id {
             return Err(anyhow::anyhow!(
@@ -2760,9 +3994,14 @@ impl AccelProvider for InProcessProvider {
         }
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
+        integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_precision(h);
         runmat_accelerate_api::clear_handle_class_name(h);
         runmat_accelerate_api::clear_handle_logical(h);
+        runmat_accelerate_api::clear_handle_integer_type(h);
         runmat_accelerate_api::clear_handle_storage(h);
         Ok(())
     }
@@ -3452,6 +4691,33 @@ impl AccelProvider for InProcessProvider {
         self.zeros(&prototype.shape)
     }
 
+    fn zeros_integer_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let element_type =
+            runmat_accelerate_api::handle_integer_type(prototype).ok_or_else(|| {
+                anyhow!("zeros_integer_like requires a native integer gpuArray prototype")
+            })?;
+        let len = shape.iter().try_fold(1usize, |total, &dim| {
+            total
+                .checked_mul(dim)
+                .ok_or_else(|| anyhow!("zeros_integer_like: tensor size overflow"))
+        })?;
+        let data = match element_type {
+            IntegerElementType::I8 => HostIntegerDataOwned::I8(vec![0; len]),
+            IntegerElementType::I16 => HostIntegerDataOwned::I16(vec![0; len]),
+            IntegerElementType::I32 => HostIntegerDataOwned::I32(vec![0; len]),
+            IntegerElementType::I64 => HostIntegerDataOwned::I64(vec![0; len]),
+            IntegerElementType::U8 => HostIntegerDataOwned::U8(vec![0; len]),
+            IntegerElementType::U16 => HostIntegerDataOwned::U16(vec![0; len]),
+            IntegerElementType::U32 => HostIntegerDataOwned::U32(vec![0; len]),
+            IntegerElementType::U64 => HostIntegerDataOwned::U64(vec![0; len]),
+        };
+        Ok(self.allocate_integer_tensor(data, shape.to_vec()))
+    }
+
     fn ones(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -3642,7 +4908,7 @@ impl AccelProvider for InProcessProvider {
             runmat_runtime::builtins::image::filters::fspecial::spec_from_request(&request.filter)
                 .map_err(|err| anyhow!(err))?;
         let tensor = spec.generate_tensor().map_err(|err| anyhow!(err))?;
-        Ok(self.allocate_tensor(tensor.data.clone(), tensor.shape.clone()))
+        Ok(self.allocate_tensor(tensor.materialize_f64(), tensor.shape.clone()))
     }
 
     fn imfilter<'a>(
@@ -3675,8 +4941,8 @@ impl AccelProvider for InProcessProvider {
                 "imfilter",
             )
             .map_err(|err| anyhow!(err))?;
-            let Tensor { data, shape, .. } = result;
-            Ok(self.allocate_tensor(data, shape))
+            let shape = result.shape.clone();
+            Ok(self.allocate_tensor(result.materialize_f64(), shape))
         })
     }
 
@@ -3811,8 +5077,9 @@ impl AccelProvider for InProcessProvider {
             let result = runtime_cov_from_tensors(left, right, options.rows, weight_spec)
                 .map_err(|flow| runtime_flow_to_anyhow("covariance", flow))?;
 
+            let result_data = result.materialize_f64();
             let view = HostTensorView {
-                data: &result.data,
+                data: &result_data,
                 shape: &result.shape,
             };
             self.upload(&view)
@@ -3831,8 +5098,9 @@ impl AccelProvider for InProcessProvider {
             let result =
                 runtime_corrcoef_from_tensors(tensor, None, options.normalization, options.rows)
                     .map_err(|flow| runtime_flow_to_anyhow("corrcoef", flow))?;
+            let result_data = result.materialize_f64();
             let view = HostTensorView {
-                data: &result.data,
+                data: &result_data,
                 shape: &result.shape,
             };
             self.upload(&view)
@@ -4908,7 +6176,11 @@ impl AccelProvider for InProcessProvider {
             }
             let mut out = vec![0.0; ybuf.len()];
             for idx in 0..ybuf.len() {
-                out[idx] = ybuf[idx].atan2(xbuf[idx]);
+                out[idx] = if ybuf[idx] == 0.0 && xbuf[idx] == 0.0 && xbuf[idx].is_sign_negative() {
+                    0.0
+                } else {
+                    ybuf[idx].atan2(xbuf[idx])
+                };
             }
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -5013,14 +6285,7 @@ impl AccelProvider for InProcessProvider {
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().copied().map(erf_scalar_host).collect();
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
         })
     }
     fn unary_erfcinv<'a>(
@@ -5663,20 +6928,108 @@ impl AccelProvider for InProcessProvider {
 
     fn unary_exp<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
+                "unary_exp does not support complex-interleaved buffers"
+            );
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.exp()).collect();
             drop(guard);
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let mut guard2 = registry().lock().unwrap();
-            guard2.insert(id, out);
-            Ok(GpuTensorHandle {
-                shape: a.shape.clone(),
-                device_id: self.device_id,
-                buffer_id: id,
-            })
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
+        })
+    }
+
+    fn unary_expm1<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
+                "unary_expm1 does not support complex-interleaved buffers"
+            );
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = abuf.iter().map(|&x| x.exp_m1()).collect();
+            drop(guard);
+            Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), GpuTensorStorage::Real))
+        })
+    }
+
+    fn activation_elu<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        alpha: f64,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::Real,
+                "activation_elu: complex inputs are not supported"
+            );
+            let guard = registry().lock().unwrap();
+            let input = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out = input
+                .iter()
+                .map(|&value| {
+                    if value > 0.0 {
+                        value
+                    } else {
+                        alpha * (value.exp() - 1.0)
+                    }
+                })
+                .collect();
+            drop(guard);
+            Ok(self.allocate_tensor(out, a.shape.clone()))
+        })
+    }
+
+    fn activation_softmax_rows<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            ensure!(
+                runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::Real,
+                "activation_softmax_rows: complex inputs are not supported"
+            );
+            ensure!(
+                a.shape.len() == 2,
+                "activation_softmax_rows: input must be a 2-D tensor"
+            );
+            let rows = a.shape[0];
+            let cols = a.shape[1];
+            let guard = registry().lock().unwrap();
+            let input = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let mut out = vec![0.0; input.len()];
+            for row in 0..rows {
+                let max_value = (0..cols)
+                    .map(|col| input[row + col * rows])
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let mut denom = 0.0;
+                for col in 0..cols {
+                    let value = (input[row + col * rows] - max_value).exp();
+                    out[row + col * rows] = value;
+                    denom += value;
+                }
+                ensure!(
+                    denom.is_finite() && denom > 0.0,
+                    "activation_softmax_rows: softmax produced invalid normalization"
+                );
+                for col in 0..cols {
+                    out[row + col * rows] /= denom;
+                }
+            }
+            drop(guard);
+            Ok(self.allocate_tensor(out, a.shape.clone()))
         })
     }
 
@@ -5908,6 +7261,23 @@ impl AccelProvider for InProcessProvider {
         Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
     }
 
+    fn scalar_max(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
+        let storage = runmat_accelerate_api::handle_storage(a);
+        ensure!(
+            storage == GpuTensorStorage::Real,
+            "scalar_max: complex inputs are not supported"
+        );
+        let out = {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            ensure_storage_len("scalar_max", abuf, &a.shape, &storage)?;
+            abuf.iter().map(|&value| value.max(scalar)).collect()
+        };
+        Ok(self.allocate_tensor_with_storage(out, a.shape.clone(), storage))
+    }
+
     fn scalar_div(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
         let storage = runmat_accelerate_api::handle_storage(a);
         let out = {
@@ -6021,9 +7391,18 @@ impl AccelProvider for InProcessProvider {
         let signal_len: usize = signal.shape.iter().copied().product();
         let kernel_len: usize = kernel.shape.iter().copied().product();
 
-        if signal_len == 0 || kernel_len == 0 {
+        if signal_len == 0 {
             let shape = conv1d_output_shape(0, options.orientation);
             return Ok(self.allocate_tensor(Vec::new(), shape));
+        }
+        if kernel_len == 0 {
+            let data = if matches!(options.mode, ProviderConvMode::Valid) {
+                vec![0.0; signal_len]
+            } else {
+                Vec::new()
+            };
+            let shape = conv1d_output_shape(data.len(), options.orientation);
+            return Ok(self.allocate_tensor(data, shape));
         }
 
         if matches!(options.mode, ProviderConvMode::Valid) && signal_len < kernel_len {
@@ -6400,6 +7779,21 @@ impl AccelProvider for InProcessProvider {
         })
     }
     fn permute(&self, handle: &GpuTensorHandle, order: &[usize]) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "permute: unknown integer tensor handle {}",
+                        handle.buffer_id
+                    )
+                })?;
+            let (permuted, new_shape) = permute_integer_data(&data, &handle.shape, order)?;
+            return Ok(self.allocate_integer_tensor(permuted, new_shape));
+        }
         let storage = runmat_accelerate_api::handle_storage(handle);
         let lane_factor = match storage {
             GpuTensorStorage::Real => 1usize,
@@ -6417,6 +7811,21 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!("flip: unknown integer tensor handle {}", handle.buffer_id)
+                })?;
+            return Ok(self.allocate_integer_tensor(
+                flip_integer_data(&data, &handle.shape, axes)?,
+                handle.shape.clone(),
+            ));
+        }
+        let storage = runmat_accelerate_api::handle_storage(handle);
         let data = {
             let guard = registry().lock().unwrap();
             guard
@@ -6425,10 +7834,33 @@ impl AccelProvider for InProcessProvider {
                 .clone()
         };
         let flipped = flip_data(&data, &handle.shape, axes)?;
-        Ok(self.allocate_tensor(flipped, handle.shape.clone()))
+        Ok(self.allocate_tensor_with_storage(flipped, handle.shape.clone(), storage))
     }
 
     fn circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "circshift: unknown integer tensor handle {}",
+                        handle.buffer_id
+                    )
+                })?;
+            let mut shape = handle.shape.clone();
+            if shifts.len() > shape.len() {
+                shape.extend(std::iter::repeat_n(1, shifts.len() - shape.len()));
+            }
+            let mut full_shifts = vec![0isize; shape.len()];
+            full_shifts[..shifts.len()].copy_from_slice(shifts);
+            return Ok(self.allocate_integer_tensor(
+                circshift_integer_data(&data, &shape, &full_shifts)?,
+                shape,
+            ));
+        }
         let data = {
             let guard = registry().lock().unwrap();
             guard
@@ -6491,8 +7923,8 @@ impl AccelProvider for InProcessProvider {
             Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("diff_dim: {e}"))?;
         let diffed =
             diff_tensor_host(tensor, order, Some(dim + 1)).map_err(|e| anyhow!("diff_dim: {e}"))?;
-        let Tensor { data, shape, .. } = diffed;
-        Ok(self.allocate_tensor(data, shape))
+        let shape = diffed.shape.clone();
+        Ok(self.allocate_tensor(diffed.materialize_f64(), shape))
     }
 
     fn gradient_dim(
@@ -6521,7 +7953,8 @@ impl AccelProvider for InProcessProvider {
                 .map_err(|e| anyhow!("gradient_dim: {e}"))?;
             let gradiented = gradient_complex_tensor_host(tensor, dim + 1, spacing)
                 .map_err(|e| anyhow!("gradient_dim: {e}"))?;
-            let ComplexTensor { data, shape, .. } = gradiented;
+            let shape = gradiented.shape.clone();
+            let data = gradiented.materialize_f64();
             let mut interleaved = Vec::with_capacity(data.len() * 2);
             for (re, im) in data {
                 interleaved.push(re);
@@ -6538,8 +7971,8 @@ impl AccelProvider for InProcessProvider {
             Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("gradient_dim: {e}"))?;
         let gradiented = gradient_real_tensor_host(tensor, dim + 1, spacing)
             .map_err(|e| anyhow!("gradient_dim: {e}"))?;
-        let Tensor { data, shape, .. } = gradiented;
-        Ok(self.allocate_tensor(data, shape))
+        let shape = gradiented.shape.clone();
+        Ok(self.allocate_tensor(gradiented.materialize_f64(), shape))
     }
 
     fn gradient_dim_with_coordinates(
@@ -6588,7 +8021,8 @@ impl AccelProvider for InProcessProvider {
             let gradiented =
                 gradient_complex_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
                     .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
-            let ComplexTensor { data, shape, .. } = gradiented;
+            let shape = gradiented.shape.clone();
+            let data = gradiented.materialize_f64();
             let mut interleaved = Vec::with_capacity(data.len() * 2);
             for (re, im) in data {
                 interleaved.push(re);
@@ -6606,8 +8040,8 @@ impl AccelProvider for InProcessProvider {
         let gradiented =
             gradient_real_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
                 .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
-        let Tensor { data, shape, .. } = gradiented;
-        Ok(self.allocate_tensor(data, shape))
+        let shape = gradiented.shape.clone();
+        Ok(self.allocate_tensor(gradiented.materialize_f64(), shape))
     }
 
     fn unique<'a>(
@@ -6645,6 +8079,13 @@ impl AccelProvider for InProcessProvider {
         options: &'a SetdiffOptions,
     ) -> AccelProviderFuture<'a, SetdiffResult> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some()
+                || runmat_accelerate_api::handle_integer_type(b).is_some()
+            {
+                return Err(anyhow!(
+                    "setdiff: resident integer inputs require exact runtime fallback"
+                ));
+            }
             let data_a = {
                 let guard = registry().lock().unwrap();
                 guard
@@ -6679,6 +8120,18 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn repmat(&self, handle: &GpuTensorHandle, reps: &[usize]) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&handle.buffer_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!("repmat: unknown integer tensor handle {}", handle.buffer_id)
+                })?;
+            let (tiled, shape) = repmat_integer_data(&data, &handle.shape, reps)?;
+            return Ok(self.allocate_integer_tensor(tiled, shape));
+        }
         let data = {
             let guard = registry().lock().unwrap();
             guard
@@ -6721,7 +8174,7 @@ impl AccelProvider for InProcessProvider {
                 Tensor::new(rhs_buf, rhs.shape.clone()).map_err(|e| anyhow!("dot: {e}"))?;
             let result = dot_host_real_for_provider(&lhs_tensor, &rhs_tensor, dim)
                 .map_err(|e| anyhow!(e))?;
-            Ok(self.allocate_tensor(result.data.clone(), result.shape.clone()))
+            Ok(self.allocate_tensor(result.materialize_f64(), result.shape.clone()))
         })
     }
 
@@ -6730,6 +8183,9 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_sum_native(a).await;
+            }
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
@@ -6753,6 +8209,9 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_sum_native_dim(a, dim).await;
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_sum_dim: only 2D supported"));
             }
@@ -6805,11 +8264,59 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn reduce_integer_sum_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let mut current = a.clone();
+            let mut owned = false;
+            for dim in 0..a.shape.len() {
+                match self.reduce_integer_sum_native_dim(&current, dim).await {
+                    Ok(next) => {
+                        if owned {
+                            let _ = self.free(&current);
+                        }
+                        current = next;
+                        owned = true;
+                    }
+                    Err(error) => {
+                        if owned {
+                            let _ = self.free(&current);
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(current)
+        })
+    }
+
+    fn reduce_integer_sum_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id))?;
+            let (out, shape) = reduce_integer_data_dim(&data, &a.shape, dim, false)?;
+            Ok(self.allocate_integer_tensor(out, shape))
+        })
+    }
+
     fn reduce_prod<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_prod_native(a).await;
+            }
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
@@ -6833,6 +8340,9 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_prod_native_dim(a, dim).await;
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_prod_dim: only 2D supported"));
             }
@@ -6880,11 +8390,133 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn reduce_integer_prod_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let mut current = a.clone();
+            let mut owned = false;
+            for dim in 0..a.shape.len() {
+                match self.reduce_integer_prod_native_dim(&current, dim).await {
+                    Ok(next) => {
+                        if owned {
+                            let _ = self.free(&current);
+                        }
+                        current = next;
+                        owned = true;
+                    }
+                    Err(error) => {
+                        if owned {
+                            let _ = self.free(&current);
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(current)
+        })
+    }
+
+    fn reduce_integer_prod_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id))?;
+            let (out, shape) = reduce_integer_data_dim(&data, &a.shape, dim, true)?;
+            Ok(self.allocate_integer_tensor(out, shape))
+        })
+    }
+
+    fn reduce_integer_mean_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let dims: Vec<usize> = (0..a.shape.len()).collect();
+            self.reduce_integer_mean_native_dims(a, &dims).await
+        })
+    }
+
+    fn reduce_integer_mean_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id))?;
+            let (out, shape) = reduce_integer_mean_data_dim(&data, &a.shape, dim)?;
+            Ok(self.allocate_integer_tensor(out, shape))
+        })
+    }
+
+    fn reduce_integer_mean_native_dims<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = integer_registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&a.buffer_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id))?;
+            let (out, shape) = reduce_integer_mean_data_dims(&data, &a.shape, dims_zero_based)?;
+            Ok(self.allocate_integer_tensor(out, shape))
+        })
+    }
+
+    fn cast_to_integer<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        target: IntegerElementType,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let integer_data = {
+                integer_registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&a.buffer_id)
+                    .cloned()
+            };
+            if let Some(data) = integer_data {
+                let out = cast_integer_data_to_integer(&data, target);
+                return Ok(self.allocate_integer_tensor(out, a.shape.clone()));
+            }
+            let data = {
+                registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&a.buffer_id)
+                    .cloned()
+            }
+            .ok_or_else(|| anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out = cast_f64_to_integer_data(&data, target);
+            Ok(self.allocate_integer_tensor(out, a.shape.clone()))
+        })
+    }
+
     fn reduce_mean<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_mean_native(a).await;
+            }
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)
@@ -6911,6 +8543,9 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_integer_type(a).is_some() {
+                return self.reduce_integer_mean_native_dim(a, dim).await;
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_mean_dim: only 2D supported"));
             }
@@ -7304,6 +8939,21 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, runmat_accelerate_api::ReduceDimResult> {
         Box::pin(async move {
+            let integer_data = {
+                integer_registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&a.buffer_id)
+                    .cloned()
+            };
+            if let Some(data) = integer_data {
+                let (values, indices, shape) =
+                    reduce_integer_extrema_data_dim(&data, &a.shape, dim, true)?;
+                return Ok(runmat_accelerate_api::ReduceDimResult {
+                    values: self.allocate_integer_tensor(values, shape.clone()),
+                    indices: self.allocate_tensor(indices, shape),
+                });
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_min_dim: only 2D supported"));
             }
@@ -7390,6 +9040,21 @@ impl AccelProvider for InProcessProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, runmat_accelerate_api::ReduceDimResult> {
         Box::pin(async move {
+            let integer_data = {
+                integer_registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&a.buffer_id)
+                    .cloned()
+            };
+            if let Some(data) = integer_data {
+                let (values, indices, shape) =
+                    reduce_integer_extrema_data_dim(&data, &a.shape, dim, false)?;
+                return Ok(runmat_accelerate_api::ReduceDimResult {
+                    values: self.allocate_integer_tensor(values, shape.clone()),
+                    indices: self.allocate_tensor(indices, shape),
+                });
+            }
             if a.shape.len() != 2 {
                 return Err(anyhow::anyhow!("reduce_max_dim: only 2D supported"));
             }
@@ -7459,6 +9124,38 @@ impl AccelProvider for InProcessProvider {
         Err(anyhow!("cumsum_scan not supported by provider"))
     }
 
+    fn integer_cumsum_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<GpuTensorHandle> {
+        let data = integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&input.buffer_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id))?;
+        let (values, _) = scan_integer_data_dim(&data, &input.shape, dim, 0, direction)?;
+        Ok(self.allocate_integer_tensor(values, input.shape.clone()))
+    }
+
+    fn integer_cumprod_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<GpuTensorHandle> {
+        let data = integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&input.buffer_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id))?;
+        let (values, _) = scan_integer_data_dim(&data, &input.shape, dim, 1, direction)?;
+        Ok(self.allocate_integer_tensor(values, input.shape.clone()))
+    }
+
     fn trapz_dim(
         &self,
         input: &GpuTensorHandle,
@@ -7495,6 +9192,44 @@ impl AccelProvider for InProcessProvider {
         _nan_mode: ProviderNanMode,
     ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
         Err(anyhow!("cummin_scan not supported by provider"))
+    }
+
+    fn integer_cummin_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
+        let data = integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&input.buffer_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id))?;
+        let (values, indices) = scan_integer_data_dim(&data, &input.shape, dim, 2, direction)?;
+        Ok(runmat_accelerate_api::ProviderCumminResult {
+            values: self.allocate_integer_tensor(values, input.shape.clone()),
+            indices: self.allocate_tensor(indices.unwrap_or_default(), input.shape.clone()),
+        })
+    }
+
+    fn integer_cummax_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
+        let data = integer_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&input.buffer_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id))?;
+        let (values, indices) = scan_integer_data_dim(&data, &input.shape, dim, 3, direction)?;
+        Ok(runmat_accelerate_api::ProviderCummaxResult {
+            values: self.allocate_integer_tensor(values, input.shape.clone()),
+            indices: self.allocate_tensor(indices.unwrap_or_default(), input.shape.clone()),
+        })
     }
 
     fn find(
@@ -7634,7 +9369,7 @@ impl AccelProvider for InProcessProvider {
             .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
             let factor_tensor = tensor_from_value("chol", eval.factor())?;
             let factor =
-                self.allocate_tensor(factor_tensor.data.clone(), factor_tensor.shape.clone());
+                self.allocate_tensor(factor_tensor.materialize_f64(), factor_tensor.shape.clone());
             Ok(ProviderCholResult {
                 factor,
                 info: eval.flag_index() as u32,
@@ -7675,14 +9410,14 @@ impl AccelProvider for InProcessProvider {
             let perm_matrix_tensor = tensor_from_value("qr", eval.permutation_matrix())?;
             let perm_vector_tensor = tensor_from_value("qr", eval.permutation_vector())?;
 
-            let q_handle = self.allocate_tensor(q_tensor.data.clone(), q_tensor.shape.clone());
-            let r_handle = self.allocate_tensor(r_tensor.data.clone(), r_tensor.shape.clone());
+            let q_handle = self.allocate_tensor(q_tensor.materialize_f64(), q_tensor.shape.clone());
+            let r_handle = self.allocate_tensor(r_tensor.materialize_f64(), r_tensor.shape.clone());
             let perm_matrix_handle = self.allocate_tensor(
-                perm_matrix_tensor.data.clone(),
+                perm_matrix_tensor.materialize_f64(),
                 perm_matrix_tensor.shape.clone(),
             );
             let perm_vector_handle = self.allocate_tensor(
-                perm_vector_tensor.data.clone(),
+                perm_vector_tensor.materialize_f64(),
                 perm_vector_tensor.shape.clone(),
             );
 
@@ -8036,9 +9771,10 @@ impl AccelProvider for InProcessProvider {
             self.telemetry
                 .record_solve_fallback("linsolve:host_reupload");
             self.telemetry
-                .record_upload_bytes((solution.data.len() * std::mem::size_of::<f64>()) as u64);
+                .record_upload_bytes((solution.len() * std::mem::size_of::<f64>()) as u64);
 
-            let Tensor { data, shape, .. } = solution;
+            let shape = solution.shape.clone();
+            let data = solution.materialize_f64();
             let handle = self.allocate_tensor(data, shape);
             Ok(ProviderLinsolveResult {
                 solution: handle,
@@ -8063,7 +9799,8 @@ impl AccelProvider for InProcessProvider {
             let tensor =
                 Tensor::new(data, matrix.shape.clone()).map_err(|e| anyhow!("inv: {e}"))?;
             let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-            let Tensor { data, shape, .. } = result;
+            let shape = result.shape.clone();
+            let data = result.materialize_f64();
             Ok(self.allocate_tensor(data, shape))
         })
     }
@@ -8085,7 +9822,8 @@ impl AccelProvider for InProcessProvider {
                 Tensor::new(data, matrix.shape.clone()).map_err(|e| anyhow!("pinv: {e}"))?;
             let result = pinv_host_real_for_provider(&tensor, options.tolerance)
                 .map_err(|e| anyhow!("{e}"))?;
-            let Tensor { data, shape, .. } = result;
+            let shape = result.shape.clone();
+            let data = result.materialize_f64();
             Ok(self.allocate_tensor(data, shape))
         })
     }
@@ -8280,9 +10018,10 @@ impl AccelProvider for InProcessProvider {
             self.telemetry
                 .record_solve_fallback("mldivide:host_reupload");
             self.telemetry
-                .record_upload_bytes((result.data.len() * std::mem::size_of::<f64>()) as u64);
+                .record_upload_bytes((result.len() * std::mem::size_of::<f64>()) as u64);
 
-            let Tensor { data, shape, .. } = result;
+            let shape = result.shape.clone();
+            let data = result.materialize_f64();
             Ok(self.allocate_tensor(data, shape))
         })
     }
@@ -8322,9 +10061,10 @@ impl AccelProvider for InProcessProvider {
             self.telemetry
                 .record_solve_fallback("mrdivide:host_reupload");
             self.telemetry
-                .record_upload_bytes((result.data.len() * std::mem::size_of::<f64>()) as u64);
+                .record_upload_bytes((result.len() * std::mem::size_of::<f64>()) as u64);
 
-            let Tensor { data, shape, .. } = result;
+            let shape = result.shape.clone();
+            let data = result.materialize_f64();
             Ok(self.allocate_tensor(data, shape))
         })
     }
@@ -8456,7 +10196,107 @@ pub fn reset_inprocess_rng() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{ProviderBlackScholesPriceInput, ProviderNdgridAxis};
+    use runmat_accelerate_api::{
+        IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
+    };
+    use runmat_builtins::{IntValue, IntegerStorage};
+
+    #[test]
+    fn conv1d_valid_empty_kernel_returns_signal_length_zeros() {
+        let provider = InProcessProvider::new();
+        let signal = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0],
+                shape: &[3, 1],
+            })
+            .unwrap();
+        let kernel = provider
+            .upload(&HostTensorView {
+                data: &[],
+                shape: &[0, 1],
+            })
+            .unwrap();
+        let output = provider
+            .conv1d(
+                &signal,
+                &kernel,
+                ProviderConv1dOptions {
+                    mode: ProviderConvMode::Valid,
+                    orientation: ProviderConvOrientation::Column,
+                },
+            )
+            .unwrap();
+        let output = block_on(provider.download(&output)).unwrap();
+        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.data, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn conv1d_same_even_kernel_uses_matlab_alignment() {
+        let provider = InProcessProvider::new();
+        let signal = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0],
+                shape: &[1, 5],
+            })
+            .unwrap();
+        let kernel = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[1, 4],
+            })
+            .unwrap();
+        let output = provider
+            .conv1d(
+                &signal,
+                &kernel,
+                ProviderConv1dOptions {
+                    mode: ProviderConvMode::Same,
+                    orientation: ProviderConvOrientation::Row,
+                },
+            )
+            .unwrap();
+        let output = block_on(provider.download(&output)).unwrap();
+        assert_eq!(output.shape, vec![1, 5]);
+        assert_eq!(output.data, vec![10.0, 20.0, 30.0, 34.0, 31.0]);
+    }
+
+    #[test]
+    fn simple_provider_broadcast_canonicalizes_one_dimensional_row_shorthand() {
+        let left = [1.0, 2.0, 3.0];
+        let right = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0];
+        let (values, shape, storage) = elementwise_binary_broadcast_data(
+            "plus",
+            BinaryOperand {
+                data: &left,
+                storage: GpuTensorStorage::Real,
+                shape: &[3],
+            },
+            BinaryOperand {
+                data: &right,
+                storage: GpuTensorStorage::Real,
+                shape: &[1, 3, 2],
+            },
+            ElementwiseBinaryOp::Add,
+        )
+        .expect("row shorthand broadcast");
+        assert_eq!(shape, vec![1, 3, 2]);
+        assert_eq!(values, vec![11.0, 22.0, 33.0, 41.0, 52.0, 63.0]);
+        assert_eq!(storage, GpuTensorStorage::Real);
+    }
+
+    #[test]
+    fn float_result_materializer_rejects_native_integers() {
+        let scalar = tensor_from_value("qr", Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("wide integer scalar must not use f64");
+        assert!(scalar.to_string().contains("typed provider result path"));
+
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+            .expect("integer tensor");
+        let tensor = tensor_from_value("qr", Value::Tensor(tensor))
+            .expect_err("integer tensor must not use f64");
+        assert!(tensor.to_string().contains("typed provider result path"));
+    }
 
     fn complex_handle(
         provider: &InProcessProvider,
@@ -8489,6 +10329,532 @@ mod tests {
                 shape,
             })
             .expect("upload real")
+    }
+
+    #[test]
+    fn inprocess_native_integer_sum_prod_hooks_preserve_class() {
+        let provider = InProcessProvider::new();
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[100, 50, -20, 3]),
+                shape: &[2, 2],
+            })
+            .expect("upload native integer");
+        let sum = block_on(provider.reduce_integer_sum_native_dim(&handle, 0))
+            .expect("native integer sum dim");
+        let prod =
+            block_on(provider.reduce_integer_prod_native(&handle)).expect("native integer prod");
+        assert_eq!(
+            block_on(provider.download_integer(&sum))
+                .expect("download sum")
+                .data,
+            HostIntegerDataOwned::I8(vec![127, -17])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&prod))
+                .expect("download prod")
+                .data,
+            HostIntegerDataOwned::I8(vec![-128])
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&sum),
+            Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&prod),
+            Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+    }
+
+    #[test]
+    fn inprocess_integer_shape_moves_stay_exact_and_out_of_f64_registry() {
+        let provider = InProcessProvider::new();
+        let input = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[
+                    u64::MAX,
+                    (1_u64 << 63) + 1,
+                    (1_u64 << 63) + 3,
+                    7,
+                ]),
+                shape: &[2, 2],
+            })
+            .expect("upload exact uint64");
+
+        let permuted = provider.permute(&input, &[1, 0]).expect("permute");
+        let flipped = provider.flip(&permuted, &[0]).expect("flip");
+        let shifted = provider.circshift(&flipped, &[1, 0]).expect("circshift");
+        let tiled = provider.repmat(&shifted, &[1, 2]).expect("repmat");
+
+        for handle in [&permuted, &flipped, &shifted, &tiled] {
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(handle),
+                Some(IntegerElementType::U64)
+            );
+            assert!(
+                !registry().lock().unwrap().contains_key(&handle.buffer_id),
+                "integer shape operation must not allocate an f64 mirror"
+            );
+        }
+        assert_eq!(permuted.shape, vec![2, 2]);
+        assert_eq!(shifted.shape, vec![2, 2]);
+        assert_eq!(tiled.shape, vec![2, 4]);
+        assert_eq!(
+            block_on(provider.download_integer(&tiled))
+                .expect("download exact uint64 shape result")
+                .data,
+            HostIntegerDataOwned::U64(vec![
+                u64::MAX,
+                (1_u64 << 63) + 3,
+                (1_u64 << 63) + 1,
+                7,
+                u64::MAX,
+                (1_u64 << 63) + 3,
+                (1_u64 << 63) + 1,
+                7
+            ])
+        );
+    }
+
+    #[test]
+    fn inprocess_public_reductions_route_native_wide_integers() {
+        let provider = InProcessProvider::new();
+        let input = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[(1_u64 << 63) + 1, (1_u64 << 63) + 3, 7, 9]),
+                shape: &[2, 2],
+            })
+            .expect("upload uint64");
+
+        let sum = block_on(provider.reduce_sum(&input)).expect("public uint64 sum");
+        let product = block_on(provider.reduce_prod(&input)).expect("public uint64 product");
+        let mean = block_on(provider.reduce_mean_dim(&input, 0)).expect("public uint64 mean");
+
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&sum),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&product),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&mean),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&sum))
+                .expect("download uint64 sum")
+                .data,
+            HostIntegerDataOwned::U64(vec![u64::MAX])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&product))
+                .expect("download uint64 product")
+                .data,
+            HostIntegerDataOwned::U64(vec![u64::MAX])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&mean))
+                .expect("download uint64 mean")
+                .data,
+            HostIntegerDataOwned::U64(vec![(1_u64 << 63) + 2, 8])
+        );
+    }
+
+    #[test]
+    fn inprocess_integer_extrema_hooks_keep_wide_values_resident_and_exact() {
+        let provider = InProcessProvider::new();
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[u64::MAX, 1_u64 << 63, 9, 7]),
+                shape: &[2, 2],
+            })
+            .expect("upload uint64 extrema input");
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[i64::MIN, -7, i64::MAX, 3]),
+                shape: &[2, 2],
+            })
+            .expect("upload int64 extrema input");
+        let downloads_before = provider.telemetry_snapshot().download_bytes;
+
+        let min = block_on(provider.reduce_min_dim(&unsigned, 0)).expect("uint64 min");
+        let max = block_on(provider.reduce_max_dim(&signed, 1)).expect("int64 max");
+
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&min.values),
+            Some(IntegerElementType::U64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&max.values),
+            Some(IntegerElementType::I64)
+        );
+        assert_eq!(
+            provider.telemetry_snapshot().download_bytes,
+            downloads_before
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&min.values))
+                .expect("download uint64 min")
+                .data,
+            HostIntegerDataOwned::U64(vec![1_u64 << 63, 7])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&max.values))
+                .expect("download int64 max")
+                .data,
+            HostIntegerDataOwned::I64(vec![i64::MAX, 3])
+        );
+        assert_eq!(
+            block_on(provider.download(&min.indices))
+                .expect("download min indices")
+                .data,
+            vec![2.0, 2.0]
+        );
+        assert_eq!(
+            block_on(provider.download(&max.indices))
+                .expect("download max indices")
+                .data,
+            vec![2.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn inprocess_native_integer_sum_prod_hooks_reduce_nd_shapes() {
+        let provider = InProcessProvider::new();
+        let values: Vec<u16> = (1..=12).collect();
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U16(&values),
+                shape: &[2, 3, 2],
+            })
+            .expect("upload native integer ndarray");
+        let sum_pages = block_on(provider.reduce_integer_sum_native_dim(&handle, 2))
+            .expect("sum across third dimension");
+        let sum_all =
+            block_on(provider.reduce_integer_sum_native(&handle)).expect("sum across all dims");
+        let prod_all =
+            block_on(provider.reduce_integer_prod_native(&handle)).expect("prod across all dims");
+        assert_eq!(
+            block_on(provider.download_integer(&sum_pages))
+                .expect("download page sums")
+                .data,
+            HostIntegerDataOwned::U16(vec![8, 10, 12, 14, 16, 18])
+        );
+        assert_eq!(sum_pages.shape, vec![2, 3, 1]);
+        assert_eq!(
+            block_on(provider.download_integer(&sum_all))
+                .expect("download global sum")
+                .data,
+            HostIntegerDataOwned::U16(vec![78])
+        );
+        assert_eq!(sum_all.shape, vec![1, 1, 1]);
+        assert_eq!(
+            block_on(provider.download_integer(&prod_all))
+                .expect("download global product")
+                .data,
+            HostIntegerDataOwned::U16(vec![u16::MAX])
+        );
+        assert_eq!(prod_all.shape, vec![1, 1, 1]);
+    }
+
+    #[test]
+    fn inprocess_native_integer_cumulative_hooks_preserve_class_and_direction() {
+        let provider = InProcessProvider::new();
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I8(&[120, 10, 2, 4, -5, 3]),
+                shape: &[3, 2],
+            })
+            .expect("upload native integer");
+        let forward = provider
+            .integer_cumsum_scan(&handle, 0, ProviderScanDirection::Forward)
+            .expect("integer cumsum");
+        let reverse = provider
+            .integer_cumprod_scan(&handle, 0, ProviderScanDirection::Reverse)
+            .expect("integer cumprod reverse");
+        assert_eq!(
+            block_on(provider.download_integer(&forward))
+                .expect("download cumsum")
+                .data,
+            HostIntegerDataOwned::I8(vec![120, 127, 127, 4, -1, 2])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&reverse))
+                .expect("download cumprod")
+                .data,
+            HostIntegerDataOwned::I8(vec![127, 20, 2, -60, -15, 3])
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&forward),
+            Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&reverse),
+            Some(runmat_accelerate_api::IntegerElementType::I8)
+        );
+    }
+
+    #[test]
+    fn inprocess_native_integer_cumulative_extrema_return_indices() {
+        let provider = InProcessProvider::new();
+        let handle = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U16(&[4, 2, 2, 7, 3, 7, 9, 9, 1, 8, 8, 0]),
+                shape: &[2, 3, 2],
+            })
+            .expect("upload native integer ndarray");
+        let mins = provider
+            .integer_cummin_scan(&handle, 1, ProviderScanDirection::Forward)
+            .expect("integer cummin");
+        let maxes = provider
+            .integer_cummax_scan(&handle, 2, ProviderScanDirection::Reverse)
+            .expect("integer cummax reverse");
+        assert_eq!(
+            block_on(provider.download_integer(&mins.values))
+                .expect("download cummin values")
+                .data,
+            HostIntegerDataOwned::U16(vec![4, 2, 2, 2, 2, 2, 9, 9, 1, 8, 1, 0])
+        );
+        assert_eq!(mins.values.shape, vec![2, 3, 2]);
+        assert_eq!(
+            registry()
+                .lock()
+                .unwrap()
+                .get(&mins.indices.buffer_id)
+                .cloned()
+                .expect("cummin indices"),
+            vec![1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0]
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&maxes.values))
+                .expect("download cummax values")
+                .data,
+            HostIntegerDataOwned::U16(vec![9, 9, 2, 8, 8, 7, 9, 9, 1, 8, 8, 0])
+        );
+        assert_eq!(
+            registry()
+                .lock()
+                .unwrap()
+                .get(&maxes.indices.buffer_id)
+                .cloned()
+                .expect("cummax indices"),
+            vec![2.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn inprocess_native_integer_mean_preserves_64bit_precision_and_vecdim_rounding() {
+        let provider = InProcessProvider::new();
+        let large = 1_u64 << 63;
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[large + 1, large + 3, 7, 9]),
+                shape: &[2, 2],
+            })
+            .expect("upload uint64 mean input");
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[-2, -3, 10, 13]),
+                shape: &[2, 2],
+            })
+            .expect("upload int64 mean input");
+        let vecdim_input = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I16(&[1, 1, 1, 3]),
+                shape: &[2, 2],
+            })
+            .expect("upload int16 vecdim mean input");
+        let unsigned_dim0 = block_on(provider.reduce_integer_mean_native_dim(&unsigned, 0))
+            .expect("uint64 mean dim 0");
+        let signed_dim0 = block_on(provider.reduce_integer_mean_native_dim(&signed, 0))
+            .expect("int64 mean dim 0");
+        let vecdim = block_on(provider.reduce_integer_mean_native_dims(&vecdim_input, &[0, 1]))
+            .expect("int16 mean vecdim");
+        assert_eq!(
+            block_on(provider.download_integer(&unsigned_dim0))
+                .expect("download uint64 mean")
+                .data,
+            HostIntegerDataOwned::U64(vec![large + 2, 8])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&signed_dim0))
+                .expect("download int64 mean")
+                .data,
+            HostIntegerDataOwned::I64(vec![-3, 12])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&vecdim))
+                .expect("download vecdim mean")
+                .data,
+            HostIntegerDataOwned::I16(vec![2])
+        );
+        assert_eq!(vecdim.shape, vec![1, 1]);
+    }
+
+    #[test]
+    fn inprocess_native_integer_mean_covers_all_classes_and_empty_reductions() {
+        let provider = InProcessProvider::new();
+        macro_rules! check {
+            ($view:ident, $owned:ident, $ty:ty, $element_type:expr) => {{
+                let values: [$ty; 4] = [1 as $ty, 2 as $ty, 3 as $ty, 4 as $ty];
+                let input = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&values),
+                        shape: &[2, 2],
+                    })
+                    .expect("upload integer mean values");
+                let dim0 = block_on(provider.reduce_integer_mean_native_dim(&input, 0))
+                    .expect("mean dim 0");
+                let dim1 = block_on(provider.reduce_integer_mean_native_dim(&input, 1))
+                    .expect("mean dim 1");
+                let global =
+                    block_on(provider.reduce_integer_mean_native(&input)).expect("mean global");
+                assert_eq!(
+                    block_on(provider.download_integer(&dim0))
+                        .expect("download mean dim 0")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![2 as $ty, 4 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer(&dim1))
+                        .expect("download mean dim 1")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![2 as $ty, 3 as $ty])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer(&global))
+                        .expect("download global mean")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![3 as $ty])
+                );
+                assert_eq!(dim0.shape, vec![1, 2]);
+                assert_eq!(dim1.shape, vec![2, 1]);
+                assert_eq!(global.shape, vec![1, 1]);
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&dim0),
+                    Some($element_type)
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&global),
+                    Some($element_type)
+                );
+
+                let empty_values: [$ty; 0] = [];
+                let empty = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&empty_values),
+                        shape: &[0, 3],
+                    })
+                    .expect("upload empty integer mean values");
+                let empty_dim0 = block_on(provider.reduce_integer_mean_native_dim(&empty, 0))
+                    .expect("mean empty dim 0");
+                assert_eq!(empty_dim0.shape, vec![1, 3]);
+                assert_eq!(
+                    block_on(provider.download_integer(&empty_dim0))
+                        .expect("download empty mean")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![0 as $ty, 0 as $ty, 0 as $ty])
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&empty_dim0),
+                    Some($element_type)
+                );
+            }};
+        }
+
+        check!(I8, I8, i8, IntegerElementType::I8);
+        check!(I16, I16, i16, IntegerElementType::I16);
+        check!(I32, I32, i32, IntegerElementType::I32);
+        check!(I64, I64, i64, IntegerElementType::I64);
+        check!(U8, U8, u8, IntegerElementType::U8);
+        check!(U16, U16, u16, IntegerElementType::U16);
+        check!(U32, U32, u32, IntegerElementType::U32);
+        check!(U64, U64, u64, IntegerElementType::U64);
+    }
+
+    #[test]
+    fn inprocess_integer_cast_covers_all_target_classes_and_exact_native_inputs() {
+        let provider = InProcessProvider::new();
+        let real = provider
+            .upload(&HostTensorView {
+                data: &[-129.6, -1.0, 4.4, 5.6, f64::NAN, f64::INFINITY],
+                shape: &[2, 3],
+            })
+            .expect("upload real cast input");
+        let signed = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[-1, 0, i64::MAX]),
+                shape: &[1, 3],
+            })
+            .expect("upload signed integer cast input");
+        let unsigned = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[0, 1_u64 << 63, u64::MAX]),
+                shape: &[1, 3],
+            })
+            .expect("upload unsigned integer cast input");
+
+        macro_rules! check_real {
+            ($target:expr, $owned:ident, $expected:expr) => {{
+                let output = block_on(provider.cast_to_integer(&real, $target))
+                    .expect("resident real-to-integer cast");
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&output),
+                    Some($target)
+                );
+                assert_eq!(output.shape, vec![2, 3]);
+                assert_eq!(
+                    block_on(provider.download_integer(&output))
+                        .expect("download integer cast")
+                        .data,
+                    HostIntegerDataOwned::$owned($expected)
+                );
+            }};
+        }
+
+        check_real!(
+            IntegerElementType::I8,
+            I8,
+            vec![i8::MIN, -1, 4, 6, 0, i8::MAX]
+        );
+        check_real!(
+            IntegerElementType::I16,
+            I16,
+            vec![-130, -1, 4, 6, 0, i16::MAX]
+        );
+        check_real!(
+            IntegerElementType::I32,
+            I32,
+            vec![-130, -1, 4, 6, 0, i32::MAX]
+        );
+        check_real!(
+            IntegerElementType::I64,
+            I64,
+            vec![-130, -1, 4, 6, 0, i64::MAX]
+        );
+        check_real!(IntegerElementType::U8, U8, vec![0, 0, 4, 6, 0, u8::MAX]);
+        check_real!(IntegerElementType::U16, U16, vec![0, 0, 4, 6, 0, u16::MAX]);
+        check_real!(IntegerElementType::U32, U32, vec![0, 0, 4, 6, 0, u32::MAX]);
+        check_real!(IntegerElementType::U64, U64, vec![0, 0, 4, 6, 0, u64::MAX]);
+
+        let to_u64 = block_on(provider.cast_to_integer(&signed, IntegerElementType::U64))
+            .expect("resident int64-to-uint64 cast");
+        let to_i64 = block_on(provider.cast_to_integer(&unsigned, IntegerElementType::I64))
+            .expect("resident uint64-to-int64 cast");
+        assert_eq!(
+            block_on(provider.download_integer(&to_u64))
+                .expect("download uint64")
+                .data,
+            HostIntegerDataOwned::U64(vec![0, 0, i64::MAX as u64])
+        );
+        assert_eq!(
+            block_on(provider.download_integer(&to_i64))
+                .expect("download int64")
+                .data,
+            HostIntegerDataOwned::I64(vec![0, i64::MAX, i64::MAX])
+        );
     }
 
     #[test]
@@ -9049,6 +11415,60 @@ mod tests {
     }
 
     #[test]
+    fn linear_gather_and_scatter_preserve_all_native_integer_classes() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_175, Ordering::Relaxed);
+        macro_rules! check {
+            ($view:ident, $owned:ident, $values:expr, $expected:expr) => {{
+                let source = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&$values),
+                        shape: &[1, 3],
+                    })
+                    .expect("upload integer source");
+                let gathered = provider
+                    .gather_linear(&source, &[2, 0], &[1, 2])
+                    .expect("gather integer values");
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&gathered),
+                    runmat_accelerate_api::handle_integer_type(&source)
+                );
+                assert_eq!(
+                    block_on(provider.download_integer(&gathered))
+                        .expect("download gathered")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![($expected)[0], ($expected)[1]])
+                );
+
+                let target = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::$view(&[0 as _, 0 as _, 0 as _]),
+                        shape: &[1, 3],
+                    })
+                    .expect("upload integer target");
+                provider
+                    .scatter_linear(&target, &[0, 2], &gathered)
+                    .expect("scatter integer values");
+                assert_eq!(
+                    block_on(provider.download_integer(&target))
+                        .expect("download target")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![($expected)[0], 0, ($expected)[1]])
+                );
+            }};
+        }
+
+        check!(I8, I8, [i8::MIN, -1, i8::MAX], [i8::MAX, i8::MIN]);
+        check!(I16, I16, [i16::MIN, -1, i16::MAX], [i16::MAX, i16::MIN]);
+        check!(I32, I32, [i32::MIN, -1, i32::MAX], [i32::MAX, i32::MIN]);
+        check!(I64, I64, [i64::MIN, -1, i64::MAX], [i64::MAX, i64::MIN]);
+        check!(U8, U8, [0, 1, u8::MAX], [u8::MAX, 0]);
+        check!(U16, U16, [0, 1, u16::MAX], [u16::MAX, 0]);
+        check!(U32, U32, [0, 1, u32::MAX], [u32::MAX, 0]);
+        check!(U64, U64, [0, 1, u64::MAX], [u64::MAX, 0]);
+    }
+
+    #[test]
     fn iir_filter_preserves_complex_storage_and_filters_lanes() {
         let provider = InProcessProvider::new();
         provider.next_id.store(9_000_175, Ordering::Relaxed);
@@ -9218,5 +11638,23 @@ mod tests {
             &values.map(|(re, im)| tan_complex_host(re, im)),
             &[1, 2],
         );
+    }
+
+    #[test]
+    fn expm1_is_precise_for_tiny_real_values_and_real_exp_hooks_reject_complex() {
+        let provider = InProcessProvider::new();
+        provider.next_id.store(9_000_450, Ordering::Relaxed);
+        let real = real_handle(&provider, &[1.0e-16, -1.0e-16], &[1, 2]);
+        let output = block_on(provider.unary_expm1(&real)).expect("expm1");
+        assert_real_close(
+            &provider,
+            &output,
+            &[1.0e-16_f64.exp_m1(), (-1.0e-16_f64).exp_m1()],
+            &[1, 2],
+        );
+
+        let complex = complex_handle(&provider, &[(1.0, 2.0)], &[1, 1]);
+        assert!(block_on(provider.unary_exp(&complex)).is_err());
+        assert!(block_on(provider.unary_expm1(&complex)).is_err());
     }
 }

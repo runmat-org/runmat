@@ -2,9 +2,10 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, NumericDType, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, ComplexTensor, NumericDType, NumericStorage,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -19,6 +20,15 @@ use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinc";
+
+const SINC_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sinc-nonfloating-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sinc with integer or logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SincNonfloatingInputExtension"),
+};
+
+pub const SINC_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SINC_NONFLOATING_INPUT_EXTENSION];
 
 const SINC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -199,9 +209,17 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::sinc::SINC_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::sinc::SINC_EXTENSIONS),
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
+    if is_supported_nonfloating_input(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SINC_NONFLOATING_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => sinc_gpu(handle).await,
         Value::Complex(re, im) => {
@@ -213,6 +231,21 @@ async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
             Err(sinc_error(&SINC_ERROR_INVALID_INPUT))
         }
         other => sinc_real(other),
+    }
+}
+
+fn is_supported_nonfloating_input(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32
+        ),
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
+        _ => false,
     }
 }
 
@@ -278,18 +311,32 @@ fn sinc_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sinc_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| sinc_real_value(value))
-        .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
+    let storage = match storage {
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| sinc_real_value(f64::from(value)) as f32)
+                .collect(),
+        ),
+        storage => NumericStorage::F64(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(sinc_real_value)
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))
 }
 
 fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| sinc_complex_value(re, im))
         .collect::<Vec<_>>();
@@ -540,11 +587,12 @@ mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 6]);
-                assert_eq!(out.data, vec![0.0; 6]);
+                assert_eq!(out.materialize_f64(), vec![0.0; 6]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
 
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = call(Value::Int(IntValue::I32(-3))).expect("sinc int");
         match result {
             Value::Num(value) => assert_eq!(value, 0.0),
@@ -577,7 +625,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 4]);
                 let expected = [0.0, 1.0, 0.0, 2.0 / std::f64::consts::PI];
-                for (got, want) in out.data.iter().zip(expected) {
+                for (got, want) in out.materialize_f64().iter().zip(expected) {
                     assert_close(*got, want);
                 }
             }
@@ -596,7 +644,24 @@ mod tests {
     }
 
     #[test]
+    fn sinc_preserves_native_single_storage() {
+        let input =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0, 0.5, 1.0]), vec![1, 3])
+                .unwrap();
+        let result = call(Value::Tensor(input)).expect("single sinc");
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, (2.0 / std::f32::consts::PI), 0.0])
+        );
+    }
+
+    #[test]
     fn sinc_logical_inputs_are_numeric() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let zero = call(Value::Bool(false)).expect("sinc false");
         let one = call(Value::Bool(true)).expect("sinc true");
         match (zero, one) {
@@ -606,6 +671,43 @@ mod tests {
             }
             other => panic!("expected scalar results, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sinc_nonfloating_input_follows_compatibility_mode() {
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                call(Value::Int(IntValue::I16(1))).expect_err("MATLAB mode rejects integer input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SincNonfloatingInputExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call(Value::Int(IntValue::I16(1))).is_ok());
+        }
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_300_005,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::I16,
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(Value::GpuTensor(handle.clone()))
+                .expect_err("MATLAB mode rejects resident integer input before dispatch");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SincNonfloatingInputExtension")
+            );
+        }
+        runmat_accelerate_api::clear_handle_integer_type(&handle);
     }
 
     #[test]
@@ -634,8 +736,8 @@ mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_complex_close(out.data[0], (1.0, 0.0));
-                assert_complex_close(out.data[1], sinc_complex_value(0.5, 0.25));
+                assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
+                assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -662,7 +764,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
                 let expected = [1.0, 2.0 / std::f64::consts::PI, 0.0];
-                for (got, want) in out.data.iter().zip(expected) {
+                for (got, want) in out.materialize_f64().iter().zip(expected) {
                     assert_close(*got, want);
                 }
             }
@@ -705,8 +807,8 @@ mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_complex_close(out.data[0], (1.0, 0.0));
-                assert_complex_close(out.data[1], sinc_complex_value(0.5, 0.25));
+                assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
+                assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
             }
             other => panic!("expected complex tensor fallback, got {other:?}"),
         }
@@ -735,7 +837,7 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -747,7 +849,7 @@ mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
             let expected = [1.0, 2.0 / std::f64::consts::PI, 0.0];
-            for (got, want) in gathered.data.iter().zip(expected) {
+            for (got, want) in gathered.materialize_f64().iter().zip(expected) {
                 assert_close(*got, want);
             }
         });
@@ -774,8 +876,8 @@ mod tests {
                 panic!("expected complex tensor");
             };
             assert_eq!(out.shape, complex.shape);
-            assert_complex_close(out.data[0], (1.0, 0.0));
-            assert_complex_close(out.data[1], sinc_complex_value(0.5, 0.25));
+            assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
+            assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
         });
     }
 
@@ -795,7 +897,7 @@ mod tests {
         let tensor = Tensor::new(vec![0.0, 0.5, 1.0, 1.25, 2.0], vec![1, 5]).unwrap();
         let cpu = sinc_real(Value::Tensor(tensor.clone())).expect("cpu sinc");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -810,7 +912,11 @@ mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (got, want) in gathered.data.iter().zip(expected.data.iter()) {
+        for (got, want) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!((got - want).abs() < tol, "|{got} - {want}| >= {tol}");
         }
     }
@@ -855,7 +961,11 @@ mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (got, want) in actual.data.iter().zip(expected.data.iter()) {
+        for (got, want) in actual
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!(
                 (got.0 - want.0).abs() < tol && (got.1 - want.1).abs() < tol,
                 "got {got:?}, expected {want:?}, tol {tol}"

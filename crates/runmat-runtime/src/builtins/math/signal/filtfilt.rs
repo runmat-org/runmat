@@ -2,9 +2,13 @@
 
 use num_complex::Complex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -14,8 +18,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::math::fft::common::ensure_wide_integer_data_exact;
 use crate::builtins::math::signal::common::{
-    complex_vector_to_value, signal_error, value_to_complex_vector, vector_is_row,
+    complex_vector_to_value_with_dtype, signal_error, value_to_complex_vector, vector_is_row,
     ComplexVectorInput,
 };
 use crate::builtins::math::signal::filter;
@@ -24,6 +29,61 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "filtfilt";
 const EPS: f64 = 1.0e-12;
+
+const FILTFILT_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "filtfilt-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "filtfilt with typed-integer coefficients or signal data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FiltfiltIntegerInputExtension"),
+};
+
+const FILTFILT_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "filtfilt-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "filtfilt with logical coefficients or signal data is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FiltfiltLogicalInputExtension"),
+};
+
+const FILTFILT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    FILTFILT_INTEGER_INPUT_EXTENSION,
+    FILTFILT_LOGICAL_INPUT_EXTENSION,
+];
+
+const FILTFILT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "b",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB documents single and double coefficients; RunMat mode additionally accepts real integer coefficients.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "a",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB documents single and double coefficients; RunMat mode additionally accepts real integer coefficients.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "MATLAB documents single and double signals; RunMat mode additionally accepts real integer vectors.",
+    },
+];
+
+const FILTFILT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "y = filtfilt(integer_b, integer_a, integer_x)",
+        inputs: &FILTFILT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer inputs are independently mode-gated before gathering or provider access and produce double output.",
+    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::filtfilt")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -162,6 +222,8 @@ fn filtfilt_error_with_message(
     accel = "custom",
     type_resolver(filtfilt_type),
     descriptor(crate::builtins::math::signal::filtfilt::FILTFILT_DESCRIPTOR),
+    extensions(FILTFILT_EXTENSIONS),
+    integer_capabilities(FILTFILT_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::filtfilt"
 )]
 async fn filtfilt_builtin(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
@@ -169,6 +231,17 @@ async fn filtfilt_builtin(b: Value, a: Value, x: Value) -> BuiltinResult<Value> 
 }
 
 pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
+    ensure_filtfilt_extensions([&b, &a, &x])?;
+    let b = gather_wide_integer_for_exactness(b).await?;
+    let a = gather_wide_integer_for_exactness(a).await?;
+    let x = gather_wide_integer_for_exactness(x).await?;
+    for value in [&b, &a, &x] {
+        ensure_wide_integer_data_exact(value, BUILTIN_NAME)?;
+    }
+    let output_single = [&b, &a, &x].into_iter().any(value_is_single);
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
     let b_input = value_to_complex_vector(BUILTIN_NAME, "numerator", b)
         .await
         .map_err(|err| {
@@ -190,18 +263,86 @@ pub async fn evaluate(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
             "signal cannot be empty",
         ));
     }
+    if x_input
+        .data
+        .iter()
+        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(filtfilt_error_with_detail(
+            &FILTFILT_ERROR_INVALID_SIGNAL,
+            "signal values must be finite",
+        ));
+    }
 
-    if let Some(value) = try_filtfilt_gpu(&coeffs, &x_input).await? {
+    let output_dtype = if output_single {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    if let Some(value) = try_filtfilt_gpu(&coeffs, &x_input, output_dtype).await? {
         return Ok(value);
     }
 
     let filtered = filtfilt_host(&coeffs, &x_input.data)?;
-    complex_vector_to_value(
+    complex_vector_to_value_with_dtype(
         filtered,
         x_input.shape,
         b_input.is_complex || a_input.is_complex || x_input.is_complex,
+        output_dtype,
     )
     .map_err(|err| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, err.message()))
+}
+
+async fn gather_wide_integer_for_exactness(value: Value) -> BuiltinResult<Value> {
+    if matches!(&value, Value::GpuTensor(handle) if matches!(
+        runmat_accelerate_api::handle_integer_type(handle),
+        Some(runmat_accelerate_api::IntegerElementType::I64 | runmat_accelerate_api::IntegerElementType::U64)
+    )) {
+        return gpu_helpers::gather_value_async(&value)
+            .await
+            .map_err(|source| {
+                filtfilt_error_with_detail(
+                    &FILTFILT_ERROR_INVALID_SIGNAL,
+                    format!("wide integer gather failed: {source}"),
+                )
+            });
+    }
+    Ok(value)
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn value_is_single(value: &Value) -> bool {
+    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_none()
+            && !runmat_accelerate_api::handle_is_logical(handle)
+            && runmat_accelerate_api::handle_precision(handle) == Some(runmat_accelerate_api::ProviderPrecision::F32))
+}
+
+fn is_logical_value(value: &Value) -> bool {
+    matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn ensure_filtfilt_extensions(values: [&Value; 3]) -> BuiltinResult<()> {
+    if values.iter().copied().any(is_typed_integer_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FILTFILT_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if values.iter().copied().any(is_logical_value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FILTFILT_LOGICAL_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -413,12 +554,23 @@ fn solve_linear(
 async fn try_filtfilt_gpu(
     coeffs: &NormalizedCoefficients,
     input: &ComplexVectorInput,
+    output_dtype: NumericDType,
 ) -> BuiltinResult<Option<Value>> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    let Some(input_handle) = input.gpu_handle.as_ref() else {
         return Ok(None);
     };
-    if input.gpu_handle.is_none() || input.is_complex || !coeffs.is_real() || coeffs.state_len == 0
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(input_handle) else {
+        return Ok(None);
+    };
+    if matches!(output_dtype, NumericDType::F32)
+        != matches!(
+            provider.precision(),
+            runmat_accelerate_api::ProviderPrecision::F32
+        )
     {
+        return Ok(None);
+    }
+    if input.is_complex || !coeffs.is_real() || coeffs.state_len == 0 {
         return Ok(None);
     }
     let nfact = 3usize
@@ -433,7 +585,7 @@ async fn try_filtfilt_gpu(
         return Ok(None);
     }
     let extended = odd_reflect(&input.data, nfact);
-    let first_pass = match gpu_filter_pass(coeffs, &extended, &input.shape, &zi).await {
+    let first_pass = match gpu_filter_pass(provider, coeffs, &extended, &input.shape, &zi).await {
         Ok(value) => value,
         Err(err) => {
             log::debug!("filtfilt: first GPU pass failed ({err:?}), falling back to host");
@@ -442,7 +594,7 @@ async fn try_filtfilt_gpu(
     };
     let mut reversed = first_pass;
     reversed.reverse();
-    let second_pass = match gpu_filter_pass(coeffs, &reversed, &input.shape, &zi).await {
+    let second_pass = match gpu_filter_pass(provider, coeffs, &reversed, &input.shape, &zi).await {
         Ok(value) => value,
         Err(err) => {
             log::debug!("filtfilt: second GPU pass failed ({err:?}), falling back to host");
@@ -498,14 +650,12 @@ impl Drop for OwnedGpuHandle<'_> {
 }
 
 async fn gpu_filter_pass(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
     coeffs: &NormalizedCoefficients,
     signal: &[Complex<f64>],
     original_shape: &[usize],
     zi: &[Complex<f64>],
 ) -> BuiltinResult<Vec<Complex<f64>>> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, "no acceleration provider")
-    })?;
     let is_row = vector_is_row(original_shape);
     let shape = if is_row {
         vec![1, signal.len()]
@@ -540,11 +690,7 @@ async fn gpu_filter_pass(
         .into_iter()
         .map(|z| z.re)
         .collect::<Vec<_>>();
-    let zi_shape = if is_row {
-        vec![1, coeffs.state_len]
-    } else {
-        vec![coeffs.state_len, 1]
-    };
+    let zi_shape = vec![coeffs.state_len, 1];
     let zi_value = Tensor::new(scaled_zi, zi_shape)
         .map(Value::Tensor)
         .map_err(|e| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, e))?;
@@ -572,8 +718,7 @@ async fn gpu_filter_pass(
         other => tensor::value_to_tensor(&other)
             .map_err(|e| filtfilt_error_with_detail(&FILTFILT_ERROR_INTERNAL, e))?,
     };
-    Ok(tensor
-        .data
+    Ok(tensor::tensor_into_values_f64(tensor)
         .into_iter()
         .map(|re| Complex::new(re, 0.0))
         .collect())
@@ -597,7 +742,7 @@ mod tests {
 
     fn tensor_data(value: Value) -> (Vec<f64>, Vec<usize>) {
         let tensor = test_support::gather(value).expect("gather tensor");
-        (tensor.data, tensor.shape)
+        (tensor.materialize_f64(), tensor.shape)
     }
 
     fn approx(lhs: &[f64], rhs: &[f64], tol: f64) {
@@ -681,6 +826,65 @@ mod tests {
             .errors
             .iter()
             .any(|err| err.code == "RM.FILTFILT.INVALID_SIGNAL"));
+        assert_eq!(builtin.integer_capabilities.len(), 1);
+        assert_eq!(builtin.extensions.len(), 2);
+    }
+
+    #[test]
+    fn compatibility_mode_rejects_integer_and_logical_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = call(
+            Value::Int(runmat_builtins::IntValue::I16(1)),
+            Value::Num(1.0),
+            Value::Num(1.0),
+        )
+        .expect_err("integer extension must reject");
+        assert_eq!(
+            integer.identifier(),
+            FILTFILT_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let logical = call(Value::Bool(true), Value::Num(1.0), Value::Num(1.0))
+            .expect_err("logical extension must reject");
+        assert_eq!(
+            logical.identifier(),
+            FILTFILT_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn resident_exact_wide_integer_uses_authoritative_gather_fallback() {
+        test_support::with_test_provider(|provider| {
+            let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+            let signal = Tensor::new_integer(
+                runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_994; 4]),
+                vec![1, 4],
+            )
+            .expect("wide signal");
+            let handle = gpu_helpers::upload_tensor(provider, &signal).expect("wide upload");
+            let result = block_on(evaluate(
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::GpuTensor(handle),
+            ))
+            .expect("exact resident wide integer");
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
+            assert_eq!(gathered.shape, vec![1, 4]);
+        });
+    }
+
+    #[test]
+    fn single_output_is_native_and_nonfinite_signal_rejects() {
+        let single = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let value = call(Value::Num(1.0), Value::Num(1.0), Value::Tensor(single)).unwrap();
+        let Value::Tensor(value) = value else {
+            panic!("expected tensor")
+        };
+        assert_eq!(value.numeric_dtype(), NumericDType::F32);
+
+        let nonfinite = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).unwrap();
+        call(Value::Num(1.0), Value::Num(1.0), Value::Tensor(nonfinite))
+            .expect_err("nonfinite signal must reject");
     }
 
     #[test]
@@ -736,7 +940,7 @@ mod tests {
             panic!("expected complex output");
         };
         assert_eq!(out.shape, vec![1, 2]);
-        assert_eq!(out.data, vec![(1.0, 1.0), (2.0, -1.0)]);
+        assert_eq!(out.materialize_f64(), vec![(1.0, 1.0), (2.0, -1.0)]);
     }
 
     #[test]
@@ -754,7 +958,13 @@ mod tests {
             .collect::<Vec<_>>();
         let zi = vec![Complex::new(0.0, 0.0)];
 
-        let result = block_on(gpu_filter_pass(&coeffs, &signal, &[1, 8], &zi));
+        let result = block_on(gpu_filter_pass(
+            &DOWNLOAD_FAIL_PROVIDER,
+            &coeffs,
+            &signal,
+            &[1, 8],
+            &zi,
+        ));
 
         assert!(result.is_err());
         assert_eq!(DOWNLOAD_FAIL_PROVIDER.free_count(), 1);
@@ -775,7 +985,7 @@ mod tests {
             let (cpu_data, _) = tensor_data(cpu);
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload");
@@ -812,7 +1022,7 @@ mod tests {
         let (cpu_data, _) = tensor_data(cpu);
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             })
             .expect("upload");

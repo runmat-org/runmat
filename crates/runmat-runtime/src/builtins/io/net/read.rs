@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, IntValue, StructValue, Tensor, Value,
+    CharArray, IntegerStorage, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
@@ -496,9 +496,14 @@ fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> Builtin
         | DataType::UInt32
         | DataType::Int32
         | DataType::UInt64
-        | DataType::Int64
-        | DataType::Single
-        | DataType::Double => {
+        | DataType::Int64 => {
+            let storage = integer_storage_from_bytes(bytes, datatype, order)?;
+            let tensor =
+                Tensor::new_integer(storage, vec![1, bytes.len() / datatype.element_size()])
+                    .map_err(|err| read_flow(&READ_ERROR_INTERNAL, format!("read: {err}")))?;
+            Ok(Value::Tensor(tensor))
+        }
+        DataType::Single | DataType::Double => {
             let values = numeric_from_bytes(bytes, datatype, order)?;
             let cols = values.len();
             let tensor = Tensor::new(values, vec![1, cols])
@@ -534,21 +539,78 @@ fn numeric_from_bytes(
     let chunks = bytes.chunks_exact(size);
     for chunk in chunks {
         let value = match datatype {
-            DataType::UInt8 => chunk[0] as f64,
-            DataType::Int8 => (chunk[0] as i8) as f64,
-            DataType::UInt16 => u16_from(chunk, order) as f64,
-            DataType::Int16 => i16_from(chunk, order) as f64,
-            DataType::UInt32 => u32_from(chunk, order) as f64,
-            DataType::Int32 => i32_from(chunk, order) as f64,
-            DataType::UInt64 => u64_from(chunk, order) as f64,
-            DataType::Int64 => i64_from(chunk, order) as f64,
             DataType::Single => f32_from(chunk, order) as f64,
             DataType::Double => f64_from(chunk, order),
-            DataType::Char | DataType::String => unreachable!(),
+            _ => {
+                return Err(read_flow(
+                    &READ_ERROR_INTERNAL,
+                    "read: expected a floating-point datatype",
+                ));
+            }
         };
         out.push(value);
     }
     Ok(out)
+}
+
+fn integer_storage_from_bytes(
+    bytes: &[u8],
+    datatype: DataType,
+    order: ByteOrder,
+) -> BuiltinResult<IntegerStorage> {
+    let size = datatype.element_size();
+    if !bytes.len().is_multiple_of(size) {
+        return Err(read_flow(
+            &READ_ERROR_INTERNAL,
+            "read: received byte count does not align with datatype size",
+        ));
+    }
+    Ok(match datatype {
+        DataType::UInt8 => IntegerStorage::U8(bytes.to_vec()),
+        DataType::Int8 => IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect()),
+        DataType::UInt16 => IntegerStorage::U16(
+            bytes
+                .chunks_exact(2)
+                .map(|chunk| u16_from(chunk, order))
+                .collect(),
+        ),
+        DataType::Int16 => IntegerStorage::I16(
+            bytes
+                .chunks_exact(2)
+                .map(|chunk| i16_from(chunk, order))
+                .collect(),
+        ),
+        DataType::UInt32 => IntegerStorage::U32(
+            bytes
+                .chunks_exact(4)
+                .map(|chunk| u32_from(chunk, order))
+                .collect(),
+        ),
+        DataType::Int32 => IntegerStorage::I32(
+            bytes
+                .chunks_exact(4)
+                .map(|chunk| i32_from(chunk, order))
+                .collect(),
+        ),
+        DataType::UInt64 => IntegerStorage::U64(
+            bytes
+                .chunks_exact(8)
+                .map(|chunk| u64_from(chunk, order))
+                .collect(),
+        ),
+        DataType::Int64 => IntegerStorage::I64(
+            bytes
+                .chunks_exact(8)
+                .map(|chunk| i64_from(chunk, order))
+                .collect(),
+        ),
+        DataType::Single | DataType::Double | DataType::Char | DataType::String => {
+            return Err(read_flow(
+                &READ_ERROR_INTERNAL,
+                "read: expected an integer datatype",
+            ));
+        }
+    })
 }
 
 fn u16_from(bytes: &[u8], order: ByteOrder) -> u16 {
@@ -635,10 +697,47 @@ async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
 }
 
 fn parse_count(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(int) = value {
+        return int.try_to_usize().ok_or_else(|| {
+            let (error, detail) = if int.try_to_u64().is_some() {
+                (
+                    &READ_ERROR_INVALID_COUNT,
+                    "read: count exceeds the maximum supported size",
+                )
+            } else {
+                (
+                    &READ_ERROR_INVALID_COUNT,
+                    "read: count must be a non-negative finite value",
+                )
+            };
+            read_flow(error, detail)
+        });
+    }
+
     let numeric = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
+            let value = t
+                .numeric_value_at(0)
+                .expect("scalar tensor has authoritative numeric value");
+            if let Some(int) = value.into_int_value() {
+                return int.try_to_usize().ok_or_else(|| {
+                    let (error, detail) = if int.try_to_u64().is_some() {
+                        (
+                            &READ_ERROR_INVALID_COUNT,
+                            "read: count exceeds the maximum supported size",
+                        )
+                    } else {
+                        (
+                            &READ_ERROR_INVALID_COUNT,
+                            "read: count must be a non-negative finite value",
+                        )
+                    };
+                    read_flow(error, detail)
+                });
+            }
+            value.materialize_f64()
+        }
         _ => {
             return Err(read_flow(
                 &READ_ERROR_INVALID_COUNT,
@@ -658,7 +757,7 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
             "read: count must be finite",
         ));
     }
-    if numeric > usize::MAX as f64 {
+    if numeric > usize::MAX as f64 || (usize::BITS == 64 && numeric == usize::MAX as f64) {
         return Err(read_flow(
             &READ_ERROR_INVALID_COUNT,
             "read: count exceeds the maximum supported size",
@@ -711,8 +810,12 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
         )
     })?;
     match id_value {
-        Value::Int(IntValue::U64(id)) => Ok(*id),
-        Value::Int(iv) => Ok(iv.to_i64() as u64),
+        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
+            read_flow(
+                &READ_ERROR_INVALID_CLIENT,
+                "read: tcpclient struct has invalid handle field",
+            )
+        }),
         _ => Err(read_flow(
             &READ_ERROR_INVALID_CLIENT,
             "read: tcpclient struct has invalid handle field",
@@ -761,7 +864,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::accept::{
         configure_stream, insert_client, remove_client_for_test,
     };
-    use runmat_builtins::{IntValue, StructValue, Value};
+    use runmat_builtins::{IntValue, IntegerStorage, StructValue, Tensor, Value};
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
     use std::thread;
@@ -794,12 +897,114 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
+    #[test]
+    fn typed_read_count_and_handle_parsers_are_exact() {
+        assert_eq!(parse_count(&Value::Int(IntValue::U64(42))).unwrap(), 42);
+        assert!(parse_count(&Value::Int(IntValue::I8(-1))).is_err());
+        let maximum = parse_count(&Value::Int(IntValue::U64(u64::MAX)));
+        if usize::BITS == 64 {
+            assert_eq!(maximum.unwrap(), usize::MAX);
+        } else {
+            assert!(maximum.is_err());
+        }
+
+        let typed_count =
+            Tensor::new_integer(IntegerStorage::U64(vec![42]), vec![1, 1]).expect("count");
+        assert_eq!(parse_count(&Value::Tensor(typed_count)).unwrap(), 42);
+
+        let boundary = parse_count(&Value::Num(usize::MAX as f64));
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), usize::MAX);
+        }
+        assert!(parse_count(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+
+        let typed_negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
+        assert!(parse_count(&Value::Tensor(typed_negative)).is_err());
+
+        let typed_max =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("count");
+        let maximum = parse_count(&Value::Tensor(typed_max));
+        if usize::BITS == 64 {
+            assert_eq!(maximum.unwrap(), usize::MAX);
+        } else {
+            assert!(maximum.is_err());
+        }
+
+        let mut client = StructValue::new();
+        client.fields.insert(
+            CLIENT_HANDLE_FIELD.to_string(),
+            Value::Int(IntValue::I8(-1)),
+        );
+        let err = extract_client_id(&client).unwrap_err();
+        assert_error_identifier(err, READ_ERROR_INVALID_CLIENT.identifier.unwrap());
+    }
+
     fn run_read(client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(read_builtin(client, rest))
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
         crate::builtins::io::net::accept::test_guard()
+    }
+
+    fn integer_bytes(storage: &IntegerStorage, order: ByteOrder) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        match storage {
+            IntegerStorage::I8(values) => bytes.extend(values.iter().map(|value| *value as u8)),
+            IntegerStorage::U8(values) => bytes.extend_from_slice(values),
+            IntegerStorage::I16(values) => {
+                for value in values {
+                    bytes.extend_from_slice(&match order {
+                        ByteOrder::Little => value.to_le_bytes(),
+                        ByteOrder::Big => value.to_be_bytes(),
+                    });
+                }
+            }
+            IntegerStorage::U16(values) => {
+                for value in values {
+                    bytes.extend_from_slice(&match order {
+                        ByteOrder::Little => value.to_le_bytes(),
+                        ByteOrder::Big => value.to_be_bytes(),
+                    });
+                }
+            }
+            IntegerStorage::I32(values) => {
+                for value in values {
+                    bytes.extend_from_slice(&match order {
+                        ByteOrder::Little => value.to_le_bytes(),
+                        ByteOrder::Big => value.to_be_bytes(),
+                    });
+                }
+            }
+            IntegerStorage::U32(values) => {
+                for value in values {
+                    bytes.extend_from_slice(&match order {
+                        ByteOrder::Little => value.to_le_bytes(),
+                        ByteOrder::Big => value.to_be_bytes(),
+                    });
+                }
+            }
+            IntegerStorage::I64(values) => {
+                for value in values {
+                    bytes.extend_from_slice(&match order {
+                        ByteOrder::Little => value.to_le_bytes(),
+                        ByteOrder::Big => value.to_be_bytes(),
+                    });
+                }
+            }
+            IntegerStorage::U64(values) => {
+                for value in values {
+                    bytes.extend_from_slice(&match order {
+                        ByteOrder::Little => value.to_le_bytes(),
+                        ByteOrder::Big => value.to_be_bytes(),
+                    });
+                }
+            }
+        }
+        bytes
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -836,7 +1041,77 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         };
         assert_eq!(tensor.shape, vec![1, 6]);
-        assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        handle.join().expect("server thread");
+        remove_client_for_test(client_id(&client));
+    }
+
+    #[test]
+    fn bytes_to_value_preserves_all_integer_classes_in_both_byte_orders() {
+        let cases = [
+            (DataType::Int8, IntegerStorage::I8(vec![i8::MIN, i8::MAX])),
+            (DataType::UInt8, IntegerStorage::U8(vec![0, u8::MAX])),
+            (
+                DataType::Int16,
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            ),
+            (DataType::UInt16, IntegerStorage::U16(vec![0, u16::MAX])),
+            (
+                DataType::Int32,
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            ),
+            (DataType::UInt32, IntegerStorage::U32(vec![0, u32::MAX])),
+            (
+                DataType::Int64,
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            ),
+            (
+                DataType::UInt64,
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+            ),
+        ];
+
+        for order in [ByteOrder::Little, ByteOrder::Big] {
+            for (datatype, expected) in &cases {
+                let decoded = bytes_to_value(&integer_bytes(expected, order), *datatype, order)
+                    .expect("typed decode");
+                let Value::Tensor(tensor) = decoded else {
+                    panic!("expected tensor");
+                };
+                assert_eq!(tensor.integer_storage(), Some(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn read_requested_uint64_preserves_exact_socket_values() {
+        let _guard = net_guard();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let port = listener.local_addr().unwrap().port();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            stream
+                .write_all(
+                    &[1_u64 << 63, u64::MAX]
+                        .into_iter()
+                        .flat_map(u64::to_le_bytes)
+                        .collect::<Vec<_>>(),
+                )
+                .expect("write");
+        });
+
+        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+        let client = make_client(stream, 1.0);
+        let data =
+            run_read(client.clone(), vec![Value::Num(2.0), Value::from("uint64")]).expect("read");
+        let Value::Tensor(tensor) = data else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
+        );
 
         handle.join().expect("server thread");
         remove_client_for_test(client_id(&client));
@@ -864,7 +1139,7 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         };
         assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.data, vec![42.0, 43.0, 44.0]);
+        assert_eq!(tensor.materialize_f64(), vec![42.0, 43.0, 44.0]);
 
         handle.join().expect("server thread");
         remove_client_for_test(client_id(&client));

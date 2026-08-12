@@ -622,12 +622,12 @@ pub struct BinscatterHandleState {
     pub values: Tensor,
     pub x_bin_edges: Vec<f64>,
     pub y_bin_edges: Vec<f64>,
-    pub x_data: Vec<f64>,
-    pub y_data: Vec<f64>,
+    pub x_data: Tensor,
+    pub y_data: Tensor,
     pub num_bins: [usize; 2],
     pub auto_bins: bool,
-    pub x_limits_option: Option<(f64, f64)>,
-    pub y_limits_option: Option<(f64, f64)>,
+    pub x_limits_option: Option<Tensor>,
+    pub y_limits_option: Option<Tensor>,
     pub x_limits: (f64, f64),
     pub y_limits: (f64, f64),
     pub show_empty_bins: bool,
@@ -680,6 +680,7 @@ pub struct FunctionContourHandleState {
     pub x_range: (f64, f64),
     pub y_range: (f64, f64),
     pub function: FunctionSurfaceFunctionRef,
+    pub fill: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1015,8 +1016,8 @@ impl PlotChildHandleState {
                 y_data: state.y_data.clone(),
                 num_bins: state.num_bins,
                 auto_bins: state.auto_bins,
-                x_limits_option: state.x_limits_option,
-                y_limits_option: state.y_limits_option,
+                x_limits_option: state.x_limits_option.clone(),
+                y_limits_option: state.y_limits_option.clone(),
                 x_limits: state.x_limits,
                 y_limits: state.y_limits,
                 show_empty_bins: state.show_empty_bins,
@@ -1040,6 +1041,7 @@ impl PlotChildHandleState {
                 x_range: state.x_range,
                 y_range: state.y_range,
                 function: state.function.clone(),
+                fill: state.fill,
             }),
             Self::Area(_) => Self::Area(AreaHandleState {
                 figure,
@@ -3461,10 +3463,6 @@ pub fn toggle_colorbar() -> bool {
     enabled
 }
 
-pub fn set_colormap(colormap: ColorMap) {
-    set_colormap_with_length(colormap, DEFAULT_COLORMAP_LENGTH);
-}
-
 pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
     let (handle, figure_clone) = {
         let mut reg = registry();
@@ -3484,14 +3482,29 @@ pub fn set_colormap_for_axes(
     axes_index: usize,
     colormap: ColorMap,
 ) -> Result<(), FigureError> {
+    set_colormap_for_axes_with_length(handle, axes_index, colormap, DEFAULT_COLORMAP_LENGTH)
+}
+
+pub fn set_colormap_for_axes_with_length(
+    handle: FigureHandle,
+    axes_index: usize,
+    colormap: ColorMap,
+    length: usize,
+) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_colormap(axes_index, colormap);
-        state
-            .colormap_lengths
-            .insert(axes_index, DEFAULT_COLORMAP_LENGTH);
+        state.colormap_lengths.insert(axes_index, length);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
+}
+
+pub fn colormap_length_for_axes(handle: FigureHandle, axes_index: usize) -> usize {
+    let reg = registry();
+    reg.figures
+        .get(&handle)
+        .and_then(|state| state.colormap_lengths.get(&axes_index).copied())
+        .unwrap_or(DEFAULT_COLORMAP_LENGTH)
 }
 
 pub fn current_colormap_length() -> usize {
@@ -3849,12 +3862,12 @@ pub fn register_binscatter_handle(
     values: Tensor,
     x_bin_edges: Vec<f64>,
     y_bin_edges: Vec<f64>,
-    x_data: Vec<f64>,
-    y_data: Vec<f64>,
+    x_data: Tensor,
+    y_data: Tensor,
     num_bins: [usize; 2],
     auto_bins: bool,
-    x_limits_option: Option<(f64, f64)>,
-    y_limits_option: Option<(f64, f64)>,
+    x_limits_option: Option<Tensor>,
+    y_limits_option: Option<Tensor>,
     show_empty_bins: bool,
     face_alpha: f64,
     display_name: Option<String>,
@@ -3930,6 +3943,7 @@ pub fn register_function_contour_handle(
     x_range: (f64, f64),
     y_range: (f64, f64),
     function: FunctionSurfaceFunctionRef,
+    fill: bool,
 ) -> f64 {
     let mut reg = registry();
     let id = reg.next_plot_child_handle;
@@ -3944,6 +3958,7 @@ pub fn register_function_contour_handle(
             x_range,
             y_range,
             function,
+            fill,
         }),
     );
     id as f64
@@ -4239,7 +4254,6 @@ where
 
 #[derive(Clone, Copy, Debug)]
 pub enum CopyParentTarget {
-    Figure(FigureHandle),
     Axes(FigureHandle, usize),
 }
 
@@ -4301,13 +4315,7 @@ pub fn copy_plot_child_to_parent(
             .cloned()
             .ok_or(FigureError::InvalidPlotObjectHandle)?;
 
-        let (target_figure, target_axes) = match target {
-            CopyParentTarget::Figure(figure) => {
-                let axes_index = get_state_mut(&mut reg, figure).active_axes;
-                (figure, axes_index)
-            }
-            CopyParentTarget::Axes(figure, axes_index) => (figure, axes_index),
-        };
+        let CopyParentTarget::Axes(target_figure, target_axes) = target;
 
         let (new_plot_index, figure_clone) = {
             let target_state = get_state_mut(&mut reg, target_figure);

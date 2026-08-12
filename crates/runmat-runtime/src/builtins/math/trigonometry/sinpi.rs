@@ -104,6 +104,7 @@ pub const SINPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::math::trigonometry::sinpi"
 )]
 async fn sinpi_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "sinpi")?;
     match value {
         Value::GpuTensor(handle) => sinpi_gpu(handle).await,
         Value::Complex(re, im) => {
@@ -135,14 +136,17 @@ fn sinpi_real_value(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sinpi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&value| sinpi_real(value)).collect();
+    let data = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .map(|&value| sinpi_real(value))
+        .collect();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|err| sinpi_error_with_detail(&ERROR_INTERNAL, err))
 }
 
 fn sinpi_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| sinpi_complex(re, im))
         .collect::<Vec<_>>();
@@ -231,7 +235,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 5]);
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, -1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, -1.0, 0.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -242,7 +246,7 @@ mod tests {
         let Value::Tensor(out) = call(Value::LogicalArray(logical)).unwrap() else {
             panic!("expected tensor");
         };
-        assert_eq!(out.data, vec![0.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 0.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -271,15 +275,34 @@ mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload");
             let Value::Tensor(out) = call(Value::GpuTensor(handle)).unwrap() else {
                 panic!("expected tensor");
             };
-            assert_eq!(out.data, vec![0.0, 1.0, 0.0]);
+            assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0]);
         });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn sinpi_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 2]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+
+        match call(Value::Tensor(tensor)).expect("sinpi") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert!(out.materialize_f64().iter().all(|value| *value == 0.0));
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

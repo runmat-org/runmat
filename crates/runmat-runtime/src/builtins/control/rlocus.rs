@@ -9,9 +9,12 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+use crate::builtins::common::{
+    spec::{
+        BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+        ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    },
+    tensor,
 };
 use crate::builtins::control::tf_model::{poly_eval, polynomial_roots, scalar_f64, TfModel, EPS};
 use crate::builtins::control::type_resolvers::rlocus_type;
@@ -337,12 +340,12 @@ fn real_gain_vector(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Complex(re, im) if im.abs() <= EPS => vec![re],
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape)?;
-            tensor.data
+            tensor::tensor_values_f64(&tensor)
         }
         Value::ComplexTensor(tensor) => {
             ensure_vector_shape(&tensor.shape)?;
             tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| {
                     if im.abs() <= EPS {
@@ -597,21 +600,16 @@ fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<DMatrix
     match value {
         Value::Tensor(tensor) => {
             ensure_matrix_shape(name, &tensor.shape)?;
-            let data = tensor
-                .data
-                .iter()
-                .map(|&re| Complex64::new(re, 0.0))
+            let data = tensor::tensor_values_f64(tensor)
+                .into_iter()
+                .map(|re| Complex64::new(re, 0.0))
                 .collect::<Vec<_>>();
             ensure_finite_coefficients(name, &data)?;
             Ok(DMatrix::from_column_slice(tensor.rows, tensor.cols, &data))
         }
         Value::ComplexTensor(tensor) => {
             ensure_matrix_shape(name, &tensor.shape)?;
-            let data = tensor
-                .data
-                .iter()
-                .map(|&(re, im)| Complex64::new(re, im))
-                .collect::<Vec<_>>();
+            let data = tensor::complex_tensor_values_complex64(tensor);
             ensure_finite_coefficients(name, &data)?;
             Ok(DMatrix::from_column_slice(tensor.rows, tensor.cols, &data))
         }
@@ -692,16 +690,11 @@ fn numeric_values(value: &Value, name: &str) -> BuiltinResult<Vec<Complex64>> {
         Value::Int(i) => vec![Complex64::new(i.to_f64(), 0.0)],
         Value::Bool(b) => vec![Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)],
         Value::Complex(re, im) => vec![Complex64::new(*re, *im)],
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|&re| Complex64::new(re, 0.0))
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor)
+            .into_iter()
+            .map(|re| Complex64::new(re, 0.0))
             .collect(),
-        Value::ComplexTensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|&(re, im)| Complex64::new(re, im))
-            .collect(),
+        Value::ComplexTensor(tensor) => tensor::complex_tensor_values_complex64(tensor),
         Value::LogicalArray(logical) => logical
             .data
             .iter()
@@ -1200,6 +1193,7 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage};
 
     fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
         block_on(crate::call_builtin_async(
@@ -1240,6 +1234,74 @@ mod tests {
     }
 
     #[test]
+    fn numeric_values_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3])
+            .expect("typed integer tensor");
+
+        assert_eq!(
+            numeric_values(&Value::Tensor(tensor), "A").expect("numeric values"),
+            vec![
+                Complex64::new(-1.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(2.0, 0.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn numeric_values_reads_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, -2]),
+            IntegerStorage::I16(vec![3, -4]),
+        )
+        .expect("complex integer storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+
+        assert_eq!(
+            numeric_values(&Value::ComplexTensor(tensor), "A").expect("numeric values"),
+            vec![Complex64::new(1.0, 3.0), Complex64::new(-2.0, -4.0)]
+        );
+    }
+
+    #[test]
+    fn matrix_property_reads_typed_integer_storage_exactly() {
+        let matrix = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2])
+            .expect("typed integer matrix");
+        let mut object = ObjectInstance::new("ss".to_string());
+        object
+            .properties
+            .insert("A".to_string(), Value::Tensor(matrix));
+
+        let parsed = matrix_property(&object, "A").expect("matrix property");
+
+        assert_eq!(parsed[(0, 0)], Complex64::new(1.0, 0.0));
+        assert_eq!(parsed[(1, 0)], Complex64::new(3.0, 0.0));
+        assert_eq!(parsed[(0, 1)], Complex64::new(2.0, 0.0));
+        assert_eq!(parsed[(1, 1)], Complex64::new(4.0, 0.0));
+    }
+
+    #[test]
+    fn matrix_property_reads_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 3, 2, 4]),
+            IntegerStorage::I16(vec![-1, -3, -2, -4]),
+        )
+        .expect("complex integer storage");
+        let matrix = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
+        let mut object = ObjectInstance::new("ss".to_string());
+        object
+            .properties
+            .insert("A".to_string(), Value::ComplexTensor(matrix));
+
+        let parsed = matrix_property(&object, "A").expect("matrix property");
+
+        assert_eq!(parsed[(0, 0)], Complex64::new(1.0, -1.0));
+        assert_eq!(parsed[(1, 0)], Complex64::new(3.0, -3.0));
+        assert_eq!(parsed[(0, 1)], Complex64::new(2.0, -2.0));
+        assert_eq!(parsed[(1, 1)], Complex64::new(4.0, -4.0));
+    }
+
+    #[test]
     fn descriptor_signatures_cover_output_forms() {
         let labels = RLOCUS_DESCRIPTOR
             .signatures
@@ -1265,11 +1327,33 @@ mod tests {
 
         let roots = tensor(&outputs[0]);
         assert_eq!(roots.shape, vec![1, 3]);
-        assert_eq!(roots.data, vec![-1.0, -2.0, -4.0]);
+        assert_eq!(roots.materialize_f64(), vec![-1.0, -2.0, -4.0]);
 
         let gains = tensor(&outputs[1]);
         assert_eq!(gains.shape, vec![1, 3]);
-        assert_eq!(gains.data, vec![0.0, 1.0, 3.0]);
+        assert_eq!(gains.materialize_f64(), vec![0.0, 1.0, 3.0]);
+    }
+
+    #[test]
+    fn explicit_typed_integer_gain_returns_closed_loop_roots_and_gains() {
+        let sys = tf(vec![1.0], vec![1.0, 1.0]);
+        let gains = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).unwrap(),
+        );
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = run_rlocus(sys, vec![gains]).expect("rlocus");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+
+        let roots = tensor(&outputs[0]);
+        assert_eq!(roots.shape, vec![1, 3]);
+        assert_eq!(roots.materialize_f64(), vec![-1.0, -2.0, -4.0]);
+
+        let gains = tensor(&outputs[1]);
+        assert_eq!(gains.shape, vec![1, 3]);
+        assert_eq!(gains.materialize_f64(), vec![0.0, 1.0, 3.0]);
+        assert!(gains.integer_storage().is_none());
     }
 
     #[test]
@@ -1281,7 +1365,7 @@ mod tests {
         assert_eq!(roots.shape, vec![2, 3]);
 
         for (gain_idx, gain) in [0.0_f64, 1.0, 2.0].iter().enumerate() {
-            let column = &roots.data[gain_idx * 2..gain_idx * 2 + 2];
+            let column = &roots.materialize_f64()[gain_idx * 2..gain_idx * 2 + 2];
             for root in column {
                 let residual = root * root + (3.0 + gain) * root + 2.0;
                 assert!(
@@ -1304,7 +1388,7 @@ mod tests {
         let result = run_rlocus(sys, vec![gains]).expect("rlocus");
         let roots = tensor(&result);
         assert_eq!(roots.shape, vec![1, 3]);
-        for (actual, expected) in roots.data.iter().zip([-1.0, -2.0, -4.0]) {
+        for (actual, expected) in roots.materialize_f64().iter().zip([-1.0, -2.0, -4.0]) {
             assert!((actual - expected).abs() < 1.0e-8);
         }
     }
@@ -1339,11 +1423,11 @@ mod tests {
         };
         assert_eq!(roots.shape, vec![2, 1]);
         assert!(roots
-            .data
+            .materialize_f64()
             .iter()
             .any(|(re, im)| (*re + 1.0).abs() < 1.0e-8 && (*im - 1.0).abs() < 1.0e-8));
         assert!(roots
-            .data
+            .materialize_f64()
             .iter()
             .any(|(re, im)| (*re + 1.0).abs() < 1.0e-8 && (*im + 1.0).abs() < 1.0e-8));
     }
@@ -1355,7 +1439,7 @@ mod tests {
         let roots = run_rlocus(sys, vec![gains]).expect("rlocus");
         let roots = tensor(&roots);
         assert_eq!(roots.shape, vec![1, 1]);
-        assert!(roots.data[0].abs() < 1.0e-12);
+        assert!(roots.materialize_f64()[0].abs() < 1.0e-12);
     }
 
     #[test]

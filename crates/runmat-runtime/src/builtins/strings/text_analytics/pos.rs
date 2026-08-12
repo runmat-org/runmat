@@ -1,9 +1,10 @@
 //! Part-of-speech detail helpers for Text Analytics tokenized documents.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ObjectInstance, ResolveContext, StringArray, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray,
+    ObjectInstance, ResolveContext, StringArray, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -78,6 +79,12 @@ pub const ADD_PART_OF_SPEECH_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDesc
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
+const ADD_PART_OF_SPEECH_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "addPartOfSpeechDetails accepts a tokenizedDocument, text options, and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores categorical part-of-speech tags.",
+    };
 
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
@@ -92,6 +99,9 @@ fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     type_resolver(any_type),
     descriptor(
         crate::builtins::strings::text_analytics::pos::ADD_PART_OF_SPEECH_DETAILS_DESCRIPTOR
+    ),
+    integer_audit(
+        crate::builtins::strings::text_analytics::pos::ADD_PART_OF_SPEECH_DETAILS_INTEGER_AUDIT
     ),
     builtin_path = "crate::builtins::strings::text_analytics::pos"
 )]
@@ -845,22 +855,11 @@ pub(in crate::builtins::strings::text_analytics) fn part_of_speech_details_from_
 fn logical_scalar(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
-        Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
-            0.0 => Ok(false),
-            1.0 => Ok(true),
-            other => Err(text_analytics_error(
-                "addPartOfSpeechDetails",
-                format!(
-                    "addPartOfSpeechDetails: logical scalar option must be true or false, got {other}"
-                ),
-            )),
-        },
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         other => Err(text_analytics_error(
             "addPartOfSpeechDetails",
             format!(
-                "addPartOfSpeechDetails: logical scalar option must be true or false, got {other:?}"
+                "addPartOfSpeechDetails: logical scalar option must be a logical true or false, got {other:?}"
             ),
         )),
     }
@@ -872,7 +871,7 @@ mod tests {
     use crate::builtins::strings::text_analytics::details::token_details_builtin;
     use crate::builtins::strings::text_analytics::documents::tokenized_document_builtin;
     use crate::builtins::table::{table_variable_names_from_object, table_variables};
-    use runmat_builtins::{LogicalArray, Tensor};
+    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor};
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tokenized_document_builtin(args))
@@ -906,6 +905,22 @@ mod tests {
         match table_column(table, name) {
             Value::StringArray(array) => array.data,
             other => panic!("expected string column {name}, got {other:?}"),
+        }
+    }
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn logical_scalar_rejects_typed_integer_storage() {
+        for value in [
+            poisoned_integer_scalar(IntegerStorage::U8(vec![1])),
+            poisoned_integer_scalar(IntegerStorage::I16(vec![0])),
+        ] {
+            let err = logical_scalar(&value).expect_err("typed integer is not logical");
+            assert!(err.message().contains("must be a logical true or false"));
         }
     }
 

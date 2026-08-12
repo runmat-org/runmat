@@ -1,11 +1,12 @@
 //! MATLAB-compatible binary and hexadecimal conversion helpers.
 
 use runmat_builtins::{
-    CellArray, CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value,
+    CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, NumericStorage, ResolveContext,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BI2DE_NAME: &str = "bi2de";
@@ -350,11 +351,7 @@ async fn decimal_items_from_value(
     floor_fractional: bool,
 ) -> BuiltinResult<Vec<DecimalItem>> {
     match value {
-        Value::Tensor(tensor) => tensor
-            .data
-            .into_iter()
-            .map(|value| decimal_item_from_f64(value, builtin, floor_fractional))
-            .collect(),
+        Value::Tensor(tensor) => decimal_items_from_tensor(tensor, builtin, floor_fractional),
         Value::LogicalArray(logical) => Ok(logical
             .data
             .into_iter()
@@ -367,11 +364,7 @@ async fn decimal_items_from_value(
             .collect()),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            tensor
-                .data
-                .into_iter()
-                .map(|value| decimal_item_from_f64(value, builtin, floor_fractional))
-                .collect()
+            decimal_items_from_tensor(tensor, builtin, floor_fractional)
         }
         Value::Num(value) => Ok(vec![decimal_item_from_f64(
             value,
@@ -387,6 +380,31 @@ async fn decimal_items_from_value(
         other => Err(conversion_error(
             builtin,
             format!("{builtin}: D must be numeric, logical, or char, got {other:?}"),
+        )),
+    }
+}
+
+fn decimal_items_from_tensor(
+    tensor: Tensor,
+    builtin: &'static str,
+    floor_fractional: bool,
+) -> BuiltinResult<Vec<DecimalItem>> {
+    match tensor
+        .into_numeric_storage()
+        .map_err(|err| conversion_error(builtin, format!("{builtin}: {err}")))?
+    {
+        NumericStorage::F64(values) => values
+            .into_iter()
+            .map(|value| decimal_item_from_f64(value, builtin, floor_fractional))
+            .collect(),
+        NumericStorage::F32(values) => values
+            .into_iter()
+            .map(|value| decimal_item_from_f64(f64::from(value), builtin, floor_fractional))
+            .collect(),
+        storage => Ok(decimal_items_from_integer_storage(
+            &storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer"),
         )),
     }
 }
@@ -414,6 +432,14 @@ fn decimal_item_from_int(value: IntValue) -> DecimalItem {
         IntValue::U32(value) => DecimalItem::Unsigned(u128::from(value)),
         IntValue::U64(value) => DecimalItem::Unsigned(u128::from(value)),
     }
+}
+
+fn decimal_items_from_integer_storage(storage: &IntegerStorage) -> Vec<DecimalItem> {
+    storage
+        .exact_values()
+        .into_iter()
+        .map(decimal_item_from_int)
+        .collect()
 }
 
 fn decimal_item_from_f64(
@@ -773,7 +799,7 @@ async fn digit_matrix_from_value(
             cols: 1,
         }),
         Value::Int(i) => Ok(DigitMatrix {
-            data: vec![number_to_digit(i.to_f64(), builtin, "B")?],
+            data: vec![integer_to_digit(&i, builtin, "B")?],
             rows: 1,
             cols: 1,
         }),
@@ -795,16 +821,36 @@ async fn digit_matrix_from_value(
 
 fn digit_matrix_from_tensor(tensor: Tensor, builtin: &'static str) -> BuiltinResult<DigitMatrix> {
     ensure_matrix_shape(&tensor.shape, builtin, "B")?;
-    let data = tensor
-        .data
-        .into_iter()
-        .map(|value| number_to_digit(value, builtin, "B"))
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    Ok(DigitMatrix {
-        data,
-        rows: tensor.rows,
-        cols: tensor.cols,
-    })
+    let (rows, cols) = matrix_extents(&tensor.shape);
+    let data = match tensor
+        .into_numeric_storage()
+        .map_err(|err| conversion_error(builtin, format!("{builtin}: {err}")))?
+    {
+        NumericStorage::F64(values) => values
+            .into_iter()
+            .map(|value| number_to_digit(value, builtin, "B"))
+            .collect::<BuiltinResult<Vec<_>>>()?,
+        NumericStorage::F32(values) => values
+            .into_iter()
+            .map(|value| number_to_digit(f64::from(value), builtin, "B"))
+            .collect::<BuiltinResult<Vec<_>>>()?,
+        storage => integer_storage_to_digits(
+            &storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer"),
+            builtin,
+            "B",
+        )?,
+    };
+    Ok(DigitMatrix { data, rows, cols })
+}
+
+fn matrix_extents(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [rows, cols, ..] => (*rows, *cols),
+        [cols] => (1, *cols),
+        [] => (0, 0),
+    }
 }
 
 fn digit_matrix_from_logical(
@@ -823,22 +869,14 @@ fn digit_matrix_from_logical(
 
 async fn decimal_vector_from_value(value: Value) -> BuiltinResult<Vec<u128>> {
     match value {
-        Value::Tensor(tensor) => tensor
-            .data
-            .into_iter()
-            .map(|value| number_to_decimal(value, "D"))
-            .collect(),
+        Value::Tensor(tensor) => decimal_vector_from_tensor(tensor),
         Value::LogicalArray(logical) => Ok(logical.data.into_iter().map(u128::from).collect()),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            tensor
-                .data
-                .into_iter()
-                .map(|value| number_to_decimal(value, "D"))
-                .collect()
+            decimal_vector_from_tensor(tensor)
         }
         Value::Num(n) => Ok(vec![number_to_decimal(n, "D")?]),
-        Value::Int(i) => Ok(vec![number_to_decimal(i.to_f64(), "D")?]),
+        Value::Int(i) => Ok(vec![integer_to_nonnegative(&i, DE2BI_NAME, "D")?]),
         Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(de2bi_error(
             "de2bi: D must contain real nonnegative integers",
@@ -846,6 +884,29 @@ async fn decimal_vector_from_value(value: Value) -> BuiltinResult<Vec<u128>> {
         other => Err(de2bi_error(format!(
             "de2bi: D must be numeric or logical, got {other:?}"
         ))),
+    }
+}
+
+fn decimal_vector_from_tensor(tensor: Tensor) -> BuiltinResult<Vec<u128>> {
+    match tensor
+        .into_numeric_storage()
+        .map_err(|err| de2bi_error(format!("de2bi: {err}")))?
+    {
+        NumericStorage::F64(values) => values
+            .into_iter()
+            .map(|value| number_to_decimal(value, "D"))
+            .collect(),
+        NumericStorage::F32(values) => values
+            .into_iter()
+            .map(|value| number_to_decimal(f64::from(value), "D"))
+            .collect(),
+        storage => integer_storage_to_nonnegative(
+            &storage
+                .into_integer_storage()
+                .expect("non-floating numeric storage is integer"),
+            DE2BI_NAME,
+            "D",
+        ),
     }
 }
 
@@ -1002,6 +1063,21 @@ fn parse_nonnegative_integer(
     builtin: &'static str,
     name: &str,
 ) -> BuiltinResult<u128> {
+    if let Value::Int(integer) = value {
+        return integer_to_nonnegative(integer, builtin, name);
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor_utils::is_scalar_tensor(tensor) {
+            if let Some(storage) = tensor.integer_storage() {
+                let integer = storage.value_at(0).ok_or_else(|| {
+                    build_runtime_error(format!("{builtin}: {name} must be a scalar"))
+                        .with_builtin(builtin)
+                        .build()
+                })?;
+                return integer_to_nonnegative(&integer, builtin, name);
+            }
+        }
+    }
     let n = scalar_number(value, builtin, name)?;
     if !n.is_finite() {
         return Err(
@@ -1033,7 +1109,9 @@ fn scalar_number(value: &Value, builtin: &'static str, name: &str) -> BuiltinRes
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1055,6 +1133,54 @@ fn number_to_digit(value: f64, builtin: &'static str, name: &str) -> BuiltinResu
         .build());
     }
     Ok(integer as usize)
+}
+
+fn integer_to_digit(value: &IntValue, builtin: &'static str, name: &str) -> BuiltinResult<usize> {
+    let integer = integer_to_nonnegative(value, builtin, name)?;
+    if integer > usize::MAX as u128 {
+        return Err(build_runtime_error(format!(
+            "{builtin}: {name} value is too large for this platform"
+        ))
+        .with_builtin(builtin)
+        .build());
+    }
+    Ok(integer as usize)
+}
+
+fn integer_storage_to_digits(
+    storage: &IntegerStorage,
+    builtin: &'static str,
+    name: &str,
+) -> BuiltinResult<Vec<usize>> {
+    storage
+        .exact_values()
+        .iter()
+        .map(|value| integer_to_digit(value, builtin, name))
+        .collect()
+}
+
+fn integer_storage_to_nonnegative(
+    storage: &IntegerStorage,
+    builtin: &'static str,
+    name: &str,
+) -> BuiltinResult<Vec<u128>> {
+    storage
+        .exact_values()
+        .iter()
+        .map(|value| integer_to_nonnegative(value, builtin, name))
+        .collect()
+}
+
+fn integer_to_nonnegative(
+    value: &IntValue,
+    builtin: &'static str,
+    name: &str,
+) -> BuiltinResult<u128> {
+    value.try_to_u64().map(u128::from).ok_or_else(|| {
+        build_runtime_error(format!("{builtin}: {name} must be a nonnegative integer"))
+            .with_builtin(builtin)
+            .build()
+    })
 }
 
 fn number_to_decimal(value: f64, name: &str) -> BuiltinResult<u128> {
@@ -1113,7 +1239,7 @@ fn normalize_flag(flag: &str) -> String {
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) == 0)
 }
 
 #[cfg(test)]
@@ -1124,6 +1250,14 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).expect("tensor"))
+    }
+
+    fn single_tensor(data: Vec<f32>, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::from_f32(data, shape).expect("single tensor"))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     fn bi2de(value: Value, rest: Vec<Value>) -> Value {
@@ -1162,7 +1296,7 @@ mod tests {
     fn value_data(value: Value) -> Vec<f64> {
         match value {
             Value::Num(n) => vec![n],
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected numeric output, got {other:?}"),
         }
     }
@@ -1213,7 +1347,7 @@ mod tests {
             panic!("expected column vector")
         };
         assert_eq!(tensor.shape, vec![3, 1]);
-        assert_eq!(tensor.data, vec![5.0, 6.0, 3.0]);
+        assert_eq!(tensor.materialize_f64(), vec![5.0, 6.0, 3.0]);
     }
 
     #[test]
@@ -1249,7 +1383,7 @@ mod tests {
         let out = de2bi(tensor(vec![0.0, 1.0, 2.0, 5.0], vec![1, 4]), vec![]);
         assert_eq!(out.shape, vec![4, 3]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![
                 0.0, 1.0, 0.0, 1.0, // 2^0 column
                 0.0, 0.0, 1.0, 0.0, // 2^1 column
@@ -1266,7 +1400,7 @@ mod tests {
         );
         assert_eq!(out.shape, vec![2, 4]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![
                 0.0, 0.0, // 3^3 column
                 0.0, 2.0, // 3^2 column
@@ -1287,7 +1421,7 @@ mod tests {
         let Value::Tensor(back) = back else {
             panic!("expected tensor")
         };
-        assert_eq!(back.data, vec![0.0, 1.0, 2.0, 7.0, 15.0]);
+        assert_eq!(back.materialize_f64(), vec![0.0, 1.0, 2.0, 7.0, 15.0]);
     }
 
     #[test]
@@ -1302,7 +1436,7 @@ mod tests {
         );
         assert_eq!(out.shape, vec![2, 3]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![
                 0.0, 2.0, // 3^2 column
                 1.0, 1.0, // 3^1 column
@@ -1457,7 +1591,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![3, 1]);
-        assert_eq!(out.data, vec![1023.0, 122.0, 14.0]);
+        assert_eq!(out.materialize_f64(), vec![1023.0, 122.0, 14.0]);
 
         let strings = StringArray::new(
             vec!["1111111111".into(), "1111010".into(), "1110".into()],
@@ -1468,7 +1602,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 3]);
-        assert_eq!(out.data, vec![1023.0, 122.0, 14.0]);
+        assert_eq!(out.materialize_f64(), vec![1023.0, 122.0, 14.0]);
     }
 
     #[test]
@@ -1496,7 +1630,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![5.0, 8.0]);
+        assert_eq!(out.materialize_f64(), vec![5.0, 8.0]);
     }
 
     #[test]
@@ -1535,7 +1669,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 3]);
-        assert_eq!(out.data, vec![1023.0, 122.0, 14.0]);
+        assert_eq!(out.materialize_f64(), vec![1023.0, 122.0, 14.0]);
 
         assert_eq!(value_data(hex2dec(Value::from("0xFF"))), vec![255.0]);
         assert_eq!(value_data(hex2dec(Value::from("0xFFs32"))), vec![255.0]);
@@ -1557,5 +1691,140 @@ mod tests {
         assert!(err
             .to_string()
             .contains("maximum exact integer supported by RunMat"));
+    }
+
+    #[test]
+    fn bi2de_and_de2bi_scalar_integers_remain_exact() {
+        assert_eq!(
+            integer_to_nonnegative(&IntValue::U64(u64::MAX), DE2BI_NAME, "D").unwrap(),
+            u128::from(u64::MAX)
+        );
+        assert_eq!(
+            block_on(decimal_vector_from_value(Value::Int(IntValue::U64(
+                u64::MAX
+            ))))
+            .unwrap(),
+            vec![u128::from(u64::MAX)]
+        );
+        let digits = block_on(digit_matrix_from_value(
+            Value::Int(IntValue::U8(1)),
+            BI2DE_NAME,
+        ))
+        .unwrap();
+        assert_eq!(digits.data, vec![1]);
+        assert!(integer_to_nonnegative(&IntValue::I8(-1), DE2BI_NAME, "D").is_err());
+        assert!(block_on(decimal_vector_from_value(Value::Int(IntValue::I8(-1)))).is_err());
+    }
+
+    #[test]
+    fn dec_text_min_digits_rejects_exact_integer_resource_overflow() {
+        let too_wide = IntValue::U64(MAX_DECIMAL_TEXT_OUTPUT_CHARS as u64 + 1);
+        let err = block_on(super::dec2bin_builtin(
+            Value::Num(1.0),
+            vec![Value::Int(too_wide)],
+        ))
+        .expect_err("wide typed minDigits should reject before allocation");
+        assert!(err.to_string().contains("requested output"));
+
+        let width = Tensor::new_integer(
+            IntegerStorage::U64(vec![MAX_DECIMAL_TEXT_OUTPUT_CHARS as u64 + 1]),
+            vec![1, 1],
+        )
+        .unwrap();
+        let err = block_on(super::dec2hex_builtin(
+            Value::Num(1.0),
+            vec![Value::Tensor(width)],
+        ))
+        .expect_err("wide typed tensor minDigits should reject before allocation");
+        assert!(err.to_string().contains("requested output"));
+    }
+
+    #[test]
+    fn bi2de_and_de2bi_typed_integer_tensors_remain_exact() {
+        let digits = integer_tensor(IntegerStorage::U64(vec![1, 0, 1]), vec![1, 3]);
+        assert_eq!(value_data(bi2de(digits, vec![])), vec![5.0]);
+
+        let width = Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).unwrap();
+        assert_eq!(
+            scalar_number(&Value::Tensor(width), DE2BI_NAME, "N").unwrap(),
+            12.0
+        );
+
+        for storage in [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ] {
+            let width = Tensor::new_integer(storage, vec![1, 1]).expect("typed width");
+            assert_eq!(parse_width(&Value::Tensor(width)).unwrap(), Some(2));
+        }
+
+        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        assert!(is_empty_numeric(&Value::Tensor(empty)));
+
+        assert_eq!(
+            block_on(decimal_vector_from_value(integer_tensor(
+                IntegerStorage::U64(vec![u64::MAX]),
+                vec![1, 1],
+            )))
+            .unwrap(),
+            vec![u128::from(u64::MAX)]
+        );
+
+        let err = block_on(super::de2bi_builtin(
+            integer_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+            vec![],
+        ))
+        .expect_err("negative signed integer tensor should fail");
+        assert!(err.to_string().contains("nonnegative integer"));
+    }
+
+    #[test]
+    fn dec2bin_and_dec2hex_typed_integer_tensors_preserve_storage_width() {
+        assert_eq!(
+            char_rows(&dec2bin(
+                integer_tensor(IntegerStorage::I16(vec![-1, 1]), vec![1, 2]),
+                vec![],
+            )),
+            vec!["1111111111111111", "0000000000000001"]
+        );
+        assert_eq!(
+            char_rows(&dec2hex(
+                integer_tensor(IntegerStorage::I32(vec![-1, 255]), vec![1, 2]),
+                vec![],
+            )),
+            vec!["FFFFFFFF", "000000FF"]
+        );
+        assert_eq!(
+            char_rows(&dec2hex(
+                integer_tensor(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]),
+                vec![],
+            )),
+            vec!["FFFFFFFFFFFFFFFF"]
+        );
+    }
+
+    #[test]
+    fn binary_conversions_accept_native_single_storage() {
+        assert_eq!(
+            value_data(bi2de(
+                single_tensor(vec![1.0, 0.0, 1.0], vec![1, 3]),
+                vec![],
+            )),
+            vec![5.0]
+        );
+        assert_eq!(
+            de2bi(single_tensor(vec![5.0], vec![1, 1]), vec![]).materialize_f64(),
+            vec![1.0, 0.0, 1.0]
+        );
+        assert_eq!(
+            char_rows(&dec2hex(single_tensor(vec![15.0], vec![1, 1]), vec![])),
+            vec!["F"]
+        );
     }
 }

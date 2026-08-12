@@ -12,6 +12,14 @@ pub fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
+pub fn axis_type(args: &[Type], _context: &ResolveContext) -> Type {
+    match args {
+        [] => Type::tensor(),
+        [Type::Num | Type::Int | Type::Unknown] => Type::Unknown,
+        _ => Type::Void,
+    }
+}
+
 pub fn handle_logical_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Logical {

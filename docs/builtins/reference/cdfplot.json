@@ -9,10 +9,12 @@
     "h = cdfplot(___)",
     "[h,stats] = cdfplot(___)"
   ],
-  "description": "`cdfplot(x)` plots the empirical cumulative distribution function for a numeric vector. The empirical CDF at a value `t` is the fraction of non-NaN observations less than or equal to `t`.",
+  "description": "`cdfplot(x)` plots the empirical cumulative distribution function for a single- or double-precision numeric vector. The empirical CDF at a value `t` is the fraction of non-NaN observations less than or equal to `t`.",
   "notes": [
     "`h` is the line handle for the empirical CDF plot.",
     "`stats` is a structure with `min`, `max`, `mean`, `median`, and sample `std` fields computed after omitting NaN values.",
+    "Dense typed-integer and dense logical sample data are RunMat extensions. Integer values must lie within the contiguous exact binary64 integer range at the explicit statistics and plotting boundary.",
+    "Resident sample data is a RunMat extension that gathers through its owning provider for host plotting; the handle and statistics remain host outputs.",
     "Use `ecdf` for numeric ECDF outputs, confidence bounds, frequency weights, survivor functions, and right-censored data."
   ],
   "examples": [

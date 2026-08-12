@@ -177,17 +177,10 @@ mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::Tensor;
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("semilogx test vector")
     }
 
     #[test]

@@ -21,6 +21,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -477,7 +478,7 @@ fn truecolor_shape(tensor: &Tensor, builtin: &'static str) -> crate::BuiltinResu
         ));
     }
     let expected_len = rows * cols * channels;
-    if tensor.data.len() != expected_len {
+    if tensor_utils::tensor_element_len(tensor) != expected_len {
         return Err(crate::builtins::plotting::plotting_error(
             builtin,
             format!("{builtin}: truecolor image data length mismatch"),
@@ -544,22 +545,37 @@ fn build_truecolor_image_surface(
     let x_len = x_axis.len();
     let y_len = y_axis.len();
     let channels = tensor.shape.get(2).copied().unwrap_or(3);
-    let scale = match tensor.dtype {
+    let dtype = tensor.numeric_dtype();
+    let scale = match dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
         NumericDType::U16 => 1.0f32 / 65535.0,
-        NumericDType::U32 => 1.0f32 / (u32::MAX as f32),
         NumericDType::F32 | NumericDType::F64 => 1.0,
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U32
+        | NumericDType::U64 => {
+            return Err(image_error_with_detail(
+                &IMAGE_ERROR_INVALID_ARGUMENT,
+                format!(
+                    "truecolor image data does not support {} values",
+                    dtype.class_name()
+                ),
+            ));
+        }
     };
     let mut grid = vec![vec![glam::Vec4::ZERO; y_len]; x_len];
     let plane = x_len * y_len;
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     for x_col in 0..x_len {
         for y_row in 0..y_len {
             let base = y_row + y_len * x_col;
-            let r = tensor.data[base] as f32 * scale;
-            let g = tensor.data[base + plane] as f32 * scale;
-            let b = tensor.data[base + 2 * plane] as f32 * scale;
+            let r = values[base] as f32 * scale;
+            let g = values[base + plane] as f32 * scale;
+            let b = values[base + 2 * plane] as f32 * scale;
             let a = if channels == 4 {
-                tensor.data[base + 3 * plane] as f32 * scale
+                values[base + 3 * plane] as f32 * scale
             } else {
                 1.0
             };
@@ -585,18 +601,23 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::NumericDType;
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
 
     fn truecolor_tensor() -> Tensor {
-        Tensor {
-            data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
-            integer_data: None,
-            shape: vec![2, 2, 3],
-            rows: 2,
-            cols: 2,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(
+            vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+            vec![2, 2, 3],
+        )
+        .expect("truecolor image")
+    }
+
+    fn typed_truecolor_tensor() -> Tensor {
+        Tensor::new_integer(
+            IntegerStorage::U8(vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]),
+            vec![2, 2, 3],
+        )
+        .expect("typed truecolor")
     }
 
     #[test]
@@ -621,36 +642,37 @@ mod tests {
     }
 
     #[test]
+    fn image_truecolor_reads_typed_integer_storage_without_mirror() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        futures::executor::block_on(image_builtin(vec![Value::Tensor(typed_truecolor_tensor())]))
+            .unwrap();
+
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
+            panic!("expected surface");
+        };
+        let grid = surface.color_grid.as_ref().expect("color grid");
+        assert_eq!(grid[0][0], glam::Vec4::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(grid[0][1], glam::Vec4::new(0.0, 1.0, 0.0, 1.0));
+        assert_eq!(grid[1][0], glam::Vec4::new(0.0, 0.0, 1.0, 1.0));
+        assert_eq!(grid[1][1], glam::Vec4::new(1.0, 1.0, 1.0, 1.0));
+    }
+
+    #[test]
     fn image_accepts_two_element_extent_vectors() {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
-        let c = Tensor {
-            data: (1..=12).map(|v| v as f64).collect(),
-            integer_data: None,
-            shape: vec![3, 4],
-            rows: 3,
-            cols: 4,
-            dtype: NumericDType::F64,
-        };
+        let c =
+            Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4]).expect("indexed image");
         let _ = futures::executor::block_on(image_builtin(vec![
-            Value::Tensor(Tensor {
-                data: vec![10.0, 20.0],
-                integer_data: None,
-                shape: vec![2],
-                rows: 2,
-                cols: 1,
-                dtype: NumericDType::F64,
-            }),
-            Value::Tensor(Tensor {
-                data: vec![1.0, 5.0],
-                integer_data: None,
-                shape: vec![2],
-                rows: 2,
-                cols: 1,
-                dtype: NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).expect("image x extent")),
+            Value::Tensor(Tensor::new(vec![1.0, 5.0], vec![2]).expect("image y extent")),
             Value::Tensor(c),
         ]))
         .expect("image with extent vectors should succeed");
@@ -678,18 +700,15 @@ mod tests {
 
     #[test]
     fn image_truecolor_preserves_non_square_matlab_pixel_order() {
-        let tensor = Tensor {
-            data: vec![
+        let tensor = Tensor::new(
+            vec![
                 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, // red
                 0.7, 0.8, 0.9, 1.0, 0.1, 0.2, // green
                 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, // blue
             ],
-            integer_data: None,
-            shape: vec![2, 3, 3],
-            rows: 2,
-            cols: 3,
-            dtype: NumericDType::F64,
-        };
+            vec![2, 3, 3],
+        )
+        .expect("valid truecolor tensor");
         let surface = build_truecolor_image_surface(tensor, vec![1.0, 2.0, 3.0], vec![1.0, 2.0])
             .expect("truecolor image should build");
         let colors = surface.color_grid.expect("expected truecolor grid");

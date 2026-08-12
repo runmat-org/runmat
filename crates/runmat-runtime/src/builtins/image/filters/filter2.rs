@@ -5,13 +5,15 @@
 //! correlation and returns an output the same size as the input image, matching
 //! MathWorks MATLAB semantics.
 
-use runmat_accelerate_api::{
-    GpuTensorHandle, HostTensorView, ImfilterMode, ImfilterOptions, ImfilterShape,
-};
+use runmat_accelerate_api::{GpuTensorHandle, ImfilterMode, ImfilterOptions, ImfilterShape};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -52,6 +54,78 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const FILTER2_BUILTIN: &str = "filter2";
+
+const FILTER2_MODE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "filter2-convolution-mode",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "filter2 'conv' and 'corr' mode flags are RunMat extensions",
+    error_identifier: Some("RunMat:compatibility:Filter2ModeExtension"),
+};
+
+const FILTER2_ND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "filter2-nd-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "filter2 inputs with more than two dimensions are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Filter2NdExtension"),
+};
+
+const FILTER2_VARIADIC_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "filter2-variadic-options",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "filter2 with more than one trailing option is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Filter2VariadicOptionsExtension"),
+};
+
+const FILTER2_INTEGER_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "filter2-integer-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "filter2 with integer gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Filter2IntegerGpuExtension"),
+};
+
+const FILTER2_LOGICAL_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "filter2-logical-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "filter2 with logical gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:Filter2LogicalGpuExtension"),
+};
+
+const FILTER2_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    FILTER2_MODE_EXTENSION,
+    FILTER2_ND_EXTENSION,
+    FILTER2_VARIADIC_OPTIONS_EXTENSION,
+    FILTER2_INTEGER_GPU_EXTENSION,
+    FILTER2_LOGICAL_GPU_EXTENSION,
+];
+
+const FILTER2_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "H",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for the coefficient matrix.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are documented for the input matrix.",
+    },
+];
+
+const FILTER2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = filter2(integer_H, integer_X, shape)",
+        inputs: &FILTER2_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Host integer matrices enter the documented double computation domain; MATLAB GPU inputs are restricted to single and double.",
+    }];
 
 const FILTER2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "B",
@@ -187,6 +261,8 @@ fn filter2_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
     accel = "custom-imfilter",
     type_resolver(filter2_type),
     descriptor(crate::builtins::image::filters::filter2::FILTER2_DESCRIPTOR),
+    extensions(FILTER2_EXTENSIONS),
+    integer_capabilities(FILTER2_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::image::filters::filter2"
 )]
 async fn filter2_builtin(
@@ -194,6 +270,19 @@ async fn filter2_builtin(
     image: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    ensure_filter2_extensions(&kernel, &image, &rest)?;
+    let output_single = value_is_single(&kernel) || value_is_single(&image);
+    let image_precision_mismatch = matches!(&image, Value::GpuTensor(handle)
+    if output_single
+        && runmat_accelerate_api::provider_for_handle(handle).is_some_and(|provider| {
+            provider.precision() != runmat_accelerate_api::ProviderPrecision::F32
+        }));
+    if is_nonfloating_gpu(&kernel) || is_nonfloating_gpu(&image) || image_precision_mismatch {
+        let kernel = gather_filter2_value(kernel).await?;
+        let image = gather_filter2_value(image).await?;
+        let options = parse_filter2_options(&rest)?;
+        return filter2_host(kernel, image, &options);
+    }
     let options = parse_filter2_options(&rest)?;
     match (kernel, image) {
         (Value::GpuTensor(kernel_handle), Value::GpuTensor(image_handle)) => {
@@ -212,6 +301,80 @@ async fn filter2_builtin(
     }
 }
 
+fn value_rank(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(tensor) => Some(tensor.shape.len()),
+        Value::LogicalArray(array) => Some(array.shape.len()),
+        Value::GpuTensor(handle) => Some(handle.shape.len()),
+        _ => None,
+    }
+}
+
+fn is_nonfloating_gpu(value: &Value) -> bool {
+    matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some() || runmat_accelerate_api::handle_is_logical(handle))
+}
+
+fn value_is_single(value: &Value) -> bool {
+    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_none()
+            && !runmat_accelerate_api::handle_is_logical(handle)
+            && runmat_accelerate_api::handle_precision(handle) == Some(runmat_accelerate_api::ProviderPrecision::F32))
+}
+
+fn ensure_filter2_extensions(kernel: &Value, image: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if rest.len() > 1 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FILTER2_VARIADIC_OPTIONS_EXTENSION,
+            FILTER2_BUILTIN,
+        )?;
+    }
+    if rest.iter().any(|value| {
+        tensor::value_to_string(value).is_some_and(|text| {
+            matches!(text.trim().to_ascii_lowercase().as_str(), "conv" | "corr")
+        })
+    }) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FILTER2_MODE_EXTENSION,
+            FILTER2_BUILTIN,
+        )?;
+    }
+    if value_rank(kernel).is_some_and(|rank| rank > 2)
+        || value_rank(image).is_some_and(|rank| rank > 2)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FILTER2_ND_EXTENSION,
+            FILTER2_BUILTIN,
+        )?;
+    }
+    for value in [kernel, image] {
+        if let Value::GpuTensor(handle) = value {
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FILTER2_INTEGER_GPU_EXTENSION,
+                    FILTER2_BUILTIN,
+                )?;
+            }
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FILTER2_LOGICAL_GPU_EXTENSION,
+                    FILTER2_BUILTIN,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn gather_filter2_value(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map(Value::Tensor)
+            .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT)),
+        other => Ok(other),
+    }
+}
+
 fn filter2_host(
     kernel_value: Value,
     image_value: Value,
@@ -221,8 +384,23 @@ fn filter2_host(
         .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
     let image_tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, image_value)
         .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
+    let output_single = kernel_tensor.numeric_dtype() == NumericDType::F32
+        || image_tensor.numeric_dtype() == NumericDType::F32;
     let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)
         .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
+    if output_single {
+        let shape = result.shape.clone();
+        let result = Tensor::from_f32(
+            result
+                .materialize_f64()
+                .into_iter()
+                .map(|value| value as f32)
+                .collect(),
+            shape,
+        )
+        .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INTERNAL, err))?;
+        return Ok(tensor::tensor_into_value(result));
+    }
     Ok(tensor::tensor_into_value(result))
 }
 
@@ -232,18 +410,22 @@ async fn filter2_gpu(
     options: &ImfilterOptions,
 ) -> BuiltinResult<Value> {
     let kernel_clone = kernel_value.clone();
-    let provider = match runmat_accelerate_api::provider() {
+    #[cfg(all(test, feature = "wgpu"))]
+    {
+        let kernel_is_wgpu = matches!(kernel_clone, Value::GpuTensor(ref h) if h.device_id != 0);
+        if kernel_is_wgpu || image_handle.device_id != 0 {
+            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+            );
+        }
+    }
+    let provider = match runmat_accelerate_api::provider_for_handle(&image_handle) {
         Some(p) => p,
         None => {
             let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
                 .await
                 .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-            let kernel_tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, kernel_clone)
-                .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
-            let result =
-                apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)
-                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-            return Ok(tensor::tensor_into_value(result));
+            return filter2_host(kernel_clone, Value::Tensor(image_tensor), options);
         }
     };
 
@@ -251,15 +433,38 @@ async fn filter2_gpu(
     let mut kernel_tensor_cache: Option<Tensor> = None;
 
     let kernel_handle = match kernel_value {
-        Value::GpuTensor(handle) => handle,
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::provider_for_handle(&handle)
+                .is_some_and(|owner| std::ptr::eq(owner, provider))
+            {
+                handle
+            } else {
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
+                match gpu_helpers::upload_tensor(provider, &tensor) {
+                    Ok(uploaded) => {
+                        kernel_tensor_cache = Some(tensor);
+                        uploaded_kernel = Some(uploaded.clone());
+                        uploaded
+                    }
+                    Err(_) => {
+                        let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
+                            .await
+                            .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
+                        return filter2_host(
+                            Value::Tensor(tensor),
+                            Value::Tensor(image_tensor),
+                            options,
+                        );
+                    }
+                }
+            }
+        }
         other => {
             let tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, other)
                 .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
-            let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            match provider.upload(&view) {
+            match gpu_helpers::upload_tensor(provider, &tensor) {
                 Ok(uploaded) => {
                     kernel_tensor_cache = Some(tensor);
                     uploaded_kernel = Some(uploaded.clone());
@@ -269,10 +474,11 @@ async fn filter2_gpu(
                     let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
                         .await
                         .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-                    let result =
-                        apply_imfilter_tensor(&image_tensor, &tensor, options, FILTER2_BUILTIN)
-                            .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-                    return Ok(tensor::tensor_into_value(result));
+                    return filter2_host(
+                        Value::Tensor(tensor),
+                        Value::Tensor(image_tensor),
+                        options,
+                    );
                 }
             }
         }
@@ -304,10 +510,11 @@ async fn filter2_gpu(
                     .await
                     .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?
             };
-            let result =
-                apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)
-                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
-            Ok(tensor::tensor_into_value(result))
+            filter2_host(
+                Value::Tensor(kernel_tensor),
+                Value::Tensor(image_tensor),
+                options,
+            )
         }
     }
 }
@@ -358,6 +565,39 @@ pub(crate) mod tests {
         err.message().to_string()
     }
 
+    #[cfg(feature = "wgpu")]
+    struct WgpuFilterEnvGuard {
+        skip_warmup: Option<std::ffi::OsString>,
+        disable_imfilter: Option<std::ffi::OsString>,
+    }
+
+    #[cfg(feature = "wgpu")]
+    impl WgpuFilterEnvGuard {
+        fn set() -> Self {
+            let guard = Self {
+                skip_warmup: std::env::var_os("RUNMAT_WGPU_SKIP_WARMUP"),
+                disable_imfilter: std::env::var_os("RUNMAT_WGPU_DISABLE_IMFILTER"),
+            };
+            std::env::set_var("RUNMAT_WGPU_SKIP_WARMUP", "1");
+            std::env::set_var("RUNMAT_WGPU_DISABLE_IMFILTER", "1");
+            guard
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    impl Drop for WgpuFilterEnvGuard {
+        fn drop(&mut self) {
+            match self.skip_warmup.take() {
+                Some(value) => std::env::set_var("RUNMAT_WGPU_SKIP_WARMUP", value),
+                None => std::env::remove_var("RUNMAT_WGPU_SKIP_WARMUP"),
+            }
+            match self.disable_imfilter.take() {
+                Some(value) => std::env::set_var("RUNMAT_WGPU_DISABLE_IMFILTER", value),
+                None => std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER"),
+            }
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn default_same_matches_imfilter_reference() {
@@ -378,7 +618,7 @@ pub(crate) mod tests {
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -400,7 +640,7 @@ pub(crate) mod tests {
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -422,12 +662,13 @@ pub(crate) mod tests {
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn convolution_mode_rotates_kernel() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let kernel = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let value = block_on(filter2_builtin(
@@ -444,12 +685,13 @@ pub(crate) mod tests {
         let expected =
             apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn explicit_corr_option_matches_default() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let kernel = tensor(vec![0.0, 1.0, 1.0, 0.0], 2, 2);
         let image = tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2);
 
@@ -469,12 +711,16 @@ pub(crate) mod tests {
         let default_tensor = test_support::gather(default_value).expect("gather default");
         let corr_tensor = test_support::gather(corr_value).expect("gather corr");
         assert_eq!(default_tensor.shape, corr_tensor.shape);
-        assert_eq!(default_tensor.data, corr_tensor.data);
+        assert_eq!(
+            default_tensor.materialize_f64(),
+            corr_tensor.materialize_f64()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv_and_shape_order_independent() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let kernel = tensor(vec![1.0, -1.0, 2.0, -2.0], 2, 2);
         let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
 
@@ -494,7 +740,27 @@ pub(crate) mod tests {
         let conv_first_tensor = test_support::gather(conv_first).expect("gather conv first");
         let shape_first_tensor = test_support::gather(shape_first).expect("gather shape first");
         assert_eq!(conv_first_tensor.shape, shape_first_tensor.shape);
-        assert_eq!(conv_first_tensor.data, shape_first_tensor.data);
+        assert_eq!(
+            conv_first_tensor.materialize_f64(),
+            shape_first_tensor.materialize_f64()
+        );
+    }
+
+    #[test]
+    fn multiple_trailing_options_require_runmat_extension_mode() {
+        let kernel = tensor(vec![1.0], 1, 1);
+        let image = tensor(vec![1.0], 1, 1);
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(filter2_builtin(
+            Value::Tensor(kernel),
+            Value::Tensor(image),
+            vec![Value::from("same"), Value::from("full")],
+        ))
+        .expect_err("variadic options must be gated");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:Filter2VariadicOptionsExtension")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -548,7 +814,38 @@ pub(crate) mod tests {
         .expect("expected logical reference");
 
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
+    }
+
+    #[test]
+    fn typed_integer_inputs_produce_double_and_single_input_is_preserved() {
+        use runmat_builtins::IntegerStorage;
+
+        let integer =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+        let scalar_kernel = Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).unwrap();
+        let integer_output = block_on(filter2_builtin(
+            Value::Tensor(scalar_kernel),
+            Value::Tensor(integer),
+            Vec::new(),
+        ))
+        .expect("integer filter2");
+        let Value::Tensor(integer_output) = integer_output else {
+            panic!("expected tensor")
+        };
+        assert_eq!(integer_output.numeric_dtype(), NumericDType::F64);
+
+        let single = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let single_output = block_on(filter2_builtin(
+            Value::Num(1.0),
+            Value::Tensor(single),
+            Vec::new(),
+        ))
+        .expect("single filter2");
+        let Value::Tensor(single_output) = single_output else {
+            panic!("expected tensor")
+        };
+        assert_eq!(single_output.numeric_dtype(), NumericDType::F32);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -577,7 +874,7 @@ pub(crate) mod tests {
             let kernel = tensor(vec![1.0, 0.0, -1.0, 2.0], 2, 2);
             let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
             let image_view = HostTensorView {
-                data: &image.data,
+                data: &image.materialize_f64(),
                 shape: &image.shape,
             };
             let image_handle = provider.upload(&image_view).expect("upload image");
@@ -596,7 +893,7 @@ pub(crate) mod tests {
             )
             .expect("ref");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
@@ -607,11 +904,11 @@ pub(crate) mod tests {
             let kernel = tensor(vec![0.0, 1.0, -1.0, 0.0], 2, 2);
             let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
             let kernel_view = HostTensorView {
-                data: &kernel.data,
+                data: &kernel.materialize_f64(),
                 shape: &kernel.shape,
             };
             let image_view = HostTensorView {
-                data: &image.data,
+                data: &image.materialize_f64(),
                 shape: &image.shape,
             };
             let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
@@ -631,7 +928,30 @@ pub(crate) mod tests {
             )
             .expect("reference");
             assert_eq!(gathered.shape, expected.shape);
-            assert_eq!(gathered.data, expected.data);
+            assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
+        });
+    }
+
+    #[test]
+    fn resident_double_image_with_single_kernel_returns_single() {
+        test_support::with_test_provider(|provider| {
+            let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+            let image_handle = provider
+                .upload(&HostTensorView {
+                    data: &image.materialize_f64(),
+                    shape: &image.shape,
+                })
+                .expect("upload double image");
+            let kernel = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single kernel");
+            let result = block_on(filter2_builtin(
+                Value::Tensor(kernel),
+                Value::GpuTensor(image_handle),
+                Vec::new(),
+            ))
+            .expect("filter2 mixed precision");
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.materialize_f64(), image.materialize_f64());
         });
     }
 
@@ -639,8 +959,8 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn filter2_wgpu_same_matches_cpu() {
-        std::env::set_var("RUNMAT_WGPU_SKIP_WARMUP", "1");
-        std::env::set_var("RUNMAT_WGPU_DISABLE_IMFILTER", "1");
+        let _lock = test_support::accel_test_lock();
+        let _env = WgpuFilterEnvGuard::set();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -659,11 +979,11 @@ pub(crate) mod tests {
         );
 
         let kernel_view = HostTensorView {
-            data: &kernel.data,
+            data: &kernel.materialize_f64(),
             shape: &kernel.shape,
         };
         let image_view = HostTensorView {
-            data: &image.data,
+            data: &image.materialize_f64(),
             shape: &image.shape,
         };
 
@@ -687,27 +1007,33 @@ pub(crate) mod tests {
         .expect("expected");
 
         assert_eq!(gpu_tensor.shape, expected.shape);
-        assert_eq!(gpu_tensor.data.len(), expected.data.len());
+        assert_eq!(
+            gpu_tensor.materialize_f64().len(),
+            expected.materialize_f64().len()
+        );
         let tol = match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (gpu, cpu) in gpu_tensor.data.iter().zip(expected.data.iter()) {
+        for (gpu, cpu) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < tol, "{gpu} vs {cpu}");
         }
 
         let _ = provider.free(&kernel_handle);
         let _ = provider.free(&image_handle);
-        std::env::remove_var("RUNMAT_WGPU_SKIP_WARMUP");
-        std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
     fn filter2_wgpu_full_conv_matches_cpu() {
-        std::env::set_var("RUNMAT_WGPU_SKIP_WARMUP", "1");
-        std::env::set_var("RUNMAT_WGPU_DISABLE_IMFILTER", "1");
+        let _lock = test_support::accel_test_lock();
+        let _env = WgpuFilterEnvGuard::set();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -725,11 +1051,11 @@ pub(crate) mod tests {
         );
 
         let kernel_view = HostTensorView {
-            data: &kernel.data,
+            data: &kernel.materialize_f64(),
             shape: &kernel.shape,
         };
         let image_view = HostTensorView {
-            data: &image.data,
+            data: &image.materialize_f64(),
             shape: &image.shape,
         };
         let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
@@ -752,23 +1078,30 @@ pub(crate) mod tests {
             .expect("expected host result");
 
         assert_eq!(gpu_tensor.shape, expected.shape);
-        assert_eq!(gpu_tensor.data.len(), expected.data.len());
+        assert_eq!(
+            gpu_tensor.materialize_f64().len(),
+            expected.materialize_f64().len()
+        );
         let tol = match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (gpu, cpu) in gpu_tensor.data.iter().zip(expected.data.iter()) {
+        for (gpu, cpu) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < tol, "{gpu} vs {cpu}");
         }
 
         let _ = provider.free(&kernel_handle);
         let _ = provider.free(&image_handle);
-        std::env::remove_var("RUNMAT_WGPU_SKIP_WARMUP");
-        std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER");
     }
 
     #[test]
     fn filter2_descriptor_signatures_cover_surface() {
+        let builtin =
+            runmat_builtins::builtin_function_by_name(FILTER2_BUILTIN).expect("filter2 builtin");
         let labels: Vec<&str> = FILTER2_DESCRIPTOR
             .signatures
             .iter()
@@ -776,6 +1109,8 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"B = filter2(h, X)"));
         assert!(labels.contains(&"B = filter2(h, X, options...)"));
+        assert_eq!(builtin.integer_capabilities.len(), 1);
+        assert_eq!(builtin.extensions.len(), 5);
     }
 
     #[test]

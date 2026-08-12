@@ -20,6 +20,7 @@ use super::style::{
     marker_metadata_from_appearance, parse_line_style_args, value_as_string, LineAppearance,
     LineStyleParseOptions, MarkerKind,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::builtins::table::{
     is_tabular_object, parse_variable_selector_for_object, table_height,
@@ -1008,15 +1009,16 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
 
 fn numeric_vector_from_value(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = numeric_tensor_from_value(value, name)?;
-    if tensor.rows() != tensor.data.len() && tensor.cols() != tensor.data.len() {
+    let len = tensor_utils::tensor_element_len(&tensor);
+    if tensor.rows() != len && tensor.cols() != len {
         return Err(stacked_err(format!("{name} must be a vector")));
     }
-    Ok(tensor.data)
+    Ok(tensor_utils::tensor_into_values_f64(tensor))
 }
 
 fn plotted_row_count(tensor: &Tensor) -> usize {
     if tensor.rows() == 1 || tensor.cols() == 1 {
-        tensor.data.len()
+        tensor_utils::tensor_element_len(tensor)
     } else {
         tensor.rows()
     }
@@ -1032,7 +1034,7 @@ fn tensor_plot_column_count(tensor: &Tensor) -> usize {
 
 fn tensor_plot_columns(tensor: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
     if tensor.rows() == 1 || tensor.cols() == 1 {
-        return Ok(vec![tensor.data.clone()]);
+        return Ok(vec![tensor_utils::tensor_values_f64(tensor)]);
     }
     let cols = tensor.cols().max(1);
     (0..cols).map(|col| tensor_column(tensor, col)).collect()
@@ -1042,7 +1044,8 @@ fn tensor_column(tensor: &Tensor, col: usize) -> BuiltinResult<Vec<f64>> {
     let rows = tensor.rows();
     let mut out = Vec::with_capacity(rows);
     for row in 0..rows {
-        out.push(tensor.get2(row, col).map_err(|err| stacked_err(err))?);
+        let index = row + col * rows;
+        out.push(tensor_utils::tensor_value_f64(tensor, index));
     }
     Ok(out)
 }
@@ -1072,8 +1075,7 @@ fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
             .iter()
             .map(|value| text_scalar(value, "variable selector"))
             .collect(),
-        Value::Tensor(tensor) => Ok(tensor
-            .data
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)
             .iter()
             .map(|v| {
                 let index = *v as usize;
@@ -1308,6 +1310,34 @@ mod tests {
     }
 
     #[test]
+    fn stackedplot_numeric_vector_reads_typed_integer_storage_exactly() {
+        let x = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 2, 3]),
+            vec![1, 3],
+        )
+        .expect("typed x vector");
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(x), "X").expect("numeric vector"),
+            vec![1.0, 2.0, 3.0]
+        );
+    }
+
+    #[test]
+    fn stackedplot_columns_reads_typed_integer_storage_exactly() {
+        let y = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![10, 20, 30, 40]),
+            vec![2, 2],
+        )
+        .expect("typed y matrix");
+
+        assert_eq!(
+            tensor_plot_columns(&y).expect("plot columns"),
+            vec![vec![10.0, 20.0], vec![30.0, 40.0]]
+        );
+    }
+
+    #[test]
     fn stackedplot_matrix_creates_one_axes_per_column() {
         let _guard = setup();
         let handle = stackedplot_builtin(vec![tensor(&[1.0, 2.0, 3.0, 4.0], vec![2, 2])]).unwrap();
@@ -1387,7 +1417,7 @@ mod tests {
         .unwrap();
         let x = get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap();
         match x {
-            Value::Tensor(tensor) => assert_eq!(tensor.data, vec![10.0, 20.0, 30.0]),
+            Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0, 30.0]),
             other => panic!("unexpected XData {other:?}"),
         }
     }

@@ -3,7 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
+    NumericDType, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -298,15 +299,48 @@ impl Mat2CellInput {
     fn extract(&self, start: &[usize], sizes: &[usize]) -> BuiltinResult<Value> {
         match &self.kind {
             Mat2CellKind::Tensor(t) => {
-                let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
+                if let Some(storage) = t.integer_storage() {
+                    return extract_typed_integer_block(storage, &self.base_shape, start, sizes);
+                }
                 let shape = adjust_output_shape(sizes);
-                let tensor = Tensor::new(data, shape).map_err(|e| {
+                let tensor = match t.numeric_dtype() {
+                    NumericDType::F64 => {
+                        let data = copy_block(
+                            t.as_f64_slice()
+                                .expect("double tensor has native double storage"),
+                            &self.base_shape,
+                            start,
+                            sizes,
+                        )?;
+                        Tensor::new(data, shape)
+                    }
+                    NumericDType::F32 => {
+                        let values: Vec<f32> = (0..t.len())
+                            .map(|index| match t.numeric_value_at(index) {
+                                Some(runmat_builtins::NumericScalar::F32(value)) => value,
+                                _ => unreachable!("single tensor has native single storage"),
+                            })
+                            .collect();
+                        let data = copy_block(&values, &self.base_shape, start, sizes)?;
+                        Tensor::from_f32(data, shape)
+                    }
+                    _ => unreachable!("integer tensor returned through exact block path"),
+                }
+                .map_err(|e| {
                     mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
                 })?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             Mat2CellKind::Complex(t) => {
-                let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
+                if let Some(storage) = &t.integer_storage() {
+                    return extract_typed_complex_integer_block(
+                        storage,
+                        &self.base_shape,
+                        start,
+                        sizes,
+                    );
+                }
+                let data = copy_block(&t.materialize_f64(), &self.base_shape, start, sizes)?;
                 let shape = adjust_output_shape(sizes);
                 if data.len() == 1 {
                     let (re, im) = data[0];
@@ -354,6 +388,65 @@ impl Mat2CellInput {
             Mat2CellKind::Char(ca) => slice_char_array(ca, start, sizes),
         }
     }
+}
+
+fn extract_typed_integer_block(
+    storage: &IntegerStorage,
+    base_shape: &[usize],
+    start: &[usize],
+    sizes: &[usize],
+) -> BuiltinResult<Value> {
+    let storage = storage
+        .from_exact_values_like(copy_block(
+            &storage.exact_values(),
+            base_shape,
+            start,
+            sizes,
+        )?)
+        .map_err(|e| {
+            mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+        })?;
+    let tensor = Tensor::new_integer(storage, adjust_output_shape(sizes)).map_err(|e| {
+        mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+    })?;
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn extract_typed_complex_integer_block(
+    storage: &IntegerComplexStorage,
+    base_shape: &[usize],
+    start: &[usize],
+    sizes: &[usize],
+) -> BuiltinResult<Value> {
+    let real = storage
+        .real
+        .from_exact_values_like(copy_block(
+            &storage.real.exact_values(),
+            base_shape,
+            start,
+            sizes,
+        )?)
+        .map_err(|e| {
+            mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+        })?;
+    let imag = storage
+        .imag
+        .from_exact_values_like(copy_block(
+            &storage.imag.exact_values(),
+            base_shape,
+            start,
+            sizes,
+        )?)
+        .map_err(|e| {
+            mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+        })?;
+    let storage = IntegerComplexStorage::new(real, imag).map_err(|e| {
+        mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+    })?;
+    let tensor = ComplexTensor::new_integer(storage, adjust_output_shape(sizes)).map_err(|e| {
+        mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+    })?;
+    Ok(Value::ComplexTensor(tensor))
 }
 
 fn parse_partitions(dims: &[usize], size_args: &[Value]) -> BuiltinResult<Vec<Vec<usize>>> {
@@ -437,7 +530,7 @@ fn parse_partition_vector(
     dim_size: usize,
     dim_index: usize,
 ) -> BuiltinResult<Vec<usize>> {
-    let numbers = extract_numeric_vector(value).ok_or_else(|| {
+    let numbers = extract_partition_entries(value).ok_or_else(|| {
         mat2cell_error_with_message(
             format!(
                 "mat2cell: size arguments must be numeric for dimension {}",
@@ -462,39 +555,8 @@ fn parse_partition_vector(
 
     let mut total: usize = 0;
     let mut parts = Vec::with_capacity(numbers.len());
-    for (idx, n) in numbers.iter().enumerate() {
-        if !n.is_finite() {
-            return Err(mat2cell_error_with_message(
-                format!(
-                    "mat2cell: size entries must be finite (dimension {}, index {})",
-                    dim_index,
-                    idx + 1
-                ),
-                &MAT2CELL_ERROR_INVALID_PARTITION,
-            ));
-        }
-        let rounded = n.round();
-        if (rounded - n).abs() > f64::EPSILON {
-            return Err(mat2cell_error_with_message(
-                format!(
-                    "mat2cell: size entries must be integers (dimension {}, index {})",
-                    dim_index,
-                    idx + 1
-                ),
-                &MAT2CELL_ERROR_INVALID_PARTITION,
-            ));
-        }
-        if rounded < 0.0 {
-            return Err(mat2cell_error_with_message(
-                format!(
-                    "mat2cell: size entries must be non-negative (dimension {}, index {})",
-                    dim_index,
-                    idx + 1
-                ),
-                &MAT2CELL_ERROR_INVALID_PARTITION,
-            ));
-        }
-        let value = rounded as usize;
+    for (idx, entry) in numbers.iter().enumerate() {
+        let value = partition_entry_to_usize(entry, dim_index, idx + 1)?;
         total = total.checked_add(value).ok_or_else(|| {
             mat2cell_error_with_message(
                 "mat2cell: partition sum exceeds platform limits",
@@ -516,14 +578,33 @@ fn parse_partition_vector(
     Ok(parts)
 }
 
-fn extract_numeric_vector(value: &Value) -> Option<Vec<f64>> {
+enum PartitionEntry {
+    Float(f64),
+    Integer(IntValue),
+}
+
+fn extract_partition_entries(value: &Value) -> Option<Vec<PartitionEntry>> {
     match value {
-        Value::Num(n) => Some(vec![*n]),
-        Value::Int(i) => Some(vec![i.to_f64()]),
-        Value::Bool(b) => Some(vec![if *b { 1.0 } else { 0.0 }]),
+        Value::Num(n) => Some(vec![PartitionEntry::Float(*n)]),
+        Value::Int(i) => Some(vec![PartitionEntry::Integer(i.clone())]),
+        Value::Bool(b) => Some(vec![PartitionEntry::Float(if *b { 1.0 } else { 0.0 })]),
         Value::Tensor(t) => {
             if is_vector_shape(&t.shape) {
-                Some(t.data.clone())
+                if let Some(storage) = t.integer_storage() {
+                    Some(
+                        storage
+                            .exact_values()
+                            .into_iter()
+                            .map(PartitionEntry::Integer)
+                            .collect(),
+                    )
+                } else {
+                    Some(
+                        (0..t.len())
+                            .map(|index| PartitionEntry::Float(tensor::tensor_value_f64(t, index)))
+                            .collect(),
+                    )
+                }
             } else {
                 None
             }
@@ -533,7 +614,7 @@ fn extract_numeric_vector(value: &Value) -> Option<Vec<f64>> {
                 Some(
                     arr.data
                         .iter()
-                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .map(|&b| PartitionEntry::Float(if b != 0 { 1.0 } else { 0.0 }))
                         .collect(),
                 )
             } else {
@@ -541,6 +622,41 @@ fn extract_numeric_vector(value: &Value) -> Option<Vec<f64>> {
             }
         }
         _ => None,
+    }
+}
+
+fn partition_entry_to_usize(
+    entry: &PartitionEntry,
+    dim_index: usize,
+    entry_index: usize,
+) -> BuiltinResult<usize> {
+    let invalid = |detail: &str| {
+        mat2cell_error_with_message(
+            format!(
+                "mat2cell: size entries must be {detail} (dimension {dim_index}, index {entry_index})"
+            ),
+            &MAT2CELL_ERROR_INVALID_PARTITION,
+        )
+    };
+    match entry {
+        PartitionEntry::Integer(value) => value
+            .try_to_usize()
+            .ok_or_else(|| invalid("non-negative platform integers")),
+        PartitionEntry::Float(value) => {
+            if !value.is_finite() {
+                return Err(invalid("finite"));
+            }
+            if value.fract() != 0.0 {
+                return Err(invalid("integers"));
+            }
+            if *value < 0.0 {
+                return Err(invalid("non-negative"));
+            }
+            if *value > usize::MAX as f64 || (usize::BITS == 64 && *value == usize::MAX as f64) {
+                return Err(invalid("within platform limits"));
+            }
+            Ok(*value as usize)
+        }
     }
 }
 
@@ -744,7 +860,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{LogicalArray, NumericStorage};
 
     fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mat2cell_builtin(value, rest))
@@ -793,7 +909,35 @@ pub(crate) mod tests {
         let bottom_right = cell.data[3].clone();
         let gathered = test_support::gather(bottom_right).expect("gather");
         assert_eq!(gathered.shape, vec![2, 3]);
-        assert_eq!(gathered.data, vec![7.0, 8.0, 11.0, 12.0, 15.0, 16.0]);
+        assert_eq!(
+            gathered.materialize_f64(),
+            vec![7.0, 8.0, 11.0, 12.0, 15.0, 16.0]
+        );
+    }
+
+    #[test]
+    fn native_single_data_and_partition_vectors_remain_typed() {
+        let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let rows = Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap();
+        let columns = Tensor::from_f32(vec![1.0, 1.0], vec![1, 2]).unwrap();
+        let Value::Cell(cells) = mat2cell_builtin(
+            Value::Tensor(input),
+            vec![Value::Tensor(rows), Value::Tensor(columns)],
+        )
+        .expect("mat2cell") else {
+            panic!("expected cell array");
+        };
+        assert_eq!(cells.shape, vec![1, 2]);
+        let expected = [vec![1.0_f32, 2.0], vec![3.0_f32, 4.0]];
+        for (value, expected) in cells.data.into_iter().zip(expected) {
+            let Value::Tensor(tensor) = value else {
+                panic!("expected single tensor block");
+            };
+            assert_eq!(
+                tensor.into_numeric_storage().unwrap(),
+                NumericStorage::F32(expected)
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -813,7 +957,7 @@ pub(crate) mod tests {
         assert_eq!(cell.data.len(), 3);
         let third = cell.data[2].clone();
         let gathered = test_support::gather(third).expect("gather");
-        assert_eq!(gathered.data, vec![4.0, 5.0, 6.0]);
+        assert_eq!(gathered.materialize_f64(), vec![4.0, 5.0, 6.0]);
         assert_eq!(gathered.shape, vec![1, 3]);
     }
 
@@ -831,7 +975,7 @@ pub(crate) mod tests {
         let second = cell.data[1].clone();
         let gathered = test_support::gather(second).expect("gather");
         assert_eq!(gathered.shape, vec![2, 1]);
-        assert_eq!(gathered.data, vec![3.0, 4.0]);
+        assert_eq!(gathered.materialize_f64(), vec![3.0, 4.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -879,7 +1023,7 @@ pub(crate) mod tests {
         let block = cell.data[index].clone();
         let gathered = test_support::gather(block).expect("gather");
         assert_eq!(gathered.shape, vec![2, 2, 1]);
-        assert_eq!(gathered.data, vec![8.0, 9.0, 11.0, 12.0]);
+        assert_eq!(gathered.materialize_f64(), vec![8.0, 9.0, 11.0, 12.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -898,7 +1042,7 @@ pub(crate) mod tests {
         assert_eq!(cell.shape, vec![2, 2]);
         let top_left = cell.data[0].clone();
         let gathered = test_support::gather(top_left).expect("gather");
-        assert_eq!(gathered.data.len(), 0);
+        assert_eq!(gathered.materialize_f64().len(), 0);
         assert_eq!(gathered.shape, vec![0, 1]);
     }
 
@@ -918,7 +1062,7 @@ pub(crate) mod tests {
         let third = cell.data[2].clone();
         let gathered = test_support::gather(third).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
-        assert_eq!(gathered.data, vec![3.0]);
+        assert_eq!(gathered.materialize_f64(), vec![3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -992,11 +1136,69 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn typed_integer_blocks_and_partitions_preserve_exact_values() {
+        let input = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX - 1, u64::MAX]),
+            vec![2, 1],
+        )
+        .unwrap();
+        let partitions = Tensor::new_integer(IntegerStorage::U8(vec![1, 1]), vec![2, 1]).unwrap();
+        let result =
+            mat2cell_builtin(Value::Tensor(input), vec![Value::Tensor(partitions)]).unwrap();
+        let Value::Cell(cells) = result else {
+            panic!("expected cell array");
+        };
+        assert_eq!(cells.shape, vec![2, 1]);
+        assert_eq!(cells.data[0], Value::Int(IntValue::U64(u64::MAX - 1)));
+        assert_eq!(cells.data[1], Value::Int(IntValue::U64(u64::MAX)));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn typed_partition_entries_are_checked_without_f64_truncation() {
+        let input = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let partitions =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+        let err = mat2cell_builtin(Value::Tensor(input), vec![Value::Tensor(partitions)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("18446744073709551615"),
+            "unexpected error message: {err}"
+        );
+
+        let input = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let partitions = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        let err = mat2cell_builtin(Value::Tensor(input), vec![Value::Tensor(partitions)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("non-negative"),
+            "unexpected error message: {err}"
+        );
+
+        let input = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = mat2cell_builtin(Value::Tensor(input), vec![row_vector(&[boundary])])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("platform limits"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn mat2cell_gpu_falls_back_to_host() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((1..=6).map(|v| v as f64).collect(), vec![3, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1012,7 +1214,7 @@ pub(crate) mod tests {
             assert_eq!(cell.shape, vec![2, 2]);
             let block = cell.data[3].clone();
             let gathered = test_support::gather(block).expect("gather");
-            assert_eq!(gathered.data, vec![5.0, 6.0]);
+            assert_eq!(gathered.materialize_f64(), vec![5.0, 6.0]);
             assert_eq!(gathered.shape, vec![2, 1]);
         });
     }
@@ -1033,7 +1235,7 @@ pub(crate) mod tests {
         .expect("cpu mat2cell");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -1062,7 +1264,7 @@ pub(crate) mod tests {
             let cpu_tensor = test_support::gather(cpu_val).expect("cpu gather");
             let gpu_tensor = test_support::gather(gpu_val).expect("gpu gather");
             assert_eq!(cpu_tensor.shape, gpu_tensor.shape);
-            assert_eq!(cpu_tensor.data, gpu_tensor.data);
+            assert_eq!(cpu_tensor.materialize_f64(), gpu_tensor.materialize_f64());
         }
     }
 }

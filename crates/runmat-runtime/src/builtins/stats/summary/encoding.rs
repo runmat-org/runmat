@@ -3,17 +3,58 @@
 use std::{cmp::Ordering, collections::HashMap};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CellArray, CharArray, IntValue, LogicalArray, ObjectInstance, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const MAX_ONEHOT_CELLS: usize = 50_000_000;
 const MAX_ENCODING_RANK: usize = 32;
+
+const DUMMYVAR_INTEGER_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dummyvar-integer-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "dummyvar with typed-integer grouping variables is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DummyvarIntegerGroupExtension"),
+};
+const DUMMYVAR_GPU_GROUP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "dummyvar-gpu-group",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "dummyvar with a resident grouping variable is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:DummyvarGpuGroupExtension"),
+};
+const DUMMYVAR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    DUMMYVAR_INTEGER_GROUP_EXTENSION,
+    DUMMYVAR_GPU_GROUP_EXTENSION,
+];
+const DUMMYVAR_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "group",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "R2026a lists single and double numeric grouping variables. RunMat mode additionally admits all eight integer classes as positive level labels; values outside the bounded feasible output domain reject before floating conversion.",
+    }];
+pub const DUMMYVAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "D = dummyvar(integer_group)",
+        inputs: &DUMMYVAR_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Positive integer labels select columns 1:max(group). Typed labels are validated exactly against sign and the bounded feasible output domain before their now-exact floating representation is used; resident extension inputs gather through their owner and return a host double matrix.",
+    }];
 
 const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "X",
@@ -281,12 +322,84 @@ enum OutputKind {
     summary = "Create dummy variables for grouping variables.",
     keywords = "dummyvar,dummy variables,one hot,statistics,categorical",
     type_resolver(tensor_type),
+    extensions(DUMMYVAR_EXTENSIONS),
+    integer_capabilities(DUMMYVAR_INTEGER_CAPABILITIES),
     descriptor(crate::builtins::stats::summary::encoding::dummyvar_meta::DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::encoding"
 )]
 async fn dummyvar_builtin(group: Value) -> BuiltinResult<Value> {
+    if value_contains_typed_integer(&group) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DUMMYVAR_INTEGER_GROUP_EXTENSION,
+            "dummyvar",
+        )?;
+    }
+    if crate::value_contains_gpu(&group) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DUMMYVAR_GPU_GROUP_EXTENSION,
+            "dummyvar",
+        )?;
+    }
     let group = gather("dummyvar", group).await?;
+    validate_dummyvar_integer_levels(&group)?;
     dummyvar_compute(group)
+}
+
+fn value_contains_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_typed_integer))
+}
+
+fn validate_dummyvar_integer_levels(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Int(value) => validate_dummyvar_integer_level(value),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                for index in 0..storage.len() {
+                    let value = storage.value_at(index).ok_or_else(|| {
+                        internal(
+                            "dummyvar",
+                            "dummyvar: invalid typed-integer grouping storage",
+                        )
+                    })?;
+                    validate_dummyvar_integer_level(&value)?;
+                }
+            }
+            Ok(())
+        }
+        Value::Cell(cell) => {
+            for item in &cell.data {
+                validate_dummyvar_integer_levels(item)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_dummyvar_integer_level(value: &IntValue) -> BuiltinResult<()> {
+    let level = match value {
+        IntValue::I8(value) if *value > 0 => u128::from(*value as u8),
+        IntValue::I16(value) if *value > 0 => u128::from(*value as u16),
+        IntValue::I32(value) if *value > 0 => u128::from(*value as u32),
+        IntValue::I64(value) if *value > 0 => u128::from(*value as u64),
+        IntValue::U8(value) if *value > 0 => u128::from(*value),
+        IntValue::U16(value) if *value > 0 => u128::from(*value),
+        IntValue::U32(value) if *value > 0 => u128::from(*value),
+        IntValue::U64(value) if *value > 0 => u128::from(*value),
+        _ => {
+            return Err(invalid(
+                "dummyvar",
+                "dummyvar: numeric groups must contain positive integer levels or NaN",
+            ))
+        }
+    };
+    if level > MAX_ONEHOT_CELLS as u128 {
+        return Err(invalid("dummyvar", "dummyvar: output is too large"));
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -675,7 +788,10 @@ fn labels_from_value(name: &str, value: Value) -> BuiltinResult<LabelArray> {
             categories: None,
         }),
         Value::Tensor(tensor) => Ok(LabelArray {
-            labels: tensor.data.iter().copied().map(numeric_label).collect(),
+            labels: tensor::tensor_values_f64(&tensor)
+                .into_iter()
+                .map(numeric_label)
+                .collect(),
             shape: normalized_shape(&tensor.shape),
             kind: LabelKind::Numeric,
             categories: None,
@@ -754,11 +870,12 @@ fn dummyvar_groups(value: Value) -> BuiltinResult<Vec<LabelArray>> {
         {
             let rows = tensor.rows();
             let cols = tensor.cols();
+            let values = tensor::tensor_values_f64_cow(&tensor);
             let mut groups = Vec::with_capacity(cols);
             for col in 0..cols {
                 let mut labels = Vec::with_capacity(rows);
                 for row in 0..rows {
-                    labels.push(numeric_label(tensor.data[row + col * rows]));
+                    labels.push(numeric_label(values[row + col * rows]));
                 }
                 groups.push(LabelArray {
                     labels,
@@ -797,7 +914,11 @@ fn numeric_dummyvar_classes(labels: &[Option<Label>], rows: usize) -> BuiltinRes
         let Label::Numeric(value) = label else {
             continue;
         };
-        if *value <= 0.0 || value.fract() != 0.0 || *value > usize::MAX as f64 {
+        if *value <= 0.0
+            || value.fract() != 0.0
+            || *value > usize::MAX as f64
+            || (usize::BITS == 64 && *value == usize::MAX as f64)
+        {
             return Err(invalid(
                 "dummyvar",
                 "dummyvar: numeric groups must contain positive integer levels or NaN",
@@ -898,10 +1019,13 @@ struct EncodedArray {
 
 fn encoded_values(value: Value) -> BuiltinResult<EncodedArray> {
     match value {
-        Value::Tensor(tensor) => Ok(EncodedArray {
-            data: tensor.data,
-            shape: normalized_shape(&tensor.shape),
-        }),
+        Value::Tensor(tensor) => {
+            let shape = normalized_shape(&tensor.shape);
+            Ok(EncodedArray {
+                data: tensor::tensor_into_values_f64(tensor),
+                shape,
+            })
+        }
         Value::LogicalArray(array) => Ok(EncodedArray {
             data: array.data.into_iter().map(|value| value as f64).collect(),
             shape: normalized_shape(&array.shape),
@@ -1056,9 +1180,35 @@ fn parse_output_kind(name: &str, text: &str) -> BuiltinResult<OutputKind> {
 }
 
 fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value.try_to_usize().filter(|dim| *dim >= 1).ok_or_else(|| {
+            invalid(
+                name,
+                format!("{name}: featureDim must be a positive integer scalar"),
+            )
+        });
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor::is_scalar_tensor(tensor) {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|dim| *dim >= 1)
+                    .ok_or_else(|| {
+                        invalid(
+                            name,
+                            format!("{name}: featureDim must be a positive integer scalar"),
+                        )
+                    });
+            }
+        }
+    }
     let dim = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => {
             return Err(invalid(
                 name,
@@ -1066,7 +1216,11 @@ fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
             ))
         }
     };
-    if dim.fract() != 0.0 || dim < 1.0 || dim > usize::MAX as f64 {
+    if dim.fract() != 0.0
+        || dim < 1.0
+        || dim > usize::MAX as f64
+        || (usize::BITS == 64 && dim == usize::MAX as f64)
+    {
         return Err(invalid(
             name,
             format!("{name}: featureDim must be a positive integer scalar"),
@@ -1147,13 +1301,16 @@ fn label_kinds_compatible(left: LabelKind, right: LabelKind) -> bool {
 
 fn is_grouping_container(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.len() > 1,
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) > 1,
         Value::LogicalArray(array) => array.data.len() > 1,
         Value::StringArray(array) => array.data.len() > 1,
         Value::CharArray(array) => array.rows > 1,
         Value::Cell(cell) => cell.data.len() > 1,
         Value::Object(object) if object.is_class("categorical") => {
-            matches!(object.properties.get("Codes"), Some(Value::Tensor(tensor)) if tensor.data.len() > 1)
+            matches!(
+                object.properties.get("Codes"),
+                Some(Value::Tensor(tensor)) if tensor::tensor_element_len(tensor) > 1
+            )
         }
         _ => false,
     }
@@ -1256,9 +1413,20 @@ fn linear_for_coords(coords: &[usize], strides: &[usize]) -> usize {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn assert_f64_slice_eq_nan(left: &[f64], right: &[f64]) {
@@ -1282,7 +1450,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 4]);
         assert_f64_slice_eq_nan(
-            &out.data,
+            &out.materialize_f64(),
             &[
                 1.0,
                 0.0,
@@ -1323,7 +1491,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 4]);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
         );
     }
@@ -1342,7 +1510,7 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -1353,7 +1521,131 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn dummyvar_reads_typed_integer_labels_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::Tensor(out) = block_on(dummyvar_builtin(int_tensor(
+            IntegerStorage::I16(vec![1, 2, 1, 2, 2, 1]),
+            vec![3, 2],
+        )))
+        .unwrap() else {
+            panic!("tensor");
+        };
+        assert_eq!(out.shape, vec![3, 4]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn dummyvar_supports_all_integer_classes_in_extension_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = [
+            runmat_builtins::IntegerStorage::I8(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::I16(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::I32(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::I64(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::U8(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::U16(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::U32(vec![1, 2, 1]),
+            runmat_builtins::IntegerStorage::U64(vec![1, 2, 1]),
+        ];
+        for storage in storages {
+            let Value::Tensor(output) = block_on(dummyvar_builtin(int_tensor(storage, vec![3, 1])))
+                .expect("integer groups")
+            else {
+                panic!("expected double tensor")
+            };
+            assert!(output.integer_storage().is_none());
+            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+        }
+    }
+
+    #[test]
+    fn dummyvar_rejects_wide_typed_levels_before_floating_conversion() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in [
+            IntegerStorage::I64(vec![(1_i64 << 53) + 1]),
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ] {
+            let error = block_on(dummyvar_builtin(int_tensor(storage, vec![1, 1])))
+                .expect_err("wide typed labels cannot request an unbounded design matrix");
+            assert!(error.message().contains("output is too large"));
+        }
+
+        let error = block_on(dummyvar_builtin(int_tensor(
+            IntegerStorage::I64(vec![i64::MIN]),
+            vec![1, 1],
+        )))
+        .expect_err("negative typed labels remain invalid");
+        assert!(error.message().contains("positive integer levels"));
+    }
+
+    #[test]
+    fn dummyvar_integer_extension_rejects_before_computation_in_strict_mode() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(dummyvar_builtin(int_tensor(
+            runmat_builtins::IntegerStorage::U8(vec![1, 2]),
+            vec![2, 1],
+        )))
+        .expect_err("integer extension gate");
+        assert_eq!(
+            error.identifier(),
+            DUMMYVAR_INTEGER_GROUP_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn dummyvar_gpu_extension_rejects_before_provider_access() {
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: 0,
+            buffer_id: 9_399_001,
+        });
+        let error = block_on(dummyvar_builtin(resident)).expect_err("GPU extension gate");
+        assert_eq!(
+            error.identifier(),
+            DUMMYVAR_GPU_GROUP_EXTENSION.error_identifier
+        );
+        drop(strict);
+    }
+
+    #[test]
+    fn dummyvar_rejects_unrepresentable_numeric_level_before_cast() {
+        let err = block_on(dummyvar_builtin(tensor(
+            vec![usize::MAX as f64],
+            vec![1, 1],
+        )))
+        .unwrap_err();
+        assert!(err.message.contains("positive integer levels"));
+    }
+
+    #[test]
+    fn dummyvar_grouping_detection_uses_typed_integer_storage_len() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let first = mirrorless_int_tensor(IntegerStorage::I16(vec![1, 2, 1]), vec![3, 1]);
+        let second = mirrorless_int_tensor(IntegerStorage::I16(vec![2, 2, 1]), vec![3, 1]);
+
+        let Value::Tensor(out) = block_on(dummyvar_builtin(Value::Cell(
+            CellArray::new(vec![first, second], 1, 2).unwrap(),
+        )))
+        .unwrap() else {
+            panic!("tensor");
+        };
+
+        assert_eq!(out.shape, vec![3, 4]);
+        assert_eq!(
+            out.materialize_f64(),
+            vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
+        );
     }
 
     #[test]
@@ -1383,7 +1675,7 @@ mod tests {
             panic!("dummy tensor");
         };
         assert_eq!(dummy.shape, vec![2, 3]);
-        assert_eq!(dummy.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(dummy.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
 
         let Value::Tensor(encoded) =
             block_on(onehotencode_builtin(group, Value::Num(2.0), Vec::new())).unwrap()
@@ -1391,7 +1683,10 @@ mod tests {
             panic!("encoded tensor");
         };
         assert_eq!(encoded.shape, vec![2, 3]);
-        assert_eq!(encoded.data, vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(
+            encoded.materialize_f64(),
+            vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+        );
     }
 
     #[test]
@@ -1436,7 +1731,7 @@ mod tests {
             panic!("tensor");
         };
         assert_eq!(out.shape, vec![3, 2]);
-        assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -1462,7 +1757,7 @@ mod tests {
         };
         assert_eq!(out.shape, vec![3, 2]);
         assert_f64_slice_eq_nan(
-            &out.data,
+            &out.materialize_f64(),
             &[1.0, f64::NAN, f64::NAN, 0.0, f64::NAN, f64::NAN],
         );
 
@@ -1478,6 +1773,49 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message.contains("logical output cannot represent"));
+    }
+
+    #[test]
+    fn onehotencode_reads_typed_integer_labels_and_classes_exactly() {
+        let Value::Tensor(out) = block_on(onehotencode_builtin(
+            int_tensor(IntegerStorage::U16(vec![1, 2, 1]), vec![3, 1]),
+            Value::Num(2.0),
+            vec![
+                Value::from("ClassNames"),
+                int_tensor(IntegerStorage::I16(vec![1, 2]), vec![1, 2]),
+            ],
+        ))
+        .unwrap() else {
+            panic!("tensor");
+        };
+        assert_eq!(out.shape, vec![3, 2]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn onehot_feature_dimension_parses_integer_bounds_exactly() {
+        assert_eq!(
+            positive_dim("onehotencode", &Value::Int(IntValue::U16(2))).unwrap(),
+            2
+        );
+        assert_eq!(
+            positive_dim(
+                "onehotencode",
+                &mirrorless_int_tensor(IntegerStorage::U64(vec![2]), vec![1, 1])
+            )
+            .unwrap(),
+            2
+        );
+
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+            mirrorless_int_tensor(IntegerStorage::U64(vec![0]), vec![1, 1]),
+        ] {
+            assert!(positive_dim("onehotencode", &value).is_err());
+        }
     }
 
     #[test]
@@ -1574,6 +1912,24 @@ mod tests {
             other => panic!("categories {other:?}"),
         };
         assert_eq!(categories, vec!["low", "high"]);
+    }
+
+    #[test]
+    fn onehotdecode_reads_typed_integer_encoded_array_exactly() {
+        let encoded = int_tensor(IntegerStorage::U8(vec![0, 1, 1, 0]), vec![2, 2]);
+        let Value::StringArray(out) = block_on(onehotdecode_builtin(
+            encoded,
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::Num(2.0),
+            vec![Value::from("string")],
+        ))
+        .unwrap() else {
+            panic!("strings");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.data, vec!["high", "low"]);
     }
 
     #[test]

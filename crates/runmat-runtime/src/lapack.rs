@@ -4,6 +4,8 @@
 
 use runmat_builtins::Tensor as Matrix;
 
+use crate::builtins::common::tensor;
+
 /// LU decomposition result
 pub struct LuDecomposition {
     pub lu_matrix: Matrix,
@@ -29,6 +31,10 @@ pub struct EigenDecomposition {
     pub eigenvectors: Option<Matrix>,
 }
 
+fn matrix_values_f64(matrix: &Matrix) -> std::borrow::Cow<'_, [f64]> {
+    tensor::tensor_values_f64_cow(matrix)
+}
+
 /// Solve linear system Ax = b using LU decomposition with partial pivoting
 /// Uses DGESV (double precision general solve)
 pub fn lapack_solve_linear_system(a: &Matrix, b: &[f64]) -> Result<Vec<f64>, String> {
@@ -49,10 +55,11 @@ pub fn lapack_solve_linear_system(a: &Matrix, b: &[f64]) -> Result<Vec<f64>, Str
 
     // Copy data since LAPACK modifies input
     // Transpose A since LAPACK expects column-major but we store row-major
-    let mut a_copy = vec![0.0; a.data.len()];
+    let values = matrix_values_f64(a);
+    let mut a_copy = vec![0.0; values.len()];
     for i in 0..a.rows() {
         for j in 0..a.cols() {
-            a_copy[j * a.rows() + i] = a.data[i * a.cols() + j]; // transpose
+            a_copy[j * a.rows() + i] = values[i * a.cols() + j]; // transpose
         }
     }
     let mut b_copy = b.to_vec();
@@ -88,10 +95,11 @@ pub fn lapack_lu_decomposition(matrix: &Matrix) -> Result<LuDecomposition, Strin
 
     let n = matrix.rows() as i32;
     // Transpose matrix since LAPACK expects column-major but we store row-major
-    let mut a_copy = vec![0.0; matrix.data.len()];
+    let values = matrix_values_f64(matrix);
+    let mut a_copy = vec![0.0; values.len()];
     for i in 0..matrix.rows() {
         for j in 0..matrix.cols() {
-            a_copy[j * matrix.rows() + i] = matrix.data[i * matrix.cols() + j]; // transpose
+            a_copy[j * matrix.rows() + i] = values[i * matrix.cols() + j]; // transpose
         }
     }
     let mut ipiv = vec![0i32; n as usize];
@@ -133,7 +141,7 @@ pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, Strin
     let m = matrix.rows() as i32;
     let n = matrix.cols() as i32;
     // LAPACK expects column-major; our Tensor stores in column-major already
-    let mut a_copy = matrix.data.clone();
+    let mut a_copy = matrix_values_f64(matrix).into_owned();
     let mut tau = vec![0.0; std::cmp::min(m, n) as usize];
     let mut work = vec![0.0; 1];
     let mut lwork = -1i32;
@@ -204,7 +212,7 @@ pub fn lapack_eigenvalues(
     let jobz = if compute_vectors { b'V' } else { b'N' };
     let uplo = b'U'; // Upper triangular
 
-    let mut a_copy = matrix.data.clone();
+    let mut a_copy = matrix_values_f64(matrix).into_owned();
     let mut w = vec![0.0; n as usize]; // eigenvalues
     let mut work = vec![0.0; 1];
     let mut lwork = -1i32;
@@ -275,7 +283,7 @@ pub fn lapack_determinant(matrix: &Matrix) -> Result<f64, String> {
 
     // Product of diagonal elements
     for i in 0..n {
-        det *= lu.lu_matrix.data[i * n + i];
+        det *= tensor::tensor_value_f64(&lu.lu_matrix, i * n + i);
     }
 
     // Count number of row swaps to determine sign
@@ -302,7 +310,7 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
 
     let n = matrix.rows() as i32;
     // Our storage is column-major; copy as-is
-    let mut a_copy = matrix.data.clone();
+    let mut a_copy = matrix_values_f64(matrix).into_owned();
     let mut ipiv = vec![0i32; n as usize];
     let mut work = vec![0.0; 1];
     let mut lwork = -1i32;

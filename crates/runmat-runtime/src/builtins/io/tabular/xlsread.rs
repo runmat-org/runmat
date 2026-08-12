@@ -7,7 +7,7 @@ use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as Sp
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "xlsread";
@@ -402,26 +403,33 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
             Ok(SheetSelector::Name(trimmed.to_string()))
         }
         Value::Num(n) => numeric_sheet_index(*n),
-        Value::Int(i) => {
-            let index = i.to_i64();
-            if index <= 0 {
-                return Err(xlsread_error_with(
-                    &XLSREAD_ERROR_SHEET,
-                    "xlsread: sheet index must be one-based",
-                ));
+        Value::Int(i) => integer_sheet_index(i),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                integer_sheet_index(&value)
+            } else {
+                numeric_sheet_index(tensor::tensor_value_f64(t, 0))
             }
-            usize::try_from(index - 1)
-                .map(SheetSelector::Index)
-                .map_err(|_| {
-                    xlsread_error_with(&XLSREAD_ERROR_SHEET, "xlsread: sheet index is too large")
-                })
         }
-        Value::Tensor(t) if t.data.len() == 1 => numeric_sheet_index(t.data[0]),
         _ => Err(xlsread_error_with(
             &XLSREAD_ERROR_SHEET,
             "xlsread: sheet must be a name or one-based numeric index",
         )),
     }
+}
+
+fn integer_sheet_index(value: &IntValue) -> BuiltinResult<SheetSelector> {
+    value
+        .try_to_usize()
+        .and_then(|index| index.checked_sub(1))
+        .map(SheetSelector::Index)
+        .ok_or_else(|| {
+            xlsread_error_with(
+                &XLSREAD_ERROR_SHEET,
+                "xlsread: sheet index must be one-based",
+            )
+        })
 }
 
 fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
@@ -431,16 +439,21 @@ fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
             "xlsread: sheet index must be a positive integer",
         ));
     }
-    let index = value.round() as u128;
+    let rounded = value.round();
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_SHEET,
+            "xlsread: sheet index is too large",
+        ));
+    }
+    let index = rounded as usize;
     let zero_based = index.checked_sub(1).ok_or_else(|| {
         xlsread_error_with(
             &XLSREAD_ERROR_SHEET,
             "xlsread: sheet index must be one-based",
         )
     })?;
-    usize::try_from(zero_based)
-        .map(SheetSelector::Index)
-        .map_err(|_| xlsread_error_with(&XLSREAD_ERROR_SHEET, "xlsread: sheet index is too large"))
+    Ok(SheetSelector::Index(zero_based))
 }
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
@@ -815,7 +828,13 @@ fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             parse_range_string(&value_to_string_scalar(value)?)
         }
-        Value::Tensor(t) => parse_numeric_range(&t.data),
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                parse_integer_range(&storage.exact_values())
+            } else {
+                parse_numeric_range(&t.materialize_f64())
+            }
+        }
         _ => Err(xlsread_error_with(
             &XLSREAD_ERROR_RANGE,
             "xlsread: range must be a string or numeric vector",
@@ -905,6 +924,36 @@ fn parse_numeric_range(values: &[f64]) -> BuiltinResult<RangeSpec> {
     Ok(spec)
 }
 
+fn parse_integer_range(values: &[IntValue]) -> BuiltinResult<RangeSpec> {
+    if values.len() != 2 && values.len() != 4 {
+        return Err(xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            "xlsread: numeric range must contain 2 or 4 one-based indices",
+        ));
+    }
+    let indices = values
+        .iter()
+        .enumerate()
+        .map(|(idx, value)| positive_integer_index(value, idx))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let spec = RangeSpec {
+        start_row: indices[0],
+        start_col: indices[1],
+        end_row: if indices.len() == 4 {
+            Some(indices[2])
+        } else {
+            None
+        },
+        end_col: if indices.len() == 4 {
+            Some(indices[3])
+        } else {
+            None
+        },
+    };
+    spec.validate()?;
+    Ok(spec)
+}
+
 fn positive_index(value: f64, position: usize) -> BuiltinResult<usize> {
     if !value.is_finite() || value < 1.0 || (value.round() - value).abs() > f64::EPSILON {
         return Err(xlsread_error_with(
@@ -912,17 +961,33 @@ fn positive_index(value: f64, position: usize) -> BuiltinResult<usize> {
             "xlsread: range indices must be positive integers",
         ));
     }
-    if value > usize::MAX as f64 {
+    let rounded = value.round();
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(xlsread_error_with(
             &XLSREAD_ERROR_RANGE,
             format!("xlsread: range index {} is too large", position + 1),
         ));
     }
-    let one_based = value.round() as usize;
+    let one_based = rounded as usize;
     one_based.checked_sub(1).ok_or_else(|| {
         xlsread_error_with(
             &XLSREAD_ERROR_RANGE,
             "xlsread: range indices must be one-based",
+        )
+    })
+}
+
+fn positive_integer_index(value: &IntValue, position: usize) -> BuiltinResult<usize> {
+    let one_based = value.try_to_usize().ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            "xlsread: range indices must be positive integers",
+        )
+    })?;
+    one_based.checked_sub(1).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_RANGE,
+            format!("xlsread: range index {} must be one-based", position + 1),
         )
     })
 }
@@ -1427,6 +1492,75 @@ fn cell_to_raw(cell: &SpreadsheetData) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn typed_sheet_selector_does_not_clamp_uint64() {
+        let selected = parse_sheet_selector(&Value::Int(IntValue::U64(u64::MAX)));
+        match usize::try_from(u64::MAX)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+        {
+            Some(index) => {
+                assert!(matches!(selected, Ok(SheetSelector::Index(actual)) if actual == index))
+            }
+            None => assert!(selected.is_err()),
+        }
+        assert!(parse_sheet_selector(&Value::Int(IntValue::I64(-1))).is_err());
+
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+            .expect("typed sheet tensor");
+        assert!(matches!(
+            parse_sheet_selector(&Value::Tensor(tensor)),
+            Ok(SheetSelector::Index(6))
+        ));
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed sheet tensor");
+        let selected = parse_sheet_selector(&Value::Tensor(too_large));
+        match usize::try_from(u64::MAX)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+        {
+            Some(index) => {
+                assert!(matches!(selected, Ok(SheetSelector::Index(actual)) if actual == index))
+            }
+            None => assert!(selected.is_err()),
+        }
+        let negative =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
+
+        assert!(parse_sheet_selector(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_sheet_selector(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+    }
+
+    #[test]
+    fn xlsread_numeric_range_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4])
+            .expect("typed range tensor");
+
+        let range = parse_range(&Value::Tensor(tensor)).expect("numeric range");
+        assert_eq!(range.start_row, 1);
+        assert_eq!(range.start_col, 2);
+        assert_eq!(range.end_row, Some(3));
+        assert_eq!(range.end_col, Some(4));
+
+        let invalid = Tensor::new_integer(IntegerStorage::I16(vec![-1, 1]), vec![1, 2])
+            .expect("typed invalid range");
+        assert!(parse_range(&Value::Tensor(invalid)).is_err());
+
+        let too_large = Tensor::new_integer(
+            IntegerStorage::U64(vec![MAX_EXCEL_ROW_INDEX as u64 + 2, 1]),
+            vec![1, 2],
+        )
+        .expect("typed excessive range");
+        assert!(parse_range(&Value::Tensor(too_large)).is_err());
+
+        let boundary = Value::Tensor(
+            Tensor::new(vec![usize::MAX as f64, 1.0], vec![1, 2]).expect("boundary range"),
+        );
+        assert!(parse_range(&boundary).is_err());
+    }
     use futures::executor::block_on;
     use std::fs;
     use std::io::Write;
@@ -1568,7 +1702,10 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![3, 2]);
-                assert_eq!(tensor.data, vec![1.5, 2.5, 3.5, 10.0, 20.0, 30.0]);
+                assert_eq!(
+                    tensor.materialize_f64(),
+                    vec![1.5, 2.5, 3.5, 10.0, 20.0, 30.0]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1583,7 +1720,7 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.data, vec![10.0, 20.0]);
+                assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1598,7 +1735,7 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![1.5]);
+                assert_eq!(tensor.materialize_f64(), vec![1.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1823,7 +1960,7 @@ mod tests {
         match &outputs[0] {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![2, 2]);
-                assert_eq!(tensor.data, vec![1.5, 2.5, 10.0, 20.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.5, 2.5, 10.0, 20.0]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
         }

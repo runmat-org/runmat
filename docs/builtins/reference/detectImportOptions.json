@@ -17,7 +17,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs on the host. The returned options are metadata consumed by later import calls."
+    "notes": "Runs on the host. Resident arguments, including nested option values, are rejected before provider or file access."
   },
   "fusion": {
     "elementwise": false,
@@ -39,9 +39,12 @@
     "Detects text delimiters from comma, tab, semicolon, pipe, and whitespace-separated records unless `Delimiter` is supplied.",
     "Infers variable names from a non-data header row and sets `NumHeaderLines` so readers import only data rows.",
     "Infers `VariableTypes` as `double`, `logical`, `datetime`, or text (`string`/`char`) using the same token rules as `readtable`.",
-    "Honors supported overrides including `FileType`, `Delimiter`, `NumHeaderLines`, `Range`, `Sheet`, `VariableNames`, `VariableTypes`, `ReadVariableNames`, `ReadRowNames`, `TreatAsMissing`, `VariableNamingRule`, `TextType`, `DatetimeType`, `EmptyLineRule`, and `Encoding`.",
+    "Honors the implemented text/spreadsheet override subset, including `FileType`, `Delimiter`, `NumHeaderLines`, `Range`, `DataRange`, `Sheet`, `ExpectedNumVariables`, `VariableNamesLine`, `VariableNames`, `VariableTypes`, `ReadVariableNames`, `ReadRowNames`, `TreatAsMissing`, `VariableNamingRule`, `TextType`, `DatetimeType`, `EmptyLineRule`, and `Encoding`.",
+    "Integer `Range`, `DataRange`, `Sheet`, `ExpectedNumVariables`, and `VariableNamesLine` controls are parsed exactly from all eight integer classes. `ExpectedNumVariables` and `Sheet` must be positive; boolean controls accept only logical values or exact numeric zero/one.",
+    "Numeric `DataRange` currently supports a positive scalar start row or one 1-by-2 increasing row interval. Textual cell references are supported for detected-option replay; multiple numeric Nx2 intervals remain a recorded general gap.",
+    "Typed-integer `NumHeaderLines` is a RunMat-only extension. Compatibility mode rejects it before provider or file access; scalar single and double remain public inputs.",
     "For spreadsheet files, uses the same sheet/range reader as `readtable` and emits spreadsheet-compatible option fields.",
-    "The returned struct intentionally contains fields understood by current RunMat readers; unsupported MATLAB option fields are not emitted."
+    "The returned struct intentionally contains fields understood by current RunMat readers. Concrete MATLAB import-options classes and JSON, XML, Word, HTML, and archive option families remain recorded general gaps."
   ],
   "examples": [
     {
@@ -69,6 +72,10 @@
     {
       "question": "Does detection read the whole file?",
       "answer": "RunMat currently reads the file into host memory and samples the parsed rows, matching the existing `readtable` import pipeline."
+    },
+    {
+      "question": "Can detection options be GPU-resident?",
+      "answer": "No. Resident path or option values, including nested values, are rejected before provider or file access."
     }
   ],
   "links": [
@@ -86,11 +93,11 @@
     }
   ],
   "source": {
-    "label": "`crates/runmat-runtime/src/builtins/table/mod.rs`",
-    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/mod.rs"
+    "label": "`crates/runmat-runtime/src/builtins/table/builtins/io.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/builtins/io.rs"
   },
   "gpu_residency": "`detectImportOptions` performs file inspection on the host and returns host metadata. It does not create GPU-resident arrays.",
   "gpu_behavior": [
-    "No acceleration provider hooks are used."
+    "No acceleration provider hooks are used. Resident arguments are rejected without a download."
   ]
 }

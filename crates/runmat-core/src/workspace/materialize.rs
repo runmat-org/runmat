@@ -1,6 +1,6 @@
 use anyhow::Result;
 use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{NumericStorage, Tensor, Value};
 
 use super::{WorkspaceMaterializeOptions, WorkspaceSliceOptions};
 
@@ -12,115 +12,41 @@ pub(crate) fn slice_value_for_preview(
 ) -> Option<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let data = gather_tensor_slice(tensor, slice);
-            if data.is_empty() {
-                return None;
-            }
             let mut shape = slice.shape.clone();
             if shape.is_empty() {
                 shape.push(1);
             }
-            let rows = shape.first().copied().unwrap_or(1);
-            let cols = shape.get(1).copied().unwrap_or(1);
-            Some(Value::Tensor(Tensor {
-                data,
-                integer_data: gather_integer_tensor_slice(tensor, slice),
-                shape,
-                rows,
-                cols,
-                dtype: tensor.dtype,
-            }))
+            let storage = gather_tensor_slice(tensor, slice)?;
+            Tensor::from_numeric_storage(storage, shape)
+                .ok()
+                .map(Value::Tensor)
         }
         _ => None,
     }
 }
 
-fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Vec<f64> {
+fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Option<NumericStorage> {
     if tensor.shape.is_empty() || slice.shape.contains(&0) {
-        return Vec::new();
+        return None;
     }
     let total: usize = slice.shape.iter().product();
-    let mut result = Vec::with_capacity(total);
+    if total == 0 {
+        return None;
+    }
+    let mut indices = Vec::with_capacity(total);
     let mut coords = vec![0usize; tensor.shape.len()];
-    gather_tensor_slice_recursive(tensor, slice, 0, &mut coords, &mut result);
-    result
-}
-
-fn gather_integer_tensor_slice(
-    tensor: &Tensor,
-    slice: &WorkspaceSliceOptions,
-) -> Option<runmat_builtins::IntegerStorage> {
-    let storage = tensor.integer_storage()?;
-    let total: usize = slice.shape.iter().product();
-    let mut result = storage.zeros_like(total);
-    let mut coords = vec![0usize; tensor.shape.len()];
-    let mut output_index = 0usize;
-    gather_integer_tensor_slice_recursive(
-        tensor,
-        slice,
-        0,
-        &mut coords,
-        &mut result,
-        &mut output_index,
-    );
-    Some(result)
-}
-
-fn gather_integer_tensor_slice_recursive(
-    tensor: &Tensor,
-    slice: &WorkspaceSliceOptions,
-    axis: usize,
-    coords: &mut [usize],
-    output: &mut runmat_builtins::IntegerStorage,
-    output_index: &mut usize,
-) {
-    if axis == tensor.shape.len() {
-        let index = column_major_index(&tensor.shape, coords);
-        if let Some(value) = tensor
-            .integer_storage()
-            .and_then(|storage| storage.value_at(index))
-        {
-            output
-                .set_value(*output_index, value)
-                .expect("integer preview storage shape must match slice shape");
-            *output_index += 1;
-        }
-        return;
-    }
-    let start = slice.start.get(axis).copied().unwrap_or(0);
-    let count = slice.shape.get(axis).copied().unwrap_or(1);
-    for offset in 0..count {
-        coords[axis] = start + offset;
-        gather_integer_tensor_slice_recursive(
-            tensor,
-            slice,
-            axis + 1,
-            coords,
-            output,
-            output_index,
-        );
-    }
-}
-
-fn gather_tensor_slice_recursive(
-    tensor: &Tensor,
-    slice: &WorkspaceSliceOptions,
-    axis: usize,
-    coords: &mut [usize],
-    out: &mut Vec<f64>,
-) {
-    if axis == tensor.shape.len() {
-        let idx = column_major_index(&tensor.shape, coords);
-        if let Some(value) = tensor.data.get(idx) {
-            out.push(*value);
-        }
-        return;
-    }
-    let start = slice.start.get(axis).copied().unwrap_or(0);
-    let count = slice.shape.get(axis).copied().unwrap_or(1);
-    for offset in 0..count {
-        coords[axis] = start + offset;
-        gather_tensor_slice_recursive(tensor, slice, axis + 1, coords, out);
+    visit_slice_coords(&tensor.shape, slice, 0, &mut coords, &mut |coords| {
+        indices.push(column_major_index(&tensor.shape, coords));
+    });
+    if indices.len() != total {
+        None
+    } else {
+        tensor
+            .clone()
+            .into_numeric_storage()
+            .ok()?
+            .gather(&indices)
+            .ok()
     }
 }
 
@@ -253,4 +179,54 @@ pub(crate) async fn gather_gpu_preview_values(
     let _ = provider.free(&gathered);
 
     Ok(Some((host.data, truncated)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn preview_slice_preserves_exact_uint64_storage() {
+        let values = vec![0, 1, 9_007_199_254_740_993, u64::MAX];
+        let tensor = Tensor::new_integer(IntegerStorage::U64(values.clone()), vec![2, 2])
+            .expect("typed tensor");
+        let slice = WorkspaceSliceOptions {
+            start: vec![0, 1],
+            shape: vec![2, 1],
+        };
+
+        let Value::Tensor(preview) =
+            slice_value_for_preview(&Value::Tensor(tensor), &slice).expect("preview")
+        else {
+            panic!("expected tensor preview");
+        };
+
+        assert_eq!(preview.shape, vec![2, 1]);
+        assert_eq!(
+            preview.integer_storage(),
+            Some(&IntegerStorage::U64(vec![values[2], values[3]]))
+        );
+    }
+
+    #[test]
+    fn preview_slice_preserves_native_single_storage() {
+        let values = vec![0.1_f32, 0.2, f32::MAX, f32::MIN_POSITIVE];
+        let tensor = Tensor::from_f32(values.clone(), vec![2, 2]).expect("single tensor");
+        let slice = WorkspaceSliceOptions {
+            start: vec![0, 1],
+            shape: vec![2, 1],
+        };
+
+        let Value::Tensor(preview) =
+            slice_value_for_preview(&Value::Tensor(tensor), &slice).expect("preview")
+        else {
+            panic!("expected tensor preview");
+        };
+        assert_eq!(preview.shape, vec![2, 1]);
+        assert_eq!(
+            preview.into_numeric_storage(),
+            Ok(NumericStorage::F32(vec![values[2], values[3]]))
+        );
+    }
 }

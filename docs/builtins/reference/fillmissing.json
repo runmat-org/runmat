@@ -7,13 +7,16 @@
   "fusion": {"elementwise": false, "reduction": false, "max_inputs": 3, "constants": "inline"},
   "requires_feature": null,
   "tested": {"unit": "builtins::missing::tests", "integration": "crates/runmat-vm/tests/missing_values.rs"},
-  "description": "`fillmissing(A, method, ...)` replaces missing values while preserving the input shape.",
+  "description": "`fillmissing(A, method, ...)` replaces supported missing values while preserving the input shape. Typed-integer input is a mode-gated RunMat extension: integer classes have no standard missing value, so the result is an exact same-class no-op and the optional filled-entry mask is all false. Integer data nested in table variables or cell contents is a separately declared aggregate extension and is classified before resident children are gathered.",
   "behaviors": [
     "Numeric arrays support `\"constant\"`, `\"previous\"`, `\"next\"`, `\"nearest\"`, `\"linear\"`, `\"mean\"`, and `\"median\"`.",
     "String arrays support `\"constant\"`, `\"previous\"`, `\"next\"`, and `\"nearest\"`.",
     "Cell arrays support `\"constant\"` replacement.",
     "Tables apply filling variable-by-variable and return a table plus an optional logical mask; incompatible variable/method combinations report an error.",
-    "The optional dimension argument may be supplied as `1`, `2`, or as a `\"dim\", value` pair. Without an explicit dimension, the first non-singleton dimension is used."
+    "The optional dimension argument may be supplied as `1`, `2`, or as a `\"dim\", value` pair. Without an explicit dimension, the first non-singleton dimension is used.",
+    "The optional logical mask marks entries that were actually filled; missing endpoints left unchanged by a neighbor method are false.",
+    "Complex and sparse array filling is not implemented and is rejected instead of replacing an aggregate value.",
+    "Current general gaps include `\"spline\"`, `\"pchip\"`, `\"makima\"`, `\"mode\"`, moving-window, KNN, custom-function, sample-point, known-location, maximum-gap, variable-selection, and append forms."
   ],
   "examples": [
     {"description": "Fill by interpolation", "input": "B = fillmissing([1 NaN 3], 'linear')", "output": "B = [1 2 3]"},

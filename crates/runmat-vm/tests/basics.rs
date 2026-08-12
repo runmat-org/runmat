@@ -2,7 +2,7 @@
 mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
-use runmat_builtins::Value;
+use runmat_builtins::{IntegerStorage, Value};
 use runmat_vm::{EndExpr, Instr};
 use std::convert::TryInto;
 use std::path::Path;
@@ -12,6 +12,11 @@ use test_helpers::interpret;
 fn execute_source(source: &str) -> Vec<Value> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
+}
+
+fn execute_source_result(source: &str) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
+    let bytecode = compile_source(source).expect("compile source");
+    interpret(&bytecode).map_err(Box::new)
 }
 
 fn matlab_single_quoted_path(path: &Path) -> String {
@@ -26,6 +31,97 @@ fn arithmetic_and_assignment() {
     let y: f64 = (&vars[1]).try_into().unwrap();
     assert_eq!(x, 3.0);
     assert_eq!(y, 9.0);
+}
+
+#[test]
+fn compiled_bsxfun_preserves_exact_integer_and_native_single_results() {
+    let vars = execute_source(
+        "base = uint64(9007199254740992); a = [base+uint64(1);base+uint64(3)]; c = bsxfun(@plus,a,uint64(1)); p = bsxfun(@gt,a,base+uint64(2)); s = bsxfun(@plus,single([1 2]),single(1));",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U64(vec![9_007_199_254_740_994, 9_007_199_254_740_996]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::LogicalArray(array) if array.data == vec![0, 1]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.as_f32_slice() == Some(&[2.0, 3.0])
+    )));
+}
+
+#[test]
+fn compiled_builtin_inherits_exact_integer_single_and_output_count_semantics() {
+    let vars = execute_source(
+        "base = uint64(9007199254740992); a = [base+uint64(1);base+uint64(3)]; c = builtin('plus',a,uint64(1)); s = builtin('plus',single([1 2]),single(1)); [i,j] = builtin('find',int16([0 3;4 0]));",
+    );
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U64(vec![9_007_199_254_740_994, 9_007_199_254_740_996]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor) if tensor.as_f32_slice() == Some(&[2.0, 3.0])
+    )));
+    let double_indices = vars
+        .iter()
+        .filter(|value| {
+            matches!(
+                value,
+                Value::Tensor(tensor)
+                    if tensor.shape == vec![2, 1]
+                        && tensor.as_f64_slice().is_some()
+                        && tensor.materialize_f64().iter().all(|entry| matches!(*entry, 1.0 | 2.0))
+            )
+        })
+        .count();
+    assert!(
+        double_indices >= 2,
+        "expected delegated find row and column outputs"
+    );
+}
+
+#[test]
+fn compiled_integer_arithmetic_rejects_ordered_logical_operands() {
+    let expressions = [
+        "integer_value + logical_value",
+        "logical_value + integer_value",
+        "integer_value - logical_value",
+        "logical_value - integer_value",
+        "integer_value .* logical_value",
+        "logical_value .* integer_value",
+        "integer_value ./ logical_value",
+        "logical_value ./ integer_value",
+        r"integer_value .\ logical_value",
+        r"logical_value .\ integer_value",
+        "integer_value .^ logical_value",
+        "logical_value .^ integer_value",
+        "rem(integer_value, logical_value)",
+        "rem(logical_value, integer_value)",
+        "mod(integer_value, logical_value)",
+        "mod(logical_value, integer_value)",
+    ];
+    for expression in expressions {
+        let source = format!(
+            "integer_value = int64([1 2]); logical_value = logical([1 0]); output = {expression};"
+        );
+        let bytecode = compile_source(&source).expect("compile integer/logical expression");
+        let error =
+            interpret(&bytecode).expect_err("compiled integer/logical arithmetic must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("integer arrays can only be combined with scalar double values"),
+            "{expression}: unexpected error: {error}"
+        );
+    }
 }
 
 #[test]
@@ -48,10 +144,10 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
         })
         .expect("expected output tensor");
     assert_eq!(out.shape, vec![1, 4]);
-    assert!(out.data[0] > 0.0 && out.data[0] < 1.0);
-    assert_eq!(out.data[1], 6.0);
-    assert_eq!(out.data[2], 1.0);
-    assert_eq!(out.data[3], 7.0);
+    assert!(out.materialize_f64()[0] > 0.0 && out.materialize_f64()[0] < 1.0);
+    assert_eq!(out.materialize_f64()[1], 6.0);
+    assert_eq!(out.materialize_f64()[2], 1.0);
+    assert_eq!(out.materialize_f64()[3], 7.0);
 }
 
 #[test]
@@ -73,8 +169,8 @@ fn rand_legacy_seed_forms_execute_from_source() {
             _ => None,
         })
         .expect("expected result tensor");
-    assert!(result.data[0].abs() < 1.0e-12);
-    assert!(result.data[1] > 1.0);
+    assert!(result.materialize_f64()[0].abs() < 1.0e-12);
+    assert!(result.materialize_f64()[1] > 1.0);
 }
 
 #[test]
@@ -143,7 +239,7 @@ fn nan_constant_and_constructor_coexist() {
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.data, vec![1.0, 6.0, 1.0, 1.0]);
+    assert_eq!(out.materialize_f64(), vec![1.0, 6.0, 1.0, 1.0]);
 }
 
 #[test]
@@ -162,7 +258,7 @@ fn inf_constant_and_constructor_coexist() {
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.data, vec![1.0, 6.0, 1.0, 1.0]);
+    assert_eq!(out.materialize_f64(), vec![1.0, 6.0, 1.0, 1.0]);
 }
 
 #[test]
@@ -185,7 +281,7 @@ fn hilbert_builtin_executes_for_fm_demod_shape() {
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.data, vec![11.0, 11.0, 11.0, 11.0]);
+    assert_eq!(out.materialize_f64(), vec![11.0, 11.0, 11.0, 11.0]);
 }
 
 #[test]
@@ -203,10 +299,84 @@ fn buttord_builtin_executes_for_butterworth_workflow() {
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.data[0], 12.0);
-    assert!((out.data[1] - 0.2108).abs() < 5e-4);
-    assert_eq!(out.data[2], 13.0);
-    assert_eq!(out.data[3], 13.0);
+    assert_eq!(out.materialize_f64()[0], 12.0);
+    assert!((out.materialize_f64()[1] - 0.2108).abs() < 5e-4);
+    assert_eq!(out.materialize_f64()[2], 13.0);
+    assert_eq!(out.materialize_f64()[3], 13.0);
+}
+
+#[test]
+fn compiled_buttord_integer_extensions_return_double_design_values() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("[n,Wn] = buttord(uint8(1),uint16(2),uint32(1),uint64(40),'s');");
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(order) if *order == 8.0)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(cutoff) if *cutoff > 1.0 && *cutoff < 2.0)));
+}
+
+#[test]
+fn compiled_buttord_integer_frequency_respects_compatibility_policy() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let err = execute_source_result("n = buttord(uint8(1),2,1,40,'s');")
+        .expect_err("typed integer frequency must be gated");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:compatibility:ButtordIntegerFrequencyExtension")
+    );
+}
+
+#[test]
+fn compiled_butter_integer_extensions_preserve_double_filter_outputs() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("[b,a] = butter(uint16(1),uint8(1),'s');");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                && tensor.materialize_f64() == vec![0.0, 1.0]
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                && tensor.materialize_f64() == vec![1.0, 1.0]
+    )));
+}
+
+#[test]
+fn compiled_butter_integer_order_respects_compatibility_policy() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let err = execute_source_result("b = butter(uint16(1),0.5);")
+        .expect_err("typed integer order must be gated");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:compatibility:ButterIntegerOrderExtension")
+    );
+}
+
+#[test]
+fn compiled_cat_preserves_exact_integer_dimension_and_data_contracts() {
+    let vars = execute_source("c = cat(uint8(2),uint8([1 2]),int16(300),int8(-1));");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.integer_storage()
+                == Some(&IntegerStorage::U8(vec![1, 2, u8::MAX, 0]))
+    )));
+}
+
+#[test]
+fn compiled_cat_like_form_respects_compatibility_policy() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let err = execute_source_result("c = cat(2,uint8(1),uint8(2),'like',uint8(0));")
+        .expect_err("cat like form must be gated");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:compatibility:CatLikePrototypeExtension")
+    );
 }
 
 #[test]
@@ -227,10 +397,10 @@ fn pwelch_builtin_executes_for_psd_workflow() {
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.data[0], 17.0);
-    assert_eq!(out.data[1], 17.0);
-    assert_eq!(out.data[2], 5.0);
-    assert_eq!(out.data[3], 4.0);
+    assert_eq!(out.materialize_f64()[0], 17.0);
+    assert_eq!(out.materialize_f64()[1], 17.0);
+    assert_eq!(out.materialize_f64()[2], 5.0);
+    assert_eq!(out.materialize_f64()[3], 4.0);
 }
 
 #[test]
@@ -251,10 +421,10 @@ fn periodogram_builtin_executes_for_psd_workflow() {
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.data[0], 17.0);
-    assert_eq!(out.data[1], 17.0);
-    assert_eq!(out.data[2], 5.0);
-    assert_eq!(out.data[3], 4.0);
+    assert_eq!(out.materialize_f64()[0], 17.0);
+    assert_eq!(out.materialize_f64()[1], 17.0);
+    assert_eq!(out.materialize_f64()[2], 5.0);
+    assert_eq!(out.materialize_f64()[3], 4.0);
 }
 
 #[test]
@@ -275,13 +445,13 @@ fn spectrogram_builtin_executes_for_stft_workflow() {
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.data[0], 17.0);
-    assert_eq!(out.data[1], 3.0);
-    assert_eq!(out.data[2], 17.0);
-    assert_eq!(out.data[3], 3.0);
-    assert_eq!(out.data[4], 5.0);
-    assert_eq!(out.data[5], 4.0);
-    assert_eq!(out.data[6], 0.5);
+    assert_eq!(out.materialize_f64()[0], 17.0);
+    assert_eq!(out.materialize_f64()[1], 3.0);
+    assert_eq!(out.materialize_f64()[2], 17.0);
+    assert_eq!(out.materialize_f64()[3], 3.0);
+    assert_eq!(out.materialize_f64()[4], 5.0);
+    assert_eq!(out.materialize_f64()[5], 4.0);
+    assert_eq!(out.materialize_f64()[6], 0.5);
 }
 
 #[test]
@@ -300,7 +470,7 @@ fn pulstran_rectpuls_builtin_executes_for_impulse_train_shape() {
             _ => None,
         })
         .expect("expected pulse train summary tensor");
-    assert_eq!(out.data, vec![5.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+    assert_eq!(out.materialize_f64(), vec![5.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
 }
 
 #[test]
@@ -325,7 +495,7 @@ fn upsample_downsample_builtin_executes_for_discrete_signal_workflow() {
         })
         .expect("expected sample-rate summary tensor");
     assert_eq!(
-        out.data,
+        out.materialize_f64(),
         vec![10.0, 1.0, 0.0, 5.0, 0.0, 3.0, 1.0, 5.0, 2.0, 2.0, 4.0, 10.0, 1.0, 0.0, 5.0, 0.0,]
     );
 }
@@ -347,7 +517,10 @@ fn nanmax_builtin_executes_for_reduction_and_pairwise_workflows() {
             _ => None,
         })
         .expect("expected nanmax summary tensor");
-    assert_eq!(out.data, vec![3.0, 4.0, 2.0, 4.0, 3.0, 3.0, 2.0, 1.0]);
+    assert_eq!(
+        out.materialize_f64(),
+        vec![3.0, 4.0, 2.0, 4.0, 3.0, 3.0, 2.0, 1.0]
+    );
 }
 
 #[test]
@@ -506,12 +679,12 @@ fn logical_slice_read_and_write_execute() {
     let Value::Tensor(selected) = &vars[2] else {
         panic!("expected selected tensor, got {:?}", vars[2]);
     };
-    assert_eq!(selected.data, vec![3.0, 4.0]);
+    assert_eq!(selected.materialize_f64(), vec![3.0, 4.0]);
 
     let Value::Tensor(updated) = &vars[3] else {
         panic!("expected updated tensor, got {:?}", vars[3]);
     };
-    assert_eq!(updated.data, vec![1.0, 2.0, 9.0, 9.0]);
+    assert_eq!(updated.materialize_f64(), vec![1.0, 2.0, 9.0, 9.0]);
 }
 
 #[test]
@@ -523,12 +696,12 @@ fn call_result_slice_index_executes() {
     let Value::Tensor(selected) = &vars[2] else {
         panic!("expected selected tensor, got {:?}", vars[2]);
     };
-    assert_eq!(selected.data, vec![3.0, 4.0]);
+    assert_eq!(selected.materialize_f64(), vec![3.0, 4.0]);
 
     let Value::Tensor(updated) = &vars[3] else {
         panic!("expected updated tensor, got {:?}", vars[3]);
     };
-    assert_eq!(updated.data, vec![1.0, 2.0, 9.0, 9.0]);
+    assert_eq!(updated.materialize_f64(), vec![1.0, 2.0, 9.0, 9.0]);
 }
 
 #[test]
@@ -539,7 +712,7 @@ fn scalar_call_result_index_assignment_executes() {
     let Value::Tensor(updated) = &vars[2] else {
         panic!("expected updated tensor, got {:?}", vars[2]);
     };
-    assert_eq!(updated.data, vec![1.0, 2.0, 9.0]);
+    assert_eq!(updated.materialize_f64(), vec![1.0, 2.0, 9.0]);
 }
 
 #[test]
@@ -551,7 +724,7 @@ fn scalar_value_index_assignment_executes() {
         Value::Num(n) => assert!((*n - 2.0).abs() < 1e-9),
         Value::Tensor(t) => {
             assert_eq!(t.shape, vec![1, 1]);
-            assert_eq!(t.data, vec![2.0]);
+            assert_eq!(t.materialize_f64(), vec![2.0]);
         }
         other => panic!("expected scalar numeric assignment result, got {other:?}"),
     }
@@ -573,7 +746,7 @@ fn undefined_root_index_assignment_uses_index_assignment_load_semantics() {
         panic!("expected tensor assignment result, got {updated:?}");
     };
     assert_eq!(tensor.shape, vec![1, 1]);
-    assert_eq!(tensor.data, vec![7.0]);
+    assert_eq!(tensor.materialize_f64(), vec![7.0]);
 }
 
 #[test]
@@ -595,7 +768,7 @@ fn complex_literal_matrix_executes() {
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
-            assert_eq!(tensor.data, vec![(1.0, 2.0), (3.0, -4.0)]);
+            assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
     }
@@ -608,7 +781,7 @@ fn leading_dot_complex_literals_execute() {
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
-            assert_eq!(tensor.data, vec![(0.0, 0.1), (0.0, 0.005)]);
+            assert_eq!(tensor.materialize_f64(), vec![(0.0, 0.1), (0.0, 0.005)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
     }
@@ -621,7 +794,7 @@ fn matrix_literal_with_leading_dot_entries_executes() {
     match &vars[0] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
-            assert_eq!(tensor.data, vec![1.0, 0.2, 0.3]);
+            assert_eq!(tensor.materialize_f64(), vec![1.0, 0.2, 0.3]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -634,7 +807,7 @@ fn elementwise_division_accepts_leading_dot_rhs() {
     match &vars[1] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
-            assert_eq!(tensor.data, vec![2.0, 4.0, 6.0]);
+            assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -669,7 +842,7 @@ fn uint16_cast_is_callable_in_vm() {
     match &vars[0] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
-            assert_eq!(tensor.data, vec![3.0, 0.0, u16::MAX as f64]);
+            assert_eq!(tensor.materialize_f64(), vec![3.0, 0.0, u16::MAX as f64]);
         }
         other => panic!("expected tensor output, got {other:?}"),
     }
@@ -735,6 +908,40 @@ fn atan2_explicit_comma_list_argument_path_unpacks_before_call() {
             |instr| matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "atan2")
         ),
         "atan2(C{{:}}) should lower through expand-multi-output call shape, not fixed-arity builtin call"
+    );
+}
+
+#[test]
+fn atan2_compiled_dispatch_gates_integer_extension() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let error = execute_source_result("y = atan2(uint64(18446744073709551615), 1);")
+        .expect_err("integer atan2 must be gated");
+    assert!(
+        error
+            .to_string()
+            .contains("atan2 with typed-integer input is a RunMat extension"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn atan2_compiled_dispatch_accepts_all_wide_integer_bits_in_extension_mode() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("y = atan2(uint64(18446744073709551615), 1);");
+    let actual: f64 = (&vars[0]).try_into().expect("convert atan2 result");
+    let expected = (u64::MAX as f64).atan2(1.0);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn audioread_compiled_dispatch_rejects_typed_integer_sample_range_before_io() {
+    let error = execute_source_result("y = audioread(\"missing.wav\", uint8([1 2]));")
+        .expect_err("typed-integer sample range must reject");
+    assert!(
+        error
+            .message()
+            .contains("sample range must be a two-element double vector"),
+        "unexpected error: {error}"
     );
 }
 
@@ -889,7 +1096,7 @@ fn fftshift_accepts_abs_of_fft2_complex_output() {
         other => panic!("abs(fft2(A)) should produce a real tensor, got {other:?}"),
     };
     assert_eq!(m.shape, vec![2, 2]);
-    assert_eq!(m.data, vec![10.0, 4.0, 2.0, 0.0]);
+    assert_eq!(m.materialize_f64(), vec![10.0, 4.0, 2.0, 0.0]);
 
     let out = vars
         .iter()
@@ -898,7 +1105,7 @@ fn fftshift_accepts_abs_of_fft2_complex_output() {
             _ => None,
         })
         .expect("expected shape summary tensor");
-    assert_eq!(out.data, vec![4.0, 2.0, 2.0, 4.0, 2.0, 2.0]);
+    assert_eq!(out.materialize_f64(), vec![4.0, 2.0, 2.0, 4.0, 2.0, 2.0]);
 }
 
 #[test]

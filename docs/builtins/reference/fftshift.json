@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Uses the provider circshift hook when available; otherwise gathers once, shifts on the host, and re-uploads."
+    "notes": "Uses the owning provider's circshift hook when available; otherwise gathers once, shifts on the host, and restores the result to that provider."
   },
   "fusion": {
     "elementwise": false,
@@ -33,7 +33,7 @@
   "description": "`fftshift(X)` circularly shifts FFT output so the zero-frequency component moves to the center of each shifted dimension. The default all-dimension behavior and optional dimension selection follow MATLAB semantics.",
   "behaviors": [
     "When called without a dimension list, `fftshift` shifts along every dimension by `floor(size(X, dim) / 2)`.",
-    "`fftshift(X, dims)` shifts only the specified dimensions. `dims` can be a scalar, vector, or logical mask.",
+    "`fftshift(X, DIM)` shifts one documented scalar dimension. Numeric vectors and logical masks are separately gated RunMat extensions.",
     "Dimensions of length 0 or 1 are left unchanged.",
     "Inputs can be real or complex and may already reside on the GPU (`gpuArray`)."
   ],
@@ -79,7 +79,7 @@
     },
     {
       "question": "Can I apply `fftshift` to only one dimension?",
-      "answer": "Yes. Pass a dimension index or vector, e.g. `fftshift(X, 2)` to shift column channels only."
+      "answer": "Pass a positive scalar dimension such as `fftshift(X,2)`. RunMat extension mode additionally accepts numeric dimension vectors and logical masks."
     },
     {
       "question": "Does `fftshift` work with gpuArray inputs?",
@@ -132,8 +132,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/fft/fftshift.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/fft/fftshift.rs"
   },
-  "gpu_residency": "RunMat's auto-offload keeps FFT spectra on the GPU whenever the active provider exposes the `circshift` hook. In that case `fftshift` runs entirely on the device and downstream fused operations continue without a gather. If no GPU provider is registered—or it does not expose `circshift`—RunMat gathers the data once, performs the host shift, and uploads the result back to the device so subsequent work can still benefit from acceleration. You can always call `gpuArray` explicitly when you need MATLAB compatibility or want to guarantee a specific residency boundary.",
+  "gpu_residency": "RunMat keeps FFT spectra on the GPU whenever the input's owning provider can execute the required `circshift`. Otherwise RunMat gathers the data once, performs the host shift, and restores the result to the same provider so subsequent work can remain resident. You can call `gpuArray` explicitly when you want to guarantee a residency boundary.",
   "gpu_behavior": [
-    "RunMat asks the active acceleration provider to execute `fftshift` via the `circshift` hook (with predetermined offsets). If the provider cannot satisfy the request, the tensor is gathered exactly once, shifted on the host, and optionally re-uploaded. Scalars remain on their existing device."
+    "RunMat asks the input's owning provider to execute `fftshift` via the `circshift` hook. If the provider cannot satisfy the request, the tensor is gathered once, shifted on the host, and restored to that provider. Scalars remain on their existing device."
   ]
 }

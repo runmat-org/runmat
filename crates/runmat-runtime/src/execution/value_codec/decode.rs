@@ -1,6 +1,6 @@
 use runmat_builtins::{
-    CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
-    MException, SparseTensor, StringArray, StructValue, Tensor, Value,
+    CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, MException, SparseTensor, StringArray, StructValue, Tensor, Value,
 };
 use runmat_execution::value::{
     CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, SparseValue, ValueLimits,
@@ -136,6 +136,48 @@ fn decode_dense(value: &DenseValue, path: &str) -> Result<Value, ValueCodecError
                     .map_err(|error| ValueCodecError::invalid(path, error))?,
             ))
         }
+        ElementType::ComplexF32 => {
+            let words = decode_arrays::<4>(&value.little_endian_data, path)?;
+            let data = words
+                .chunks_exact(2)
+                .map(|pair| {
+                    (
+                        f32::from_bits(u32::from_le_bytes(pair[0])),
+                        f32::from_bits(u32::from_le_bytes(pair[1])),
+                    )
+                })
+                .collect();
+            Ok(Value::ComplexTensor(
+                ComplexTensor::from_f32(data, shape)
+                    .map_err(|error| ValueCodecError::invalid(path, error))?,
+            ))
+        }
+        element_type if complex_integer_element_type(element_type).is_some() => {
+            let (scalar_type, width) = complex_integer_element_type(element_type)
+                .expect("guarded complex integer element type");
+            let pair_width = width * 2;
+            if !value.little_endian_data.len().is_multiple_of(pair_width) {
+                return Err(ValueCodecError::invalid(
+                    path,
+                    "complex integer byte length is not element aligned",
+                ));
+            }
+            let mut real = Vec::with_capacity(value.little_endian_data.len() / 2);
+            let mut imag = Vec::with_capacity(value.little_endian_data.len() / 2);
+            for pair in value.little_endian_data.chunks_exact(pair_width) {
+                real.extend_from_slice(&pair[..width]);
+                imag.extend_from_slice(&pair[width..]);
+            }
+            let storage = IntegerComplexStorage::new(
+                decode_integer_storage(scalar_type, &real, path)?,
+                decode_integer_storage(scalar_type, &imag, path)?,
+            )
+            .map_err(|error| ValueCodecError::invalid(path, error))?;
+            Ok(Value::ComplexTensor(
+                ComplexTensor::new_integer(storage, shape)
+                    .map_err(|error| ValueCodecError::invalid(path, error))?,
+            ))
+        }
         element_type => Ok(Value::Tensor(
             Tensor::new_integer(
                 decode_integer_storage(element_type, &value.little_endian_data, path)?,
@@ -161,7 +203,24 @@ fn decode_sparse(value: &SparseValue, path: &str) -> Result<Value, ValueCodecErr
             row_indices,
             decode_f64(&value.little_endian_data, path)?,
         ),
-        ElementType::Logical | ElementType::F32 | ElementType::ComplexF64 => {
+        ElementType::F32 => SparseTensor::new_f32(
+            rows,
+            columns,
+            column_offsets,
+            row_indices,
+            decode_f32(&value.little_endian_data, path)?,
+        ),
+        ElementType::Logical
+        | ElementType::ComplexF64
+        | ElementType::ComplexF32
+        | ElementType::ComplexI8
+        | ElementType::ComplexI16
+        | ElementType::ComplexI32
+        | ElementType::ComplexI64
+        | ElementType::ComplexU8
+        | ElementType::ComplexU16
+        | ElementType::ComplexU32
+        | ElementType::ComplexU64 => {
             return Err(ValueCodecError::unsupported(
                 path,
                 "the runtime has no matching sparse value class",
@@ -177,6 +236,20 @@ fn decode_sparse(value: &SparseValue, path: &str) -> Result<Value, ValueCodecErr
     }
     .map_err(|error| ValueCodecError::invalid(path, error))?;
     Ok(Value::SparseTensor(sparse))
+}
+
+fn complex_integer_element_type(element_type: ElementType) -> Option<(ElementType, usize)> {
+    Some(match element_type {
+        ElementType::ComplexI8 => (ElementType::I8, 1),
+        ElementType::ComplexI16 => (ElementType::I16, 2),
+        ElementType::ComplexI32 => (ElementType::I32, 4),
+        ElementType::ComplexI64 => (ElementType::I64, 8),
+        ElementType::ComplexU8 => (ElementType::U8, 1),
+        ElementType::ComplexU16 => (ElementType::U16, 2),
+        ElementType::ComplexU32 => (ElementType::U32, 4),
+        ElementType::ComplexU64 => (ElementType::U64, 8),
+        _ => return None,
+    })
 }
 
 fn decode_integer_storage(

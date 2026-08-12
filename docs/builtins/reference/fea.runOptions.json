@@ -1,0 +1,37 @@
+{
+  "title": "fea.runOptions",
+  "category": "fea",
+  "keywords": ["fea", "run options", "solver", "iterations", "tolerance"],
+  "summary": "Create family-specific typed FEA run options.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
+  "description": "`fea.runOptions(solver, Name, Value, ...)` creates a `fea.RunOptions` object whose schema is selected by the solver family.",
+  "behaviors": [
+    "Supported solver families are `linear_static`, `modal`, `acoustic`, `thermal`, `transient`, `cfd`, `cht`, `fsi`, `nonlinear`, and `electromagnetic`.",
+    "Count and iteration fields are nonnegative exact structural scalars at construction. All eight integer classes and ordinary integral doubles are accepted exactly; fractional, nonfinite, negative, out-of-range, nonscalar, and resident controls reject. Solver-specific positivity checks run before execution.",
+    "Tolerance, time, scale, ratio, exponent, frequency, and residual fields are real physical scalars. Integer inputs cross once into binary64 after kind, field, and scalar-shape validation; solver-specific finiteness and range checks run before execution.",
+    "Logical controls require logical scalars. `PrecisionMode`, `PreconditionerMode`, `QualityPolicy`, `PrepArtifactId`, and `PrepCalibrationProfile` are text. Public `PrepContext` injection is rejected because prep context is internal runtime state.",
+    "Unknown or duplicate normalized options reject before object construction. Structural option properties remain exact typed integers; true floating options remain double."
+  ],
+  "integer_forms": [
+    "Exact modal: `ModeCount` (default 3). Floating modal: `ResidualWarnThreshold` (default 1e-3).",
+    "Exact acoustic: `ModeCount` (default 3). Floating acoustic: `ResidualWarnThreshold` (default 1e-3).",
+    "Exact thermal: `StepCount` (default 10). Floating thermal: `TimeStepS` (default 1e-2), `ResidualWarnThreshold` (default 1e-4).",
+    "Exact transient: `StepCount` 10, `MaxLinearIters` 128, `MaxStepRetries` 4. Floating transient: `TimeStepS` 1e-3, `MinTimeStepS` 1e-6, `MaxTimeStepS` 2e-2, `Tolerance` 1e-8, `ResidualTarget` 1e-6, `AdaptMinScale` 0.8, `AdaptMaxScale` 1.25, `AdaptGrowthExponent` 0.35, `AdaptRetryGrowthCap` 1.05, `AdaptNonconvergedShrink` 0.75, `DtBucketRelTolerance` 0.",
+    "Exact CFD: `StepCount` 12, `MaxLinearIters` 128. Floating CFD: `TimeStepS` 1e-3, `Tolerance` 1e-8, `ResidualWarnThreshold` 1e-5.",
+    "Exact CHT: `StepCount` 12, `MaxLinearIters` 128. Floating CHT: `TimeStepS` 1e-3, `Tolerance` 1e-8, `ResidualWarnThreshold` 1e-4.",
+    "Exact FSI: `StepCount` 12, `MaxLinearIters` 128. Floating FSI: `TimeStepS` 1e-3, `Tolerance` 1e-8, `ResidualWarnThreshold` 1e-4.",
+    "Exact nonlinear: `IncrementCount` 12, `MaxNewtonIters` 24, `MaxLineSearchBacktracks` 6, `TangentRefreshInterval` 2. Floating nonlinear: `Tolerance` 1e-6, `ResidualConvergenceFactor` 5, `IncrementNormTolerance` 1e-7, `LineSearchReduction` 0.5.",
+    "Exact electromagnetic: `HarmonicMaxIterations` 96. Floating electromagnetic: `ResidualTarget` 1e-6, `HarmonicTolerance` 1e-7, and finite `SweepFrequencyHz` values."
+  ],
+  "defaults": [
+    "Every family defaults `DeterministicMode` to false, `PrecisionMode` to `fp64`, and `QualityPolicy` to `balanced`.",
+    "`linear_static` additionally defaults `PreconditionerMode` to `auto` and has no numeric count or physical scalar option.",
+    "Transient defaults `AdaptiveTimeStep` to true; nonlinear defaults `LineSearch` to true; electromagnetic defaults `SweepEnabled` to false and `SweepFrequencyHz` to empty.",
+    "Prep artifact id and calibration profile default to absent."
+  ],
+  "examples": [{ "description": "Configure an exact transient step count", "input": "opts = fea.runOptions(\"transient\", \"StepCount\", uint32(20), \"TimeStepS\", 5e-4);" }],
+  "faqs": [{ "question": "Why is an integer accepted for a tolerance?", "answer": "It is accepted as a finite real scalar and converted once to the option's binary64 physics field; count fields instead remain exact integers." }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

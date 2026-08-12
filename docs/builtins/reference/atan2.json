@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Executes on the GPU when the provider implements elem_atan2 for shape-matched inputs; otherwise the runtime gathers operands and falls back to the host."
+    "notes": "Executes on the GPU when the provider implements MATLAB-compatible elem_atan2 for shape-matched floating inputs; otherwise the runtime gathers through authoritative storage, computes on the host, and restores the result to the resident input's owning provider."
   },
   "fusion": {
     "elementwise": true,
@@ -33,13 +33,13 @@
   },
   "description": "`theta = atan2(y, x)` computes the four-quadrant inverse tangent of point `(x, y)`. The result is in radians over `(-pi, pi]`, with element-wise scalar expansion behavior that matches MATLAB and RunMat.",
   "behaviors": [
-    "Inputs can be scalars, vectors, matrices, or N-D tensors of real numeric, logical, or character data. MATLAB-style implicit expansion (broadcasting) applies when shapes are compatible.",
+    "Documented inputs are real `single` or `double` scalars, vectors, matrices, and N-D arrays. MATLAB-style implicit expansion applies when every paired dimension is equal or one dimension is singleton.",
     "`atan2` treats `y` as the numerator and `x` as the denominator: `atan2(Y, X)` equals `atan(Y ./ X)` but keeps the correct quadrant and handles zero denominators.",
-    "Logical inputs are cast to `double`, character arrays use their Unicode code points, and integer inputs are promoted to `double`, mirroring MATLAB promotion rules.",
+    "RunMat can additionally accept all eight real integer classes, logical arrays, and character arrays when RunMat extensions are enabled. These are classified extensions, not MATLAB-compatible forms; integer storage remains authoritative until one explicit binary64 computation boundary.",
     "Complex inputs are **not** supported; MATLAB raises an error and RunMat matches that behaviour.",
-    "`atan2(0, 0)` returns `0`. `atan2(±0, -0)` follows IEEE-754 semantics, matching MATLAB for signed zeros and infinities.",
+    "MATLAB deliberately differs from IEEE 754 for a negative-zero denominator: both `atan2(0,-0)` and `atan2(-0,-0)` return positive zero. RunMat applies that rule on host, provider, and fused execution paths while preserving the negative-zero result of `atan2(-0,0)`.",
     "`atan2(NaN, x)` or `atan2(y, NaN)` returns `NaN`; inputs containing `Inf` combinations follow IEEE-754 quadrant semantics exactly like MATLAB.",
-    "The output always has double precision and the same size as the broadcasted inputs."
+    "The output has the broadcasted input size. Double inputs return double; single inputs return single; a mixed single/double call computes with double operands and casts the result to single."
   ],
   "examples": [
     {
@@ -68,7 +68,7 @@
       "output": "angles =\n    0.7854    2.3562\n   -0.7854   -2.3562"
     },
     {
-      "description": "Converting character data to angles",
+      "description": "Using RunMat's gated character-input extension",
       "input": "theta = atan2('A', 100)",
       "output": "theta = 0.5764"
     }
@@ -88,7 +88,7 @@
     },
     {
       "question": "How are logical or character inputs handled?",
-      "answer": "Logical values map to `0` and `1`, and character arrays use their Unicode code point values (as doubles) before computing the angle."
+      "answer": "They are not documented MATLAB `atan2` inputs. With RunMat extensions enabled, logical values map to `0` and `1`, character arrays use their Unicode code points, and typed integers cross an explicit binary64 computation boundary."
     },
     {
       "question": "What happens when `x` is zero?",
@@ -96,7 +96,7 @@
     },
     {
       "question": "Are GPU and CPU results identical?",
-      "answer": "Double-precision providers match CPU results exactly. Single-precision providers can differ by routine IEEE rounding. RunMat automatically promotes to double when materialising host tensors to mirror MATLAB."
+      "answer": "RunMat enforces the MATLAB negative-zero exception in its host, supplied provider, and fusion implementations. Normal floating-point results can still differ by routine provider precision and rounding."
     },
     {
       "question": "How can I compute angles in degrees?",
@@ -169,11 +169,11 @@
     "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/atan2.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atan2.rs"
   },
-  "gpu_residency": "RunMat's planner keeps tensors on the GPU whenever profitable. Explicit `gpuArray` calls are optional—use them only when you need to control residency for interoperability. When `elem_atan2` is unavailable, RunMat automatically gathers data to the CPU, performs the computation, and re-uploads results only when downstream consumers demand GPU residency.",
+  "gpu_residency": "RunMat's planner keeps tensors on the GPU whenever profitable. Explicit `gpuArray` calls are optional—use them only when you need to control residency for interoperability. When `elem_atan2` is unavailable, broadcasting is required, or an admitted extension uses typed integer/logical storage, RunMat gathers through the owning provider, computes on the CPU, and restores the result to that provider.",
   "gpu_behavior": [
     "When both operands already reside on the GPU and the active provider implements the `elem_atan2` hook, RunMat executes the operation entirely on the device without reformatting buffers.",
-    "If shapes require implicit expansion or the provider lacks `elem_atan2`, RunMat transparently gathers both tensors to the host, computes the result with the reference CPU implementation, and continues execution.",
-    "When GPU work completes in single precision (because the provider only exposes 32-bit buffers), RunMat promotes the results to double precision whenever the data is materialised on the host so the observable behaviour still matches MATLAB.",
-    "Fusion-aware expressions (for example, `sin(atan2(y, x))`) can still emit a combined WGSL kernel; the fusion planner recognises `atan2` as a binary elementwise primitive."
+    "If shapes require implicit expansion or the provider lacks `elem_atan2`, RunMat transparently gathers both tensors to the host, computes the result with the reference CPU implementation, and restores it to the first resident input's owning provider.",
+    "Native single storage remains single. Mixed single/double inputs compute in double and return single, matching the documented MATLAB binary element-wise rule.",
+    "Fusion-aware expressions (for example, `sin(atan2(y, x))`) can still emit a combined WGSL kernel; the emitted expression includes MATLAB's positive-zero override for a negative-zero denominator."
   ]
 }

@@ -11,9 +11,9 @@ use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -24,6 +24,25 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sawtooth";
 const TWO_PI: f64 = 2.0 * PI;
+
+const SAWTOOTH_NONDOUBLE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sawtooth-nondouble-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sawtooth with a non-double numeric argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SawtoothNondoubleInputExtension"),
+};
+
+const SAWTOOTH_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sawtooth-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "interactive sawtooth gpuArray input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SawtoothGpuInputExtension"),
+};
+
+pub const SAWTOOTH_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
+    SAWTOOTH_GPU_INPUT_EXTENSION,
+];
 
 const SAWTOOTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -201,9 +220,29 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
     keywords = "sawtooth,waveform,signal processing,triangle,periodic",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::sawtooth::SAWTOOTH_DESCRIPTOR),
+    extensions(crate::builtins::math::signal::sawtooth::SAWTOOTH_EXTENSIONS),
     builtin_path = "crate::builtins::math::signal::sawtooth"
 )]
 async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(&t, Value::GpuTensor(_))
+        || varargin
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SAWTOOTH_GPU_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if varargin.len() <= 1
+        && (is_supported_nondouble_argument(&t)
+            || varargin.iter().any(is_supported_nondouble_argument))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let xmax = parse_xmax(&varargin).await?;
     match t {
         Value::GpuTensor(handle) => sawtooth_gpu(handle, xmax).await,
@@ -214,6 +253,20 @@ async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value
             Err(sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT))
         }
         other => sawtooth_real(other, xmax),
+    }
+}
+
+fn is_supported_nondouble_argument(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => tensor.numeric_dtype() != NumericDType::F64,
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_precision(handle)
+                    == Some(runmat_accelerate_api::ProviderPrecision::F32)
+        }
+        _ => false,
     }
 }
 
@@ -256,12 +309,15 @@ fn sawtooth_real(value: Value, xmax: f64) -> BuiltinResult<Value> {
 }
 
 fn sawtooth_tensor(tensor: Tensor, xmax: f64) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
     let data = tensor
-        .data
-        .iter()
-        .map(|&value| sawtooth_scalar(value, xmax))
+        .into_numeric_storage()
+        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))?
+        .materialize_f64()
+        .into_iter()
+        .map(|value| sawtooth_scalar(value, xmax))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, shape)
         .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))
 }
 
@@ -360,9 +416,13 @@ mod tests {
         let tensor = Tensor::new(data.clone(), vec![1, n]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
         assert_eq!(result.shape, vec![1, n]);
-        let min = result.data.iter().cloned().fold(f64::INFINITY, f64::min);
+        let min = result
+            .materialize_f64()
+            .iter()
+            .cloned()
+            .fold(f64::INFINITY, f64::min);
         let max = result
-            .data
+            .materialize_f64()
             .iter()
             .cloned()
             .fold(f64::NEG_INFINITY, f64::max);
@@ -376,11 +436,11 @@ mod tests {
         );
         // First and last samples land exactly on period boundaries (t=0 and t=4*pi)
         // so the rising sawtooth resets to -1 at both ends.
-        assert_close(result.data[0], -1.0);
-        assert_close(*result.data.last().unwrap(), -1.0);
+        assert_close(result.materialize_f64()[0], -1.0);
+        assert_close(*result.materialize_f64().last().unwrap(), -1.0);
 
         // Each sample must satisfy the elementwise formula.
-        for (idx, (&t, &y)) in data.iter().zip(result.data.iter()).enumerate() {
+        for (idx, (&t, &y)) in data.iter().zip(result.materialize_f64().iter()).enumerate() {
             assert_close(y, sawtooth_scalar(t, 1.0));
             if !y.is_finite() {
                 panic!("non-finite sample at index {idx}");
@@ -390,10 +450,10 @@ mod tests {
         // There should be exactly two period boundaries in (0, 4*pi]: the inner
         // reset near index 50 (sample just after 2*pi) and the closing sample.
         let reset_count = result
-            .data
+            .materialize_f64()
             .iter()
             .enumerate()
-            .filter(|(idx, &y)| *idx > 0 && y < result.data[idx - 1])
+            .filter(|(idx, &y)| *idx > 0 && y < result.materialize_f64()[idx - 1])
             .count();
         assert_eq!(
             reset_count, 2,
@@ -479,6 +539,7 @@ mod tests {
 
     #[test]
     fn sawtooth_int_and_logical_promote_to_double() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let int_result = expect_num(call(Value::Int(IntValue::I32(0))).unwrap());
         assert_close(int_result, -1.0);
 
@@ -488,8 +549,60 @@ mod tests {
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
         assert_eq!(result.shape, vec![1, 2]);
-        assert_close(result.data[0], -1.0);
-        assert_close(result.data[1], sawtooth_scalar(1.0, 1.0));
+        assert_close(result.materialize_f64()[0], -1.0);
+        assert_close(result.materialize_f64()[1], sawtooth_scalar(1.0, 1.0));
+    }
+
+    #[test]
+    fn sawtooth_single_extension_promotes_to_documented_double_domain() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input = Tensor::from_numeric_storage(
+            runmat_builtins::NumericStorage::F32(vec![0.0, 1.0]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let result = expect_tensor(call(Value::Tensor(input)).unwrap());
+        assert_eq!(result.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_close(result.materialize_f64()[0], -1.0);
+        assert_close(result.materialize_f64()[1], sawtooth_scalar(1.0, 1.0));
+    }
+
+    #[test]
+    fn sawtooth_extensions_follow_compatibility_mode() {
+        let single = || {
+            Value::Tensor(
+                Tensor::from_numeric_storage(
+                    runmat_builtins::NumericStorage::F32(vec![0.0, 1.0]),
+                    vec![1, 2],
+                )
+                .expect("single input"),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(single()).expect_err("MATLAB mode rejects single input");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:SawtoothNondoubleInputExtension")
+            );
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call(single()).is_ok());
+        }
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 2],
+            device_id: 0,
+            buffer_id: 9_300_003,
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = call(Value::GpuTensor(handle))
+            .expect_err("MATLAB mode rejects interactive gpuArray input before gather");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:SawtoothGpuInputExtension")
+        );
     }
 
     #[test]
@@ -519,7 +632,7 @@ mod tests {
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
         assert_eq!(result.shape, vec![2, 2]);
         let expected = [-1.0, -0.5, 0.0, 0.5];
-        for (got, want) in result.data.iter().zip(expected) {
+        for (got, want) in result.materialize_f64().iter().zip(expected) {
             assert_close(*got, want);
         }
     }

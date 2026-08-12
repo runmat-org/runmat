@@ -1,4 +1,4 @@
-use runmat_builtins::{CellArray, Tensor, Value};
+use runmat_builtins::{CellArray, IntegerStorage, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -21,7 +21,7 @@ fn has_timetable(vars: &[Value]) -> bool {
 
 fn has_tensor(vars: &[Value], expected: &[f64]) -> bool {
     vars.iter().any(|value| match value {
-        Value::Tensor(Tensor { data, .. }) => data == expected,
+        Value::Tensor(tensor) => tensor.materialize_f64() == expected,
         _ => false,
     })
 }
@@ -37,6 +37,12 @@ fn has_num(vars: &[Value], expected: f64) -> bool {
     vars.iter().any(
         |value| matches!(value, Value::Num(value) if (*value - expected).abs() <= f64::EPSILON),
     )
+}
+
+fn has_integer_storage(vars: &[Value], expected: &IntegerStorage) -> bool {
+    vars.iter().any(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.integer_storage() == Some(expected))
+    })
 }
 
 #[test]
@@ -57,6 +63,75 @@ fn table_conversion_surface_executes_from_scripts() {
             ..
         })
     )));
+}
+
+#[test]
+fn array2table_compiled_surface_preserves_all_integer_classes() {
+    let vars = execute_source(
+        "a = table2array(array2table(int8([-128 127]))); b = table2array(array2table(int16([-32768 32767]))); c = table2array(array2table(int32([-2147483648 2147483647]))); d = table2array(array2table(int64([-7 9]))); e = table2array(array2table(uint8([0 255]))); f = table2array(array2table(uint16([0 65535]))); g = table2array(array2table(uint32([0 4294967295]))); base = uint64(9007199254740992); h = table2array(array2table(base + uint64([1 2])));",
+    )
+    .expect("compiled array2table integer conversion");
+    for expected in [
+        IntegerStorage::I8(vec![-128, 127]),
+        IntegerStorage::I16(vec![-32768, 32767]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![-7, 9]),
+        IntegerStorage::U8(vec![0, 255]),
+        IntegerStorage::U16(vec![0, 65535]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            has_integer_storage(&vars, &expected),
+            "missing compiled storage {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn array2timetable_compiled_surface_preserves_all_integer_classes() {
+    let vars = execute_source(
+        "a = table2array(timetable2table(array2timetable(int8([-128 127]), 'SampleRate', int8(2)))); b = table2array(timetable2table(array2timetable(int16([-32768 32767]), 'SampleRate', int16(2)))); c = table2array(timetable2table(array2timetable(int32([-2147483648 2147483647]), 'SampleRate', int32(2)))); d = table2array(timetable2table(array2timetable(int64([-7 9]), 'SampleRate', int64(2)))); e = table2array(timetable2table(array2timetable(uint8([0 255]), 'SampleRate', uint8(2)))); f = table2array(timetable2table(array2timetable(uint16([0 65535]), 'SampleRate', uint16(2)))); g = table2array(timetable2table(array2timetable(uint32([0 4294967295]), 'SampleRate', uint32(2)))); base = uint64(9007199254740992); h = table2array(timetable2table(array2timetable(base + uint64([1 2]), 'SampleRate', uint64(2))));",
+    )
+    .expect("compiled array2timetable integer conversion");
+    for expected in [
+        IntegerStorage::I8(vec![-128, 127]),
+        IntegerStorage::I16(vec![-32768, 32767]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![-7, 9]),
+        IntegerStorage::U8(vec![0, 255]),
+        IntegerStorage::U16(vec![0, 65535]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            has_integer_storage(&vars, &expected),
+            "missing compiled storage {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn array_datastore_compiled_surface_preserves_all_integer_classes() {
+    let vars = execute_source(
+        "a = arrayDatastore(int8([-128 127]), 'ReadSize', 2, 'OutputType', 'same').Data; b = arrayDatastore(int16([-32768 32767])).Data; c = arrayDatastore(int32([-2147483648 2147483647])).Data; d = arrayDatastore(int64([-7 9])).Data; e = arrayDatastore(uint8([0 255])).Data; f = arrayDatastore(uint16([0 65535])).Data; g = arrayDatastore(uint32([0 4294967295])).Data; base = uint64(9007199254740992); h = arrayDatastore(base + uint64([1 2])).Data;",
+    )
+    .expect("compiled arrayDatastore integer construction");
+    for expected in [
+        IntegerStorage::I8(vec![-128, 127]),
+        IntegerStorage::I16(vec![-32768, 32767]),
+        IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        IntegerStorage::I64(vec![-7, 9]),
+        IntegerStorage::U8(vec![0, 255]),
+        IntegerStorage::U16(vec![0, 65535]),
+        IntegerStorage::U32(vec![0, u32::MAX]),
+        IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994]),
+    ] {
+        assert!(
+            has_integer_storage(&vars, &expected),
+            "missing compiled storage {expected:?}"
+        );
+    }
 }
 
 #[test]
@@ -88,4 +163,66 @@ fn categorical_dictionary_and_selector_surface_executes_from_scripts() {
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Object(object) if object.class_name == "dictionary")));
+}
+
+#[test]
+fn dictionary_compiled_surface_preserves_wide_integer_keys_and_scalar_expansion() {
+    let vars = execute_source(
+        "base = uint64(9007199254740992); keys = base + uint64([1 2 1]); D = dictionary(keys, int16(7)); x = D(base + uint64(2)); column = D(base + uint64([2; 1])); D(base + uint64([1 2])) = int16(9); y = D(base + uint64(1)); D(base + uint64(2)) = [];",
+    )
+    .expect("compiled exact integer dictionary construction and mutation");
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Int(runmat_builtins::IntValue::I16(7)))));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Int(runmat_builtins::IntValue::I16(9)))));
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.shape == [2, 1]
+                    && tensor.integer_storage()
+                        == Some(&runmat_builtins::IntegerStorage::I16(vec![7, 7]))
+        )
+    }));
+    let dictionary = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Object(object) if object.class_name == "dictionary" => Some(object),
+            _ => None,
+        })
+        .expect("dictionary result");
+    let Value::Cell(keys) = dictionary.properties.get("Keys").unwrap() else {
+        panic!("dictionary keys");
+    };
+    assert_eq!(keys.data.len(), 1);
+    assert_eq!(
+        keys.data[0],
+        Value::Int(runmat_builtins::IntValue::U64(9_007_199_254_740_993))
+    );
+}
+
+#[test]
+fn categorical_compiled_surface_preserves_exact_integer_identity_and_flags() {
+    let vars = execute_source(
+        "base = uint64(9007199254740992); C = categorical(base + uint64([1 2]), base + uint64([2 1]), {'two','one'}, 'Ordinal', uint8(1)); tf = isordinal(C);",
+    )
+    .expect("compiled categorical integer construction");
+    assert!(has_bool(&vars, true));
+    let object = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::Object(object) if object.class_name == "categorical" => Some(object),
+            _ => None,
+        })
+        .expect("categorical object");
+    match object.properties.get("Codes").expect("codes") {
+        Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![2.0, 1.0]),
+        other => panic!("expected categorical codes, got {other:?}"),
+    }
+    match object.properties.get("Categories").expect("categories") {
+        Value::StringArray(categories) => assert_eq!(categories.data, vec!["two", "one"]),
+        other => panic!("expected categorical names, got {other:?}"),
+    }
 }

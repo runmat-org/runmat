@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::math::signal::common::{
     centered_frequency_offset, centered_shift, gpu_matrix_shape, parse_nonnegative_integer,
     parse_scalar_f64, value_to_complex_vector,
@@ -286,6 +287,10 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     if rest.len() > 6 {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_ARG_COUNT));
     }
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     if let Value::GpuTensor(handle) = &x {
         let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle).map_err(|err| {
             periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_SIGNAL, err.message())
@@ -458,9 +463,9 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
     let rows = tensor.rows();
     let cols = tensor.cols();
     if rows == 1 || cols == 1 {
+        let values = tensor_utils::tensor_into_values_f64(tensor);
         return Ok(SignalColumns {
-            columns: vec![tensor
-                .data
+            columns: vec![values
                 .into_iter()
                 .map(|value| Complex::new(value, 0.0))
                 .collect()],
@@ -473,7 +478,10 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
     for col in 0..cols {
         let mut column = Vec::with_capacity(rows);
         for row in 0..rows {
-            column.push(Complex::new(tensor.data[row + col * rows], 0.0));
+            column.push(Complex::new(
+                tensor_utils::tensor_value_f64(&tensor, row + col * rows),
+                0.0,
+            ));
         }
         columns.push(column);
     }
@@ -496,11 +504,14 @@ fn complex_tensor_to_signal_columns(
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let is_complex = tensor.data.iter().any(|(_, im)| im.abs() > EPS);
+    let is_complex = tensor
+        .materialize_f64()
+        .iter()
+        .any(|(_, im)| im.abs() > EPS);
     if rows == 1 || cols == 1 {
         return Ok(SignalColumns {
             columns: vec![tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Complex::new(re, im))
                 .collect()],
@@ -513,7 +524,7 @@ fn complex_tensor_to_signal_columns(
     for col in 0..cols {
         let mut column = Vec::with_capacity(rows);
         for row in 0..rows {
-            let (re, im) = tensor.data[row + col * rows];
+            let (re, im) = tensor.materialize_f64()[row + col * rows];
             column.push(Complex::new(re, im));
         }
         columns.push(column);
@@ -683,8 +694,8 @@ async fn parse_frequency_grid(value: Value) -> BuiltinResult<FrequencyGrid> {
 fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.data.len() == 1,
-        Value::ComplexTensor(tensor) => tensor.data.len() == 1,
+        Value::Tensor(tensor) => tensor_utils::is_scalar_tensor(tensor),
+        Value::ComplexTensor(tensor) => tensor_utils::is_scalar_complex_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         _ => false,
     }
@@ -913,8 +924,8 @@ fn frequency_vector(nfft: usize, units: FrequencyUnits, range: FrequencyRange) -
 
 fn is_empty(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => t.len() == 0,
+        Value::ComplexTensor(t) => t.materialize_f64().is_empty(),
         _ => false,
     }
 }
@@ -943,7 +954,7 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::{builtin_function_by_name, IntegerStorage};
 
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
@@ -960,7 +971,7 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f tensor");
         };
-        (pxx.data.clone(), f.data.clone())
+        (pxx.materialize_f64().clone(), f.materialize_f64().clone())
     }
 
     fn output_pair_with_pxx_shape(value: Value) -> (Vec<f64>, Vec<usize>, Vec<f64>) {
@@ -973,7 +984,24 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f tensor");
         };
-        (pxx.data.clone(), pxx.shape.clone(), f.data.clone())
+        (
+            pxx.materialize_f64().clone(),
+            pxx.shape.clone(),
+            f.materialize_f64().clone(),
+        )
+    }
+
+    fn integer_tensor(values: Vec<i16>, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(IntegerStorage::I16(values), shape).expect("typed integer tensor")
+    }
+
+    #[test]
+    fn periodogram_scalar_detector_reads_typed_integer_storage_without_mirror() {
+        let scalar = Tensor::new_integer(IntegerStorage::I16(vec![8]), vec![1, 1]).expect("scalar");
+        let vector = integer_tensor(vec![8, 16], vec![1, 2]);
+
+        assert!(is_scalar_numeric(&Value::Tensor(scalar)));
+        assert!(!is_scalar_numeric(&Value::Tensor(vector)));
     }
 
     #[test]
@@ -1012,6 +1040,28 @@ mod tests {
     }
 
     #[test]
+    fn periodogram_reads_typed_integer_vector_storage_exactly() {
+        let out = call(
+            Value::Tensor(integer_tensor(vec![0, 1, 0, -1, 0, 1, 0, -1], vec![1, 8])),
+            &[
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(8.0),
+                Value::Num(8.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, f) = output_pair(out);
+        let (peak_idx, _) = pxx
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap();
+        assert_eq!(peak_idx, 2);
+        assert_eq!(f[peak_idx], 2.0);
+    }
+
+    #[test]
     fn periodogram_power_reports_mean_square_sinusoid_power() {
         let amp = 1.8;
         let x = (0..32)
@@ -1041,6 +1091,28 @@ mod tests {
         ];
         let out = call(
             Value::Tensor(Tensor::new(data, vec![8, 2]).unwrap()),
+            &[
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Num(8.0),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        let (pxx, shape, f) = output_pair_with_pxx_shape(out);
+        assert_eq!(shape, vec![5, 2]);
+        assert_eq!(pxx.len(), 10);
+        assert_eq!(f.len(), 5);
+        assert!(pxx[0] > pxx[5]);
+    }
+
+    #[test]
+    fn periodogram_reads_typed_integer_matrix_storage_exactly() {
+        let data = vec![
+            1, 1, 1, 1, 0, 0, 0, 0, //
+            0, 1, 0, -1, 0, 1, 0, -1,
+        ];
+        let out = call(
+            Value::Tensor(integer_tensor(data, vec![8, 2])),
             &[
                 Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
                 Value::Num(8.0),
@@ -1182,9 +1254,9 @@ mod tests {
             crate::builtins::common::test_support::gather(values[0].clone()).expect("gather pxx");
         let f = crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
         assert_eq!(pxx.shape, vec![17, 1]);
-        assert_eq!(f.data[4], 4.0);
+        assert_eq!(f.materialize_f64()[4], 4.0);
         let peak = pxx
-            .data
+            .materialize_f64()
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
@@ -1235,9 +1307,14 @@ mod tests {
         let gpu_f =
             crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
 
-        assert_eq!(gpu_f.data, host_f);
-        assert_eq!(gpu_pxx.data.len(), host_pxx.len());
-        for (idx, (actual, expected)) in gpu_pxx.data.iter().zip(host_pxx.iter()).enumerate() {
+        assert_eq!(gpu_f.materialize_f64(), host_f);
+        assert_eq!(gpu_pxx.materialize_f64().len(), host_pxx.len());
+        for (idx, (actual, expected)) in gpu_pxx
+            .materialize_f64()
+            .iter()
+            .zip(host_pxx.iter())
+            .enumerate()
+        {
             assert!(
                 (actual - expected).abs() < 1e-6,
                 "centered bin {idx}: gpu {actual}, host {expected}"

@@ -219,7 +219,7 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
             shape: vec![1, 1],
         }),
         Value::Int(i) => Ok(LogicalBuffer {
-            data: vec![if i.to_i64() != 0 { 1 } else { 0 }],
+            data: vec![u8::from(!i.is_zero())],
             shape: vec![1, 1],
         }),
         Value::Complex(re, im) => Ok(LogicalBuffer {
@@ -247,8 +247,17 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
 }
 
 fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
-    let Tensor { data, shape, .. } = tensor;
-    let mapped = data.into_iter().map(logical_from_f64).collect();
+    let shape = tensor.shape.clone();
+    let mapped = (0..tensor.len())
+        .map(|index| {
+            u8::from(
+                !tensor
+                    .numeric_value_at(index)
+                    .expect("tensor storage is structurally valid")
+                    .is_zero(),
+            )
+        })
+        .collect();
     Ok(LogicalBuffer {
         data: mapped,
         shape,
@@ -256,10 +265,14 @@ fn tensor_to_logical_buffer(tensor: Tensor) -> BuiltinResult<LogicalBuffer> {
 }
 
 fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<LogicalBuffer> {
-    let ComplexTensor { data, shape, .. } = tensor;
-    let mapped = data
-        .into_iter()
-        .map(|(re, im)| logical_from_complex(re, im))
+    let shape = tensor.shape.clone();
+    let mapped = (0..tensor.len())
+        .map(|index| {
+            let (real, imag) = tensor
+                .numeric_value_at(index)
+                .expect("complex tensor storage is structurally valid");
+            u8::from(!real.is_zero() || !imag.is_zero())
+        })
         .collect();
     Ok(LogicalBuffer {
         data: mapped,
@@ -268,14 +281,14 @@ fn complex_tensor_to_logical_buffer(tensor: ComplexTensor) -> BuiltinResult<Logi
 }
 
 fn char_array_to_logical_buffer(array: CharArray) -> BuiltinResult<LogicalBuffer> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray { data, shape, .. } = array;
     let mapped = data
         .into_iter()
         .map(|ch| if ch == '\0' { 0 } else { 1 })
         .collect();
     Ok(LogicalBuffer {
         data: mapped,
-        shape: vec![rows, cols],
+        shape,
     })
 }
 
@@ -323,7 +336,7 @@ pub(crate) mod tests {
     }
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -365,6 +378,30 @@ pub(crate) mod tests {
             }
             other => panic!("expected logical array, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn or_reads_typed_integer_storage_exactly_for_truth_values() {
+        let lhs = Tensor::new_integer(
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
+            vec![1, 3],
+        )
+        .unwrap();
+        let rhs = Tensor::new_integer(IntegerStorage::I16(vec![0, 0, -2]), vec![1, 3]).unwrap();
+        let result = run_or(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap();
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![1, 3]);
+                assert_eq!(array.data, vec![0, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+
+        assert_eq!(
+            run_or(Value::Int(IntValue::U64(u64::MAX)), Value::Bool(false)).unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -424,11 +461,11 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![0.0, 2.0, 0.0, 4.0], vec![2, 2]).unwrap();
             let rhs = Tensor::new(vec![1.0, 0.0, 3.0, 0.0], vec![2, 2]).unwrap();
             let lhs_view = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let rhs_view = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
             let a = provider.upload(&lhs_view).unwrap();
@@ -436,7 +473,7 @@ pub(crate) mod tests {
             let result = run_or(Value::GpuTensor(a), Value::GpuTensor(b)).unwrap();
             let gathered = test_support::gather(result).unwrap();
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 1.0, 1.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0]);
         });
     }
 
@@ -448,11 +485,11 @@ pub(crate) mod tests {
             let rhs = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
 
             let lhs_view = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let rhs_view = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
 
@@ -462,7 +499,7 @@ pub(crate) mod tests {
             let result = run_or(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("or");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![0.0, 1.0, 0.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
         });
     }
 
@@ -486,11 +523,11 @@ pub(crate) mod tests {
         };
 
         let view_lhs = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_rhs = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
         let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -505,7 +542,11 @@ pub(crate) mod tests {
             ProviderPrecision::F64 => 1e-12,
             ProviderPrecision::F32 => 1e-5,
         };
-        for (idx, (actual, expected)) in gathered.data.iter().zip(expected_data.iter()).enumerate()
+        for (idx, (actual, expected)) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(expected_data.iter())
+            .enumerate()
         {
             let expected_f = if *expected != 0 { 1.0 } else { 0.0 };
             assert!(

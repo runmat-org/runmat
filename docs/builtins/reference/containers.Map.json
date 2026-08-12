@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Map storage lives on the host. GPU inputs are gathered when constructing maps or fetching values."
+    "notes": "Map storage and outputs are host-resident. Resident constructor, key-query, removal, lookup, selected-values, and assignment inputs are gated RunMat extensions that gather before host Map processing."
   },
   "fusion": {
     "elementwise": false,
@@ -26,15 +26,18 @@
   "tested": {
     "unit": "builtins::containers::map::containers_map::tests"
   },
-  "description": "`containers.Map` creates dictionary objects that associate unique keys with values. Supported key kinds include character vectors, string scalars, and numeric/logical scalars; values default to `'any'` storage semantics, with method behavior aligned to MATLAB and RunMat.",
+  "description": "`containers.Map` creates host-resident handle objects that associate unique character or real numeric keys with values. Public key types are `char`, `double`, `single`, `int32`, `uint32`, `int64`, and `uint64`; declared value types include `any`, `char`, `logical`, both floating classes, and all eight integer classes.",
   "behaviors": [
-    "Keys must be unique. Constructing a map or assigning a key that already exists overwrites the stored value (matching MATLAB's behaviour).",
-    "The `KeyType`, `ValueType`, and `Count` properties are readable with dot-indexing.",
+    "Constructor keys must be unique and duplicates raise an error. Later assignment to an existing key overwrites the stored value.",
+    "The read-only `KeyType`, `ValueType`, and `Count` properties are readable with dot-indexing; `Count` is a uint64 scalar.",
     "`map(key)` returns the associated value; requesting a missing key raises the MATLAB-compatible error *\"The specified key is not present in this container.\"*",
     "Assignments of the form `map(key) = value` update or insert entries.",
-    "Methods `keys(map)`, `values(map)`, `isKey(map, keySpec)`, and `remove(map, keySpec)` are fully compatible. When `keySpec` is a cell or string array, the result matches MATLAB's shape.",
-    "GPU tensors presented as values are gathered to host memory before insertion. When values or keys arrive on the GPU and need to be expanded element-wise (for example, vector-valued constructor arguments), RunMat downloads them to materialise individual scalars.",
-    "The `'UniformValues'` flag is accepted; when `true`, RunMat validates that every inserted value has the same MATLAB class. Retrieval still returns a cell array, matching MATLAB behaviour when the value type is `'any'`."
+    "RunMat returns `keys(map)` as a sorted row cell and aligns `values(map)` to that order, matching public examples without treating ordering as a formal MATLAB guarantee. `values(map,keySet)` requires a cell key set and preserves its shape.",
+    "`isKey` returns scalar logical for one scalar key and a same-shape logical result for key collections; `remove` mutates the handle and has no public output.",
+    "Integer key identity is exact for int32, uint32, int64, and uint64, including values wider than binary64 can distinguish. Narrow integer key arrays reject rather than alias through double.",
+    "All eight integer value classes preserve native storage through construction, assignment, lookup, and values output. Declared integer ValueType values are scalar and use the runtime's MATLAB integer saturation rules; ValueType any retains nonscalar integer arrays exactly.",
+    "`UniformValues` defaults to true for populated constructors; specifying false permits heterogeneous values and sets ValueType to `any`.",
+    "MATLAB documents thread-based execution but no gpuArray capability for this class. RunMat resident input gathering is therefore compatibility-gated and always produces host Map state and host outputs."
   ],
   "examples": [
     {
@@ -44,7 +47,7 @@
     },
     {
       "description": "Build a map from paired cell arrays",
-      "input": "keys = {'apple', 'pear', 'banana'};\nvals = {42, [1 2 3], true};\nfruit = containers.Map(keys, vals);\nenergy = fruit('apple')",
+      "input": "keys = {'apple', 'pear', 'banana'};\nvals = {42, [1 2 3], true};\nfruit = containers.Map(keys, vals, 'UniformValues', false);\nenergy = fruit('apple')",
       "output": "energy =\n    42"
     },
     {
@@ -55,7 +58,7 @@
     {
       "description": "Query keys, values, and membership",
       "input": "allKeys = keys(fruit);\nallVals = values(fruit);\nmask = isKey(fruit, {'apple', 'durian'})",
-      "output": "allKeys =\n  1×4 cell array\n    {'apple'}    {'pear'}    {'banana'}    {'peach'}\n\nallVals =\n  1×4 cell array\n    {[99]}    {[1 2 3]}    {[1]}    {1×1 struct}\n\nmask =\n  1×2 logical array\n     1     0"
+      "output": "allKeys =\n  1×4 cell array\n    {'apple'}    {'banana'}    {'peach'}    {'pear'}\n\nallVals =\n  1×4 cell array\n    {[99]}    {[1]}    {1×1 struct}    {[1 2 3]}\n\nmask =\n  1×2 logical array\n     1     0"
     },
     {
       "description": "Remove keys and inspect the map length",
@@ -66,7 +69,7 @@
   "faqs": [
     {
       "question": "Which key types are supported?",
-      "answer": "`containers.Map` accepts `'char'`, `'string'`, `'double'`, `'single'`, `'int32'`, `'uint32'`, `'int64'`, `'uint64'`, and `'logical'`. Keys supplied during construction or assignment are coerced to the declared type and must be scalar."
+      "answer": "Public KeyType values are `'char'`, `'double'`, `'single'`, `'int32'`, `'uint32'`, `'int64'`, and `'uint64'`. String-array constructor keys are converted to character-vector keys, so the resulting KeyType is `'char'`; logical and narrow integer KeyType values are not public Map key types."
     },
     {
       "question": "What happens when I provide duplicate keys at construction time?",
@@ -78,7 +81,7 @@
     },
     {
       "question": "Can I store GPU arrays as map values?",
-      "answer": "Yes. RunMat automatically gathers GPU tensors to host memory before inserting them so it can apply the same validation and coercion rules as MATLAB. This ensures constructors that rely on vector expansion continue to produce predictable host-side values."
+      "answer": "Only as a RunMat extension. MATLAB does not document gpuArray support for containers.Map. With RunMat extensions enabled, resident keys or values gather before processing and the Map stores host values; strict compatibility mode rejects before provider access."
     },
     {
       "question": "How does `length(map)` behave?",
@@ -90,11 +93,7 @@
     },
     {
       "question": "Does the map preserve insertion order?",
-      "answer": "Yes. `keys(map)` and `values(map)` return entries in the order they were first inserted, matching the behaviour of MATLAB's `containers.Map`."
-    },
-    {
-      "question": "Is the implementation thread-safe?",
-      "answer": "Yes. A global read/write lock guards the backing storage so concurrent reads are allowed while write operations remain exclusive."
+      "answer": "No insertion-order guarantee should be assumed. RunMat returns keys in key order and aligns `values(map)` to that order, matching the ordering shown by MATLAB's public examples."
     },
     {
       "question": "How do I remove every entry?",
@@ -114,7 +113,7 @@
     },
     {
       "question": "Can I use MATLAB `string` values as `containers.Map` keys?",
-      "answer": "— MATLAB's `containers.Map` only accepts scalar character vectors (or scalar numerics / logicals) as keys, not `string` scalars. Convert first with `char(str)` when you use a `'char'` KeyType, e.g. `m(char(\"apple\")) = 1`. RunMat additionally accepts `'string'` as a `KeyType` alias that stores keys as character vectors internally, so either `m = containers.Map('KeyType','char','ValueType','any')` followed by `m(char(s)) = v` or constructing from cell arrays of char vectors works reliably across both runtimes."
+      "answer": "String arrays are accepted as constructor key sets and converted to character vectors, making the resulting KeyType `'char'`. Key lookup methods also accept a string scalar as a textual key, but `'string'` is not a KeyType value."
     },
     {
       "question": "Is `containers.Map` a handle class?",
@@ -125,6 +124,26 @@
     {
       "label": "length",
       "url": "./length"
+    },
+    {
+      "label": "MATLAB containers.Map documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/containers.map.html"
+    },
+    {
+      "label": "MATLAB isKey documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/containers.map.iskey.html"
+    },
+    {
+      "label": "MATLAB keys documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/containers.map.keys.html"
+    },
+    {
+      "label": "MATLAB values documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/containers.map.values.html"
+    },
+    {
+      "label": "MATLAB remove documentation",
+      "url": "https://www.mathworks.com/help/matlab/ref/containers.map.remove.html"
     }
   ],
   "source": {
@@ -132,7 +151,7 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/containers/map/containers.map.rs"
   },
   "gpu_behavior": [
-    "The data structure itself resides on the CPU. When you construct a map with GPU arrays, RunMat first downloads the inputs so it can perform MATLAB-compatible validation and coercion. Maps never retain device buffers internally, so the GPU provider does not need to implement special hooks for this builtin."
+    "The data structure itself resides on the CPU. RunMat can gather resident inputs only through explicitly gated extensions; Maps never retain device buffers and all method outputs are host-resident."
   ],
   "syntax": {
     "example": {
@@ -142,8 +161,8 @@
     "points": [
       "`keys` is a cell vector (or string array) of scalar keys. Every element must share the same `KeyType`; mixing classes raises an error.",
       "`values` is a matched cell vector of the values to store, one per key. When `'UniformValues'` is `true`, every value must share the same MATLAB class.",
-      "`ktype` (the `'KeyType'` Name-Value pair) selects the key class. Supported values are `'char'` (default), `'double'`, `'single'`, `'int32'`, `'uint32'`, `'int64'`, `'uint64'`, and `'logical'`. RunMat additionally accepts `'string'`, storing keys as char vectors internally for MATLAB compatibility.",
-      "`vtype` (the `'ValueType'` Name-Value pair) restricts the values. The default `'any'` stores arbitrary MATLAB objects; pass a class name (e.g. `'double'`) to reject mismatched inserts.",
+      "`ktype` selects `'char'`, `'double'`, `'single'`, `'int32'`, `'uint32'`, `'int64'`, or `'uint64'`. Empty typed construction requires both KeyType and ValueType.",
+      "`vtype` selects `'any'`, `'char'`, `'logical'`, `'double'`, `'single'`, or any of the eight integer classes.",
       "Returns `m`, a handle to a `containers.Map` object. Because it is a handle class, assigning `m2 = m` produces two references to the same map."
     ]
   }

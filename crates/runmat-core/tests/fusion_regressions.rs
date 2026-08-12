@@ -20,7 +20,7 @@ fn read_scalar(engine: &mut RunMatSession, expr: &str) -> f64 {
         .expect("evaluate scalar expression");
     match result.value.expect("scalar value should be available") {
         Value::Num(value) => value,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor.materialize_f64()[0],
         other => panic!("expected scalar numeric value, got {other:?}"),
     }
 }

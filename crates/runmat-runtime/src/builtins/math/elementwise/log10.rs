@@ -9,11 +9,12 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use super::log::{detect_gpu_requires_complex, log_complex_parts};
+use super::log::{detect_gpu_requires_complex, log_complex_parts, log_complex_parts_f32};
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -148,7 +149,10 @@ async fn log10_builtin(value: Value) -> BuiltinResult<Value> {
             let (r, i) = log10_complex_parts(re, im);
             Ok(Value::Complex(r, i))
         }
-        Value::ComplexTensor(ct) => log10_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "log10")?;
+            log10_complex_tensor(ct)
+        }
         Value::CharArray(ca) => log10_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(log10_error_with_detail(
             &LOG10_ERROR_INVALID_INPUT,
@@ -159,6 +163,12 @@ async fn log10_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn log10_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let tensor = gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        return log10_tensor(tensor);
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
@@ -194,27 +204,31 @@ fn log10_real(value: Value) -> BuiltinResult<Value> {
 
 fn log10_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let shape = tensor.shape.clone();
-    let len = tensor.data.len();
-    let mut complex_values = Vec::with_capacity(len);
-    let mut has_imag = false;
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("log10: {e}")))?;
+    match storage {
+        NumericStorage::F64(values) => log10_real_f64_values(values, shape),
+        NumericStorage::F32(values) => log10_real_f32_values(values, shape),
+        storage => log10_real_f64_values(promote_integer_storage_to_log10_domain(storage), shape),
+    }
+}
 
-    for &v in &tensor.data {
+fn log10_real_f64_values(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let mut complex_values = Vec::with_capacity(values.len());
+    let mut has_imag = false;
+    for v in values {
         let (re_part, im_part) = log10_complex_parts(v, 0.0);
         if im_part != 0.0 {
             has_imag = true;
         }
         complex_values.push((re_part, im_part));
     }
-
     if has_imag {
-        if len == 1 {
-            let (re, im) = complex_values[0];
-            Ok(Value::Complex(re, im))
-        } else {
-            let tensor = ComplexTensor::new(complex_values, shape)
+        let tensor =
+            ComplexTensor::from_complex_storage(ComplexStorage::F64(complex_values), shape)
                 .map_err(|e| builtin_error(format!("log10: {e}")))?;
-            Ok(Value::ComplexTensor(tensor))
-        }
+        Ok(complex_tensor_into_value(tensor))
     } else {
         let data: Vec<f64> = complex_values
             .into_iter()
@@ -225,24 +239,73 @@ fn log10_tensor(tensor: Tensor) -> BuiltinResult<Value> {
                 re
             })
             .collect();
-        let tensor = Tensor::new(data, shape).map_err(|e| builtin_error(format!("log10: {e}")))?;
+        let tensor = Tensor::from_numeric_storage(NumericStorage::F64(data), shape)
+            .map_err(|e| builtin_error(format!("log10: {e}")))?;
+        Ok(tensor::tensor_into_value(tensor))
+    }
+}
+
+fn log10_real_f32_values(values: Vec<f32>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    let mut complex_values = Vec::with_capacity(values.len());
+    let mut has_imag = false;
+    for value in values {
+        let (real, imag) = log10_complex_parts_f32(value, 0.0);
+        has_imag |= imag != 0.0;
+        complex_values.push((real, imag));
+    }
+    if has_imag {
+        let tensor =
+            ComplexTensor::from_complex_storage(ComplexStorage::F32(complex_values), shape)
+                .map_err(|e| builtin_error(format!("log10: {e}")))?;
+        Ok(complex_tensor_into_value(tensor))
+    } else {
+        let values = complex_values
+            .into_iter()
+            .map(|(mut real, _)| {
+                if real.is_finite() && real.abs() < IMAG_EPS as f32 {
+                    real = 0.0;
+                }
+                real
+            })
+            .collect();
+        let tensor = Tensor::from_numeric_storage(NumericStorage::F32(values), shape)
+            .map_err(|e| builtin_error(format!("log10: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
 
 fn log10_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ct.data.len());
-    for &(re, im) in &ct.data {
-        data.push(log10_complex_parts(re, im));
-    }
-    if data.len() == 1 {
-        let (re, im) = data[0];
-        Ok(Value::Complex(re, im))
-    } else {
-        let tensor = ComplexTensor::new(data, ct.shape.clone())
-            .map_err(|e| builtin_error(format!("log10: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
-    }
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(real, imag)| log10_complex_parts(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(real, imag)| log10_complex_parts_f32(real, imag))
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => {
+            return Err(log10_error_with_detail(
+                &LOG10_ERROR_INVALID_INPUT,
+                "typed complex integer input is not supported",
+            ))
+        }
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| builtin_error(format!("log10: {e}")))?;
+    Ok(complex_tensor_into_value(tensor))
+}
+
+fn promote_integer_storage_to_log10_domain(storage: NumericStorage) -> Vec<f64> {
+    storage
+        .into_integer_storage()
+        .expect("log10 integer-promotion boundary received floating storage")
+        .to_f64_vec()
 }
 
 fn log10_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -267,13 +330,26 @@ fn log10_complex_parts(re: f64, im: f64) -> (f64, f64) {
     (real_part, imag_part)
 }
 
+fn log10_complex_parts_f32(re: f32, im: f32) -> (f32, f32) {
+    let (real_ln, imag_ln) = log_complex_parts_f32(re, im);
+    let mut real_part = real_ln * std::f32::consts::LOG10_E;
+    let mut imag_part = imag_ln * std::f32::consts::LOG10_E;
+    if real_part.is_finite() && real_part.abs() < IMAG_EPS as f32 {
+        real_part = 0.0;
+    }
+    if imag_part.abs() < IMAG_EPS as f32 {
+        imag_part = 0.0;
+    }
+    (real_part, imag_part)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+        IntValue, IntegerStorage, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
     };
 
     fn log10_builtin(value: Value) -> BuiltinResult<Value> {
@@ -345,6 +421,43 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn log10_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, 10, 100]), vec![3, 1])
+            .expect("integer tensor");
+
+        let result = log10_builtin(Value::Tensor(tensor)).expect("log10");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 2.0]);
+                assert!(out.integer_storage().is_none());
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn log10_negative_typed_integer_tensor_promotes_to_complex_from_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![-10, 10]), vec![1, 2])
+            .expect("integer tensor");
+
+        let result = log10_builtin(Value::Tensor(tensor)).expect("log10");
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
+                assert!(
+                    (out.materialize_f64()[0].1 - std::f64::consts::PI * LOG10_E).abs() < 1e-12
+                );
+                assert_eq!(out.materialize_f64()[1], (1.0, 0.0));
+            }
+            other => panic!("expected complex tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn log10_scalar_zero() {
         let result = log10_builtin(Value::Num(0.0)).expect("log10");
         match result {
@@ -385,14 +498,79 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 2]);
-                assert!((ct.data[0].0 - 1.0).abs() < 1e-12);
+                assert!((ct.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
                 let expected_im = std::f64::consts::PI * LOG10_E;
-                assert!((ct.data[0].1 - expected_im).abs() < 1e-12);
-                assert!((ct.data[1].0 - 1.0).abs() < 1e-12);
-                assert!((ct.data[1].1).abs() < 1e-12);
+                assert!((ct.materialize_f64()[0].1 - expected_im).abs() < 1e-12);
+                assert!((ct.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
+                assert!((ct.materialize_f64()[1].1).abs() < 1e-12);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn log10_preserves_native_single_real_complex_negative_and_empty_storage() {
+        let tensor = Tensor::from_f32(vec![1.0, 10.0], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = log10_builtin(Value::Tensor(tensor)).expect("log10") else {
+            panic!("expected single real tensor");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 1.0])
+        );
+
+        let tensor = Tensor::from_f32(vec![-10.0, 10.0], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(output) = log10_builtin(Value::Tensor(tensor)).expect("log10")
+        else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(
+                &[
+                    log10_complex_parts_f32(-10.0, 0.0),
+                    log10_complex_parts_f32(10.0, 0.0),
+                ][..]
+            )
+        );
+
+        let complex = ComplexTensor::from_f32(vec![(1.0, 1.0)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(output) =
+            log10_builtin(Value::ComplexTensor(complex)).expect("log10")
+        else {
+            panic!("one-element complex single must retain class");
+        };
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[log10_complex_parts_f32(1.0, 1.0)][..])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let Value::ComplexTensor(output) =
+            log10_builtin(Value::ComplexTensor(empty)).expect("log10")
+        else {
+            panic!("expected empty complex single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 2]);
+        assert_eq!(output.as_f32_slice(), Some(&[][..]));
+    }
+
+    #[test]
+    fn log10_integer_gpu_gathers_exact_storage_before_floating_domain() {
+        test_support::with_test_provider(|provider| {
+            let wide = 9_007_199_254_740_993_u64;
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, wide]), vec![1, 2]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let Value::Tensor(output) = log10_builtin(Value::GpuTensor(handle)).expect("log10")
+            else {
+                panic!("expected host double tensor");
+            };
+            assert_eq!(
+                output.into_numeric_storage().unwrap(),
+                NumericStorage::F64(vec![0.0, (wide as f64).log10()])
+            );
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -417,8 +595,11 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 0.0).abs() < 1e-12);
-                assert!(t.data[1].is_infinite() && t.data[1].is_sign_negative());
+                assert!((t.materialize_f64()[0] - 0.0).abs() < 1e-12);
+                assert!(
+                    t.materialize_f64()[1].is_infinite()
+                        && t.materialize_f64()[1].is_sign_negative()
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -432,8 +613,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - (65.0f64).log10()).abs() < 1e-12);
-                assert!((t.data[1] - (90.0f64).log10()).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - (65.0f64).log10()).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] - (90.0f64).log10()).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -445,15 +626,19 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 10.0, 1000.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = log10_builtin(Value::GpuTensor(handle)).expect("log10");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            let expected: Vec<f64> = tensor.data.iter().map(|&v| v.log10()).collect();
-            for (a, b) in gathered.data.iter().zip(expected.iter()) {
+            let expected: Vec<f64> = tensor
+                .materialize_f64()
+                .iter()
+                .map(|&v| v.log10())
+                .collect();
+            for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-12);
             }
         });
@@ -480,7 +665,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-10.0, 10.0], vec![1, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -489,7 +674,7 @@ pub(crate) mod tests {
                 Value::ComplexTensor(ct) => {
                     assert_eq!(ct.shape, vec![1, 2]);
                     let expected_im = std::f64::consts::PI * LOG10_E;
-                    assert!((ct.data[0].1 - expected_im).abs() < 1e-12);
+                    assert!((ct.materialize_f64()[0].1 - expected_im).abs() < 1e-12);
                 }
                 other => panic!("expected complex tensor, got {other:?}"),
             }
@@ -516,7 +701,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 10.0, 1000.0, 0.1], vec![4, 1]).unwrap();
         let cpu = log10_real(Value::Tensor(tensor.clone())).expect("cpu log10");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -528,7 +713,11 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(gathered.shape, ct.shape);
-                for (gpu, cpu) in gathered.data.iter().zip(ct.data.iter()) {
+                for (gpu, cpu) in gathered
+                    .materialize_f64()
+                    .iter()
+                    .zip(ct.materialize_f64().iter())
+                {
                     let tol = match runmat_accelerate_api::provider().unwrap().precision() {
                         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

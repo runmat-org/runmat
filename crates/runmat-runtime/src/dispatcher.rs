@@ -1,7 +1,9 @@
 use crate::{build_runtime_error, create_class_object, make_cell_with_shape, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostTensorOwned,
+};
 use runmat_builtins::{
-    builtin_functions, ComplexTensor, LogicalArray, NumericDType, Tensor, Value,
+    builtin_functions, ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
 };
 use std::cell::RefCell;
 
@@ -81,6 +83,17 @@ fn gather_if_needed_async_impl<'a>(
     Box::pin(async move {
         match value {
             Value::GpuTensor(handle) => {
+                // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
+                #[cfg(all(test, feature = "wgpu"))]
+                {
+                    let active_owner = runmat_accelerate_api::provider()
+                        .is_some_and(|provider| provider.device_id() == handle.device_id);
+                    if handle.device_id != 0 && !active_owner {
+                        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+                    );
+                    }
+                }
                 let provider =
                     runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
                         build_runtime_error("gather: no acceleration provider registered")
@@ -88,6 +101,30 @@ fn gather_if_needed_async_impl<'a>(
                             .build()
                     })?;
                 let is_logical = runmat_accelerate_api::handle_is_logical(handle);
+                if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                    let integer = provider.download_integer(handle).await.map_err(|err| {
+                        build_runtime_error(format!("gather: {err}"))
+                            .with_identifier("RunMat:gather:DownloadFailed")
+                            .build()
+                    })?;
+                    runmat_accelerate_api::clear_residency(handle);
+                    let storage = match integer.data {
+                        HostIntegerDataOwned::I8(data) => IntegerStorage::I8(data),
+                        HostIntegerDataOwned::I16(data) => IntegerStorage::I16(data),
+                        HostIntegerDataOwned::I32(data) => IntegerStorage::I32(data),
+                        HostIntegerDataOwned::I64(data) => IntegerStorage::I64(data),
+                        HostIntegerDataOwned::U8(data) => IntegerStorage::U8(data),
+                        HostIntegerDataOwned::U16(data) => IntegerStorage::U16(data),
+                        HostIntegerDataOwned::U32(data) => IntegerStorage::U32(data),
+                        HostIntegerDataOwned::U64(data) => IntegerStorage::U64(data),
+                    };
+                    let tensor = Tensor::new_integer(storage, integer.shape).map_err(|err| {
+                        build_runtime_error(format!("gather: {err}"))
+                            .with_identifier("RunMat:gather:TensorShapeError")
+                            .build()
+                    })?;
+                    return Ok(Value::Tensor(tensor));
+                }
                 let host = download_handle_async(provider, handle)
                     .await
                     .map_err(|err| {
@@ -236,14 +273,15 @@ async fn call_builtin_async_impl(
 
     if matching_builtins.is_empty() {
         if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
-            return Ok(result);
+            return compatibility_checked_builtin_result(name, result);
         }
         if let Some(result) = try_call_registered_static_method(name, args, output_count).await? {
-            return Ok(result);
+            return compatibility_checked_builtin_result(name, result);
         }
         // Fallback: treat as class constructor if class is registered.
         if runmat_builtins::get_class(name).is_some() {
-            return call_registered_class_constructor(name, args, output_count).await;
+            let result = call_registered_class_constructor(name, args, output_count).await?;
+            return compatibility_checked_builtin_result(name, result);
         }
         return Err(build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("RunMat:UndefinedFunction")
@@ -251,7 +289,7 @@ async fn call_builtin_async_impl(
     }
 
     if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
-        return Ok(result);
+        return compatibility_checked_builtin_result(name, result);
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -276,12 +314,14 @@ async fn call_builtin_async_impl(
     {
         let f = builtin.implementation;
         match (f)(args).await {
-            Ok(result) => return Ok(result),
+            Ok(result) => return compatibility_checked_builtin_result(name, result),
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, args) {
                     match gather_args_for_retry_async(args).await {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
-                            Ok(result) => return Ok(result),
+                            Ok(result) => {
+                                return compatibility_checked_builtin_result(name, result);
+                            }
                             Err(retry_err) => last_error = retry_err,
                         },
                         Ok(None) => last_error = err,
@@ -315,6 +355,11 @@ async fn call_builtin_async_impl(
     .with_source(last_error);
     builder = builder.with_identifier(identifier);
     Err(builder.build())
+}
+
+fn compatibility_checked_builtin_result(name: &str, result: Value) -> Result<Value, RuntimeError> {
+    crate::compatibility::ensure_value_compatible(&result, name)?;
+    Ok(result)
 }
 
 pub(crate) async fn try_call_registered_instance_method(

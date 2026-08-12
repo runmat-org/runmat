@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider's unary_conj hook for real-valued and complex-interleaved GPU tensors. Complex GPU inputs stay resident when the provider supports the hook; fusion treats conj as a pass-through for real data."
+    "notes": "Uses the owning provider's unary_conj hook for floating real and complex-interleaved GPU tensors. Real integer and logical inputs are exact resident identities. If the hook is unavailable, floating data is gathered, conjugated on the host, and re-uploaded to the owning provider. Typed complex integer resident buffers are not yet representable by the provider ABI."
   },
   "fusion": {
     "elementwise": true,
@@ -32,10 +32,11 @@
   },
   "description": "`conj(x)` negates the imaginary component of each element in `x`, while real values remain unchanged. The operation is element-wise for scalars and arrays, matching MATLAB behavior.",
   "behaviors": [
-    "Complex scalars and arrays have their imaginary components multiplied by `-1`; when a result has no imaginary part it collapses to a real scalar or tensor just like MATLAB.",
+    "Complex scalars and arrays have their imaginary components multiplied by `-1` and remain complex values, including when the imaginary component is zero.",
+    "For typed complex integers, RunMat conservatively applies saturating imaginary-component negation; public evidence does not directly settle signed-minimum or unsigned-imaginary endpoints, so those cases remain evidence-open.",
     "Purely real numeric inputs (double, single, integer) are returned unchanged.",
-    "Logical arrays are promoted to double precision with `true → 1.0` and `false → 0.0`.",
-    "Character arrays are promoted to double precision containing their Unicode code points; the Conjugate operation does not alter the codes because they are real-valued.",
+    "Logical scalars and arrays are returned unchanged and retain logical class.",
+    "Character arrays are not part of the documented MATLAB input classes. RunMat mode accepts them as an explicit compatibility extension and returns double Unicode code points.",
     "String arrays are not supported and raise an error."
   ],
   "examples": [
@@ -55,12 +56,12 @@
       "output": "unchanged = [-2.5 0 9.75]"
     },
     {
-      "description": "Use conj on logical masks converted to doubles",
+      "description": "Use conj on a logical mask",
       "input": "mask = logical([0 1 0; 1 1 0]);\nnumeric = conj(mask)",
-      "output": "numeric =\n     0     1     0\n     1     1     0"
+      "output": "numeric retains logical class and the same true/false values."
     },
     {
-      "description": "Convert MATLAB char arrays to numeric codes with conj",
+      "description": "Use the RunMat character-input extension",
       "input": "chars = 'RunMat';\ncodes = conj(chars)\noutputClass = class(codes)",
       "output": "codes = [82 117 110 77 97 116];\noutputClass = 'double'"
     },
@@ -72,23 +73,23 @@
   "faqs": [
     {
       "question": "Does `conj` change purely real inputs?",
-      "answer": "No. Real values (including logical and character data) are returned unchanged, although logical and character inputs become double precision arrays just like in MATLAB."
+      "answer": "No. Real numeric and logical values retain their class and values. Character input is a RunMat-mode extension that returns double code points."
     },
     {
       "question": "How does `conj` handle complex zeros?",
-      "answer": "`conj(0 + 0i)` returns `0`. Imaginary zeros remain zero after negation."
+      "answer": "The value remains complex and its imaginary zero changes sign under negation."
     },
     {
       "question": "Can I call `conj` on string arrays?",
-      "answer": "No. The builtin only accepts numeric, logical, or character inputs. Convert strings with `double(string)` if you need numeric codes."
+      "answer": "No. MATLAB-compatible mode accepts numeric and logical inputs. RunMat mode additionally accepts character input as an explicit extension."
     },
     {
       "question": "Does `conj` allocate a new array?",
-      "answer": "Yes. The builtin materialises a new tensor (or scalar). Fusion may eliminate the allocation when the surrounding expression can be fused safely, especially when the data stays on the GPU."
+      "answer": "Not necessarily. Real host values and resident integer or logical handles use an exact identity path. Floating and complex providers may allocate an output handle, while fusion can eliminate intermediate allocation."
     },
     {
       "question": "What happens on the GPU without `unary_conj`?",
-      "answer": "RunMat gathers the tensor to host memory, applies the CPU semantics (including complex negation), and allows later operations to re-upload data if advantageous."
+      "answer": "RunMat gathers floating data to host memory, applies the CPU semantics, and re-uploads the result through the handle's owning provider so residency is preserved."
     },
     {
       "question": "Is GPU execution numerically identical to CPU?",
@@ -96,7 +97,7 @@
     },
     {
       "question": "Does `conj` participate in fusion?",
-      "answer": "Yes. The fusion planner can fold `conj` into neighbouring elementwise kernels, letting providers keep tensors on the GPU whenever possible."
+      "answer": "Yes for supported floating real expressions. The fusion planner treats real conjugation as identity; complex and typed-integer cases use their dedicated runtime paths."
     }
   ],
   "links": [
@@ -211,8 +212,8 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's fusion planner and Accelerate layer manage residency and offload decisions automatically, keeping tensors on the GPU whenever device execution is beneficial. Explicit `gpuArray` and `gather` remain available for MATLAB compatibility or fine-grained residency control.",
   "gpu_behavior": [
-    "**Hook available:** Real tensors stay on the GPU and are processed in-place (both the in-process provider used for tests and the WGPU provider expose this path).",
+    "**Hook available:** Real tensors stay GPU-resident and are processed by the owning provider (both the in-process provider used for tests and the WGPU provider expose this path).",
     "**Fusion and auto-offload:** Because `conj` is tagged as an elementwise unary builtin, the fusion planner treats it as a pass-through for real-valued kernels. Native auto-offload therefore keeps fused expressions resident on the GPU whenever the surrounding ops are profitable.",
-    "**Hook missing or complex input:** RunMat gathers the data to host memory, applies the CPU semantics (including complex negation and type promotion), and returns the result. The planner may re-upload tensors later if profitable.\n\nComplex tensors are currently materialised on the host because GPU-side complex layouts are still under development. Providers can add native complex kernels later without changing this builtin."
+    "**Hook missing:** RunMat gathers floating real or complex data to host memory, applies the CPU semantics, and re-uploads through the input handle's owning provider. Providers may implement native complex-interleaved conjugation through the same hook. Typed complex-integer buffers remain unsupported by the provider ABI."
   ]
 }

@@ -175,17 +175,10 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use crate::builtins::plotting::{configure_subplot, current_figure_handle};
-    use runmat_builtins::{NumericDType, Tensor};
+    use runmat_builtins::Tensor;
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("loglog test vector")
     }
 
     #[test]

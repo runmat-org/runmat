@@ -2,9 +2,9 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use log::warn;
-use runmat_builtins::Value;
 #[cfg(test)]
-use runmat_builtins::{NumericDType, Tensor};
+use runmat_builtins::Tensor;
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 #[cfg(test)]
@@ -173,14 +173,7 @@ mod tests {
     use runmat_builtins::{ResolveContext, Type};
 
     fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![rows, cols]).expect("contour3 test tensor")
     }
 
     #[test]

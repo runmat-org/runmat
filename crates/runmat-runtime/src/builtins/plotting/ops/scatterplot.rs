@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::state::{
     axes_handle_exists, decode_axes_handle, figure_handle_exists,
 };
@@ -359,21 +360,39 @@ fn parse_marker(value: &Value) -> BuiltinResult<Value> {
 }
 
 fn parse_axes_handle(value: &Value) -> BuiltinResult<f64> {
-    let scalar = match value {
-        Value::Num(v) => *v,
-        Value::Int(v) => v.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
-        Value::Tensor(_) => {
+    let scalar = if let Some(integer) = tensor_utils::scalar_integer_value(value) {
+        let encoded = integer.try_to_u64().ok_or_else(|| {
+            scatterplot_error(
+                "scatterplot: ax must be a valid axes handle",
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            )
+        })?;
+        const MAX_AXES_HANDLE: u64 = ((u32::MAX as u64) << 20) | ((1 << 20) - 1);
+        if encoded == 0 || encoded > MAX_AXES_HANDLE {
             return Err(scatterplot_error(
-                "scatterplot: ax must be a scalar axes handle",
+                "scatterplot: ax must be a valid axes handle",
                 &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
             ));
         }
-        other => {
-            return Err(scatterplot_error(
-                format!("scatterplot: ax must be a scalar axes handle, got {other:?}"),
-                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
-            ));
+        encoded as f64
+    } else {
+        match value {
+            Value::Num(v) => *v,
+            Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+                tensor_utils::tensor_value_f64(tensor, 0)
+            }
+            Value::Tensor(_) => {
+                return Err(scatterplot_error(
+                    "scatterplot: ax must be a scalar axes handle",
+                    &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+                ));
+            }
+            other => {
+                return Err(scatterplot_error(
+                    format!("scatterplot: ax must be a scalar axes handle, got {other:?}"),
+                    &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+                ));
+            }
         }
     };
     if !scalar.is_finite() || scalar <= 0.0 || scalar.fract() != 0.0 || scalar > (u64::MAX as f64) {
@@ -410,19 +429,16 @@ async fn extract_scatter_values(
                 return Ok((Value::GpuTensor(real), Value::GpuTensor(imag), limits));
             }
             let gathered = gather_gpu_value(handle).await?;
-            let (real, imag) = extract_host_points(gathered, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(gathered, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
         Value::GpuTensor(handle) => {
             let gathered = gather_gpu_value(handle).await?;
-            let (real, imag) = extract_host_points(gathered, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(gathered, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
         other => {
-            let (real, imag) = extract_host_points(other, n, offset)?;
-            let limits = symmetric_limits(&real.data, &imag.data);
+            let (real, imag, limits) = extract_host_points(other, n, offset)?;
             Ok((Value::Tensor(real), Value::Tensor(imag), limits))
         }
     }
@@ -444,7 +460,9 @@ async fn gather_gpu_value(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))
 }
 
-fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(Tensor, Tensor)> {
+type HostPointTensors = (Tensor, Tensor, Option<(f64, f64)>);
+
+fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<HostPointTensors> {
     let samples = complex_samples(value)?;
     if samples.is_empty() {
         return Err(scatterplot_error(
@@ -465,6 +483,7 @@ fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(
         real.push(re);
         imag.push(im);
     }
+    let limits = symmetric_limits(&real, &imag);
     let shape = vec![real.len(), 1];
     let x = Tensor::new(real, shape.clone()).map_err(|err| {
         scatterplot_error(
@@ -478,17 +497,20 @@ fn extract_host_points(value: Value, n: usize, offset: usize) -> BuiltinResult<(
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
         )
     })?;
-    Ok((x, y))
+    Ok((x, y, limits))
 }
 
 fn complex_samples(value: Value) -> BuiltinResult<Vec<(f64, f64)>> {
     match value {
         Value::Complex(re, im) => Ok(vec![(re, im)]),
-        Value::ComplexTensor(tensor) => Ok(tensor.data),
+        Value::ComplexTensor(tensor) => Ok(tensor.materialize_f64()),
         Value::Num(v) => Ok(vec![(v, 0.0)]),
         Value::Int(v) => Ok(vec![(v.to_f64(), 0.0)]),
         Value::Bool(v) => Ok(vec![(if v { 1.0 } else { 0.0 }, 0.0)]),
-        Value::Tensor(tensor) => Ok(tensor.data.into_iter().map(|v| (v, 0.0)).collect()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(&tensor)
+            .into_iter()
+            .map(|v| (v, 0.0))
+            .collect()),
         Value::LogicalArray(logical) => Ok(logical
             .data
             .into_iter()
@@ -502,6 +524,14 @@ fn complex_samples(value: Value) -> BuiltinResult<Vec<(f64, f64)>> {
 }
 
 fn parse_nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor_utils::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            scatterplot_error(
+                format!("scatterplot: {name} is too large"),
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            )
+        });
+    }
     let scalar = parse_numeric_scalar(value, name)?;
     if !scalar.is_finite() || scalar < 0.0 || scalar.fract() != 0.0 {
         return Err(scatterplot_error(
@@ -509,7 +539,7 @@ fn parse_nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> 
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
         ));
     }
-    if scalar > (usize::MAX as f64) {
+    if scalar > usize::MAX as f64 || (usize::BITS == 64 && scalar == usize::MAX as f64) {
         return Err(scatterplot_error(
             format!("scatterplot: {name} is too large"),
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
@@ -523,7 +553,9 @@ fn parse_numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(v) => Ok(*v),
         Value::Int(v) => Ok(v.to_f64()),
         Value::Bool(v) => Ok(if *v { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(scatterplot_error(
             format!("scatterplot: {name} must be a numeric scalar, got {other:?}"),
             &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
@@ -592,6 +624,7 @@ mod tests {
         reset_hold_state_for_run,
     };
     use futures::executor::block_on;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
     use runmat_plot::plots::{scatter::MarkerStyle, PlotElement};
 
     fn setup_plot_tests() {
@@ -608,13 +641,73 @@ mod tests {
         ComplexTensor::new(data.to_vec(), vec![data.len(), 1]).expect("complex tensor")
     }
 
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
+    }
+
+    fn all_integer_scalar_storages(value: u8) -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![value as i8]),
+            IntegerStorage::I16(vec![value as i16]),
+            IntegerStorage::I32(vec![value as i32]),
+            IntegerStorage::I64(vec![value as i64]),
+            IntegerStorage::U8(vec![value]),
+            IntegerStorage::U16(vec![value as u16]),
+            IntegerStorage::U32(vec![value as u32]),
+            IntegerStorage::U64(vec![value as u64]),
+        ]
+    }
+
     #[test]
     fn scatterplot_decimates_from_zero_based_offset() {
         let data = complex_tensor(&[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (4.0, 40.0)]);
-        let (x, y) =
+        let (x, y, limits) =
             extract_host_points(Value::ComplexTensor(data), 2, 1).expect("decimated points");
-        assert_eq!(x.data, vec![2.0, 4.0]);
-        assert_eq!(y.data, vec![20.0, 40.0]);
+        assert_eq!(x.as_f64_slice(), Some(&[2.0, 4.0][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[20.0, 40.0][..]));
+        assert_eq!(limits, Some((-42.0, 42.0)));
+    }
+
+    #[test]
+    fn scatterplot_samples_and_scalars_read_typed_integer_storage() {
+        let samples = poisoned_integer_tensor(IntegerStorage::I16(vec![1, -2, 3]), vec![3, 1]);
+        let (x, y, _) = extract_host_points(Value::Tensor(samples), 1, 0).expect("integer samples");
+        assert_eq!(x.as_f64_slice(), Some(&[1.0, -2.0, 3.0][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[0.0, 0.0, 0.0][..]));
+
+        let decimation = poisoned_integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]);
+        assert_eq!(
+            parse_nonnegative_integer(&Value::Tensor(decimation), "n").expect("decimation"),
+            2
+        );
+    }
+
+    #[test]
+    fn scatterplot_materializes_native_single_at_the_plotting_boundary() {
+        let samples =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![2, 1])
+                .expect("single samples");
+        let (x, y, limits) =
+            extract_host_points(Value::Tensor(samples), 1, 0).expect("single samples");
+        assert_eq!(x.as_f64_slice(), Some(&[1.25, -2.5][..]));
+        assert_eq!(y.as_f64_slice(), Some(&[0.0, 0.0][..]));
+        assert_eq!(limits, Some((-2.625, 2.625)));
+    }
+
+    #[test]
+    fn scatterplot_count_parser_reads_all_integer_storages_without_mirrors() {
+        for storage in all_integer_scalar_storages(2) {
+            let value = Value::Tensor(poisoned_integer_tensor(storage, vec![1, 1]));
+            assert_eq!(parse_nonnegative_integer(&value, "n").unwrap(), 2);
+        }
+    }
+
+    #[test]
+    fn scatterplot_axes_parser_reads_all_integer_storages_without_mirrors() {
+        for storage in all_integer_scalar_storages(1) {
+            let value = Value::Tensor(poisoned_integer_tensor(storage, vec![1, 1]));
+            assert!(parse_axes_handle(&value).is_err());
+        }
     }
 
     #[test]
@@ -657,6 +750,16 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
         assert!(!err.to_string().contains("PlotFailed"));
+    }
+
+    #[test]
+    fn scatterplot_rejects_unrepresentable_integer_options_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_nonnegative_integer(&Value::Num(boundary), "n").is_err());
     }
 
     #[test]

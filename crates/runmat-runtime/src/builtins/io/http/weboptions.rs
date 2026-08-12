@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
@@ -584,8 +585,8 @@ fn numeric_scalar(
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(tensor.data[0])
+            if tensor::is_scalar_tensor(tensor) {
+                Ok(tensor::tensor_value_f64(tensor, 0))
             } else {
                 Err(weboptions_error_with(error, context))
             }
@@ -730,6 +731,28 @@ pub(crate) mod tests {
                 _ => None,
             }),
             Some("auto")
+        );
+    }
+
+    #[test]
+    fn weboptions_timeout_reads_typed_integer_tensor_storage_exactly() {
+        let timeout = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![2026]),
+            vec![1, 1],
+        )
+        .expect("typed timeout");
+
+        let result = run_weboptions(vec![Value::from("Timeout"), Value::Tensor(timeout)])
+            .expect("weboptions timeout");
+        let Value::Struct(options) = result else {
+            panic!("expected options struct");
+        };
+        assert_eq!(
+            options.fields.get("Timeout").and_then(|v| match v {
+                Value::Num(n) => Some(*n),
+                _ => None,
+            }),
+            Some(2026.0)
         );
     }
 

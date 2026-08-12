@@ -16,7 +16,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+    integer_f64_order, try_complex_integer_equality_comparison, try_integer_comparison,
+    IntegerComparisonError, IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::logical_binary_type;
 use crate::{build_runtime_error, RuntimeError};
@@ -176,6 +177,17 @@ async fn ne_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
+    if let Some(result) =
+        try_complex_integer_equality_comparison(&lhs, &rhs, IntegerComparisonOp::Ne).map_err(
+            |error| match error {
+                IntegerComparisonError::SizeMismatch => ne_error(&NE_ERROR_SIZE_MISMATCH),
+                IntegerComparisonError::Internal => ne_error(&NE_ERROR_INVALID_INPUT),
+            },
+        )?
+    {
+        return Ok(result);
+    }
+
     if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Ne).map_err(
         |error| match error {
             IntegerComparisonError::SizeMismatch => ne_error(&NE_ERROR_SIZE_MISMATCH),
@@ -227,7 +239,7 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -239,7 +251,10 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Some((value.re, value.im))
+        }
         _ => None,
     }
 }
@@ -259,6 +274,24 @@ fn scalar_ne_value(lhs: &Value, rhs: &Value) -> Option<crate::BuiltinResult<Valu
         let left = left_string?;
         let right = right_string?;
         return Some(Ok(Value::Bool(left != right)));
+    }
+
+    // Preserve native integer precision when comparing against an ordinary
+    // complex scalar. Typed complex storage is handled by the exact helper in
+    // `ne_host` before reaching this scalar fallback.
+    if let (Some(left), Some((right_re, right_im))) =
+        (tensor::scalar_integer_value(lhs), scalar_complex_value(rhs))
+    {
+        return Some(Ok(Value::Bool(
+            right_im != 0.0 || integer_f64_order(left, right_re) != Some(std::cmp::Ordering::Equal),
+        )));
+    }
+    if let (Some((left_re, left_im)), Some(right)) =
+        (scalar_complex_value(lhs), tensor::scalar_integer_value(rhs))
+    {
+        return Some(Ok(Value::Bool(
+            left_im != 0.0 || integer_f64_order(right, left_re) != Some(std::cmp::Ordering::Equal),
+        )));
     }
 
     let left = scalar_complex_value(lhs).or_else(|| scalar_numeric_value(lhs).map(|v| (v, 0.0)))?;
@@ -341,9 +374,10 @@ impl NumericBuffer {
     }
 
     fn from_tensor(tensor: Tensor) -> Self {
+        let shape = tensor.shape.clone();
         Self {
-            data: tensor.data,
-            shape: tensor.shape,
+            data: tensor::tensor_into_values_f64(tensor),
+            shape,
         }
     }
 
@@ -397,7 +431,7 @@ impl ComplexBuffer {
 
     fn from_tensor(tensor: ComplexTensor) -> Self {
         Self {
-            data: tensor.data,
+            data: tensor.materialize_f64(),
             shape: tensor.shape,
         }
     }
@@ -576,10 +610,71 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{HandleRef, Listener};
+    use runmat_builtins::{
+        ComplexTensor, HandleRef, IntegerComplexStorage, IntegerStorage, Listener,
+    };
 
     fn run_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ne_builtin(lhs, rhs))
+    }
+
+    #[test]
+    fn scalar_numeric_value_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .expect("integer tensor");
+
+        assert_eq!(
+            scalar_numeric_value(&Value::Tensor(tensor)),
+            Some(9_007_199_254_740_993_u64 as f64)
+        );
+    }
+
+    #[test]
+    fn ne_scalar_complex_reads_all_typed_integer_classes_without_f64_mirrors() {
+        let cases = [
+            (IntegerStorage::I8(vec![-7]), -7.0, false),
+            (IntegerStorage::I16(vec![-300]), -300.0, false),
+            (IntegerStorage::I32(vec![-70_000]), -70_000.0, false),
+            (
+                IntegerStorage::I64(vec![-9_007_199_254_740_991]),
+                -9_007_199_254_740_991.0,
+                false,
+            ),
+            (IntegerStorage::U8(vec![7]), 7.0, false),
+            (IntegerStorage::U16(vec![300]), 300.0, false),
+            (IntegerStorage::U32(vec![70_000]), 70_000.0, false),
+            (
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+                (1_u64 << 53) as f64,
+                true,
+            ),
+        ];
+
+        for (storage, real, expected) in cases {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
+            assert_eq!(
+                run_ne(Value::Tensor(tensor), Value::Complex(real, 0.0)).expect("ne"),
+                Value::Bool(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn ne_dense_integer_arrays_read_exact_storage_without_mirror() {
+        let lhs = Tensor::new_integer(IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]), vec![2, 1])
+            .expect("lhs");
+        let rhs = Tensor::new_integer(IntegerStorage::I64(vec![0, 1, i64::MAX]), vec![1, 3])
+            .expect("rhs");
+
+        let result = run_ne(Value::Tensor(lhs), Value::Tensor(rhs)).expect("ne");
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![2, 3]);
+                assert_eq!(array.data, vec![0, 1, 1, 1, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
     }
 
     #[cfg(feature = "wgpu")]
@@ -729,6 +824,65 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), NE_ERROR_INVALID_INPUT.identifier);
     }
 
+    #[test]
+    fn ne_typed_complex_integer_compares_exact_storage() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
+                IntegerStorage::U64(vec![0, 7]),
+            )
+            .expect("matching components"),
+            vec![2, 1],
+        )
+        .expect("typed complex");
+        let rhs = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, u64::MAX]),
+                IntegerStorage::U64(vec![0, 0, 7]),
+            )
+            .expect("matching components"),
+            vec![1, 3],
+        )
+        .expect("typed complex rhs");
+
+        assert_eq!(
+            run_ne(Value::ComplexTensor(tensor), Value::ComplexTensor(rhs)).unwrap(),
+            Value::LogicalArray(
+                LogicalArray::new(vec![0, 1, 1, 1, 1, 0], vec![2, 3]).expect("logical result")
+            )
+        );
+    }
+
+    #[test]
+    fn ne_typed_complex_integer_real_comparison_requires_zero_imaginary_part() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1_u64 << 63, (1_u64 << 63) + 1]),
+                IntegerStorage::U64(vec![0, 1]),
+            )
+            .expect("matching components"),
+            vec![2, 1],
+        )
+        .expect("typed complex");
+
+        assert_eq!(
+            run_ne(
+                Value::ComplexTensor(tensor),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![1_u64 << 63, (1_u64 << 63) + 1]),
+                        vec![1, 2],
+                    )
+                    .expect("integer tensor")
+                ),
+            )
+            .unwrap(),
+            Value::LogicalArray(
+                LogicalArray::new(vec![0, 1, 1, 1], vec![2, 2]).expect("logical result")
+            )
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ne_gpu_provider_roundtrip() {
@@ -736,11 +890,11 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let tensor_b = Tensor::new(vec![1.0, 0.0, 3.0, 5.0], vec![2, 2]).unwrap();
             let view_a = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let view_b = HostTensorView {
-                data: &tensor_b.data,
+                data: &tensor_b.materialize_f64(),
                 shape: &tensor_b.shape,
             };
             let h_a = provider.upload(&view_a).expect("upload a");
@@ -748,7 +902,7 @@ pub(crate) mod tests {
             let result = run_ne(Value::GpuTensor(h_a), Value::GpuTensor(h_b)).expect("ne");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![0.0, 1.0, 1.0, 0.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
         });
     }
 
@@ -758,7 +912,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -783,11 +937,11 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![1.0, 0.0, 3.0, 5.0], vec![2, 2]).unwrap();
         let cpu = run_ne_host(Value::Tensor(a.clone()), Value::Tensor(b.clone())).unwrap();
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -802,7 +956,7 @@ pub(crate) mod tests {
                     ProviderPrecision::F64 => 1e-12,
                     ProviderPrecision::F32 => 1e-5,
                 };
-                for (a, b) in gt.data.iter().zip(cp.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(cp.data.iter()) {
                     let diff = *a - f64::from(*b);
                     assert!(
                         diff.abs() < tol,

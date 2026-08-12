@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -166,13 +166,27 @@ fn imag_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn imag_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    Tensor::new(vec![0.0; tensor.data.len()], tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
+    let zeros = storage.zeros_like(storage.len());
+    Tensor::from_numeric_storage(zeros, shape)
         .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))
 }
 
 fn imag_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let data = ct.data.iter().map(|&(_, im)| im).collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|(_, imag)| imag).collect())
+        }
+        ComplexStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|(_, imag)| imag).collect())
+        }
+        ComplexStorage::Integer(storage) => NumericStorage::from_integer_storage(storage.imag),
+    };
+    let tensor = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -252,6 +266,21 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn imag_integer_complex_scalar_preserves_int64_value() {
+        let complex = ComplexTensor::new_integer(
+            runmat_builtins::IntegerComplexStorage::new(
+                runmat_builtins::IntegerStorage::I64(vec![i64::MIN]),
+                runmat_builtins::IntegerStorage::I64(vec![i64::MAX]),
+            )
+            .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap();
+        let result = imag_builtin(Value::ComplexTensor(complex)).expect("imag");
+        assert_eq!(result, Value::Int(IntValue::I64(i64::MAX)));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn imag_bool_scalar_zero() {
@@ -266,10 +295,26 @@ pub(crate) mod tests {
     #[test]
     fn imag_int_scalar_zero() {
         let result = imag_builtin(Value::Int(IntValue::I32(-42))).expect("imag");
-        match result {
-            Value::Num(n) => assert_eq!(n, 0.0),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
+        assert_eq!(result, Value::Int(IntValue::I32(0)));
+    }
+
+    #[test]
+    fn imag_typed_real_integer_tensor_zeros_from_storage_without_mirror() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![1, 9_223_372_036_854_775_809, u64::MAX]),
+            vec![1, 3],
+        )
+        .expect("typed integer tensor");
+
+        let result = imag_builtin(Value::Tensor(tensor)).expect("imag");
+        let Value::Tensor(output) = result else {
+            panic!("expected typed integer zero tensor");
+        };
+        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(
+            output.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![0, 0, 0]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -280,10 +325,34 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 1]);
-                assert!(t.data.iter().all(|v| *v == 0.0));
+                assert!(t.materialize_f64().iter().all(|v| *v == 0.0));
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn imag_real_and_complex_single_preserve_native_class_and_shape() {
+        let real = Tensor::from_f32(vec![1.0, -2.0], vec![1, 2]).unwrap();
+        let Value::Tensor(output) = imag_builtin(Value::Tensor(real)).expect("imag") else {
+            panic!("expected single zero tensor");
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 0.0])
+        );
+
+        let complex = ComplexTensor::from_f32(vec![(1.25, 2.5), (-3.0, 4.0)], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = imag_builtin(Value::ComplexTensor(complex)).expect("imag")
+        else {
+            panic!("expected single imaginary tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![2.5, 4.0])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -294,10 +363,24 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 3]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn imag_empty_complex_single_preserves_native_class_and_shape() {
+        let complex = ComplexTensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let Value::Tensor(output) = imag_builtin(Value::ComplexTensor(complex)).expect("imag")
+        else {
+            panic!("expected empty single imaginary tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -309,7 +392,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.data, vec![2.0, 4.5]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 4.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -323,7 +406,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0; 4]);
+                assert_eq!(t.materialize_f64(), vec![0.0; 4]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -337,7 +420,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![0.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -367,14 +450,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = imag_builtin(Value::GpuTensor(handle)).expect("imag");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert!(gathered.data.iter().all(|v| *v == 0.0));
+            assert!(gathered.materialize_f64().iter().all(|v| *v == 0.0));
         });
     }
 
@@ -394,7 +477,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert_eq!(gathered.data, vec![2.0, 4.5]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 4.5]);
         });
     }
 
@@ -408,7 +491,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 1.0, -2.5, 4.0], vec![4, 1]).unwrap();
         let cpu = imag_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -423,8 +506,15 @@ pub(crate) mod tests {
             other => panic!("unexpected cpu value {other:?}"),
         };
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert_eq!(gathered.data.len(), cpu_tensor.data.len());
-        for (g, c) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        assert_eq!(
+            gathered.materialize_f64().len(),
+            cpu_tensor.materialize_f64().len()
+        );
+        for (g, c) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((g - c).abs() < 1e-12, "imag mismatch {} vs {}", g, c);
         }
     }
@@ -447,6 +537,6 @@ pub(crate) mod tests {
             runmat_accelerate_api::GpuTensorStorage::Real
         );
         let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-        assert_eq!(gathered.data, vec![2.0, 4.5]);
+        assert_eq!(gathered.materialize_f64(), vec![2.0, 4.5]);
     }
 }

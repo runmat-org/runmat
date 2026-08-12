@@ -7,8 +7,7 @@ pub use object_array::ObjectArray;
 use runmat_gc_api::{GcHandle, Trace, Tracer};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
@@ -85,10 +84,10 @@ pub enum Value {
     String(String),
     // String array (R2016b+): N-D array of string scalars
     StringArray(StringArray),
-    // Char array (single-quoted): 2-D character array (rows x cols)
+    // Char array (single-quoted): N-D character array with 2-D row/column caches
     CharArray(CharArray),
     Tensor(Tensor),
-    /// Real double sparse matrix in compressed sparse column form.
+    /// Real sparse matrix in compressed sparse column form.
     SparseTensor(SparseTensor),
     /// Complex numeric array; same column-major shape semantics as `Tensor`
     ComplexTensor(ComplexTensor),
@@ -135,7 +134,7 @@ pub enum Value {
     /// Durable batch execution capability.
     Job(runmat_execution::JobHandle),
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntValue {
     I8(i8),
     I16(i16),
@@ -166,6 +165,59 @@ impl IntValue {
             }
         }
     }
+
+    /// Returns the signed representation when it is exactly representable.
+    ///
+    /// Unlike [`Self::to_i64`], this never saturates an out-of-range `uint64`.
+    pub fn try_to_i64(&self) -> Option<i64> {
+        match self {
+            IntValue::I8(v) => Some(*v as i64),
+            IntValue::I16(v) => Some(*v as i64),
+            IntValue::I32(v) => Some(*v as i64),
+            IntValue::I64(v) => Some(*v),
+            IntValue::U8(v) => Some(*v as i64),
+            IntValue::U16(v) => Some(*v as i64),
+            IntValue::U32(v) => Some(*v as i64),
+            IntValue::U64(v) => i64::try_from(*v).ok(),
+        }
+    }
+
+    /// Returns the `int32` representation when it is exactly representable.
+    pub fn try_to_i32(&self) -> Option<i32> {
+        self.try_to_i64()
+            .and_then(|value| i32::try_from(value).ok())
+    }
+
+    /// Returns the platform signed representation when it is exactly
+    /// representable.
+    ///
+    /// This is intended for signed offsets and shifts. In particular, it
+    /// rejects `uint64` values above `int64::MAX` instead of saturating them.
+    pub fn try_to_isize(&self) -> Option<isize> {
+        self.try_to_i64()
+            .and_then(|value| isize::try_from(value).ok())
+    }
+
+    /// Returns the unsigned representation when it is exactly representable.
+    pub fn try_to_u64(&self) -> Option<u64> {
+        match self {
+            IntValue::I8(v) => u64::try_from(*v).ok(),
+            IntValue::I16(v) => u64::try_from(*v).ok(),
+            IntValue::I32(v) => u64::try_from(*v).ok(),
+            IntValue::I64(v) => u64::try_from(*v).ok(),
+            IntValue::U8(v) => Some(*v as u64),
+            IntValue::U16(v) => Some(*v as u64),
+            IntValue::U32(v) => Some(*v as u64),
+            IntValue::U64(v) => Some(*v),
+        }
+    }
+
+    /// Returns the platform dimension representation when it is exactly
+    /// representable and non-negative.
+    pub fn try_to_usize(&self) -> Option<usize> {
+        self.try_to_u64()
+            .and_then(|value| usize::try_from(value).ok())
+    }
     pub fn to_f64(&self) -> f64 {
         match self {
             // `uint64` has a wider positive range than `int64`. Converting it
@@ -176,7 +228,16 @@ impl IntValue {
         }
     }
     pub fn is_zero(&self) -> bool {
-        self.to_i64() == 0
+        match self {
+            IntValue::I8(value) => *value == 0,
+            IntValue::I16(value) => *value == 0,
+            IntValue::I32(value) => *value == 0,
+            IntValue::I64(value) => *value == 0,
+            IntValue::U8(value) => *value == 0,
+            IntValue::U16(value) => *value == 0,
+            IntValue::U32(value) => *value == 0,
+            IntValue::U64(value) => *value == 0,
+        }
     }
     pub fn class_name(&self) -> &'static str {
         match self {
@@ -190,17 +251,130 @@ impl IntValue {
             IntValue::U64(_) => "uint64",
         }
     }
+
+    /// Returns the exact base-10 representation without narrowing through a
+    /// signed integer or floating-point compatibility path.
+    pub fn decimal_string(&self) -> String {
+        match self {
+            IntValue::I8(value) => value.to_string(),
+            IntValue::I16(value) => value.to_string(),
+            IntValue::I32(value) => value.to_string(),
+            IntValue::I64(value) => value.to_string(),
+            IntValue::U8(value) => value.to_string(),
+            IntValue::U16(value) => value.to_string(),
+            IntValue::U32(value) => value.to_string(),
+            IntValue::U64(value) => value.to_string(),
+        }
+    }
+
+    /// Add two values of the same MATLAB integer class with saturating
+    /// semantics. Sparse triplet construction uses this for duplicate entries.
+    pub fn saturating_add(&self, rhs: &Self) -> Result<Self, String> {
+        match (self, rhs) {
+            (Self::I8(lhs), Self::I8(rhs)) => Ok(Self::I8(lhs.saturating_add(*rhs))),
+            (Self::I16(lhs), Self::I16(rhs)) => Ok(Self::I16(lhs.saturating_add(*rhs))),
+            (Self::I32(lhs), Self::I32(rhs)) => Ok(Self::I32(lhs.saturating_add(*rhs))),
+            (Self::I64(lhs), Self::I64(rhs)) => Ok(Self::I64(lhs.saturating_add(*rhs))),
+            (Self::U8(lhs), Self::U8(rhs)) => Ok(Self::U8(lhs.saturating_add(*rhs))),
+            (Self::U16(lhs), Self::U16(rhs)) => Ok(Self::U16(lhs.saturating_add(*rhs))),
+            (Self::U32(lhs), Self::U32(rhs)) => Ok(Self::U32(lhs.saturating_add(*rhs))),
+            (Self::U64(lhs), Self::U64(rhs)) => Ok(Self::U64(lhs.saturating_add(*rhs))),
+            (lhs, rhs) => Err(format!(
+                "cannot add {} and {} integer values",
+                lhs.class_name(),
+                rhs.class_name()
+            )),
+        }
+    }
 }
 
 #[cfg(test)]
 mod int_value_tests {
-    use super::IntValue;
+    use super::{IntValue, Value};
 
     #[test]
     fn uint64_to_f64_does_not_clamp_through_int64() {
         let value = IntValue::U64(u64::MAX);
         assert_eq!(value.to_f64(), u64::MAX as f64);
         assert!(value.to_f64() > i64::MAX as f64);
+    }
+
+    #[test]
+    fn decimal_string_preserves_full_signed_and_unsigned_range() {
+        assert_eq!(
+            IntValue::I64(i64::MIN).decimal_string(),
+            "-9223372036854775808"
+        );
+        assert_eq!(
+            IntValue::U64(u64::MAX).decimal_string(),
+            "18446744073709551615"
+        );
+        assert_eq!(
+            Value::Int(IntValue::U64(u64::MAX)).to_string(),
+            "18446744073709551615"
+        );
+        assert_eq!(
+            String::try_from(&Value::Int(IntValue::U64(u64::MAX))).expect("string conversion"),
+            "18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn checked_integer_conversions_do_not_saturate_or_change_sign() {
+        assert_eq!(IntValue::I64(i64::MIN).try_to_i64(), Some(i64::MIN));
+        assert_eq!(IntValue::U64(i64::MAX as u64).try_to_i64(), Some(i64::MAX));
+        assert_eq!(IntValue::U64(u64::MAX).try_to_i64(), None);
+        assert_eq!(IntValue::I32(i32::MIN).try_to_i32(), Some(i32::MIN));
+        assert_eq!(IntValue::U64(i32::MAX as u64).try_to_i32(), Some(i32::MAX));
+        assert_eq!(IntValue::U64(u64::MAX).try_to_i32(), None);
+        assert_eq!(IntValue::I64(-1).try_to_u64(), None);
+        assert_eq!(IntValue::U64(u64::MAX).try_to_u64(), Some(u64::MAX));
+        assert_eq!(
+            IntValue::U64(u64::MAX).try_to_usize(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert_eq!(
+            IntValue::I64(isize::MIN as i64).try_to_isize(),
+            Some(isize::MIN)
+        );
+        assert_eq!(IntValue::U64(u64::MAX).try_to_isize(), None);
+    }
+
+    #[test]
+    fn is_zero_checks_integer_storage_exactly() {
+        let zeroes = [
+            IntValue::I8(0),
+            IntValue::I16(0),
+            IntValue::I32(0),
+            IntValue::I64(0),
+            IntValue::U8(0),
+            IntValue::U16(0),
+            IntValue::U32(0),
+            IntValue::U64(0),
+        ];
+        for value in zeroes {
+            assert!(value.is_zero(), "{value:?} should be zero");
+        }
+
+        let nonzeroes = [
+            IntValue::I8(-1),
+            IntValue::I16(1),
+            IntValue::I32(-1),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ];
+        for value in nonzeroes {
+            assert!(!value.is_zero(), "{value:?} should be nonzero");
+        }
+    }
+
+    #[test]
+    fn bool_conversion_uses_exact_integer_zero_test() {
+        assert!(!bool::try_from(&Value::Int(IntValue::U64(0))).expect("zero bool"));
+        assert!(bool::try_from(&Value::Int(IntValue::U64(u64::MAX))).expect("max bool"));
     }
 }
 
@@ -242,9 +416,14 @@ impl Default for StructValue {
 pub enum NumericDType {
     F64,
     F32,
+    I8,
+    I16,
+    I32,
+    I64,
     U8,
     U16,
     U32,
+    U64,
 }
 
 /// Exact homogeneous backing storage for MATLAB integer arrays.
@@ -265,6 +444,35 @@ pub enum IntegerStorage {
 }
 
 impl IntegerStorage {
+    /// Returns the logical MATLAB class represented by this exact buffer.
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match self {
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    /// Construct a one-element buffer preserving the scalar's MATLAB integer
+    /// class.
+    pub fn from_scalar(value: IntValue) -> Self {
+        match value {
+            IntValue::I8(value) => Self::I8(vec![value]),
+            IntValue::I16(value) => Self::I16(vec![value]),
+            IntValue::I32(value) => Self::I32(vec![value]),
+            IntValue::I64(value) => Self::I64(vec![value]),
+            IntValue::U8(value) => Self::U8(vec![value]),
+            IntValue::U16(value) => Self::U16(vec![value]),
+            IntValue::U32(value) => Self::U32(vec![value]),
+            IntValue::U64(value) => Self::U64(vec![value]),
+        }
+    }
+
     pub fn len(&self) -> usize {
         match self {
             Self::I8(values) => values.len(),
@@ -322,6 +530,90 @@ impl IntegerStorage {
         }
     }
 
+    /// Returns exact values in storage order.
+    pub fn exact_values(&self) -> Vec<IntValue> {
+        (0..self.len())
+            .map(|index| {
+                self.value_at(index)
+                    .expect("integer storage index is valid")
+            })
+            .collect()
+    }
+
+    /// Converts an exact integer scalar to this storage class using the
+    /// round-and-saturate assignment semantics used by MATLAB integer arrays.
+    pub fn cast_exact_assignment(&self, value: &IntValue) -> IntValue {
+        match self {
+            Self::I8(_) => IntValue::I8(value.to_i64().clamp(i8::MIN as i64, i8::MAX as i64) as i8),
+            Self::I16(_) => {
+                IntValue::I16(value.to_i64().clamp(i16::MIN as i64, i16::MAX as i64) as i16)
+            }
+            Self::I32(_) => {
+                IntValue::I32(value.to_i64().clamp(i32::MIN as i64, i32::MAX as i64) as i32)
+            }
+            Self::I64(_) => IntValue::I64(value.to_i64()),
+            Self::U8(_) => IntValue::U8(cast_exact_unsigned(value, u8::MAX as u64) as u8),
+            Self::U16(_) => IntValue::U16(cast_exact_unsigned(value, u16::MAX as u64) as u16),
+            Self::U32(_) => IntValue::U32(cast_exact_unsigned(value, u32::MAX as u64) as u32),
+            Self::U64(_) => IntValue::U64(cast_exact_unsigned(value, u64::MAX)),
+        }
+    }
+
+    /// Converts a floating scalar to this storage class using the
+    /// round-and-saturate assignment semantics used by MATLAB integer arrays.
+    pub fn cast_f64_assignment(&self, value: f64) -> IntValue {
+        match self {
+            Self::I8(_) => {
+                IntValue::I8(cast_f64_signed(value, i8::MIN as i64, i8::MAX as i64) as i8)
+            }
+            Self::I16(_) => {
+                IntValue::I16(cast_f64_signed(value, i16::MIN as i64, i16::MAX as i64) as i16)
+            }
+            Self::I32(_) => {
+                IntValue::I32(cast_f64_signed(value, i32::MIN as i64, i32::MAX as i64) as i32)
+            }
+            Self::I64(_) => IntValue::I64(cast_f64_signed(value, i64::MIN, i64::MAX)),
+            Self::U8(_) => IntValue::U8(cast_f64_unsigned(value, u8::MAX as u64) as u8),
+            Self::U16(_) => IntValue::U16(cast_f64_unsigned(value, u16::MAX as u64) as u16),
+            Self::U32(_) => IntValue::U32(cast_f64_unsigned(value, u32::MAX as u64) as u32),
+            Self::U64(_) => IntValue::U64(cast_f64_unsigned(value, u64::MAX)),
+        }
+    }
+
+    /// Rebuilds this homogeneous storage class from exact values.
+    pub fn from_exact_values_like(&self, values: Vec<IntValue>) -> Result<Self, String> {
+        macro_rules! rebuild {
+            ($variant:ident, $value_variant:ident) => {{
+                let mut output = Vec::with_capacity(values.len());
+                for value in values {
+                    let IntValue::$value_variant(value) = value else {
+                        return Err("integer storage class mismatch".into());
+                    };
+                    output.push(value);
+                }
+                Ok(Self::$variant(output))
+            }};
+        }
+        match self {
+            Self::I8(_) => rebuild!(I8, I8),
+            Self::I16(_) => rebuild!(I16, I16),
+            Self::I32(_) => rebuild!(I32, I32),
+            Self::I64(_) => rebuild!(I64, I64),
+            Self::U8(_) => rebuild!(U8, U8),
+            Self::U16(_) => rebuild!(U16, U16),
+            Self::U32(_) => rebuild!(U32, U32),
+            Self::U64(_) => rebuild!(U64, U64),
+        }
+    }
+
+    /// Applies a structural reorder while preserving this exact storage class.
+    pub fn reorder(
+        &self,
+        reorder: impl Fn(&[IntValue]) -> Result<Vec<IntValue>, String>,
+    ) -> Result<Self, String> {
+        self.from_exact_values_like(reorder(&self.exact_values())?)
+    }
+
     /// Allocates zeros while preserving this integer class.
     pub fn zeros_like(&self, len: usize) -> Self {
         match self {
@@ -333,6 +625,20 @@ impl IntegerStorage {
             Self::U16(_) => Self::U16(vec![0; len]),
             Self::U32(_) => Self::U32(vec![0; len]),
             Self::U64(_) => Self::U64(vec![0; len]),
+        }
+    }
+
+    /// Allocates ones while preserving this integer class.
+    pub fn ones_like(&self, len: usize) -> Self {
+        match self {
+            Self::I8(_) => Self::I8(vec![1; len]),
+            Self::I16(_) => Self::I16(vec![1; len]),
+            Self::I32(_) => Self::I32(vec![1; len]),
+            Self::I64(_) => Self::I64(vec![1; len]),
+            Self::U8(_) => Self::U8(vec![1; len]),
+            Self::U16(_) => Self::U16(vec![1; len]),
+            Self::U32(_) => Self::U32(vec![1; len]),
+            Self::U64(_) => Self::U64(vec![1; len]),
         }
     }
 
@@ -354,6 +660,740 @@ impl IntegerStorage {
             )),
         }
     }
+
+    /// Converts and stores an exact scalar without materializing a floating
+    /// compatibility value or rebuilding the backing buffer.
+    pub fn set_exact_assignment(&mut self, index: usize, value: &IntValue) -> Result<(), String> {
+        let value = self.cast_exact_assignment(value);
+        self.set_value(index, value)
+    }
+
+    /// Converts and stores a floating scalar using integer assignment
+    /// semantics without rebuilding the backing buffer.
+    pub fn set_f64_assignment(&mut self, index: usize, value: f64) -> Result<(), String> {
+        let value = self.cast_f64_assignment(value);
+        self.set_value(index, value)
+    }
+
+    /// Builds storage with this buffer's class from same-class exact values.
+    pub fn from_same_class_values(&self, values: Vec<IntValue>) -> Result<Self, String> {
+        macro_rules! collect_values {
+            ($variant:ident, $type:ty) => {
+                values
+                    .into_iter()
+                    .map(|value| match value {
+                        IntValue::$variant(value) => Ok(value),
+                        value => Err(format!(
+                            "cannot store {} in {} integer storage",
+                            value.class_name(),
+                            self.class_name()
+                        )),
+                    })
+                    .collect::<Result<Vec<$type>, String>>()
+                    .map(Self::$variant)
+            };
+        }
+        match self {
+            Self::I8(_) => collect_values!(I8, i8),
+            Self::I16(_) => collect_values!(I16, i16),
+            Self::I32(_) => collect_values!(I32, i32),
+            Self::I64(_) => collect_values!(I64, i64),
+            Self::U8(_) => collect_values!(U8, u8),
+            Self::U16(_) => collect_values!(U16, u16),
+            Self::U32(_) => collect_values!(U32, u32),
+            Self::U64(_) => collect_values!(U64, u64),
+        }
+    }
+}
+
+/// Authoritative homogeneous host storage for a real numeric array.
+///
+/// Each variant owns values in the native Rust representation for its MATLAB
+/// numeric class. Consumers must dispatch on the variant or request a matching
+/// typed slice; this type deliberately provides no implicit `f64` view.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NumericStorage {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+}
+
+/// One exact scalar read from or written to [`NumericStorage`].
+///
+/// The variant is part of the value: extracting an integer does not first
+/// route it through a floating-point representation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumericScalar {
+    F64(f64),
+    F32(f32),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+}
+
+impl From<IntValue> for NumericScalar {
+    fn from(value: IntValue) -> Self {
+        match value {
+            IntValue::I8(value) => Self::I8(value),
+            IntValue::I16(value) => Self::I16(value),
+            IntValue::I32(value) => Self::I32(value),
+            IntValue::I64(value) => Self::I64(value),
+            IntValue::U8(value) => Self::U8(value),
+            IntValue::U16(value) => Self::U16(value),
+            IntValue::U32(value) => Self::U32(value),
+            IntValue::U64(value) => Self::U64(value),
+        }
+    }
+}
+
+impl NumericScalar {
+    pub fn into_int_value(self) -> Option<IntValue> {
+        match self {
+            Self::I8(value) => Some(IntValue::I8(value)),
+            Self::I16(value) => Some(IntValue::I16(value)),
+            Self::I32(value) => Some(IntValue::I32(value)),
+            Self::I64(value) => Some(IntValue::I64(value)),
+            Self::U8(value) => Some(IntValue::U8(value)),
+            Self::U16(value) => Some(IntValue::U16(value)),
+            Self::U32(value) => Some(IntValue::U32(value)),
+            Self::U64(value) => Some(IntValue::U64(value)),
+            Self::F64(_) | Self::F32(_) => None,
+        }
+    }
+}
+
+/// Immutable typed view over authoritative real numeric storage.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumericStorageView<'a> {
+    F64(&'a [f64]),
+    F32(&'a [f32]),
+    I8(&'a [i8]),
+    I16(&'a [i16]),
+    I32(&'a [i32]),
+    I64(&'a [i64]),
+    U8(&'a [u8]),
+    U16(&'a [u16]),
+    U32(&'a [u32]),
+    U64(&'a [u64]),
+}
+
+/// Mutable typed view over authoritative real numeric storage.
+#[derive(Debug)]
+pub enum NumericStorageViewMut<'a> {
+    F64(&'a mut [f64]),
+    F32(&'a mut [f32]),
+    I8(&'a mut [i8]),
+    I16(&'a mut [i16]),
+    I32(&'a mut [i32]),
+    I64(&'a mut [i64]),
+    U8(&'a mut [u8]),
+    U16(&'a mut [u16]),
+    U32(&'a mut [u32]),
+    U64(&'a mut [u64]),
+}
+
+impl NumericStorage {
+    pub fn zeros(dtype: NumericDType, len: usize) -> Self {
+        match dtype {
+            NumericDType::F64 => Self::F64(vec![0.0; len]),
+            NumericDType::F32 => Self::F32(vec![0.0; len]),
+            NumericDType::I8 => Self::I8(vec![0; len]),
+            NumericDType::I16 => Self::I16(vec![0; len]),
+            NumericDType::I32 => Self::I32(vec![0; len]),
+            NumericDType::I64 => Self::I64(vec![0; len]),
+            NumericDType::U8 => Self::U8(vec![0; len]),
+            NumericDType::U16 => Self::U16(vec![0; len]),
+            NumericDType::U32 => Self::U32(vec![0; len]),
+            NumericDType::U64 => Self::U64(vec![0; len]),
+        }
+    }
+
+    pub fn ones(dtype: NumericDType, len: usize) -> Self {
+        match dtype {
+            NumericDType::F64 => Self::F64(vec![1.0; len]),
+            NumericDType::F32 => Self::F32(vec![1.0; len]),
+            NumericDType::I8 => Self::I8(vec![1; len]),
+            NumericDType::I16 => Self::I16(vec![1; len]),
+            NumericDType::I32 => Self::I32(vec![1; len]),
+            NumericDType::I64 => Self::I64(vec![1; len]),
+            NumericDType::U8 => Self::U8(vec![1; len]),
+            NumericDType::U16 => Self::U16(vec![1; len]),
+            NumericDType::U32 => Self::U32(vec![1; len]),
+            NumericDType::U64 => Self::U64(vec![1; len]),
+        }
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    pub fn class_name(&self) -> &'static str {
+        self.numeric_dtype().class_name()
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn checked_byte_len(&self) -> Option<usize> {
+        self.len().checked_mul(self.numeric_dtype().byte_size())
+    }
+
+    pub fn value_at(&self, index: usize) -> Option<NumericScalar> {
+        match self {
+            Self::F64(values) => values.get(index).copied().map(NumericScalar::F64),
+            Self::F32(values) => values.get(index).copied().map(NumericScalar::F32),
+            Self::I8(values) => values.get(index).copied().map(NumericScalar::I8),
+            Self::I16(values) => values.get(index).copied().map(NumericScalar::I16),
+            Self::I32(values) => values.get(index).copied().map(NumericScalar::I32),
+            Self::I64(values) => values.get(index).copied().map(NumericScalar::I64),
+            Self::U8(values) => values.get(index).copied().map(NumericScalar::U8),
+            Self::U16(values) => values.get(index).copied().map(NumericScalar::U16),
+            Self::U32(values) => values.get(index).copied().map(NumericScalar::U32),
+            Self::U64(values) => values.get(index).copied().map(NumericScalar::U64),
+        }
+    }
+
+    /// Stores a same-class scalar without numeric conversion.
+    pub fn set_value(&mut self, index: usize, value: NumericScalar) -> Result<(), String> {
+        let storage_class = self.class_name();
+        let value_class = value.class_name();
+        match (self, value) {
+            (Self::F64(values), NumericScalar::F64(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::F32(values), NumericScalar::F32(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::I8(values), NumericScalar::I8(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::I16(values), NumericScalar::I16(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::I32(values), NumericScalar::I32(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::I64(values), NumericScalar::I64(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::U8(values), NumericScalar::U8(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::U16(values), NumericScalar::U16(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::U32(values), NumericScalar::U32(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            (Self::U64(values), NumericScalar::U64(value)) => {
+                set_numeric_element(values, index, value, storage_class)
+            }
+            _ => Err(format!(
+                "cannot store {value_class} in {storage_class} numeric storage"
+            )),
+        }
+    }
+
+    pub fn view(&self) -> NumericStorageView<'_> {
+        match self {
+            Self::F64(values) => NumericStorageView::F64(values),
+            Self::F32(values) => NumericStorageView::F32(values),
+            Self::I8(values) => NumericStorageView::I8(values),
+            Self::I16(values) => NumericStorageView::I16(values),
+            Self::I32(values) => NumericStorageView::I32(values),
+            Self::I64(values) => NumericStorageView::I64(values),
+            Self::U8(values) => NumericStorageView::U8(values),
+            Self::U16(values) => NumericStorageView::U16(values),
+            Self::U32(values) => NumericStorageView::U32(values),
+            Self::U64(values) => NumericStorageView::U64(values),
+        }
+    }
+
+    pub fn view_mut(&mut self) -> NumericStorageViewMut<'_> {
+        match self {
+            Self::F64(values) => NumericStorageViewMut::F64(values),
+            Self::F32(values) => NumericStorageViewMut::F32(values),
+            Self::I8(values) => NumericStorageViewMut::I8(values),
+            Self::I16(values) => NumericStorageViewMut::I16(values),
+            Self::I32(values) => NumericStorageViewMut::I32(values),
+            Self::I64(values) => NumericStorageViewMut::I64(values),
+            Self::U8(values) => NumericStorageViewMut::U8(values),
+            Self::U16(values) => NumericStorageViewMut::U16(values),
+            Self::U32(values) => NumericStorageViewMut::U32(values),
+            Self::U64(values) => NumericStorageViewMut::U64(values),
+        }
+    }
+
+    pub fn as_f64_slice(&self) -> Option<&[f64]> {
+        match self {
+            Self::F64(values) => Some(values),
+            Self::F32(_)
+            | Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => None,
+        }
+    }
+
+    pub fn as_f32_slice(&self) -> Option<&[f32]> {
+        match self {
+            Self::F32(values) => Some(values),
+            Self::F64(_)
+            | Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => None,
+        }
+    }
+
+    pub fn as_f64_slice_mut(&mut self) -> Option<&mut [f64]> {
+        match self {
+            Self::F64(values) => Some(values),
+            Self::F32(_)
+            | Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => None,
+        }
+    }
+
+    pub fn as_f32_slice_mut(&mut self) -> Option<&mut [f32]> {
+        match self {
+            Self::F32(values) => Some(values),
+            Self::F64(_)
+            | Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => None,
+        }
+    }
+
+    pub fn validate_shape(&self, shape: &[usize]) -> Result<(), String> {
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
+        let Some(expected) = expected else {
+            return Err(format!("numeric tensor shape {shape:?} overflows usize"));
+        };
+        if self.len() != expected {
+            return Err(format!(
+                "{} storage length {} doesn't match shape {:?} ({} elements)",
+                self.class_name(),
+                self.len(),
+                shape,
+                expected
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn zeros_like(&self, len: usize) -> Self {
+        Self::zeros(self.numeric_dtype(), len)
+    }
+
+    pub fn ones_like(&self, len: usize) -> Self {
+        Self::ones(self.numeric_dtype(), len)
+    }
+
+    /// Resizes storage in class, filling new elements with exact zero.
+    pub fn resize_zeroed(&mut self, len: usize) {
+        match self {
+            Self::F64(values) => values.resize(len, 0.0),
+            Self::F32(values) => values.resize(len, 0.0),
+            Self::I8(values) => values.resize(len, 0),
+            Self::I16(values) => values.resize(len, 0),
+            Self::I32(values) => values.resize(len, 0),
+            Self::I64(values) => values.resize(len, 0),
+            Self::U8(values) => values.resize(len, 0),
+            Self::U16(values) => values.resize(len, 0),
+            Self::U32(values) => values.resize(len, 0),
+            Self::U64(values) => values.resize(len, 0),
+        }
+    }
+
+    /// Removes zero-based positions while preserving class and relative order.
+    pub fn remove_positions(&mut self, positions: &[usize]) -> Result<(), String> {
+        let mut positions = positions.to_vec();
+        positions.sort_unstable();
+        positions.dedup();
+        if let Some(&position) = positions.last() {
+            if position >= self.len() {
+                return Err(format!(
+                    "{} numeric storage removal index {} is out of bounds for {} elements",
+                    self.class_name(),
+                    position,
+                    self.len()
+                ));
+            }
+        }
+        positions.reverse();
+        macro_rules! remove_positions {
+            ($values:expr) => {
+                for &position in &positions {
+                    $values.remove(position);
+                }
+            };
+        }
+        match self {
+            Self::F64(values) => remove_positions!(values),
+            Self::F32(values) => remove_positions!(values),
+            Self::I8(values) => remove_positions!(values),
+            Self::I16(values) => remove_positions!(values),
+            Self::I32(values) => remove_positions!(values),
+            Self::I64(values) => remove_positions!(values),
+            Self::U8(values) => remove_positions!(values),
+            Self::U16(values) => remove_positions!(values),
+            Self::U32(values) => remove_positions!(values),
+            Self::U64(values) => remove_positions!(values),
+        }
+        Ok(())
+    }
+
+    /// Clones storage for a new shape after validating its element count.
+    ///
+    /// Shape remains container metadata rather than duplicated storage state.
+    pub fn clone_for_shape(&self, shape: &[usize]) -> Result<Self, String> {
+        self.validate_shape(shape)?;
+        Ok(self.clone())
+    }
+
+    /// Selects elements by zero-based flat index without changing class.
+    pub fn gather(&self, indices: &[usize]) -> Result<Self, String> {
+        let class_name = self.class_name();
+        match self {
+            Self::F64(values) => gather_numeric_values(values, indices, class_name).map(Self::F64),
+            Self::F32(values) => gather_numeric_values(values, indices, class_name).map(Self::F32),
+            Self::I8(values) => gather_numeric_values(values, indices, class_name).map(Self::I8),
+            Self::I16(values) => gather_numeric_values(values, indices, class_name).map(Self::I16),
+            Self::I32(values) => gather_numeric_values(values, indices, class_name).map(Self::I32),
+            Self::I64(values) => gather_numeric_values(values, indices, class_name).map(Self::I64),
+            Self::U8(values) => gather_numeric_values(values, indices, class_name).map(Self::U8),
+            Self::U16(values) => gather_numeric_values(values, indices, class_name).map(Self::U16),
+            Self::U32(values) => gather_numeric_values(values, indices, class_name).map(Self::U32),
+            Self::U64(values) => gather_numeric_values(values, indices, class_name).map(Self::U64),
+        }
+    }
+
+    /// Reorders all elements using zero-based flat source indices.
+    pub fn reorder(&self, indices: &[usize]) -> Result<Self, String> {
+        if indices.len() != self.len() {
+            return Err(format!(
+                "{} reorder has {} indices for {} elements",
+                self.class_name(),
+                indices.len(),
+                self.len()
+            ));
+        }
+        self.gather(indices)
+    }
+
+    /// Explicitly materializes this storage in the `f64` computation domain.
+    ///
+    /// Integer values outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(&self) -> Vec<f64> {
+        match self {
+            Self::F64(values) => values.clone(),
+            Self::F32(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::I8(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::I16(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::I32(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::I64(values) => values.iter().map(|&value| value as f64).collect(),
+            Self::U8(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::U16(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::U32(values) => values.iter().map(|&value| f64::from(value)).collect(),
+            Self::U64(values) => values.iter().map(|&value| value as f64).collect(),
+        }
+    }
+
+    /// Explicitly materializes this storage in the `f32` computation domain.
+    ///
+    /// Wider floating and integer values may lose precision or overflow.
+    pub fn materialize_f32(&self) -> Vec<f32> {
+        match self {
+            Self::F64(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::F32(values) => values.clone(),
+            Self::I8(values) => values.iter().map(|&value| f32::from(value)).collect(),
+            Self::I16(values) => values.iter().map(|&value| f32::from(value)).collect(),
+            Self::I32(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::I64(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::U8(values) => values.iter().map(|&value| f32::from(value)).collect(),
+            Self::U16(values) => values.iter().map(|&value| f32::from(value)).collect(),
+            Self::U32(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::U64(values) => values.iter().map(|&value| value as f32).collect(),
+        }
+    }
+
+    pub fn from_integer_storage(storage: IntegerStorage) -> Self {
+        match storage {
+            IntegerStorage::I8(values) => Self::I8(values),
+            IntegerStorage::I16(values) => Self::I16(values),
+            IntegerStorage::I32(values) => Self::I32(values),
+            IntegerStorage::I64(values) => Self::I64(values),
+            IntegerStorage::U8(values) => Self::U8(values),
+            IntegerStorage::U16(values) => Self::U16(values),
+            IntegerStorage::U32(values) => Self::U32(values),
+            IntegerStorage::U64(values) => Self::U64(values),
+        }
+    }
+
+    pub fn into_integer_storage(self) -> Result<IntegerStorage, Self> {
+        match self {
+            Self::I8(values) => Ok(IntegerStorage::I8(values)),
+            Self::I16(values) => Ok(IntegerStorage::I16(values)),
+            Self::I32(values) => Ok(IntegerStorage::I32(values)),
+            Self::I64(values) => Ok(IntegerStorage::I64(values)),
+            Self::U8(values) => Ok(IntegerStorage::U8(values)),
+            Self::U16(values) => Ok(IntegerStorage::U16(values)),
+            Self::U32(values) => Ok(IntegerStorage::U32(values)),
+            Self::U64(values) => Ok(IntegerStorage::U64(values)),
+            storage @ (Self::F64(_) | Self::F32(_)) => Err(storage),
+        }
+    }
+}
+
+impl NumericScalar {
+    pub fn numeric_dtype(self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    pub fn class_name(self) -> &'static str {
+        self.numeric_dtype().class_name()
+    }
+
+    pub fn is_zero(self) -> bool {
+        match self {
+            Self::F64(value) => value == 0.0,
+            Self::F32(value) => value == 0.0,
+            Self::I8(value) => value == 0,
+            Self::I16(value) => value == 0,
+            Self::I32(value) => value == 0,
+            Self::I64(value) => value == 0,
+            Self::U8(value) => value == 0,
+            Self::U16(value) => value == 0,
+            Self::U32(value) => value == 0,
+            Self::U64(value) => value == 0,
+        }
+    }
+
+    pub fn is_finite(self) -> bool {
+        match self {
+            Self::F64(value) => value.is_finite(),
+            Self::F32(value) => value.is_finite(),
+            Self::I8(_)
+            | Self::I16(_)
+            | Self::I32(_)
+            | Self::I64(_)
+            | Self::U8(_)
+            | Self::U16(_)
+            | Self::U32(_)
+            | Self::U64(_) => true,
+        }
+    }
+
+    /// Explicitly materializes this scalar in the `f64` computation domain.
+    ///
+    /// Integer values outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(self) -> f64 {
+        match self {
+            Self::F64(value) => value,
+            Self::F32(value) => f64::from(value),
+            Self::I8(value) => f64::from(value),
+            Self::I16(value) => f64::from(value),
+            Self::I32(value) => f64::from(value),
+            Self::I64(value) => value as f64,
+            Self::U8(value) => f64::from(value),
+            Self::U16(value) => f64::from(value),
+            Self::U32(value) => f64::from(value),
+            Self::U64(value) => value as f64,
+        }
+    }
+}
+
+impl NumericStorageView<'_> {
+    pub fn numeric_dtype(self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    pub fn len(self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl NumericStorageViewMut<'_> {
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::I8(_) => NumericDType::I8,
+            Self::I16(_) => NumericDType::I16,
+            Self::I32(_) => NumericDType::I32,
+            Self::I64(_) => NumericDType::I64,
+            Self::U8(_) => NumericDType::U8,
+            Self::U16(_) => NumericDType::U16,
+            Self::U32(_) => NumericDType::U32,
+            Self::U64(_) => NumericDType::U64,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::I8(values) => values.len(),
+            Self::I16(values) => values.len(),
+            Self::I32(values) => values.len(),
+            Self::I64(values) => values.len(),
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+            Self::U64(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl From<Vec<f64>> for NumericStorage {
+    fn from(values: Vec<f64>) -> Self {
+        Self::F64(values)
+    }
+}
+
+impl From<Vec<f32>> for NumericStorage {
+    fn from(values: Vec<f32>) -> Self {
+        Self::F32(values)
+    }
+}
+
+impl From<IntegerStorage> for NumericStorage {
+    fn from(storage: IntegerStorage) -> Self {
+        Self::from_integer_storage(storage)
+    }
+}
+
+fn cast_exact_unsigned(value: &IntValue, max: u64) -> u64 {
+    match value {
+        IntValue::U64(value) => (*value).min(max),
+        value => (value.to_i64().max(0) as u64).min(max),
+    }
+}
+
+fn cast_f64_signed(value: f64, min: i64, max: i64) -> i64 {
+    if value.is_nan() {
+        0
+    } else if value.is_infinite() {
+        if value.is_sign_negative() {
+            min
+        } else {
+            max
+        }
+    } else {
+        value.round().clamp(min as f64, max as f64) as i64
+    }
+}
+
+fn cast_f64_unsigned(value: f64, max: u64) -> u64 {
+    if value.is_nan() || value.is_sign_negative() {
+        0
+    } else if value.is_infinite() {
+        max
+    } else {
+        value.round().clamp(0.0, max as f64) as u64
+    }
 }
 
 fn set_integer_element<T>(values: &mut [T], index: usize, value: T) -> Result<(), String> {
@@ -364,14 +1404,50 @@ fn set_integer_element<T>(values: &mut [T], index: usize, value: T) -> Result<()
     Ok(())
 }
 
+fn set_numeric_element<T>(
+    values: &mut [T],
+    index: usize,
+    value: T,
+    class_name: &str,
+) -> Result<(), String> {
+    let slot = values
+        .get_mut(index)
+        .ok_or_else(|| format!("{class_name} numeric storage index {index} is out of bounds"))?;
+    *slot = value;
+    Ok(())
+}
+
+fn gather_numeric_values<T: Copy>(
+    values: &[T],
+    indices: &[usize],
+    class_name: &str,
+) -> Result<Vec<T>, String> {
+    indices
+        .iter()
+        .enumerate()
+        .map(|(output_index, &source_index)| {
+            values.get(source_index).copied().ok_or_else(|| {
+                format!(
+                    "{class_name} numeric storage index {source_index} at reorder position {output_index} is out of bounds"
+                )
+            })
+        })
+        .collect()
+}
+
 impl NumericDType {
     pub fn class_name(self) -> &'static str {
         match self {
             NumericDType::F64 => "double",
             NumericDType::F32 => "single",
+            NumericDType::I8 => "int8",
+            NumericDType::I16 => "int16",
+            NumericDType::I32 => "int32",
+            NumericDType::I64 => "int64",
             NumericDType::U8 => "uint8",
             NumericDType::U16 => "uint16",
             NumericDType::U32 => "uint32",
+            NumericDType::U64 => "uint64",
         }
     }
 
@@ -379,16 +1455,25 @@ impl NumericDType {
         match self {
             NumericDType::F64 => 8,
             NumericDType::F32 => 4,
+            NumericDType::I8 => 1,
+            NumericDType::I16 => 2,
+            NumericDType::I32 => 4,
+            NumericDType::I64 => 8,
             NumericDType::U8 => 1,
             NumericDType::U16 => 2,
             NumericDType::U32 => 4,
+            NumericDType::U64 => 8,
         }
     }
 }
 
 #[cfg(test)]
 mod integer_storage_tests {
-    use super::{IntegerStorage, Tensor};
+    use super::{
+        ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+        NumericDType, NumericScalar, NumericStorage, NumericStorageView, NumericStorageViewMut,
+        Tensor,
+    };
 
     #[test]
     fn uint64_tensor_keeps_exact_backing_values() {
@@ -399,7 +1484,402 @@ mod integer_storage_tests {
             tensor.integer_storage(),
             Some(&IntegerStorage::U64(vec![0, u64::MAX]))
         );
-        assert_eq!(tensor.data[1], u64::MAX as f64);
+        assert_eq!(tensor.materialize_f64()[1], u64::MAX as f64);
+    }
+
+    #[test]
+    fn integer_tensor_reports_its_exact_matlab_dtype() {
+        let cases = [
+            (IntegerStorage::I8(vec![0]), NumericDType::I8),
+            (IntegerStorage::I16(vec![0]), NumericDType::I16),
+            (IntegerStorage::I32(vec![0]), NumericDType::I32),
+            (IntegerStorage::I64(vec![0]), NumericDType::I64),
+            (IntegerStorage::U8(vec![0]), NumericDType::U8),
+            (IntegerStorage::U16(vec![0]), NumericDType::U16),
+            (IntegerStorage::U32(vec![0]), NumericDType::U32),
+            (IntegerStorage::U64(vec![0]), NumericDType::U64),
+        ];
+
+        for (storage, dtype) in cases {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+            assert_eq!(tensor.numeric_dtype(), dtype);
+            assert_eq!(
+                tensor.numeric_dtype().class_name(),
+                tensor.integer_storage().unwrap().class_name()
+            );
+        }
+    }
+
+    #[test]
+    fn single_constructor_preserves_f32_values_and_dtype_across_storage_migration() {
+        let source = vec![f32::MIN_POSITIVE, 1.0 / 10.0, f32::MAX];
+        let expected: Vec<f64> = source.iter().map(|&value| f64::from(value)).collect();
+        let tensor = Tensor::from_f32(source.clone(), vec![1, 3]).expect("single tensor");
+
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.materialize_f64(), expected);
+        assert!(tensor.integer_storage().is_none());
+        assert_eq!(
+            tensor.into_numeric_storage(),
+            Ok(NumericStorage::F32(source))
+        );
+    }
+
+    #[test]
+    fn numeric_storage_derives_dtype_length_and_bytes_for_every_native_class() {
+        let cases = [
+            (NumericStorage::F64(vec![1.0, 2.0]), NumericDType::F64),
+            (NumericStorage::F32(vec![1.0, 2.0]), NumericDType::F32),
+            (NumericStorage::I8(vec![1, 2]), NumericDType::I8),
+            (NumericStorage::I16(vec![1, 2]), NumericDType::I16),
+            (NumericStorage::I32(vec![1, 2]), NumericDType::I32),
+            (NumericStorage::I64(vec![1, 2]), NumericDType::I64),
+            (NumericStorage::U8(vec![1, 2]), NumericDType::U8),
+            (NumericStorage::U16(vec![1, 2]), NumericDType::U16),
+            (NumericStorage::U32(vec![1, 2]), NumericDType::U32),
+            (NumericStorage::U64(vec![1, 2]), NumericDType::U64),
+        ];
+
+        for (storage, dtype) in cases {
+            assert_eq!(storage.numeric_dtype(), dtype);
+            assert_eq!(storage.class_name(), dtype.class_name());
+            assert_eq!(storage.len(), 2);
+            assert!(!storage.is_empty());
+            assert_eq!(storage.checked_byte_len(), Some(2 * dtype.byte_size()));
+            assert_eq!(storage.view().numeric_dtype(), dtype);
+            assert_eq!(storage.view().len(), 2);
+            assert!(!storage.view().is_empty());
+        }
+    }
+
+    #[test]
+    fn numeric_storage_views_are_typed_and_mutate_without_coercion() {
+        let mut cases = [
+            NumericStorage::F64(vec![0.0]),
+            NumericStorage::F32(vec![0.0]),
+            NumericStorage::I8(vec![0]),
+            NumericStorage::I16(vec![0]),
+            NumericStorage::I32(vec![0]),
+            NumericStorage::I64(vec![0]),
+            NumericStorage::U8(vec![0]),
+            NumericStorage::U16(vec![0]),
+            NumericStorage::U32(vec![0]),
+            NumericStorage::U64(vec![0]),
+        ];
+
+        for storage in &mut cases {
+            let dtype = storage.numeric_dtype();
+            let view = storage.view_mut();
+            assert_eq!(view.numeric_dtype(), dtype);
+            assert_eq!(view.len(), 1);
+            assert!(!view.is_empty());
+            match view {
+                NumericStorageViewMut::F64(values) => values[0] = 64.0,
+                NumericStorageViewMut::F32(values) => values[0] = 32.0,
+                NumericStorageViewMut::I8(values) => values[0] = -8,
+                NumericStorageViewMut::I16(values) => values[0] = -16,
+                NumericStorageViewMut::I32(values) => values[0] = -32,
+                NumericStorageViewMut::I64(values) => values[0] = -64,
+                NumericStorageViewMut::U8(values) => values[0] = 8,
+                NumericStorageViewMut::U16(values) => values[0] = 16,
+                NumericStorageViewMut::U32(values) => values[0] = 32,
+                NumericStorageViewMut::U64(values) => values[0] = 64,
+            }
+        }
+
+        assert!(matches!(cases[0].view(), NumericStorageView::F64([64.0])));
+        assert!(matches!(cases[1].view(), NumericStorageView::F32([32.0])));
+        assert!(matches!(cases[2].view(), NumericStorageView::I8([-8])));
+        assert!(matches!(cases[3].view(), NumericStorageView::I16([-16])));
+        assert!(matches!(cases[4].view(), NumericStorageView::I32([-32])));
+        assert!(matches!(cases[5].view(), NumericStorageView::I64([-64])));
+        assert!(matches!(cases[6].view(), NumericStorageView::U8([8])));
+        assert!(matches!(cases[7].view(), NumericStorageView::U16([16])));
+        assert!(matches!(cases[8].view(), NumericStorageView::U32([32])));
+        assert!(matches!(cases[9].view(), NumericStorageView::U64([64])));
+    }
+
+    #[test]
+    fn numeric_storage_shape_validation_is_exact_and_overflow_safe() {
+        let storage = NumericStorage::U64(vec![0, u64::MAX]);
+        assert_eq!(storage.validate_shape(&[1, 2]), Ok(()));
+        assert_eq!(storage.validate_shape(&[2]), Ok(()));
+        assert!(storage.validate_shape(&[3]).is_err());
+        assert!(storage.validate_shape(&[usize::MAX, 2]).is_err());
+
+        let empty = NumericStorage::I16(Vec::new());
+        assert_eq!(empty.validate_shape(&[0, 7, 3]), Ok(()));
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn numeric_storage_moves_integer_buffers_without_floating_conversion() {
+        let exact = IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]);
+        let storage = NumericStorage::from_integer_storage(exact.clone());
+
+        assert_eq!(storage.numeric_dtype(), NumericDType::U64);
+        assert!(storage.as_f64_slice().is_none());
+        assert!(storage.as_f32_slice().is_none());
+        assert_eq!(storage.into_integer_storage(), Ok(exact));
+
+        let floating = NumericStorage::F32(vec![0.1]);
+        assert_eq!(
+            floating.clone().into_integer_storage(),
+            Err(floating.clone())
+        );
+        assert_eq!(floating.as_f32_slice(), Some(&[0.1][..]));
+        assert!(floating.as_f64_slice().is_none());
+    }
+
+    #[test]
+    fn numeric_storage_reads_and_writes_exact_scalars_for_every_native_class() {
+        let mut cases = [
+            (NumericStorage::F64(vec![0.0]), NumericScalar::F64(64.25)),
+            (NumericStorage::F32(vec![0.0]), NumericScalar::F32(32.25)),
+            (NumericStorage::I8(vec![0]), NumericScalar::I8(i8::MIN)),
+            (NumericStorage::I16(vec![0]), NumericScalar::I16(i16::MIN)),
+            (NumericStorage::I32(vec![0]), NumericScalar::I32(i32::MIN)),
+            (NumericStorage::I64(vec![0]), NumericScalar::I64(i64::MIN)),
+            (NumericStorage::U8(vec![0]), NumericScalar::U8(u8::MAX)),
+            (NumericStorage::U16(vec![0]), NumericScalar::U16(u16::MAX)),
+            (NumericStorage::U32(vec![0]), NumericScalar::U32(u32::MAX)),
+            (NumericStorage::U64(vec![0]), NumericScalar::U64(u64::MAX)),
+        ];
+
+        for (storage, value) in &mut cases {
+            assert_eq!(value.numeric_dtype(), storage.numeric_dtype());
+            assert_eq!(value.class_name(), storage.class_name());
+            storage.set_value(0, *value).expect("same-class write");
+            assert_eq!(storage.value_at(0), Some(*value));
+            assert_eq!(storage.value_at(1), None);
+        }
+
+        assert!(cases[9].0.set_value(0, NumericScalar::F64(1.0)).is_err());
+        assert!(cases[9].0.set_value(1, NumericScalar::U64(1)).is_err());
+    }
+
+    #[test]
+    fn numeric_scalar_zero_and_finite_predicates_cover_every_native_class() {
+        let zeros = [
+            NumericScalar::F64(-0.0),
+            NumericScalar::F32(-0.0),
+            NumericScalar::I8(0),
+            NumericScalar::I16(0),
+            NumericScalar::I32(0),
+            NumericScalar::I64(0),
+            NumericScalar::U8(0),
+            NumericScalar::U16(0),
+            NumericScalar::U32(0),
+            NumericScalar::U64(0),
+        ];
+        assert!(zeros.into_iter().all(NumericScalar::is_zero));
+        assert!(zeros.into_iter().all(NumericScalar::is_finite));
+
+        assert!(!NumericScalar::F64(f64::NAN).is_zero());
+        assert!(!NumericScalar::F32(f32::INFINITY).is_zero());
+        assert!(!NumericScalar::F64(f64::NAN).is_finite());
+        assert!(!NumericScalar::F32(f32::INFINITY).is_finite());
+        assert!(NumericScalar::I64(i64::MIN).is_finite());
+        assert!(NumericScalar::U64(u64::MAX).is_finite());
+    }
+
+    #[test]
+    fn numeric_scalar_f64_materialization_is_explicit_for_every_native_class() {
+        let cases = [
+            (NumericScalar::F64(64.25), 64.25),
+            (NumericScalar::F32(32.25), 32.25),
+            (NumericScalar::I8(-8), -8.0),
+            (NumericScalar::I16(-16), -16.0),
+            (NumericScalar::I32(-32), -32.0),
+            (NumericScalar::I64(-64), -64.0),
+            (NumericScalar::U8(8), 8.0),
+            (NumericScalar::U16(16), 16.0),
+            (NumericScalar::U32(32), 32.0),
+            (NumericScalar::U64(64), 64.0),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(value.materialize_f64(), expected);
+        }
+        assert_eq!(
+            NumericScalar::U64(9_007_199_254_740_993).materialize_f64(),
+            9_007_199_254_740_992.0
+        );
+    }
+
+    #[test]
+    fn numeric_storage_allocates_zero_and_one_in_every_native_class() {
+        let dtypes = [
+            NumericDType::F64,
+            NumericDType::F32,
+            NumericDType::I8,
+            NumericDType::I16,
+            NumericDType::I32,
+            NumericDType::I64,
+            NumericDType::U8,
+            NumericDType::U16,
+            NumericDType::U32,
+            NumericDType::U64,
+        ];
+
+        for dtype in dtypes {
+            let zeros = NumericStorage::zeros(dtype, 3);
+            let ones = NumericStorage::ones(dtype, 3);
+            assert_eq!(zeros.numeric_dtype(), dtype);
+            assert_eq!(ones.numeric_dtype(), dtype);
+            assert_eq!(zeros.len(), 3);
+            assert_eq!(ones.len(), 3);
+            assert_eq!(zeros, ones.zeros_like(3));
+            assert_eq!(ones, zeros.ones_like(3));
+        }
+
+        assert_eq!(
+            NumericStorage::zeros(NumericDType::U64, 2),
+            NumericStorage::U64(vec![0, 0])
+        );
+        assert_eq!(
+            NumericStorage::ones(NumericDType::F32, 2),
+            NumericStorage::F32(vec![1.0, 1.0])
+        );
+    }
+
+    #[test]
+    fn numeric_storage_gather_and_reorder_preserve_every_native_class() {
+        let cases = [
+            NumericStorage::F64(vec![1.0, 2.0, 3.0]),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0]),
+            NumericStorage::I8(vec![1, 2, 3]),
+            NumericStorage::I16(vec![1, 2, 3]),
+            NumericStorage::I32(vec![1, 2, 3]),
+            NumericStorage::I64(vec![1, 2, 3]),
+            NumericStorage::U8(vec![1, 2, 3]),
+            NumericStorage::U16(vec![1, 2, 3]),
+            NumericStorage::U32(vec![1, 2, 3]),
+            NumericStorage::U64(vec![1, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in cases {
+            assert_eq!(storage.clone_for_shape(&[1, 3]), Ok(storage.clone()));
+            assert!(storage.clone_for_shape(&[2, 2]).is_err());
+            let gathered = storage.gather(&[2, 0, 2]).expect("exact gather");
+            assert_eq!(gathered.numeric_dtype(), storage.numeric_dtype());
+            assert_eq!(gathered.value_at(0), storage.value_at(2));
+            assert_eq!(gathered.value_at(1), storage.value_at(0));
+            assert_eq!(gathered.value_at(2), storage.value_at(2));
+            assert_eq!(
+                storage.reorder(&[2, 1, 0]).unwrap().value_at(0),
+                storage.value_at(2)
+            );
+            assert!(storage.gather(&[3]).is_err());
+            assert!(storage.reorder(&[0]).is_err());
+        }
+    }
+
+    #[test]
+    fn numeric_storage_resize_and_removal_preserve_every_native_class() {
+        let cases = [
+            NumericStorage::F64(vec![1.0, 2.0, 3.0]),
+            NumericStorage::F32(vec![1.0, 2.0, 3.0]),
+            NumericStorage::I8(vec![1, 2, 3]),
+            NumericStorage::I16(vec![1, 2, 3]),
+            NumericStorage::I32(vec![1, 2, 3]),
+            NumericStorage::I64(vec![1, 2, 3]),
+            NumericStorage::U8(vec![1, 2, 3]),
+            NumericStorage::U16(vec![1, 2, 3]),
+            NumericStorage::U32(vec![1, 2, 3]),
+            NumericStorage::U64(vec![1, 9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for mut storage in cases {
+            let dtype = storage.numeric_dtype();
+            let first = storage.value_at(0);
+            let third = storage.value_at(2);
+            storage.resize_zeroed(5);
+            assert_eq!(storage.numeric_dtype(), dtype);
+            assert_eq!(storage.len(), 5);
+            assert_eq!(storage.value_at(0), first);
+            assert_eq!(storage.value_at(2), third);
+            assert_eq!(
+                storage.value_at(3).map(NumericScalar::materialize_f64),
+                Some(0.0)
+            );
+
+            storage
+                .remove_positions(&[3, 1, 3])
+                .expect("in-class removal");
+            assert_eq!(storage.numeric_dtype(), dtype);
+            assert_eq!(storage.len(), 3);
+            assert_eq!(storage.value_at(0), first);
+            assert_eq!(storage.value_at(1), third);
+            assert_eq!(
+                storage.value_at(2).map(NumericScalar::materialize_f64),
+                Some(0.0)
+            );
+            assert!(storage.remove_positions(&[3]).is_err());
+        }
+    }
+
+    #[test]
+    fn numeric_storage_floating_materialization_is_explicit_and_may_be_lossy() {
+        let exact =
+            NumericStorage::U64(vec![9_007_199_254_740_992, 9_007_199_254_740_993, u64::MAX]);
+        let as_f64 = exact.materialize_f64();
+        let as_f32 = exact.materialize_f32();
+
+        assert_eq!(
+            exact.value_at(1),
+            Some(NumericScalar::U64(9_007_199_254_740_993))
+        );
+        assert_eq!(as_f64[0], as_f64[1]);
+        assert_eq!(as_f32.len(), 3);
+        assert_eq!(
+            NumericStorage::F32(vec![0.1, f32::MAX]).materialize_f64(),
+            vec![f64::from(0.1_f32), f64::from(f32::MAX)]
+        );
+        assert_eq!(
+            NumericStorage::F64(vec![0.1, f64::MAX]).materialize_f32(),
+            vec![0.1_f32, f32::INFINITY]
+        );
+    }
+
+    #[test]
+    fn tensor_numeric_storage_bridge_round_trips_every_native_class() {
+        let cases = [
+            NumericStorage::F64(vec![f64::MIN_POSITIVE, f64::MAX]),
+            NumericStorage::F32(vec![f32::MIN_POSITIVE, f32::MAX]),
+            NumericStorage::I8(vec![i8::MIN, i8::MAX]),
+            NumericStorage::I16(vec![i16::MIN, i16::MAX]),
+            NumericStorage::I32(vec![i32::MIN, i32::MAX]),
+            NumericStorage::I64(vec![i64::MIN, i64::MAX]),
+            NumericStorage::U8(vec![u8::MIN, u8::MAX]),
+            NumericStorage::U16(vec![u16::MIN, u16::MAX]),
+            NumericStorage::U32(vec![u32::MIN, u32::MAX]),
+            NumericStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in cases {
+            let dtype = storage.numeric_dtype();
+            let tensor =
+                Tensor::from_numeric_storage(storage.clone(), vec![1, 2]).expect("tensor bridge");
+            assert_eq!(tensor.numeric_dtype(), dtype);
+            assert_eq!(tensor.numeric_value_at(0), storage.value_at(0));
+            assert_eq!(tensor.numeric_value_at(1), storage.value_at(1));
+            assert_eq!(tensor.numeric_value_at(2), None);
+            assert_eq!(tensor.into_numeric_storage(), Ok(storage));
+        }
+    }
+
+    #[test]
+    fn typed_constructor_materializes_exact_integer_storage() {
+        let tensor =
+            Tensor::new_with_dtype(vec![-2.2, 12.8, 99_999.0], vec![1, 3], NumericDType::I16)
+                .expect("typed tensor");
+
+        assert_eq!(tensor.numeric_dtype(), NumericDType::I16);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::I16(vec![-2, 13, i16::MAX]))
+        );
     }
 
     #[test]
@@ -411,7 +1891,78 @@ mod integer_storage_tests {
             tensor.integer_storage().map(IntegerStorage::class_name),
             Some("int64")
         );
-        assert!(tensor.data.is_empty());
+        assert!(tensor.is_empty());
+    }
+
+    #[test]
+    fn assignment_conversion_preserves_wide_exact_values_and_mutates_in_place() {
+        let large = 9_007_199_254_740_993_u64;
+        let mut storage = IntegerStorage::U64(vec![0, 1]);
+
+        storage
+            .set_exact_assignment(0, &IntValue::U64(large))
+            .unwrap();
+        storage.set_f64_assignment(1, -4.2).unwrap();
+
+        assert_eq!(storage, IntegerStorage::U64(vec![large, 0]));
+        assert_eq!(
+            IntegerStorage::I8(vec![0]).cast_f64_assignment(200.6),
+            IntValue::I8(i8::MAX)
+        );
+    }
+
+    #[test]
+    fn tensor_get2_reads_every_integer_class_from_exact_storage() {
+        let cases = [
+            IntegerStorage::I8(vec![-8, 7]),
+            IntegerStorage::I16(vec![-16, 15]),
+            IntegerStorage::I32(vec![-32, 31]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![8, u8::MAX]),
+            IntegerStorage::U16(vec![16, u16::MAX]),
+            IntegerStorage::U32(vec![32, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in cases {
+            let expected = storage.to_f64_vec();
+            let tensor = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+
+            assert_eq!(tensor.get2(0, 0), Ok(expected[0]));
+            assert_eq!(tensor.get2(0, 1), Ok(expected[1]));
+        }
+    }
+
+    #[test]
+    fn tensor_set2_updates_exact_integer_storage_without_a_mirror() {
+        let cases = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in cases {
+            let expected = storage.cast_f64_assignment(-2.6);
+            let mut tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+
+            tensor.set2(0, 0, -2.6).expect("integer assignment");
+
+            assert_eq!(
+                tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0)),
+                Some(expected.clone())
+            );
+            assert_eq!(
+                tensor.numeric_value_at(0),
+                Some(NumericScalar::from(expected))
+            );
+        }
     }
 
     #[test]
@@ -434,41 +1985,256 @@ mod integer_storage_tests {
             Some(&IntegerStorage::I64(vec![-1, i64::MAX]))
         );
     }
+
+    #[test]
+    fn reshape_and_display_use_authoritative_integer_storage() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2],
+        )
+        .expect("integer tensor");
+
+        let tensor = tensor.reshape(vec![1, 2]).expect("reshape");
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
+
+        let mut vector = tensor.clone();
+        vector.shape = vec![2];
+        vector.rows = 1;
+        vector.cols = 2;
+        assert_eq!(
+            vector.to_string(),
+            "[9007199254740993 18446744073709551615]"
+        );
+    }
+
+    #[test]
+    fn integer_complex_storage_preserves_paired_uint64_values() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_809]),
+        )
+        .expect("matching uint64 components");
+        let tensor = ComplexTensor::new_integer(storage.clone(), vec![1, 2])
+            .expect("integer complex tensor");
+
+        assert_eq!(tensor.integer_storage(), Some(&storage));
+        assert_eq!(
+            tensor
+                .integer_storage()
+                .map(IntegerComplexStorage::class_name),
+            Some("uint64")
+        );
+        assert_eq!(
+            tensor.numeric_value_at(0),
+            Some((
+                NumericScalar::U64(9_223_372_036_854_775_809),
+                NumericScalar::U64(u64::MAX)
+            ))
+        );
+    }
+
+    #[test]
+    fn single_complex_tensor_keeps_one_native_f32_payload() {
+        let values = vec![(1.25_f32, -2.5_f32), (f32::MAX, f32::MIN_POSITIVE)];
+        let mut tensor =
+            ComplexTensor::from_f32(values.clone(), vec![1, 2]).expect("single complex tensor");
+
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.as_f32_slice(), Some(values.as_slice()));
+        assert!(tensor.as_f64_slice().is_none());
+        assert!(tensor.integer_storage().is_none());
+
+        tensor
+            .set_f64_assignment_at(0, 3.75, -4.5)
+            .expect("single complex assignment");
+        assert_eq!(
+            tensor.complex_storage(),
+            &ComplexStorage::F32(vec![(3.75_f32, -4.5_f32), values[1]])
+        );
+    }
+
+    #[test]
+    fn complex_storage_gather_preserves_native_component_class() {
+        let single = ComplexStorage::F32(vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0)]);
+        assert_eq!(
+            single.gather(&[2, 0]),
+            Ok(ComplexStorage::F32(vec![(3.0, -3.0), (1.0, -1.0)]))
+        );
+
+        let integer = ComplexStorage::Integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 9_007_199_254_740_993, u64::MAX]),
+                IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 1]),
+            )
+            .expect("complex uint64 storage"),
+        );
+        assert_eq!(
+            integer.gather(&[2, 1]),
+            Ok(ComplexStorage::Integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+                    IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
+                )
+                .expect("gathered complex uint64 storage"),
+            ))
+        );
+        assert!(integer.gather(&[3]).is_err());
+    }
+
+    #[test]
+    fn complex_floating_reconstruction_preserves_requested_class() {
+        let values = vec![(1.0, -2.0), (3.5, 4.25)];
+        let single = ComplexTensor::from_f64_values_with_dtype(
+            values.clone(),
+            vec![2, 1],
+            NumericDType::F32,
+        )
+        .expect("single reconstruction");
+        let double = ComplexTensor::from_f64_values_with_dtype(
+            values.clone(),
+            vec![2, 1],
+            NumericDType::F64,
+        )
+        .expect("double reconstruction");
+
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.materialize_f64(), values);
+        assert_eq!(double.numeric_dtype(), NumericDType::F64);
+        assert_eq!(double.as_f64_slice(), Some(values.as_slice()));
+    }
+
+    #[test]
+    fn integer_complex_display_uses_authoritative_storage() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+        )
+        .expect("matching storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![2]).expect("complex tensor");
+
+        assert_eq!(
+            tensor.to_string(),
+            "[9007199254740993+18446744073709551615i 18446744073709551615+9007199254740993i]"
+        );
+    }
+
+    #[test]
+    fn integer_complex_storage_rejects_mismatched_components() {
+        let class_mismatch =
+            IntegerComplexStorage::new(IntegerStorage::I64(vec![1]), IntegerStorage::U64(vec![1]))
+                .expect_err("integer classes must match");
+        assert!(class_mismatch.contains("matching class"));
+
+        let length_mismatch = IntegerComplexStorage::new(
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::I64(vec![1, 2]),
+        )
+        .expect_err("component lengths must match");
+        assert!(length_mismatch.contains("matching class and length"));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    pub data: Vec<f64>,
-    /// Exact homogeneous integer backing storage during the integer-dtype
-    /// migration. Floating tensors leave this unset.
-    pub integer_data: Option<IntegerStorage>,
+    storage: TensorStorage,
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,       // Compatibility for 2D usage
     pub cols: usize,       // Compatibility for 2D usage
-    /// Logical numeric class of this tensor; host storage remains f64.
-    pub dtype: NumericDType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TensorStorage {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    Integer(IntegerStorage),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SparseTensor {
     pub rows: usize,
     pub cols: usize,
-    /// Column pointers into `row_indices`/`values`; length is `cols + 1`.
+    /// Column pointers into `row_indices` and the numeric value storage; length is `cols + 1`.
     pub col_ptrs: Vec<usize>,
     /// Zero-based row indices, sorted within each column.
     pub row_indices: Vec<usize>,
-    /// Floating compatibility view for legacy sparse consumers.
-    pub values: Vec<f64>,
-    /// Exact homogeneous backing storage for typed integer sparse values.
-    pub integer_data: Option<IntegerStorage>,
+    storage: SparseValueStorage,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+enum SparseValueStorage {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+    Integer(IntegerStorage),
+    Logical,
+}
+
+type SparseCscParts<T> = (Vec<usize>, Vec<usize>, Vec<T>);
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ComplexTensor {
-    pub data: Vec<(f64, f64)>,
+    storage: ComplexStorage,
     pub shape: Vec<usize>,
     pub rows: usize,
     pub cols: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComplexStorage {
+    F64(Vec<(f64, f64)>),
+    F32(Vec<(f32, f32)>),
+    Integer(IntegerComplexStorage),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntegerComplexStorage {
+    pub real: IntegerStorage,
+    pub imag: IntegerStorage,
+}
+
+impl IntegerComplexStorage {
+    pub fn new(real: IntegerStorage, imag: IntegerStorage) -> Result<Self, String> {
+        if real.class_name() != imag.class_name() || real.len() != imag.len() {
+            return Err("complex integer components must have matching class and length".into());
+        }
+        Ok(Self { real, imag })
+    }
+
+    pub fn len(&self) -> usize {
+        self.real.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.real.is_empty()
+    }
+
+    pub fn class_name(&self) -> &'static str {
+        self.real.class_name()
+    }
+
+    /// Tests a paired complex integer element without consulting its lossy
+    /// floating compatibility representation.
+    pub fn is_nonzero_at(&self, index: usize) -> Option<bool> {
+        let real = self.real.value_at(index)?;
+        let imag = self.imag.value_at(index)?;
+        Some(!real.is_zero() || !imag.is_zero())
+    }
+
+    /// Applies the same structural reorder independently to both exact components.
+    pub fn reorder(
+        &self,
+        reorder: impl Fn(&[IntValue]) -> Result<Vec<IntValue>, String>,
+    ) -> Result<Self, String> {
+        let real = self
+            .real
+            .from_exact_values_like(reorder(&self.real.exact_values())?)?;
+        let imag = self
+            .imag
+            .from_exact_values_like(reorder(&self.imag.exact_values())?)?;
+        Self::new(real, imag)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -529,7 +2295,13 @@ impl LogicalArray {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharArray {
     pub data: Vec<char>,
+    /// Full MATLAB-visible shape vector. Character payloads retain their
+    /// historical row-major layout within each 2-D page.
+    pub shape: Vec<usize>,
+    /// Cached row count for 2-D interop; equals `shape[0]` when present.
     pub rows: usize,
+    /// Cached column count for 2-D interop; equals `shape[1]` when present,
+    /// otherwise 1 (or 0 for an empty shape).
     pub cols: usize,
 }
 
@@ -537,20 +2309,86 @@ impl CharArray {
     pub fn new_row(s: &str) -> Self {
         CharArray {
             data: s.chars().collect(),
+            shape: vec![1, s.chars().count()],
             rows: 1,
             cols: s.chars().count(),
         }
     }
     pub fn new(data: Vec<char>, rows: usize, cols: usize) -> Result<Self, String> {
-        if rows * cols != data.len() {
+        Self::new_with_shape(data, vec![rows, cols])
+    }
+    pub fn new_with_shape(data: Vec<char>, shape: Vec<usize>) -> Result<Self, String> {
+        let expected = total_len(&shape)
+            .ok_or_else(|| "Char data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
             return Err(format!(
-                "Char data length {} doesn't match dimensions {}x{}",
+                "Char data length {} doesn't match shape {:?} ({} elements)",
                 data.len(),
-                rows,
-                cols
+                shape,
+                expected
             ));
         }
-        Ok(CharArray { data, rows, cols })
+        let (rows, cols) = shape_rows_cols(&shape);
+        Ok(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        })
+    }
+    pub fn from_column_major(data: Vec<char>, shape: Vec<usize>) -> Result<Self, String> {
+        let normalized = match shape.as_slice() {
+            [] => vec![0, 0],
+            [length] => vec![1, *length],
+            _ => shape,
+        };
+        let expected = total_len(&normalized)
+            .ok_or_else(|| "Char data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
+            return Err(format!(
+                "Char data length {} doesn't match shape {:?} ({} elements)",
+                data.len(),
+                normalized,
+                expected
+            ));
+        }
+        let rows = normalized[0];
+        let cols = normalized[1];
+        let pages = total_len(&normalized[2..])
+            .ok_or_else(|| "Char page shape exceeds platform limits".to_string())?;
+        let pages = if normalized.len() <= 2 { 1 } else { pages };
+        let mut row_major = Vec::with_capacity(data.len());
+        for page in 0..pages {
+            let page_offset = page * rows * cols;
+            for row in 0..rows {
+                for col in 0..cols {
+                    row_major.push(data[page_offset + row + col * rows]);
+                }
+            }
+        }
+        Self::new_with_shape(row_major, normalized)
+    }
+    pub fn to_column_major(&self) -> Vec<char> {
+        let rows = self.rows;
+        let cols = self.cols;
+        let pages = if self.shape.len() <= 2 {
+            1
+        } else {
+            self.shape[2..].iter().product()
+        };
+        let mut column_major = Vec::with_capacity(self.data.len());
+        for page in 0..pages {
+            let page_offset = page * rows * cols;
+            for col in 0..cols {
+                for row in 0..rows {
+                    column_major.push(self.data[page_offset + row * cols + col]);
+                }
+            }
+        }
+        column_major
+    }
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
     }
 
     /// Return the character contents when this value is a MATLAB character
@@ -638,15 +2476,15 @@ impl SymbolicArray {
 
 impl Tensor {
     pub fn new(data: Vec<f64>, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if data.len() != expected {
-            return Err(format!(
-                "Tensor data length {} doesn't match shape {:?} ({} elements)",
-                data.len(),
-                shape,
-                expected
-            ));
-        }
+        Self::from_numeric_storage(NumericStorage::F64(data), shape)
+    }
+
+    /// Constructs a dense tensor from one authoritative native numeric buffer.
+    pub fn from_numeric_storage(
+        storage: NumericStorage,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
+        storage.validate_shape(&shape)?;
         let (rows, cols) = if shape.len() >= 2 {
             (shape[0], shape[1])
         } else if shape.len() == 1 {
@@ -654,13 +2492,28 @@ impl Tensor {
         } else {
             (0, 0)
         };
+        let storage = match storage {
+            NumericStorage::F64(values) => TensorStorage::F64(values),
+            NumericStorage::F32(values) => TensorStorage::F32(values),
+            storage @ (NumericStorage::I8(_)
+            | NumericStorage::I16(_)
+            | NumericStorage::I32(_)
+            | NumericStorage::I64(_)
+            | NumericStorage::U8(_)
+            | NumericStorage::U16(_)
+            | NumericStorage::U32(_)
+            | NumericStorage::U64(_)) => {
+                let integer_data = storage
+                    .into_integer_storage()
+                    .expect("integer NumericStorage variant");
+                TensorStorage::Integer(integer_data)
+            }
+        };
         Ok(Tensor {
-            data,
-            integer_data: None,
+            storage,
             shape,
             rows,
             cols,
-            dtype: NumericDType::F64,
         })
     }
 
@@ -669,13 +2522,11 @@ impl Tensor {
     }
 
     pub fn from_f32(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
-        let converted: Vec<f64> = data.into_iter().map(|v| v as f64).collect();
-        Self::new_with_dtype(converted, shape, NumericDType::F32)
+        Self::from_numeric_storage(NumericStorage::F32(data), shape)
     }
 
     pub fn from_f32_slice(data: &[f32], shape: &[usize]) -> Result<Self, String> {
-        let converted: Vec<f64> = data.iter().map(|&v| v as f64).collect();
-        Self::new_with_dtype(converted, shape.to_vec(), NumericDType::F32)
+        Self::from_numeric_storage(NumericStorage::F32(data.to_vec()), shape.to_vec())
     }
 
     pub fn new_with_dtype(
@@ -683,69 +2534,170 @@ impl Tensor {
         shape: Vec<usize>,
         dtype: NumericDType,
     ) -> Result<Self, String> {
-        let mut t = Self::new(data, shape)?;
-        t.dtype = dtype;
-        Ok(t)
+        match dtype {
+            NumericDType::F64 => Self::from_numeric_storage(NumericStorage::F64(data), shape),
+            NumericDType::F32 => Self::from_numeric_storage(
+                NumericStorage::F32(data.into_iter().map(|value| value as f32).collect()),
+                shape,
+            ),
+            integer_dtype => {
+                let prototype =
+                    integer_storage_prototype(integer_dtype).expect("integer dtype prototype");
+                let values = data
+                    .into_iter()
+                    .map(|value| prototype.cast_f64_assignment(value))
+                    .collect();
+                Self::new_integer(prototype.from_same_class_values(values)?, shape)
+            }
+        }
     }
 
     /// Construct a tensor backed by an exact homogeneous integer buffer.
-    ///
-    /// The floating `data` member is retained only as a compatibility view for
-    /// legacy numeric consumers. Integer-aware code must use `integer_data`.
     pub fn new_integer(storage: IntegerStorage, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if storage.len() != expected {
-            return Err(format!(
-                "integer tensor data length {} doesn't match shape {:?} ({} elements)",
-                storage.len(),
-                shape,
-                expected
-            ));
-        }
-
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        Ok(Tensor {
-            data: storage.to_f64_vec(),
-            integer_data: Some(storage),
-            shape,
-            rows,
-            cols,
-            // Legacy dtype consumers do not yet represent the complete
-            // integer class matrix. Integer-aware consumers inspect storage.
-            dtype: NumericDType::F64,
-        })
+        Self::from_numeric_storage(NumericStorage::from_integer_storage(storage), shape)
     }
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
-        self.integer_data.as_ref()
+        match &self.storage {
+            TensorStorage::Integer(storage) => Some(storage),
+            TensorStorage::F64(_) | TensorStorage::F32(_) => None,
+        }
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match &self.storage {
+            TensorStorage::F64(_) => NumericDType::F64,
+            TensorStorage::F32(_) => NumericDType::F32,
+            TensorStorage::Integer(storage) => storage.numeric_dtype(),
+        }
+    }
+
+    /// Returns the authoritative number of stored numeric elements.
+    pub fn len(&self) -> usize {
+        match &self.storage {
+            TensorStorage::F64(values) => values.len(),
+            TensorStorage::F32(values) => values.len(),
+            TensorStorage::Integer(storage) => storage.len(),
+        }
+    }
+
+    /// Returns whether the authoritative numeric storage contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Borrows native double storage when this tensor's authoritative class is double.
+    pub fn as_f64_slice(&self) -> Option<&[f64]> {
+        match &self.storage {
+            TensorStorage::F64(values) => Some(values),
+            TensorStorage::F32(_) | TensorStorage::Integer(_) => None,
+        }
+    }
+
+    /// Borrows native single storage when this tensor's authoritative class is single.
+    pub fn as_f32_slice(&self) -> Option<&[f32]> {
+        match &self.storage {
+            TensorStorage::F32(values) => Some(values),
+            TensorStorage::F64(_) | TensorStorage::Integer(_) => None,
+        }
+    }
+
+    /// Explicitly materializes this tensor in the `f64` computation domain.
+    ///
+    /// Integer values outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(&self) -> Vec<f64> {
+        match &self.storage {
+            TensorStorage::F64(values) => values.clone(),
+            TensorStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
+            TensorStorage::Integer(storage) => storage.to_f64_vec(),
+        }
+    }
+
+    /// Read one element without routing an integer through floating-point storage.
+    pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
+        match &self.storage {
+            TensorStorage::F64(values) => values.get(index).copied().map(NumericScalar::F64),
+            TensorStorage::F32(values) => values.get(index).copied().map(NumericScalar::F32),
+            TensorStorage::Integer(storage) => storage.value_at(index).map(NumericScalar::from),
+        }
+    }
+
+    /// Assign one numeric scalar using the destination array's class semantics.
+    ///
+    /// Integer-to-integer assignments remain exact and floating assignments use
+    /// the same round-and-saturate conversion as MATLAB integer arrays.
+    pub fn set_numeric_assignment_at(
+        &mut self,
+        index: usize,
+        value: NumericScalar,
+    ) -> Result<(), String> {
+        match &mut self.storage {
+            TensorStorage::F64(values) => {
+                let value = match value {
+                    NumericScalar::F64(value) => value,
+                    NumericScalar::F32(value) => f64::from(value),
+                    value => value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer")
+                        .to_f64(),
+                };
+                let destination = values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
+                *destination = value;
+            }
+            TensorStorage::F32(values) => {
+                let value = match value {
+                    NumericScalar::F64(value) => value as f32,
+                    NumericScalar::F32(value) => value,
+                    value => value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer")
+                        .to_f64() as f32,
+                };
+                let destination = values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
+                *destination = value;
+            }
+            TensorStorage::Integer(storage) => {
+                let exact = match value {
+                    NumericScalar::F64(value) => storage.cast_f64_assignment(value),
+                    NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
+                    value => storage.cast_exact_assignment(
+                        &value
+                            .into_int_value()
+                            .expect("non-floating numeric scalar is integer"),
+                    ),
+                };
+                storage.set_value(index, exact)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Consumes this tensor into one public all-class native numeric buffer.
+    pub fn into_numeric_storage(self) -> Result<NumericStorage, String> {
+        let storage = match self.storage {
+            TensorStorage::F64(values) => NumericStorage::F64(values),
+            TensorStorage::F32(values) => NumericStorage::F32(values),
+            TensorStorage::Integer(storage) => NumericStorage::from_integer_storage(storage),
+        };
+        storage.validate_shape(&self.shape)?;
+        Ok(storage)
     }
 
     /// Change only shape metadata while retaining the underlying numeric storage.
     pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if self.data.len() != expected {
+        let expected = shape.iter().product::<usize>();
+        if self.len() != expected {
             return Err(format!(
-                "Tensor data length {} doesn't match shape {:?} ({} elements)",
-                self.data.len(),
+                "{} tensor data length {} doesn't match shape {:?} ({} elements)",
+                self.numeric_dtype().class_name(),
+                self.len(),
                 shape,
                 expected
             ));
-        }
-        if let Some(storage) = &self.integer_data {
-            if storage.len() != expected {
-                return Err(format!(
-                    "integer tensor data length {} doesn't match shape {:?} ({} elements)",
-                    storage.len(),
-                    shape,
-                    expected
-                ));
-            }
         }
         let (rows, cols) = if shape.len() >= 2 {
             (shape[0], shape[1])
@@ -762,40 +2714,14 @@ impl Tensor {
 
     pub fn zeros(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        Tensor {
-            data: vec![0.0; size],
-            integer_data: None,
-            shape,
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Self::from_numeric_storage(NumericStorage::zeros(NumericDType::F64, size), shape)
+            .expect("zero storage length matches shape")
     }
 
     pub fn ones(shape: Vec<usize>) -> Self {
         let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        Tensor {
-            data: vec![1.0; size],
-            integer_data: None,
-            shape,
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Self::from_numeric_storage(NumericStorage::ones(NumericDType::F64, size), shape)
+            .expect("one storage length matches shape")
     }
 
     // 2D helpers for transitional call sites
@@ -822,7 +2748,11 @@ impl Tensor {
             ));
         }
         // Column-major linearization: lin = row + col*rows
-        Ok(self.data[row + col * rows])
+        let index = row + col * rows;
+        Ok(self
+            .numeric_value_at(index)
+            .expect("validated tensor index")
+            .materialize_f64())
     }
 
     pub fn set2(&mut self, row: usize, col: usize, value: f64) -> Result<(), String> {
@@ -834,21 +2764,32 @@ impl Tensor {
             ));
         }
         // Column-major linearization
-        self.data[row + col * rows] = value;
-        Ok(())
+        let index = row + col * rows;
+        self.set_numeric_assignment_at(index, NumericScalar::F64(value))
     }
 
     pub fn scalar_to_tensor2(scalar: f64, rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data: vec![scalar; rows * cols],
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Self::from_numeric_storage(
+            NumericStorage::F64(vec![scalar; rows * cols]),
+            vec![rows, cols],
+        )
+        .expect("scalar expansion length matches shape")
     }
     // No-compat constructors: prefer new/new_2d/zeros/zeros2/ones/ones2
+}
+
+fn integer_storage_prototype(dtype: NumericDType) -> Option<IntegerStorage> {
+    match dtype {
+        NumericDType::I8 => Some(IntegerStorage::I8(Vec::new())),
+        NumericDType::I16 => Some(IntegerStorage::I16(Vec::new())),
+        NumericDType::I32 => Some(IntegerStorage::I32(Vec::new())),
+        NumericDType::I64 => Some(IntegerStorage::I64(Vec::new())),
+        NumericDType::U8 => Some(IntegerStorage::U8(Vec::new())),
+        NumericDType::U16 => Some(IntegerStorage::U16(Vec::new())),
+        NumericDType::U32 => Some(IntegerStorage::U32(Vec::new())),
+        NumericDType::U64 => Some(IntegerStorage::U64(Vec::new())),
+        NumericDType::F64 | NumericDType::F32 => None,
+    }
 }
 
 impl SparseTensor {
@@ -865,8 +2806,25 @@ impl SparseTensor {
             cols,
             col_ptrs,
             row_indices,
-            values,
-            integer_data: None,
+            storage: SparseValueStorage::F64(values),
+        })
+    }
+
+    /// Constructs a sparse matrix backed by native single-precision values.
+    pub fn new_f32(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        values: Vec<f32>,
+    ) -> Result<Self, String> {
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            storage: SparseValueStorage::F32(values),
         })
     }
 
@@ -879,14 +2837,30 @@ impl SparseTensor {
         integer_data: IntegerStorage,
     ) -> Result<Self, String> {
         Self::validate_structure(rows, cols, &col_ptrs, &row_indices, integer_data.len())?;
-        let values = integer_data.to_f64_vec();
         Ok(Self {
             rows,
             cols,
             col_ptrs,
             row_indices,
-            values,
-            integer_data: Some(integer_data),
+            storage: SparseValueStorage::Integer(integer_data),
+        })
+    }
+
+    /// Constructs a sparse logical matrix whose CSC pattern is the complete
+    /// authoritative set of true elements.
+    pub fn new_logical(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+    ) -> Result<Self, String> {
+        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, row_indices.len())?;
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            storage: SparseValueStorage::Logical,
         })
     }
 
@@ -945,15 +2919,68 @@ impl SparseTensor {
             cols,
             col_ptrs: vec![0; cols.saturating_add(1)],
             row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
+            storage: SparseValueStorage::F64(Vec::new()),
         }
     }
 
+    /// Creates an all-zero sparse matrix retaining the `single` class.
+    pub fn zeros_f32(rows: usize, cols: usize) -> Self {
+        Self {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)],
+            row_indices: Vec::new(),
+            storage: SparseValueStorage::F32(Vec::new()),
+        }
+    }
+
+    /// Creates an all-false sparse logical matrix.
+    pub fn zeros_logical(rows: usize, cols: usize) -> Self {
+        Self {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)],
+            row_indices: Vec::new(),
+            storage: SparseValueStorage::Logical,
+        }
+    }
+
+    /// Creates an all-zero sparse matrix retaining an exact integer class.
+    pub fn zeros_with_integer_storage(rows: usize, cols: usize, storage: &IntegerStorage) -> Self {
+        Self {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)],
+            row_indices: Vec::new(),
+            storage: SparseValueStorage::Integer(storage.zeros_like(0)),
+        }
+    }
+
+    /// Creates a typed sparse matrix using the class of `prototype`.
+    pub fn new_integer_like(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        values: Vec<IntValue>,
+        prototype: &IntegerStorage,
+    ) -> Result<Self, String> {
+        Self::new_integer(
+            rows,
+            cols,
+            col_ptrs,
+            row_indices,
+            prototype.from_same_class_values(values)?,
+        )
+    }
+
     pub fn nnz(&self) -> usize {
-        self.integer_data
-            .as_ref()
-            .map_or_else(|| self.values.len(), IntegerStorage::len)
+        match &self.storage {
+            SparseValueStorage::F64(values) => values.len(),
+            SparseValueStorage::F32(values) => values.len(),
+            SparseValueStorage::Integer(storage) => storage.len(),
+            SparseValueStorage::Logical => self.row_indices.len(),
+        }
     }
 
     pub fn shape(&self) -> Vec<usize> {
@@ -965,30 +2992,68 @@ impl SparseTensor {
             .rows
             .checked_mul(self.cols)
             .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
-        if let Some(integer_data) = &self.integer_data {
-            let mut data = integer_data.zeros_like(len);
-            for col in 0..self.cols {
-                for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                    let row = self.row_indices[idx];
-                    let value = integer_data.value_at(idx).ok_or_else(|| {
-                        "SparseTensor integer storage is inconsistent".to_string()
-                    })?;
-                    data.set_value(row + col * self.rows, value)?;
+        match &self.storage {
+            SparseValueStorage::F64(values) => {
+                let mut data = Vec::new();
+                data.try_reserve_exact(len)
+                    .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
+                data.resize(len, 0.0);
+                for col in 0..self.cols {
+                    for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                        data[self.row_indices[idx] + col * self.rows] = values[idx];
+                    }
                 }
+                Tensor::new(data, self.shape())
             }
-            return Tensor::new_integer(data, self.shape());
+            SparseValueStorage::F32(values) => {
+                let mut data = Vec::new();
+                data.try_reserve_exact(len)
+                    .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
+                data.resize(len, 0.0);
+                for col in 0..self.cols {
+                    for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                        data[self.row_indices[idx] + col * self.rows] = values[idx];
+                    }
+                }
+                Tensor::from_f32(data, self.shape())
+            }
+            SparseValueStorage::Integer(integer_data) => {
+                let mut data = integer_data.zeros_like(len);
+                for col in 0..self.cols {
+                    for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                        let row = self.row_indices[idx];
+                        let value = integer_data.value_at(idx).ok_or_else(|| {
+                            "SparseTensor integer storage is inconsistent".to_string()
+                        })?;
+                        data.set_value(row + col * self.rows, value)?;
+                    }
+                }
+                Tensor::new_integer(data, self.shape())
+            }
+            SparseValueStorage::Logical => {
+                Err("SparseTensor logical storage requires to_dense_logical".to_string())
+            }
         }
+    }
+
+    pub fn to_dense_logical(&self) -> Result<LogicalArray, String> {
+        if !self.is_logical() {
+            return Err("SparseTensor numeric storage requires to_dense".to_string());
+        }
+        let len = self
+            .rows
+            .checked_mul(self.cols)
+            .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
         let mut data = Vec::new();
         data.try_reserve_exact(len)
             .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
-        data.resize(len, 0.0);
+        data.resize(len, 0);
         for col in 0..self.cols {
             for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                let row = self.row_indices[idx];
-                data[row + col * self.rows] = self.values[idx];
+                data[self.row_indices[idx] + col * self.rows] = 1;
             }
         }
-        Tensor::new(data, self.shape())
+        LogicalArray::new(data, self.shape())
     }
 
     pub fn get(&self, row: usize, col: usize) -> Option<f64> {
@@ -1000,12 +3065,32 @@ impl SparseTensor {
         self.row_indices[start..end]
             .binary_search(&row)
             .ok()
-            .map(|offset| self.values[start + offset])
+            .map(|offset| {
+                let index = start + offset;
+                match &self.storage {
+                    SparseValueStorage::F64(values) => values[index],
+                    SparseValueStorage::F32(values) => f64::from(values[index]),
+                    SparseValueStorage::Integer(storage) => storage
+                        .value_at(index)
+                        .expect("validated sparse storage index")
+                        .to_f64(),
+                    SparseValueStorage::Logical => 1.0,
+                }
+            })
+    }
+
+    pub fn logical_at(&self, row: usize, col: usize) -> Option<bool> {
+        if !self.is_logical() || row >= self.rows || col >= self.cols {
+            return None;
+        }
+        let start = self.col_ptrs[col];
+        let end = self.col_ptrs[col + 1];
+        Some(self.row_indices[start..end].binary_search(&row).is_ok())
     }
 
     /// Returns an exact stored integer value when this sparse matrix is typed.
     pub fn integer_at(&self, row: usize, col: usize) -> Option<IntValue> {
-        let integer_data = self.integer_data.as_ref()?;
+        let integer_data = self.integer_storage()?;
         if row >= self.rows || col >= self.cols {
             return None;
         }
@@ -1018,13 +3103,486 @@ impl SparseTensor {
     }
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
-        self.integer_data.as_ref()
+        match &self.storage {
+            SparseValueStorage::Integer(storage) => Some(storage),
+            SparseValueStorage::F64(_)
+            | SparseValueStorage::F32(_)
+            | SparseValueStorage::Logical => None,
+        }
+    }
+
+    /// Borrows stored nonzero values when this sparse matrix is double.
+    pub fn as_f64_slice(&self) -> Option<&[f64]> {
+        match &self.storage {
+            SparseValueStorage::F64(values) => Some(values),
+            SparseValueStorage::F32(_)
+            | SparseValueStorage::Integer(_)
+            | SparseValueStorage::Logical => None,
+        }
+    }
+
+    /// Borrows stored nonzero values when this sparse matrix is single.
+    pub fn as_f32_slice(&self) -> Option<&[f32]> {
+        match &self.storage {
+            SparseValueStorage::F32(values) => Some(values),
+            SparseValueStorage::F64(_)
+            | SparseValueStorage::Integer(_)
+            | SparseValueStorage::Logical => None,
+        }
+    }
+
+    pub fn is_logical(&self) -> bool {
+        matches!(self.storage, SparseValueStorage::Logical)
+    }
+
+    pub fn value_byte_size(&self) -> usize {
+        match &self.storage {
+            SparseValueStorage::Logical => 0,
+            _ => self
+                .numeric_dtype()
+                .expect("non-logical sparse storage has a numeric dtype")
+                .byte_size(),
+        }
+    }
+
+    /// Explicitly materializes stored nonzero values in the `f64` computation domain.
+    ///
+    /// Integer values outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(&self) -> Vec<f64> {
+        match &self.storage {
+            SparseValueStorage::F64(values) => values.clone(),
+            SparseValueStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
+            SparseValueStorage::Integer(storage) => storage.to_f64_vec(),
+            SparseValueStorage::Logical => vec![1.0; self.nnz()],
+        }
+    }
+
+    /// Reads one stored nonzero value without routing integers through floating point.
+    pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
+        match &self.storage {
+            SparseValueStorage::F64(values) => values.get(index).copied().map(NumericScalar::F64),
+            SparseValueStorage::F32(values) => values.get(index).copied().map(NumericScalar::F32),
+            SparseValueStorage::Integer(storage) => {
+                storage.value_at(index).map(NumericScalar::from)
+            }
+            SparseValueStorage::Logical => (index < self.nnz()).then_some(NumericScalar::F64(1.0)),
+        }
+    }
+
+    pub fn numeric_dtype(&self) -> Option<NumericDType> {
+        match &self.storage {
+            SparseValueStorage::F64(_) => Some(NumericDType::F64),
+            SparseValueStorage::F32(_) => Some(NumericDType::F32),
+            SparseValueStorage::Integer(storage) => Some(storage.numeric_dtype()),
+            SparseValueStorage::Logical => None,
+        }
+    }
+
+    fn merged_linear_updates<T: Clone>(
+        &self,
+        updates: &[(usize, T)],
+        mut stored_value: impl FnMut(usize) -> Result<T, String>,
+        is_zero: impl Fn(&T) -> bool,
+    ) -> Result<SparseCscParts<T>, String> {
+        let total = self
+            .rows
+            .checked_mul(self.cols)
+            .ok_or_else(|| "SparseTensor assignment dimensions overflow usize".to_string())?;
+        let mut latest = BTreeMap::new();
+        for (index, value) in updates {
+            if *index >= total {
+                return Err(format!(
+                    "SparseTensor assignment linear index {} exceeds {} elements",
+                    index, total
+                ));
+            }
+            latest.insert(*index, value.clone());
+        }
+
+        let capacity = self
+            .nnz()
+            .checked_add(latest.len())
+            .ok_or_else(|| "SparseTensor assignment nnz overflow".to_string())?;
+        let mut col_ptrs = Vec::with_capacity(self.cols.saturating_add(1));
+        let mut row_indices = Vec::new();
+        let mut values = Vec::new();
+        row_indices
+            .try_reserve_exact(capacity)
+            .map_err(|error| format!("SparseTensor assignment allocation failed: {error}"))?;
+        values
+            .try_reserve_exact(capacity)
+            .map_err(|error| format!("SparseTensor assignment allocation failed: {error}"))?;
+        col_ptrs.push(0);
+
+        for col in 0..self.cols {
+            let column_start = col * self.rows;
+            let column_end = column_start + self.rows;
+            let mut stored = self.col_ptrs[col];
+            let stored_end = self.col_ptrs[col + 1];
+            for (&linear, value) in latest.range(column_start..column_end) {
+                let row = linear - column_start;
+                while stored < stored_end && self.row_indices[stored] < row {
+                    row_indices.push(self.row_indices[stored]);
+                    values.push(stored_value(stored)?);
+                    stored += 1;
+                }
+                if stored < stored_end && self.row_indices[stored] == row {
+                    stored += 1;
+                }
+                if !is_zero(value) {
+                    row_indices.push(row);
+                    values.push(value.clone());
+                }
+            }
+            while stored < stored_end {
+                row_indices.push(self.row_indices[stored]);
+                values.push(stored_value(stored)?);
+                stored += 1;
+            }
+            col_ptrs.push(values.len());
+        }
+        Ok((col_ptrs, row_indices, values))
+    }
+
+    /// Applies floating updates in one CSC merge. Repeated indices use the
+    /// final assignment value and zeros are elided without densifying.
+    pub fn with_updated_linear_values(&self, updates: &[(usize, f64)]) -> Result<Self, String> {
+        let stored_values = self.as_f64_slice().ok_or_else(|| {
+            "cannot assign floating sparse value to typed integer storage".to_string()
+        })?;
+        let (col_ptrs, row_indices, values) = self.merged_linear_updates(
+            updates,
+            |index| {
+                stored_values
+                    .get(index)
+                    .copied()
+                    .ok_or_else(|| "SparseTensor double storage is inconsistent".to_string())
+            },
+            |value| *value == 0.0,
+        )?;
+        Self::new(self.rows, self.cols, col_ptrs, row_indices, values)
+    }
+
+    /// Applies native single-precision updates in one CSC merge.
+    pub fn with_updated_f32_linear_values(&self, updates: &[(usize, f32)]) -> Result<Self, String> {
+        let stored_values = self
+            .as_f32_slice()
+            .ok_or_else(|| "cannot assign single sparse value to non-single storage".to_string())?;
+        let (col_ptrs, row_indices, values) = self.merged_linear_updates(
+            updates,
+            |index| {
+                stored_values
+                    .get(index)
+                    .copied()
+                    .ok_or_else(|| "SparseTensor single storage is inconsistent".to_string())
+            },
+            |value| *value == 0.0,
+        )?;
+        Self::new_f32(self.rows, self.cols, col_ptrs, row_indices, values)
+    }
+
+    /// Applies exact integer updates in one CSC merge. Values must already be
+    /// in this sparse matrix's class; coercion belongs to the VM layer.
+    pub fn with_updated_integer_linear_values(
+        &self,
+        updates: &[(usize, IntValue)],
+    ) -> Result<Self, String> {
+        let storage = self
+            .integer_storage()
+            .ok_or_else(|| "cannot assign integer sparse value to floating storage".to_string())?;
+        let (col_ptrs, row_indices, values) = self.merged_linear_updates(
+            updates,
+            |index| {
+                storage
+                    .value_at(index)
+                    .ok_or_else(|| "SparseTensor integer storage is inconsistent".to_string())
+            },
+            IntValue::is_zero,
+        )?;
+        Self::new_integer_like(self.rows, self.cols, col_ptrs, row_indices, values, storage)
+    }
+
+    pub fn with_updated_logical_linear_values(
+        &self,
+        updates: &[(usize, bool)],
+    ) -> Result<Self, String> {
+        if !self.is_logical() {
+            return Err("cannot assign logical sparse value to numeric storage".to_string());
+        }
+        let (col_ptrs, row_indices, _) =
+            self.merged_linear_updates(updates, |_| Ok(true), |value| !*value)?;
+        Self::new_logical(self.rows, self.cols, col_ptrs, row_indices)
+    }
+
+    pub fn with_updated_value(&self, row: usize, col: usize, value: f64) -> Result<Self, String> {
+        let index = self.checked_assignment_linear_index(row, col)?;
+        self.with_updated_linear_values(&[(index, value)])
+    }
+
+    pub fn with_updated_f32_value(
+        &self,
+        row: usize,
+        col: usize,
+        value: f32,
+    ) -> Result<Self, String> {
+        let index = self.checked_assignment_linear_index(row, col)?;
+        self.with_updated_f32_linear_values(&[(index, value)])
+    }
+
+    pub fn with_updated_integer_value(
+        &self,
+        row: usize,
+        col: usize,
+        value: IntValue,
+    ) -> Result<Self, String> {
+        let index = self.checked_assignment_linear_index(row, col)?;
+        self.with_updated_integer_linear_values(&[(index, value)])
+    }
+
+    pub fn with_updated_logical_value(
+        &self,
+        row: usize,
+        col: usize,
+        value: bool,
+    ) -> Result<Self, String> {
+        let index = self.checked_assignment_linear_index(row, col)?;
+        self.with_updated_logical_linear_values(&[(index, value)])
+    }
+
+    /// Expands sparse dimensions without materializing implicit zero entries.
+    pub fn with_expanded_shape(&self, rows: usize, cols: usize) -> Result<Self, String> {
+        if rows < self.rows || cols < self.cols {
+            return Err(format!(
+                "SparseTensor cannot shrink shape ({}, {}) to ({rows}, {cols})",
+                self.rows, self.cols
+            ));
+        }
+        let mut col_ptrs = self.col_ptrs.clone();
+        col_ptrs.resize(
+            cols.checked_add(1)
+                .ok_or_else(|| "SparseTensor expanded column count overflow".to_string())?,
+            self.nnz(),
+        );
+        match &self.storage {
+            SparseValueStorage::F64(values) => Self::new(
+                rows,
+                cols,
+                col_ptrs,
+                self.row_indices.clone(),
+                values.clone(),
+            ),
+            SparseValueStorage::F32(values) => Self::new_f32(
+                rows,
+                cols,
+                col_ptrs,
+                self.row_indices.clone(),
+                values.clone(),
+            ),
+            SparseValueStorage::Integer(storage) => Self::new_integer(
+                rows,
+                cols,
+                col_ptrs,
+                self.row_indices.clone(),
+                storage.clone(),
+            ),
+            SparseValueStorage::Logical => {
+                Self::new_logical(rows, cols, col_ptrs, self.row_indices.clone())
+            }
+        }
+    }
+
+    fn checked_assignment_linear_index(&self, row: usize, col: usize) -> Result<usize, String> {
+        if row >= self.rows || col >= self.cols {
+            return Err(format!(
+                "SparseTensor assignment index ({}, {}) exceeds shape ({}, {})",
+                row, col, self.rows, self.cols
+            ));
+        }
+        col.checked_mul(self.rows)
+            .and_then(|base| base.checked_add(row))
+            .ok_or_else(|| "SparseTensor assignment linear index overflow".to_string())
+    }
+
+    fn checked_deletion_indices(
+        indices: &[usize],
+        bound: usize,
+        axis: &str,
+    ) -> Result<Vec<usize>, String> {
+        let mut sorted = indices.to_vec();
+        sorted.sort_unstable();
+        for pair in sorted.windows(2) {
+            if pair[0] == pair[1] {
+                return Err(format!(
+                    "SparseTensor {axis} deletion indices must be unique"
+                ));
+            }
+        }
+        if sorted.iter().any(|&index| index >= bound) {
+            return Err(format!(
+                "SparseTensor {axis} deletion index exceeds dimension"
+            ));
+        }
+        Ok(sorted)
+    }
+
+    fn rebuilt_csc<T: Clone>(
+        &self,
+        source_columns: &[usize],
+        mut map_row: impl FnMut(usize) -> Option<usize>,
+        mut stored_value: impl FnMut(usize) -> Result<T, String>,
+    ) -> Result<SparseCscParts<T>, String> {
+        let mut col_ptrs = Vec::new();
+        col_ptrs
+            .try_reserve_exact(
+                source_columns
+                    .len()
+                    .checked_add(1)
+                    .ok_or_else(|| "SparseTensor deletion column count overflow".to_string())?,
+            )
+            .map_err(|error| format!("SparseTensor deletion allocation failed: {error}"))?;
+        let mut row_indices = Vec::new();
+        let mut values = Vec::new();
+        row_indices
+            .try_reserve_exact(self.nnz())
+            .map_err(|error| format!("SparseTensor deletion allocation failed: {error}"))?;
+        values
+            .try_reserve_exact(self.nnz())
+            .map_err(|error| format!("SparseTensor deletion allocation failed: {error}"))?;
+        col_ptrs.push(0);
+        for &source_column in source_columns {
+            let start = self.col_ptrs[source_column];
+            let end = self.col_ptrs[source_column + 1];
+            for index in start..end {
+                if let Some(row) = map_row(self.row_indices[index]) {
+                    row_indices.push(row);
+                    values.push(stored_value(index)?);
+                }
+            }
+            col_ptrs.push(values.len());
+        }
+        Ok((col_ptrs, row_indices, values))
+    }
+
+    /// Deletes complete sparse matrix rows without materializing dense storage.
+    pub fn with_deleted_rows(&self, rows: &[usize]) -> Result<Self, String> {
+        let rows = Self::checked_deletion_indices(rows, self.rows, "row")?;
+        let source_columns = (0..self.cols).collect::<Vec<_>>();
+        let output_rows = self
+            .rows
+            .checked_sub(rows.len())
+            .ok_or_else(|| "SparseTensor deletion row count underflow".to_string())?;
+        let map_row = |row| match rows.binary_search(&row) {
+            Ok(_) => None,
+            Err(removed_before) => Some(row - removed_before),
+        };
+        match &self.storage {
+            SparseValueStorage::F64(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, map_row, |index| {
+                        storage.get(index).copied().ok_or_else(|| {
+                            "SparseTensor double storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new(output_rows, self.cols, col_ptrs, row_indices, values)
+            }
+            SparseValueStorage::F32(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, map_row, |index| {
+                        storage.get(index).copied().ok_or_else(|| {
+                            "SparseTensor single storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new_f32(output_rows, self.cols, col_ptrs, row_indices, values)
+            }
+            SparseValueStorage::Integer(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, map_row, |index| {
+                        storage.value_at(index).ok_or_else(|| {
+                            "SparseTensor integer storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new_integer_like(
+                    output_rows,
+                    self.cols,
+                    col_ptrs,
+                    row_indices,
+                    values,
+                    storage,
+                )
+            }
+            SparseValueStorage::Logical => {
+                let (col_ptrs, row_indices, _) =
+                    self.rebuilt_csc(&source_columns, map_row, |_| Ok(true))?;
+                Self::new_logical(output_rows, self.cols, col_ptrs, row_indices)
+            }
+        }
+    }
+
+    /// Deletes complete sparse matrix columns without materializing dense storage.
+    pub fn with_deleted_columns(&self, columns: &[usize]) -> Result<Self, String> {
+        let columns = Self::checked_deletion_indices(columns, self.cols, "column")?;
+        let source_columns = (0..self.cols)
+            .filter(|column| columns.binary_search(column).is_err())
+            .collect::<Vec<_>>();
+        match &self.storage {
+            SparseValueStorage::F64(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, Some, |index| {
+                        storage.get(index).copied().ok_or_else(|| {
+                            "SparseTensor double storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new(
+                    self.rows,
+                    source_columns.len(),
+                    col_ptrs,
+                    row_indices,
+                    values,
+                )
+            }
+            SparseValueStorage::F32(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, Some, |index| {
+                        storage.get(index).copied().ok_or_else(|| {
+                            "SparseTensor single storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new_f32(
+                    self.rows,
+                    source_columns.len(),
+                    col_ptrs,
+                    row_indices,
+                    values,
+                )
+            }
+            SparseValueStorage::Integer(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, Some, |index| {
+                        storage.value_at(index).ok_or_else(|| {
+                            "SparseTensor integer storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new_integer_like(
+                    self.rows,
+                    source_columns.len(),
+                    col_ptrs,
+                    row_indices,
+                    values,
+                    storage,
+                )
+            }
+            SparseValueStorage::Logical => {
+                let (col_ptrs, row_indices, _) =
+                    self.rebuilt_csc(&source_columns, Some, |_| Ok(true))?;
+                Self::new_logical(self.rows, source_columns.len(), col_ptrs, row_indices)
+            }
+        }
     }
 
     pub fn class_name(&self) -> &'static str {
-        self.integer_data
-            .as_ref()
-            .map_or("double", IntegerStorage::class_name)
+        self.numeric_dtype()
+            .map(NumericDType::class_name)
+            .unwrap_or("logical")
     }
 }
 
@@ -1033,14 +3591,247 @@ mod sparse_tensor_tests {
     use super::*;
 
     #[test]
+    fn typed_sparse_scalar_updates_preserve_exact_values_and_zero_elision() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 1],
+            vec![0],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("sparse");
+        let inserted = sparse
+            .with_updated_integer_value(1, 1, IntValue::U64(9_223_372_036_854_775_808))
+            .expect("insert");
+        assert_eq!(inserted.col_ptrs, vec![0, 1, 2]);
+        assert_eq!(inserted.row_indices, vec![0, 1]);
+        assert_eq!(
+            inserted.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                u64::MAX,
+                9_223_372_036_854_775_808
+            ]))
+        );
+
+        let removed = inserted
+            .with_updated_integer_value(0, 0, IntValue::U64(0))
+            .expect("remove");
+        assert_eq!(removed.col_ptrs, vec![0, 0, 1]);
+        assert_eq!(removed.row_indices, vec![1]);
+        assert_eq!(
+            removed.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_223_372_036_854_775_808]))
+        );
+    }
+
+    #[test]
+    fn floating_sparse_scalar_updates_keep_csc_order_and_elide_zero() {
+        let sparse =
+            SparseTensor::new(3, 1, vec![0, 2], vec![0, 2], vec![1.0, 3.0]).expect("sparse");
+        let inserted = sparse.with_updated_value(1, 0, 2.0).expect("insert");
+        assert_eq!(inserted.row_indices, vec![0, 1, 2]);
+        assert_eq!(inserted.as_f64_slice(), Some(&[1.0, 2.0, 3.0][..]));
+
+        let removed = inserted.with_updated_value(1, 0, 0.0).expect("remove");
+        assert_eq!(removed.row_indices, vec![0, 2]);
+        assert_eq!(removed.as_f64_slice(), Some(&[1.0, 3.0][..]));
+    }
+
+    #[test]
+    fn single_sparse_storage_survives_dense_and_structural_paths() {
+        let sparse = SparseTensor::new_f32(
+            3,
+            3,
+            vec![0, 2, 3, 5],
+            vec![0, 2, 1, 0, 2],
+            vec![1.25, 3.5, 2.0, 4.0, 5.75],
+        )
+        .expect("single sparse");
+        assert_eq!(sparse.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(sparse.class_name(), "single");
+        assert_eq!(sparse.numeric_value_at(1), Some(NumericScalar::F32(3.5)));
+        assert_eq!(
+            sparse.as_f32_slice(),
+            Some(&[1.25, 3.5, 2.0, 4.0, 5.75][..])
+        );
+        assert!(sparse.as_f64_slice().is_none());
+
+        let dense = sparse.to_dense().expect("dense single");
+        assert_eq!(dense.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            dense.as_f32_slice(),
+            Some(&[1.25, 0.0, 3.5, 0.0, 2.0, 0.0, 4.0, 0.0, 5.75][..])
+        );
+
+        let updated = sparse
+            .with_updated_f32_value(2, 0, 0.0)
+            .expect("remove single");
+        assert_eq!(updated.row_indices, vec![0, 1, 0, 2]);
+        assert_eq!(updated.as_f32_slice(), Some(&[1.25, 2.0, 4.0, 5.75][..]));
+
+        let expanded = sparse.with_expanded_shape(4, 4).expect("expand single");
+        assert_eq!(expanded.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(expanded.col_ptrs, vec![0, 2, 3, 5, 5]);
+        assert_eq!(expanded.as_f32_slice(), sparse.as_f32_slice());
+
+        let rows = sparse.with_deleted_rows(&[1]).expect("delete row");
+        assert_eq!(rows.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(rows.shape(), vec![2, 3]);
+        assert_eq!(rows.as_f32_slice(), Some(&[1.25, 3.5, 4.0, 5.75][..]));
+
+        let columns = sparse.with_deleted_columns(&[1]).expect("delete column");
+        assert_eq!(columns.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(columns.shape(), vec![3, 2]);
+        assert_eq!(columns.as_f32_slice(), Some(&[1.25, 3.5, 4.0, 5.75][..]));
+    }
+
+    #[test]
+    fn sparse_structural_deletion_preserves_csc_and_exact_integer_values() {
+        let sparse = SparseTensor::new_integer(
+            3,
+            3,
+            vec![0, 2, 3, 5],
+            vec![0, 2, 1, 0, 2],
+            IntegerStorage::U64(vec![1, u64::MAX, 9_223_372_036_854_775_808, 4, 5]),
+        )
+        .expect("sparse");
+
+        let without_middle_row = sparse.with_deleted_rows(&[1]).expect("delete row");
+        assert_eq!(without_middle_row.shape(), vec![2, 3]);
+        assert_eq!(without_middle_row.col_ptrs, vec![0, 2, 2, 4]);
+        assert_eq!(without_middle_row.row_indices, vec![0, 1, 0, 1]);
+        assert_eq!(
+            without_middle_row.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1, u64::MAX, 4, 5]))
+        );
+
+        let without_outer_columns = sparse
+            .with_deleted_columns(&[0, 2])
+            .expect("delete columns");
+        assert_eq!(without_outer_columns.shape(), vec![3, 1]);
+        assert_eq!(without_outer_columns.col_ptrs, vec![0, 1]);
+        assert_eq!(without_outer_columns.row_indices, vec![1]);
+        assert_eq!(
+            without_outer_columns.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_223_372_036_854_775_808]))
+        );
+
+        assert!(sparse.with_deleted_rows(&[1, 1]).is_err());
+        assert!(sparse.with_deleted_columns(&[3]).is_err());
+    }
+
+    #[test]
+    fn logical_sparse_pattern_is_authoritative_across_core_structural_paths() {
+        let sparse =
+            SparseTensor::new_logical(3, 3, vec![0, 2, 3, 4], vec![0, 2, 1, 2]).expect("logical");
+        assert!(sparse.is_logical());
+        assert_eq!(sparse.numeric_dtype(), None);
+        assert_eq!(sparse.class_name(), "logical");
+        assert_eq!(sparse.nnz(), 4);
+        assert_eq!(sparse.logical_at(2, 0), Some(true));
+        assert_eq!(sparse.logical_at(0, 1), Some(false));
+        assert_eq!(
+            sparse.to_dense_logical().expect("dense").data,
+            vec![1, 0, 1, 0, 1, 0, 0, 0, 1]
+        );
+
+        let updated = sparse
+            .with_updated_logical_value(1, 0, true)
+            .expect("insert true")
+            .with_updated_logical_value(2, 0, false)
+            .expect("remove false");
+        assert_eq!(updated.row_indices, vec![0, 1, 1, 2]);
+
+        let expanded = updated.with_expanded_shape(4, 4).expect("expand");
+        assert!(expanded.is_logical());
+        assert_eq!(expanded.col_ptrs, vec![0, 2, 3, 4, 4]);
+
+        let rows = sparse.with_deleted_rows(&[1]).expect("delete row");
+        assert!(rows.is_logical());
+        assert_eq!(rows.shape(), vec![2, 3]);
+        assert_eq!(rows.row_indices, vec![0, 1, 1]);
+
+        let columns = sparse.with_deleted_columns(&[1]).expect("delete column");
+        assert!(columns.is_logical());
+        assert_eq!(columns.shape(), vec![3, 2]);
+        assert_eq!(columns.row_indices, vec![0, 2, 2]);
+    }
+
+    #[test]
+    fn sparse_expansion_preserves_csc_and_integer_storage() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]),
+        )
+        .expect("sparse");
+        let expanded = sparse.with_expanded_shape(4, 4).expect("expand");
+        assert_eq!(expanded.shape(), vec![4, 4]);
+        assert_eq!(expanded.col_ptrs, vec![0, 1, 2, 2, 2]);
+        assert_eq!(expanded.row_indices, vec![1, 0]);
+        assert_eq!(expanded.integer_storage(), sparse.integer_storage());
+        assert!(expanded.with_expanded_shape(1, 4).is_err());
+    }
+
+    #[test]
+    fn sparse_display_reports_exact_integer_class_and_values() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("uint64 sparse");
+        let text = sparse.to_string();
+
+        assert!(text.contains("2x1 uint64 sparse matrix with 1 nonzero entries"));
+        assert!(text.contains("18446744073709551615"));
+        assert!(!text.contains("18446744073709552000"));
+    }
+
+    #[test]
+    fn sparse_compatibility_reads_derive_from_authoritative_integer_storage() {
+        let unsigned = SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("uint64 sparse");
+        assert_eq!(unsigned.get(1, 0), Some(u64::MAX as f64));
+        let dense = unsigned.to_dense().expect("dense uint64 sparse");
+        assert_eq!(
+            dense.integer_storage(),
+            Some(&IntegerStorage::U64(vec![0, u64::MAX]))
+        );
+
+        let signed = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+        )
+        .expect("int64 sparse");
+        assert_eq!(signed.get(0, 0), Some(i64::MIN as f64));
+        assert_eq!(signed.get(1, 1), Some(i64::MAX as f64));
+        let text = signed.to_string();
+        assert!(text.contains("-9223372036854775808"));
+        assert!(text.contains("9223372036854775807"));
+    }
+
+    #[test]
     fn to_dense_rejects_overflowing_dimensions() {
         let sparse = SparseTensor {
             rows: usize::MAX,
             cols: 2,
             col_ptrs: vec![0, 0, 0],
             row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
+            storage: SparseValueStorage::F64(Vec::new()),
         };
 
         let err = sparse.to_dense().unwrap_err();
@@ -1050,15 +3841,39 @@ mod sparse_tensor_tests {
 
 impl ComplexTensor {
     pub fn new(data: Vec<(f64, f64)>, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
-        if data.len() != expected {
-            return Err(format!(
-                "ComplexTensor data length {} doesn't match shape {:?} ({} elements)",
-                data.len(),
+        Self::from_complex_storage(ComplexStorage::F64(data), shape)
+    }
+
+    pub fn from_f32(data: Vec<(f32, f32)>, shape: Vec<usize>) -> Result<Self, String> {
+        Self::from_complex_storage(ComplexStorage::F32(data), shape)
+    }
+
+    /// Reconstructs floating complex values in the requested floating class.
+    pub fn from_f64_values_with_dtype(
+        data: Vec<(f64, f64)>,
+        shape: Vec<usize>,
+        dtype: NumericDType,
+    ) -> Result<Self, String> {
+        match dtype {
+            NumericDType::F64 => Self::new(data, shape),
+            NumericDType::F32 => Self::from_f32(
+                data.into_iter()
+                    .map(|(real, imag)| (real as f32, imag as f32))
+                    .collect(),
                 shape,
-                expected
-            ));
+            ),
+            _ => Err(format!(
+                "complex floating reconstruction requires single or double, got {}",
+                dtype.class_name()
+            )),
         }
+    }
+
+    pub fn from_complex_storage(
+        storage: ComplexStorage,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
+        storage.validate_shape(&shape)?;
         let (rows, cols) = if shape.len() >= 2 {
             (shape[0], shape[1])
         } else if shape.len() == 1 {
@@ -1067,30 +3882,310 @@ impl ComplexTensor {
             (0, 0)
         };
         Ok(ComplexTensor {
-            data,
+            storage,
             shape,
             rows,
             cols,
         })
     }
+    pub fn new_integer(storage: IntegerComplexStorage, shape: Vec<usize>) -> Result<Self, String> {
+        Self::from_complex_storage(ComplexStorage::Integer(storage), shape)
+    }
     pub fn new_2d(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new(data, vec![rows, cols])
     }
     pub fn zeros(shape: Vec<usize>) -> Self {
-        let size: usize = shape.iter().product();
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        ComplexTensor {
-            data: vec![(0.0, 0.0); size],
-            shape,
-            rows,
-            cols,
+        let size = shape
+            .iter()
+            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension))
+            .expect("complex zero shape must fit usize");
+        Self::from_complex_storage(ComplexStorage::F64(vec![(0.0, 0.0); size]), shape)
+            .expect("complex zero storage length matches shape")
+    }
+
+    pub fn complex_storage(&self) -> &ComplexStorage {
+        &self.storage
+    }
+
+    pub fn into_complex_storage(self) -> ComplexStorage {
+        self.storage
+    }
+
+    pub fn len(&self) -> usize {
+        self.storage.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.storage.is_empty()
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        self.storage.numeric_dtype()
+    }
+
+    pub fn as_f64_slice(&self) -> Option<&[(f64, f64)]> {
+        match &self.storage {
+            ComplexStorage::F64(values) => Some(values),
+            ComplexStorage::F32(_) | ComplexStorage::Integer(_) => None,
         }
+    }
+
+    pub fn as_f32_slice(&self) -> Option<&[(f32, f32)]> {
+        match &self.storage {
+            ComplexStorage::F32(values) => Some(values),
+            ComplexStorage::F64(_) | ComplexStorage::Integer(_) => None,
+        }
+    }
+
+    /// Explicitly materializes complex values in the `f64` computation domain.
+    ///
+    /// Integer components outside the exact binary64 range may lose precision.
+    pub fn materialize_f64(&self) -> Vec<(f64, f64)> {
+        self.storage.materialize_f64()
+    }
+
+    pub fn integer_storage(&self) -> Option<&IntegerComplexStorage> {
+        match &self.storage {
+            ComplexStorage::Integer(storage) => Some(storage),
+            ComplexStorage::F64(_) | ComplexStorage::F32(_) => None,
+        }
+    }
+
+    /// Read one complex element without routing integer components through floating point.
+    pub fn numeric_value_at(&self, index: usize) -> Option<(NumericScalar, NumericScalar)> {
+        if let Some(storage) = self.integer_storage() {
+            return Some((
+                NumericScalar::from(storage.real.value_at(index)?),
+                NumericScalar::from(storage.imag.value_at(index)?),
+            ));
+        }
+        match &self.storage {
+            ComplexStorage::F64(values) => values
+                .get(index)
+                .copied()
+                .map(|(real, imag)| (NumericScalar::F64(real), NumericScalar::F64(imag))),
+            ComplexStorage::F32(values) => values
+                .get(index)
+                .copied()
+                .map(|(real, imag)| (NumericScalar::F32(real), NumericScalar::F32(imag))),
+            ComplexStorage::Integer(_) => unreachable!("integer storage returned above"),
+        }
+    }
+
+    /// Assigns one complex floating scalar using the destination component class.
+    pub fn set_f64_assignment_at(
+        &mut self,
+        index: usize,
+        real: f64,
+        imag: f64,
+    ) -> Result<(), String> {
+        match &mut self.storage {
+            ComplexStorage::F64(values) => {
+                let destination = values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("ComplexTensor index {index} out of bounds"))?;
+                *destination = (real, imag);
+            }
+            ComplexStorage::F32(values) => {
+                let destination = values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("ComplexTensor index {index} out of bounds"))?;
+                *destination = (real as f32, imag as f32);
+            }
+            ComplexStorage::Integer(storage) => {
+                storage.real.set_f64_assignment(index, real)?;
+                storage.imag.set_f64_assignment(index, imag)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Formats one element using its exact integer components when present.
+    ///
+    pub fn format_element(&self, index: usize) -> String {
+        match &self.storage {
+            ComplexStorage::Integer(storage) => {
+                let real = storage
+                    .real
+                    .value_at(index)
+                    .expect("complex integer real storage must match tensor shape");
+                let imag = storage
+                    .imag
+                    .value_at(index)
+                    .expect("complex integer imaginary storage must match tensor shape");
+                format_integer_complex_value(&real, &imag)
+            }
+            ComplexStorage::F64(values) => {
+                let (real, imag) = values[index];
+                Value::Complex(real, imag).to_string()
+            }
+            ComplexStorage::F32(values) => {
+                let (real, imag) = values[index];
+                Value::Complex(f64::from(real), f64::from(imag)).to_string()
+            }
+        }
+    }
+}
+
+impl ComplexStorage {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F64(values) => values.len(),
+            Self::F32(values) => values.len(),
+            Self::Integer(storage) => storage.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        match self {
+            Self::F64(_) => NumericDType::F64,
+            Self::F32(_) => NumericDType::F32,
+            Self::Integer(storage) => storage.real.numeric_dtype(),
+        }
+    }
+
+    pub fn validate_shape(&self, shape: &[usize]) -> Result<(), String> {
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
+        let Some(expected) = expected else {
+            return Err(format!("complex tensor shape {shape:?} overflows usize"));
+        };
+        if self.len() != expected {
+            return Err(format!(
+                "complex {} storage length {} doesn't match shape {:?} ({} elements)",
+                self.numeric_dtype().class_name(),
+                self.len(),
+                shape,
+                expected
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn materialize_f64(&self) -> Vec<(f64, f64)> {
+        match self {
+            Self::F64(values) => values.clone(),
+            Self::F32(values) => values
+                .iter()
+                .map(|&(real, imag)| (f64::from(real), f64::from(imag)))
+                .collect(),
+            Self::Integer(storage) => storage
+                .real
+                .to_f64_vec()
+                .into_iter()
+                .zip(storage.imag.to_f64_vec())
+                .collect(),
+        }
+    }
+
+    pub fn gather(&self, indices: &[usize]) -> Result<Self, String> {
+        match self {
+            Self::F64(values) => indices
+                .iter()
+                .map(|&index| {
+                    values
+                        .get(index)
+                        .copied()
+                        .ok_or_else(|| format!("complex storage index {index} out of bounds"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Self::F64),
+            Self::F32(values) => indices
+                .iter()
+                .map(|&index| {
+                    values
+                        .get(index)
+                        .copied()
+                        .ok_or_else(|| format!("complex storage index {index} out of bounds"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Self::F32),
+            Self::Integer(storage) => {
+                let real = indices
+                    .iter()
+                    .map(|&index| {
+                        storage
+                            .real
+                            .value_at(index)
+                            .ok_or_else(|| format!("complex storage index {index} out of bounds"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let imag = indices
+                    .iter()
+                    .map(|&index| {
+                        storage
+                            .imag
+                            .value_at(index)
+                            .ok_or_else(|| format!("complex storage index {index} out of bounds"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let real = storage.real.from_exact_values_like(real)?;
+                let imag = storage.imag.from_exact_values_like(imag)?;
+                IntegerComplexStorage::new(real, imag).map(Self::Integer)
+            }
+        }
+    }
+}
+
+fn format_integer_complex_value(real: &IntValue, imag: &IntValue) -> String {
+    if imag.is_zero() {
+        return format_integer_value(real);
+    }
+    if real.is_zero() {
+        return format!("{}i", format_integer_value(imag));
+    }
+    if integer_value_is_negative(imag) {
+        return format!(
+            "{}-{}i",
+            format_integer_value(real),
+            format_integer_magnitude(imag)
+        );
+    }
+    format!(
+        "{}+{}i",
+        format_integer_value(real),
+        format_integer_value(imag)
+    )
+}
+
+fn format_integer_value(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
+    }
+}
+
+fn integer_value_is_negative(value: &IntValue) -> bool {
+    match value {
+        IntValue::I8(value) => *value < 0,
+        IntValue::I16(value) => *value < 0,
+        IntValue::I32(value) => *value < 0,
+        IntValue::I64(value) => *value < 0,
+        IntValue::U8(_) | IntValue::U16(_) | IntValue::U32(_) | IntValue::U64(_) => false,
+    }
+}
+
+fn format_integer_magnitude(value: &IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.unsigned_abs().to_string(),
+        IntValue::I16(value) => value.unsigned_abs().to_string(),
+        IntValue::I32(value) => value.unsigned_abs().to_string(),
+        IntValue::I64(value) => value.unsigned_abs().to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
     }
 }
 
@@ -1179,15 +4274,25 @@ fn write_nd_pages(
 
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let format_element = |idx: usize| {
+            let value = self
+                .numeric_value_at(idx)
+                .expect("display index is within tensor storage");
+            match value.into_int_value() {
+                Some(value) => value.decimal_string(),
+                None => format_number(value.materialize_f64()),
+            }
+        };
+
         match self.shape.len() {
             0 | 1 => {
                 // Treat as row vector for display
                 write!(f, "[")?;
-                for (i, v) in self.data.iter().enumerate() {
+                for i in 0..self.len() {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "{}", format_number(*v))?;
+                    write!(f, "{}", format_element(i))?;
                 }
                 write!(f, "]")
             }
@@ -1202,8 +4307,7 @@ impl fmt::Display for Tensor {
                         if c > 0 {
                             write!(f, "  ")?;
                         }
-                        let v = self.data[r + c * rows];
-                        write!(f, "{}", format_number(v))?;
+                        write!(f, "{}", format_element(r + c * rows))?;
                     }
                 }
                 Ok(())
@@ -1211,7 +4315,7 @@ impl fmt::Display for Tensor {
             _ => {
                 if should_expand_nd_display(&self.shape) {
                     write_nd_pages(f, &self.shape, |f, idx| {
-                        write!(f, "{}", format_number(self.data[idx]))
+                        write!(f, "{}", format_element(idx))
                     })
                 } else {
                     write!(f, "Tensor(shape={:?})", self.shape)
@@ -1264,9 +4368,10 @@ impl fmt::Display for SparseTensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "{}x{} sparse double matrix with {} nonzero entries",
+            "{}x{} {} sparse matrix with {} nonzero entries",
             self.rows,
             self.cols,
+            self.class_name(),
             self.nnz()
         )?;
         if self.nnz() == 0 {
@@ -1275,16 +4380,31 @@ impl fmt::Display for SparseTensor {
         for col in 0..self.cols {
             for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
                 let row = self.row_indices[idx];
-                writeln!(
-                    f,
-                    "  ({},{})  {}",
-                    row + 1,
-                    col + 1,
-                    format_number(self.values[idx])
-                )?;
+                let value = match &self.storage {
+                    SparseValueStorage::F64(values) => format_number(values[idx]),
+                    SparseValueStorage::F32(values) => format_number(f64::from(values[idx])),
+                    SparseValueStorage::Integer(storage) => {
+                        format_int_value(storage.value_at(idx).expect("validated sparse storage"))
+                    }
+                    SparseValueStorage::Logical => "1".to_string(),
+                };
+                writeln!(f, "  ({},{})  {}", row + 1, col + 1, value)?;
             }
         }
         Ok(())
+    }
+}
+
+fn format_int_value(value: IntValue) -> String {
+    match value {
+        IntValue::I8(value) => value.to_string(),
+        IntValue::I16(value) => value.to_string(),
+        IntValue::I32(value) => value.to_string(),
+        IntValue::I64(value) => value.to_string(),
+        IntValue::U8(value) => value.to_string(),
+        IntValue::U16(value) => value.to_string(),
+        IntValue::U32(value) => value.to_string(),
+        IntValue::U64(value) => value.to_string(),
     }
 }
 
@@ -1382,6 +4502,10 @@ impl fmt::Display for LogicalArray {
 
 impl fmt::Display for CharArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.shape.len() > 2 {
+            let dims: Vec<String> = self.shape.iter().map(|d| d.to_string()).collect();
+            return write!(f, "{} char array", dims.join("x"));
+        }
         for r in 0..self.rows {
             writeln!(f)?;
             write!(f, "  ")?; // Indent
@@ -1517,13 +4641,13 @@ impl TryFrom<&Value> for String {
             }
             Value::CharArray(ca) => {
                 // Convert full char array to one string if it is a single row; else error
-                if ca.rows == 1 {
+                if ca.shape.len() <= 2 && ca.rows == 1 {
                     Ok(ca.data.iter().collect())
                 } else {
                     Err("cannot convert multi-row char array to scalar string".to_string())
                 }
             }
-            Value::Int(i) => Ok(i.to_i64().to_string()),
+            Value::Int(i) => Ok(i.decimal_string()),
             Value::Num(n) => Ok(n.to_string()),
             Value::Bool(b) => Ok(b.to_string()),
             _ => Err(format!("cannot convert {v:?} to String")),
@@ -1887,7 +5011,7 @@ impl Type {
                 // Treat as cell of char for type purposes; or a 2-D char matrix conceptually
                 Type::Cell {
                     element_type: Some(Box::new(Type::String)),
-                    length: Some(ca.rows * ca.cols),
+                    length: Some(ca.data.len()),
                 }
             }
             Value::OutputList(values) => {
@@ -2164,6 +5288,130 @@ pub struct BuiltinDescriptor {
     pub errors: &'static [BuiltinErrorDescriptor],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerClass {
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Uint8,
+    Uint16,
+    Uint32,
+    Uint64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerScalarDoubleRule {
+    NotApplicable,
+    Allowed,
+    AllowedExceptWith64BitInteger,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerInputAvailability {
+    Documented,
+    RunMatOnly,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinIntegerInputCapability {
+    pub name: &'static str,
+    pub classes: &'static [BuiltinIntegerClass],
+    pub availability: BuiltinIntegerInputAvailability,
+    pub scalar_double: BuiltinIntegerScalarDoubleRule,
+    pub notes: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerComputationDomain {
+    ExactInteger,
+    FloatingPoint,
+    Predicate,
+    Structural,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerOutputClassRule {
+    PreserveInput,
+    PreserveNondoubleInput,
+    Double,
+    Logical,
+    OptionDependent,
+    NotApplicable,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerOverflowRule {
+    Saturate,
+    Error,
+    NotApplicable,
+    EvidenceOpen,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerBackendRule {
+    HostOnly,
+    HostAndGpu,
+    GatherFallback,
+    GpuRestricted,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerOverloadKind {
+    ScalarOnly,
+    ElementwiseShapePreserving,
+    SameSizeOrScalar,
+    BroadcastCompatible,
+    StructuralParameter,
+    Multiple,
+    FunctionSpecific,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinIntegerCapabilityDescriptor {
+    pub form: &'static str,
+    pub inputs: &'static [BuiltinIntegerInputCapability],
+    pub computation_domain: BuiltinIntegerComputationDomain,
+    pub output_class: BuiltinIntegerOutputClassRule,
+    pub overflow: BuiltinIntegerOverflowRule,
+    pub backend: BuiltinIntegerBackendRule,
+    pub overload: BuiltinIntegerOverloadKind,
+    pub notes: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinIntegerAuditKind {
+    AliasOf,
+    NotApplicable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BuiltinIntegerAuditDescriptor {
+    pub kind: BuiltinIntegerAuditKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_builtin: Option<&'static str>,
+    pub notes: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinExtensionMode {
+    RunMatOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BuiltinExtensionDescriptor {
+    pub id: &'static str,
+    pub mode: BuiltinExtensionMode,
+    pub description: &'static str,
+    pub error_identifier: Option<&'static str>,
+}
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -2180,6 +5428,9 @@ pub struct BuiltinFunction {
     pub is_sink: bool,
     pub suppress_auto_output: bool,
     pub descriptor: Option<&'static BuiltinDescriptor>,
+    pub extensions: &'static [BuiltinExtensionDescriptor],
+    pub integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
+    pub integer_audit: Option<&'static BuiltinIntegerAuditDescriptor>,
 }
 
 impl BuiltinFunction {
@@ -2212,6 +5463,9 @@ impl BuiltinFunction {
             is_sink,
             suppress_auto_output,
             descriptor: None,
+            extensions: &[],
+            integer_capabilities: &[],
+            integer_audit: None,
         }
     }
 
@@ -2225,6 +5479,27 @@ impl BuiltinFunction {
         descriptor: Option<&'static BuiltinDescriptor>,
     ) -> Self {
         self.descriptor = descriptor;
+        self
+    }
+
+    pub fn with_extensions(mut self, extensions: &'static [BuiltinExtensionDescriptor]) -> Self {
+        self.extensions = extensions;
+        self
+    }
+
+    pub fn with_integer_capabilities(
+        mut self,
+        capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
+    ) -> Self {
+        self.integer_capabilities = capabilities;
+        self
+    }
+
+    pub fn with_integer_audit(
+        mut self,
+        audit: Option<&'static BuiltinIntegerAuditDescriptor>,
+    ) -> Self {
+        self.integer_audit = audit;
         self
     }
 
@@ -2734,7 +6009,7 @@ impl Trace for Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Int(i) => write!(f, "{}", i.to_i64()),
+            Value::Int(i) => write!(f, "{}", i.decimal_string()),
             Value::Num(n) => write!(f, "{}", format_number(*n)),
             Value::Complex(re, im) => {
                 if *im == 0.0 {
@@ -2838,11 +6113,11 @@ impl fmt::Display for ComplexTensor {
         match self.shape.len() {
             0 | 1 => {
                 write!(f, "[")?;
-                for (i, (re, im)) in self.data.iter().enumerate() {
+                for i in 0..self.len() {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    let s = Value::Complex(*re, *im).to_string();
+                    let s = self.format_element(i);
                     write!(f, "{s}")?;
                 }
                 write!(f, "]")
@@ -2856,8 +6131,7 @@ impl fmt::Display for ComplexTensor {
                         if c > 0 {
                             write!(f, " ")?;
                         }
-                        let (re, im) = self.data[r + c * rows];
-                        let s = Value::Complex(re, im).to_string();
+                        let s = self.format_element(r + c * rows);
                         write!(f, "{s}")?;
                     }
                     if r + 1 < rows {
@@ -2869,8 +6143,7 @@ impl fmt::Display for ComplexTensor {
             _ => {
                 if should_expand_nd_display(&self.shape) {
                     write_nd_pages(f, &self.shape, |f, idx| {
-                        let (re, im) = self.data[idx];
-                        write!(f, "{}", Value::Complex(re, im))
+                        write!(f, "{}", self.format_element(idx))
                     })
                 } else {
                     write!(f, "ComplexTensor(shape={:?})", self.shape)
@@ -2883,8 +6156,8 @@ impl fmt::Display for ComplexTensor {
 #[cfg(test)]
 mod display_tests {
     use super::{
-        fmt_rational, format_number, set_display_format, ComplexTensor, FormatMode, LogicalArray,
-        Tensor,
+        fmt_rational, format_number, set_display_format, ComplexTensor, FormatMode,
+        IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
 
     #[test]
@@ -2919,6 +6192,42 @@ mod display_tests {
     }
 
     #[test]
+    fn dense_integer_tensor_display_uses_exact_storage_values() {
+        let vector = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![2],
+        )
+        .expect("uint64 vector");
+        assert_eq!(
+            vector.to_string(),
+            "[18446744073709551615 9007199254740993]"
+        );
+
+        let matrix = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, -1, 1, i64::MAX]),
+            vec![2, 2],
+        )
+        .expect("int64 matrix");
+        let rendered = matrix.to_string();
+        assert!(rendered.contains("-9223372036854775808"));
+        assert!(rendered.contains("9223372036854775807"));
+    }
+
+    #[test]
+    fn dense_integer_nd_display_uses_exact_storage_values() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993, 7, 8]),
+            vec![1, 2, 2],
+        )
+        .expect("uint64 nd tensor");
+        let rendered = tensor.to_string();
+        assert!(rendered.contains("(:, :, 1) ="));
+        assert!(rendered.contains("(:, :, 2) ="));
+        assert!(rendered.contains("18446744073709551615"));
+        assert!(rendered.contains("9007199254740993"));
+    }
+
+    #[test]
     fn tensor_nd_display_falls_back_for_large_arrays() {
         let tensor = Tensor::new(vec![0.0; 4097], vec![1, 1, 4097]).expect("tensor");
         assert_eq!(tensor.to_string(), "Tensor(shape=[1, 1, 4097])");
@@ -2949,6 +6258,32 @@ mod display_tests {
     }
 
     #[test]
+    fn typed_complex_integer_display_uses_exact_components() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex");
+        assert_eq!(
+            tensor.to_string(),
+            format!("[{}+7i {}]", u64::MAX, 1_u64 << 63)
+        );
+
+        let negative_imaginary = IntegerComplexStorage::new(
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .expect("matching components");
+        let tensor =
+            ComplexTensor::new_integer(negative_imaginary, vec![1, 1]).expect("typed complex");
+        assert_eq!(
+            tensor.to_string(),
+            format!("[1-{}i]", i64::MIN.unsigned_abs())
+        );
+    }
+
+    #[test]
     fn format_hex_preserves_negative_zero_sign_bit() {
         set_display_format(FormatMode::Hex);
         assert_eq!(format_number(-0.0), "8000000000000000");
@@ -2960,7 +6295,8 @@ mod display_tests {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellArray {
     pub data: Vec<Value>,
-    /// Full MATLAB-visible shape vector (column-major semantics).
+    /// Full MATLAB-visible shape vector. Cell payloads retain their historical
+    /// row-major layout within each 2-D page.
     pub shape: Vec<usize>,
     /// Cached row count for 2-D interop; equals `shape[0]` when present.
     pub rows: usize,
@@ -2991,6 +6327,60 @@ impl CellArray {
             rows,
             cols,
         })
+    }
+
+    pub fn from_column_major(data: Vec<Value>, shape: Vec<usize>) -> Result<Self, String> {
+        let normalized = match shape.as_slice() {
+            [] => vec![0, 0],
+            [length] => vec![1, *length],
+            _ => shape,
+        };
+        let expected = total_len(&normalized)
+            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
+            return Err(format!(
+                "Cell data length {} doesn't match shape {:?} ({} elements)",
+                data.len(),
+                normalized,
+                expected
+            ));
+        }
+        let rows = normalized[0];
+        let cols = normalized[1];
+        let pages = if normalized.len() <= 2 {
+            1
+        } else {
+            total_len(&normalized[2..])
+                .ok_or_else(|| "Cell page shape exceeds platform limits".to_string())?
+        };
+        let mut row_major = Vec::with_capacity(data.len());
+        for page in 0..pages {
+            let page_offset = page * rows * cols;
+            for row in 0..rows {
+                for col in 0..cols {
+                    row_major.push(data[page_offset + row + col * rows].clone());
+                }
+            }
+        }
+        Self::new_with_shape(row_major, normalized)
+    }
+
+    pub fn to_column_major(&self) -> Vec<Value> {
+        let pages = if self.shape.len() <= 2 {
+            1
+        } else {
+            self.shape[2..].iter().product()
+        };
+        let mut column_major = Vec::with_capacity(self.data.len());
+        for page in 0..pages {
+            let page_offset = page * self.rows * self.cols;
+            for col in 0..self.cols {
+                for row in 0..self.rows {
+                    column_major.push(self.data[page_offset + row * self.cols + col].clone());
+                }
+            }
+        }
+        column_major
     }
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
@@ -3248,33 +6638,36 @@ pub fn static_property_gc_roots() -> Vec<GcHandle> {
 }
 
 fn primitive_class_registry() -> HashMap<String, ClassDef> {
-    let mut registry: HashMap<String, ClassDef> = ["double", "single", "logical"]
-        .into_iter()
-        .map(|class_name| {
-            let mut methods = HashMap::new();
-            methods.insert(
-                "zeros".to_string(),
-                MethodDef {
-                    name: "zeros".to_string(),
-                    is_static: true,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: Access::Public,
-                    function_name: "zeros".to_string(),
-                    implicit_class_argument: Some(class_name.to_string()),
-                },
-            );
-            (
-                class_name.to_string(),
-                ClassDef {
-                    name: class_name.to_string(),
-                    parent: None,
-                    properties: HashMap::new(),
-                    methods,
-                },
-            )
-        })
-        .collect();
+    let mut registry: HashMap<String, ClassDef> = [
+        "double", "single", "logical", "int8", "int16", "int32", "int64", "uint8", "uint16",
+        "uint32", "uint64",
+    ]
+    .into_iter()
+    .map(|class_name| {
+        let mut methods = HashMap::new();
+        methods.insert(
+            "zeros".to_string(),
+            MethodDef {
+                name: "zeros".to_string(),
+                is_static: true,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: "zeros".to_string(),
+                implicit_class_argument: Some(class_name.to_string()),
+            },
+        );
+        (
+            class_name.to_string(),
+            ClassDef {
+                name: class_name.to_string(),
+                parent: None,
+                properties: HashMap::new(),
+                methods,
+            },
+        )
+    })
+    .collect();
 
     registry.insert(
         "handle".to_string(),
@@ -3544,7 +6937,10 @@ mod class_registry_tests {
 
     #[test]
     fn primitive_classes_expose_static_zeros_method_metadata() {
-        for class_name in ["double", "single", "logical"] {
+        for class_name in [
+            "double", "single", "logical", "int8", "int16", "int32", "int64", "uint8", "uint16",
+            "uint32", "uint64",
+        ] {
             let class_def = get_class(class_name).expect("primitive class should be registered");
             let method = class_def
                 .methods

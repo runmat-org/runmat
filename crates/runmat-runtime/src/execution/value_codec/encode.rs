@@ -1,5 +1,5 @@
 use super::ValueCodecError;
-use runmat_builtins::{IntValue, IntegerStorage, NumericDType, SparseTensor, Tensor, Value};
+use runmat_builtins::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 use runmat_execution::value::{
     CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, SparseValue, StructField,
     ValuePayload,
@@ -35,13 +35,9 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
         Value::Tensor(value) => InlineValue::Dense(encode_tensor(value, path)?),
         Value::SparseTensor(value) => InlineValue::Sparse(encode_sparse(value, path)?),
         Value::ComplexTensor(value) => {
-            let mut data = Vec::with_capacity(value.data.len().saturating_mul(16));
-            for (real, imaginary) in &value.data {
-                data.extend_from_slice(&real.to_bits().to_le_bytes());
-                data.extend_from_slice(&imaginary.to_bits().to_le_bytes());
-            }
+            let (element_type, data) = encode_complex_storage(value.complex_storage());
             InlineValue::Dense(DenseValue {
-                element_type: ElementType::ComplexF64,
+                element_type,
                 shape: shape(&value.shape, path)?,
                 little_endian_data: data,
             })
@@ -161,47 +157,26 @@ fn encode_integer_scalar(value: &IntValue) -> InlineValue {
 }
 
 fn encode_tensor(value: &Tensor, path: &str) -> Result<DenseValue, ValueCodecError> {
-    let (element_type, little_endian_data) = if let Some(storage) = &value.integer_data {
+    let (element_type, little_endian_data) = if let Some(storage) = value.integer_storage() {
         encode_integer_storage(storage)
+    } else if let Some(values) = value.as_f64_slice() {
+        (
+            ElementType::F64,
+            values
+                .iter()
+                .flat_map(|value| value.to_bits().to_le_bytes())
+                .collect(),
+        )
+    } else if let Some(values) = value.as_f32_slice() {
+        (
+            ElementType::F32,
+            values
+                .iter()
+                .flat_map(|value| value.to_bits().to_le_bytes())
+                .collect(),
+        )
     } else {
-        match value.dtype {
-            NumericDType::F64 => (
-                ElementType::F64,
-                value
-                    .data
-                    .iter()
-                    .flat_map(|value| value.to_bits().to_le_bytes())
-                    .collect(),
-            ),
-            NumericDType::F32 => (
-                ElementType::F32,
-                value
-                    .data
-                    .iter()
-                    .flat_map(|value| (*value as f32).to_bits().to_le_bytes())
-                    .collect(),
-            ),
-            NumericDType::U8 => {
-                if value.data.iter().any(|value| {
-                    !value.is_finite() || *value < 0.0 || *value > 255.0 || value.fract() != 0.0
-                }) {
-                    return Err(ValueCodecError::invalid(
-                        path,
-                        "uint8 tensor compatibility data contains a non-uint8 value",
-                    ));
-                }
-                (
-                    ElementType::U8,
-                    value.data.iter().map(|value| *value as u8).collect(),
-                )
-            }
-            NumericDType::U16 | NumericDType::U32 => {
-                return Err(ValueCodecError::invalid(
-                    path,
-                    "integer tensor is missing exact integer storage",
-                ))
-            }
-        }
+        return Err(ValueCodecError::invalid(path, "unknown tensor storage"));
     };
     Ok(DenseValue {
         element_type,
@@ -211,16 +186,29 @@ fn encode_tensor(value: &Tensor, path: &str) -> Result<DenseValue, ValueCodecErr
 }
 
 fn encode_sparse(value: &SparseTensor, path: &str) -> Result<SparseValue, ValueCodecError> {
-    let (element_type, little_endian_data) = match &value.integer_data {
-        Some(storage) => encode_integer_storage(storage),
-        None => (
+    let (element_type, little_endian_data) = if let Some(storage) = value.integer_storage() {
+        encode_integer_storage(storage)
+    } else if let Some(values) = value.as_f64_slice() {
+        (
             ElementType::F64,
-            value
-                .values
+            values
                 .iter()
                 .flat_map(|value| value.to_bits().to_le_bytes())
                 .collect(),
-        ),
+        )
+    } else if let Some(values) = value.as_f32_slice() {
+        (
+            ElementType::F32,
+            values
+                .iter()
+                .flat_map(|value| value.to_bits().to_le_bytes())
+                .collect(),
+        )
+    } else {
+        return Err(ValueCodecError::unsupported(
+            path,
+            "logical sparse transport",
+        ));
     };
     Ok(SparseValue {
         element_type,
@@ -230,6 +218,56 @@ fn encode_sparse(value: &SparseTensor, path: &str) -> Result<SparseValue, ValueC
         row_indices: indices(&value.row_indices, path)?,
         little_endian_data,
     })
+}
+
+fn encode_complex_storage(storage: &ComplexStorage) -> (ElementType, Vec<u8>) {
+    match storage {
+        ComplexStorage::F64(values) => (
+            ElementType::ComplexF64,
+            values
+                .iter()
+                .flat_map(|(real, imag)| {
+                    real.to_bits()
+                        .to_le_bytes()
+                        .into_iter()
+                        .chain(imag.to_bits().to_le_bytes())
+                })
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => (
+            ElementType::ComplexF32,
+            values
+                .iter()
+                .flat_map(|(real, imag)| {
+                    real.to_bits()
+                        .to_le_bytes()
+                        .into_iter()
+                        .chain(imag.to_bits().to_le_bytes())
+                })
+                .collect(),
+        ),
+        ComplexStorage::Integer(storage) => {
+            let element_type = match &storage.real {
+                IntegerStorage::I8(_) => ElementType::ComplexI8,
+                IntegerStorage::I16(_) => ElementType::ComplexI16,
+                IntegerStorage::I32(_) => ElementType::ComplexI32,
+                IntegerStorage::I64(_) => ElementType::ComplexI64,
+                IntegerStorage::U8(_) => ElementType::ComplexU8,
+                IntegerStorage::U16(_) => ElementType::ComplexU16,
+                IntegerStorage::U32(_) => ElementType::ComplexU32,
+                IntegerStorage::U64(_) => ElementType::ComplexU64,
+            };
+            let (_, real) = encode_integer_storage(&storage.real);
+            let (_, imag) = encode_integer_storage(&storage.imag);
+            let width = real.len().checked_div(storage.len().max(1)).unwrap_or(0);
+            let mut interleaved = Vec::with_capacity(real.len() + imag.len());
+            for index in 0..storage.len() {
+                interleaved.extend_from_slice(&real[index * width..(index + 1) * width]);
+                interleaved.extend_from_slice(&imag[index * width..(index + 1) * width]);
+            }
+            (element_type, interleaved)
+        }
+    }
 }
 
 fn encode_integer_storage(storage: &IntegerStorage) -> (ElementType, Vec<u8>) {

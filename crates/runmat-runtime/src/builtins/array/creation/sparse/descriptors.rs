@@ -10,8 +10,16 @@ pub(super) const SPARSE_MATRIX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinPar
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Sparse double matrix.",
+    description: "Sparse matrix.",
 }];
+
+const SPARSE_TYPENAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "typename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse storage type: double, single, or logical.",
+};
 
 const DENSE_VECTOR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "v",
@@ -97,7 +105,7 @@ const MATRIX_TYPENAME_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("double"),
-        description: "Sparse storage type. RunMat currently supports double sparse storage.",
+        description: "Sparse storage type: double or single.",
     },
 ];
 
@@ -128,7 +136,7 @@ const DIMS_DENSITY_TYPENAME_INPUTS: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("double"),
-        description: "Sparse storage type. RunMat currently supports double sparse storage.",
+        description: "Sparse storage type: double or single.",
     },
 ];
 
@@ -166,7 +174,7 @@ const DIMS_DENSITY_RC_TYPENAME_INPUTS: [BuiltinParamDescriptor; 5] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("double"),
-        description: "Sparse storage type. RunMat currently supports double sparse storage.",
+        description: "Sparse storage type: double or single.",
     },
 ];
 
@@ -275,7 +283,36 @@ const SPDIAGS_INPUT_REPLACE: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const SPEYE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+const SPEYE_INPUT_A_TYPENAME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "size",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Square size or two-element size vector.",
+    },
+    SPARSE_TYPENAME,
+];
+
+const SPEYE_INPUT_DIMS_TYPENAME: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "m",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Number of columns.",
+    },
+    SPARSE_TYPENAME,
+];
+
+const SPEYE_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     BuiltinSignatureDescriptor {
         label: "S = speye()",
         inputs: &[],
@@ -287,13 +324,28 @@ const SPEYE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         outputs: &SPARSE_MATRIX_OUTPUT,
     },
     BuiltinSignatureDescriptor {
+        label: "S = speye(n, typename)",
+        inputs: &SPEYE_INPUT_A_TYPENAME,
+        outputs: &SPARSE_MATRIX_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
         label: "S = speye(m, n)",
         inputs: &SPARSE_INPUT_DIMS,
         outputs: &SPARSE_MATRIX_OUTPUT,
     },
     BuiltinSignatureDescriptor {
+        label: "S = speye(m, n, typename)",
+        inputs: &SPEYE_INPUT_DIMS_TYPENAME,
+        outputs: &SPARSE_MATRIX_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
         label: "S = speye(sz)",
         inputs: &SPARSE_INPUT_A,
+        outputs: &SPARSE_MATRIX_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = speye(sz, typename)",
+        inputs: &SPEYE_INPUT_A_TYPENAME,
         outputs: &SPARSE_MATRIX_OUTPUT,
     },
 ];

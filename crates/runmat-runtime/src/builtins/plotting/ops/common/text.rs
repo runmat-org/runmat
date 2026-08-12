@@ -9,6 +9,8 @@ use crate::builtins::plotting::style::value_as_string;
 use crate::builtins::plotting::{plotting_error, plotting_error_with_source};
 use crate::BuiltinResult;
 
+use super::handles::numeric_handle_scalar;
+
 #[derive(Clone, Debug)]
 pub struct TextCommand {
     pub target: (FigureHandle, usize),
@@ -170,12 +172,7 @@ pub(crate) fn split_axes_target<'a>(
 }
 
 fn try_parse_axes_target(value: &Value) -> Option<(FigureHandle, usize)> {
-    match value {
-        Value::Num(v) => decode_axes_handle(*v).ok(),
-        Value::Int(i) => decode_axes_handle(i.to_f64()).ok(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => decode_axes_handle(tensor.data[0]).ok(),
-        _ => None,
-    }
+    decode_axes_handle(numeric_handle_scalar(value)?).ok()
 }
 
 fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec<String>> {
@@ -207,4 +204,23 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
 pub fn vec4_eq(a: Option<glam::Vec4>, b: glam::Vec4) -> bool {
     a.map(|v| (v - b).abs().max_element() < 1e-6)
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn axes_target_parser_reads_typed_integer_storage_exactly() {
+        let encoded =
+            crate::builtins::plotting::state::encode_axes_handle(FigureHandle::from(7), 2);
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U32(vec![encoded as u32]), vec![1, 1]).unwrap();
+
+        assert_eq!(
+            try_parse_axes_target(&Value::Tensor(tensor)),
+            Some((FigureHandle::from(7), 2))
+        );
+    }
 }

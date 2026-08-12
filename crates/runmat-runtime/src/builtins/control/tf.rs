@@ -473,6 +473,15 @@ async fn tf_binary(
 }
 
 fn parse_integer_exponent(value: &Value) -> BuiltinResult<i64> {
+    if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
+        return integer.try_to_i64().ok_or_else(|| {
+            control_error(
+                "tf",
+                "RunMat:tf:InvalidExponent",
+                "tf: exponent exceeds integer range",
+            )
+        });
+    }
     let exponent = scalar_f64(value, "exponent", "tf")?;
     if !exponent.is_finite() || exponent.fract().abs() > 0.0 {
         return Err(control_error(
@@ -482,6 +491,13 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<i64> {
         ));
     }
     if exponent < i64::MIN as f64 || exponent > i64::MAX as f64 {
+        return Err(control_error(
+            "tf",
+            "RunMat:tf:InvalidExponent",
+            "tf: exponent exceeds integer range",
+        ));
+    }
+    if exponent == i64::MAX as f64 {
         return Err(control_error(
             "tf",
             "RunMat:tf:InvalidExponent",
@@ -608,7 +624,7 @@ async fn tf_mpower(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, Tensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, Tensor};
 
     fn run_tf(numerator: Value, denominator: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let mut args = vec![numerator, denominator];
@@ -632,9 +648,39 @@ mod tests {
 
     fn tensor_property(value: &Value, name: &str) -> Vec<f64> {
         match property(value, name) {
-            Value::Tensor(tensor) => tensor.data.clone(),
+            Value::Tensor(tensor) => tensor.materialize_f64().clone(),
             other => panic!("expected tensor property {name}, got {other:?}"),
         }
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
+    }
+
+    #[test]
+    fn exponent_parser_reads_typed_integer_scalar_storage_exactly() {
+        assert_eq!(
+            parse_integer_exponent(&Value::Int(IntValue::I64(-3))).unwrap(),
+            -3
+        );
+
+        let exponent =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("typed exponent");
+        assert_eq!(
+            parse_integer_exponent(&Value::Tensor(exponent)).unwrap(),
+            -2
+        );
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![i64::MAX as u64 + 1]), vec![1, 1])
+                .expect("wide exponent");
+        assert!(parse_integer_exponent(&Value::Tensor(too_large)).is_err());
+    }
+
+    #[test]
+    fn exponent_parser_rejects_unrepresentable_double_boundary() {
+        assert!(parse_integer_exponent(&Value::Num(i64::MAX as f64)).is_err());
+        assert!(parse_integer_exponent(&Value::Num((i64::MAX as f64) + 1024.0)).is_err());
     }
 
     #[test]
@@ -673,14 +719,14 @@ mod tests {
         match property(&sys, "Numerator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![20.0]);
+                assert_eq!(tensor.materialize_f64(), vec![20.0]);
             }
             other => panic!("expected numerator tensor, got {other:?}"),
         }
         match property(&sys, "Denominator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![1.0, 5.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 5.0]);
             }
             other => panic!("expected denominator tensor, got {other:?}"),
         }
@@ -748,14 +794,14 @@ mod tests {
         match property(&sys, "Numerator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![1.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected numerator tensor, got {other:?}"),
         }
         match property(&sys, "Denominator") {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data, vec![1.0, 3.0, 2.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0]);
             }
             other => panic!("expected denominator tensor, got {other:?}"),
         }
@@ -775,6 +821,24 @@ mod tests {
             &Value::CharArray(CharArray::new_row("z"))
         );
         assert_eq!(property(&sys, "Ts"), &Value::Num(0.1));
+    }
+
+    #[test]
+    fn tf_typed_integer_coefficients_and_sample_time_cross_double_boundary_exactly() {
+        let sys = run_tf(
+            integer_tensor(IntegerStorage::U64(vec![1, 2]), vec![1, 2]),
+            integer_tensor(IntegerStorage::I16(vec![1, 3, 2]), vec![1, 3]),
+            vec![integer_tensor(IntegerStorage::U8(vec![1]), vec![1, 1])],
+        )
+        .expect("tf");
+
+        assert_eq!(tensor_property(&sys, "Numerator"), vec![1.0, 2.0]);
+        assert_eq!(tensor_property(&sys, "Denominator"), vec![1.0, 3.0, 2.0]);
+        assert_eq!(property(&sys, "Ts"), &Value::Num(1.0));
+        assert_eq!(
+            property(&sys, "Variable"),
+            &Value::CharArray(CharArray::new_row("z"))
+        );
     }
 
     #[test]

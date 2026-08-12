@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_builtins::Value;
+use runmat_builtins::{IntValue, IntegerStorage, Value};
 use test_helpers::execute_source;
 
 #[test]
@@ -28,7 +28,7 @@ fn logical_mask_indexing() {
     if let Value::Tensor(v) = &vars[2] {
         // MATLAB logical linear indexing returns a column vector.
         assert_eq!(v.shape, vec![2, 1]);
-        assert_eq!(v.data, vec![1.0, 2.0]);
+        assert_eq!(v.materialize_f64(), vec![1.0, 2.0]);
     } else {
         panic!("v");
     }
@@ -39,7 +39,7 @@ fn logical_mask_linear_indexing_row_vector_returns_column() {
     let vars = execute_source("A=[10,20,30,40]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
     if let Value::Tensor(v) = &vars[2] {
         assert_eq!(v.shape, vec![2, 1]);
-        assert_eq!(v.data, vec![10.0, 30.0]);
+        assert_eq!(v.materialize_f64(), vec![10.0, 30.0]);
     } else {
         panic!("v");
     }
@@ -51,7 +51,7 @@ fn logical_mask_linear_indexing_matrix_mask_returns_column() {
     // mask selects A(1,1) and A(2,2) in column-major linear order
     if let Value::Tensor(v) = &vars[2] {
         assert_eq!(v.shape, vec![2, 1]);
-        assert_eq!(v.data, vec![1.0, 4.0]);
+        assert_eq!(v.materialize_f64(), vec![1.0, 4.0]);
     } else {
         panic!("v");
     }
@@ -62,10 +62,62 @@ fn logical_mask_linear_indexing_all_false_returns_empty_column() {
     let vars = execute_source("A=[1,2;3,4]; idx=logical([0,0,0,0]); v=A(idx);").unwrap();
     if let Value::Tensor(v) = &vars[2] {
         assert_eq!(v.shape, vec![0, 1]);
-        assert!(v.data.is_empty());
+        assert!(v.materialize_f64().is_empty());
     } else {
         panic!("v");
     }
+}
+
+#[test]
+fn short_linear_logical_masks_read_assign_and_delete_integer_arrays() {
+    let vars = execute_source(
+        "A = uint64([10 20 30 40]); \
+         mask = logical([0 1]); \
+         picked = A(mask); \
+         A(mask) = uint64(99); \
+         assigned = A; \
+         A(mask) = []; \
+         deleted = A;",
+    )
+    .expect("short logical read, assignment, and deletion");
+
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 4]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![10, 99, 30, 40]))
+    )));
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        Value::Tensor(tensor)
+            if tensor.shape == vec![1, 3]
+                && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![10, 30, 40]))
+    )));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Int(IntValue::U64(20)))));
+}
+
+#[test]
+fn linear_logical_false_overhang_is_ignored_but_true_overhang_rejects() {
+    let vars = execute_source(
+        "A = uint8([10 20 30]); \
+         mask = logical([0 1 0 0 0]); \
+         picked = A(mask);",
+    )
+    .expect("false logical overhang");
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Int(IntValue::U8(20)))));
+
+    let error = execute_source(
+        "A = uint8([10 20 30]); \
+         mask = logical([0 0 0 1]); \
+         picked = A(mask);",
+    )
+    .expect_err("true logical overhang must reject");
+    assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
 
 #[test]
@@ -73,7 +125,7 @@ fn host_linear_indexing_accepts_gpu_backed_range_selector() {
     let vars = execute_source("a=length(1:10); k=floor(a/2)+1; x=(1:10)'; y=x(1:k);").unwrap();
     if let Value::Tensor(v) = &vars[3] {
         assert_eq!(v.shape, vec![1, 6]);
-        assert_eq!(v.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(v.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     } else {
         panic!("y");
     }
@@ -210,7 +262,7 @@ fn fractional_range_end_expression_truncates_range_bound() {
         .expect("fractional range end expression should execute");
     if let Value::Tensor(y) = &vars[1] {
         assert_eq!(y.shape, vec![1, 2]);
-        assert_eq!(y.data, vec![10.0, 20.0]);
+        assert_eq!(y.materialize_f64(), vec![10.0, 20.0]);
     } else {
         panic!("expected tensor result for fractional range end expression");
     }

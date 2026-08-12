@@ -1,6 +1,12 @@
 //! Exact native integer reductions shared by MATLAB reduction builtins.
 
+use std::cmp::Ordering;
+
 use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+
+use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::common::tensor;
+use crate::builtins::math::elementwise::extended_precision::Extended;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExtremaDirection {
@@ -35,6 +41,256 @@ pub(crate) enum CumulativeExtremaDirection {
 pub(crate) struct IntegerExtrema {
     pub(crate) values: Value,
     pub(crate) indices: Value,
+}
+
+/// Selects elementwise extrema from two exact integer arrays of the same class.
+///
+/// This is intentionally limited to matching typed classes. Mixed-class and
+/// double/integer calls retain their existing MATLAB dispatch paths, where the
+/// output class is governed by the full promotion rules.
+pub(crate) fn elementwise_extrema(
+    left: &IntegerStorage,
+    left_shape: &[usize],
+    right: &IntegerStorage,
+    right_shape: &[usize],
+    direction: ExtremaDirection,
+    comparison: ExtremaComparison,
+) -> Result<IntegerExtrema, String> {
+    let plan = BroadcastPlan::new(left_shape, right_shape)?;
+    let shape = plan.output_shape().to_vec();
+
+    macro_rules! select {
+        ($left:expr, $right:expr, $variant:ident) => {{
+            let mut values = Vec::with_capacity(plan.len());
+            let mut indices = Vec::with_capacity(plan.len());
+            for (_, left_index, right_index) in plan.iter() {
+                let a = $left[left_index];
+                let b = $right[right_index];
+                if !should_replace(
+                    &IntValue::$variant(a),
+                    &IntValue::$variant(b),
+                    direction,
+                    comparison,
+                ) {
+                    values.push(a);
+                    indices.push(1.0);
+                } else {
+                    values.push(b);
+                    indices.push(2.0);
+                }
+            }
+            (IntegerStorage::$variant(values), indices)
+        }};
+    }
+
+    let (storage, indices) = match (left, right) {
+        (IntegerStorage::I8(a), IntegerStorage::I8(b)) => select!(a, b, I8),
+        (IntegerStorage::I16(a), IntegerStorage::I16(b)) => select!(a, b, I16),
+        (IntegerStorage::I32(a), IntegerStorage::I32(b)) => select!(a, b, I32),
+        (IntegerStorage::I64(a), IntegerStorage::I64(b)) => select!(a, b, I64),
+        (IntegerStorage::U8(a), IntegerStorage::U8(b)) => select!(a, b, U8),
+        (IntegerStorage::U16(a), IntegerStorage::U16(b)) => select!(a, b, U16),
+        (IntegerStorage::U32(a), IntegerStorage::U32(b)) => select!(a, b, U32),
+        (IntegerStorage::U64(a), IntegerStorage::U64(b)) => select!(a, b, U64),
+        _ => {
+            return Err("elementwise integer extrema require matching integer classes".to_string())
+        }
+    };
+    Ok(IntegerExtrema {
+        values: integer_storage_into_value(storage, shape.clone())?,
+        indices: numeric_tensor_into_value(indices, shape)?,
+    })
+}
+
+/// Dispatches the MATLAB-supported pairwise integer forms: matching exact
+/// integer classes or one exact integer operand with a scalar double. Other
+/// combinations remain visible to the caller so it can report the public
+/// invalid-input category.
+pub(crate) fn elementwise_value_extrema(
+    left: &Value,
+    right: &Value,
+    direction: ExtremaDirection,
+    comparison: ExtremaComparison,
+    omit_nan: bool,
+) -> Result<Option<IntegerExtrema>, String> {
+    let left_integer = integer_storage_and_shape(left);
+    let right_integer = integer_storage_and_shape(right);
+    match (left_integer, right_integer) {
+        (Some((left_storage, left_shape)), Some((right_storage, right_shape))) => {
+            if left_storage.class_name() != right_storage.class_name() {
+                return Ok(None);
+            }
+            elementwise_extrema(
+                &left_storage,
+                &left_shape,
+                &right_storage,
+                &right_shape,
+                direction,
+                comparison,
+            )
+            .map(Some)
+        }
+        (Some((storage, shape)), None) => {
+            let Some(scalar) = scalar_double_value(right) else {
+                return Ok(None);
+            };
+            integer_scalar_extrema(
+                &storage, shape, scalar, true, direction, comparison, omit_nan,
+            )
+            .map(Some)
+        }
+        (None, Some((storage, shape))) => {
+            let Some(scalar) = scalar_double_value(left) else {
+                return Ok(None);
+            };
+            integer_scalar_extrema(
+                &storage, shape, scalar, false, direction, comparison, omit_nan,
+            )
+            .map(Some)
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn integer_storage_and_shape(value: &Value) -> Option<(IntegerStorage, Vec<usize>)> {
+    match value {
+        Value::Int(value) => Some((storage_from_scalar(value), vec![1, 1])),
+        Value::Tensor(tensor) => tensor
+            .integer_storage()
+            .cloned()
+            .map(|storage| (storage, tensor.shape.clone())),
+        _ => None,
+    }
+}
+
+pub(crate) fn value_has_integer_storage(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        _ => false,
+    }
+}
+
+fn scalar_double_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Num(value) => Some(*value),
+        Value::Tensor(tensor)
+            if tensor.numeric_dtype() == runmat_builtins::NumericDType::F64
+                && tensor::is_scalar_tensor(tensor) =>
+        {
+            tensor.numeric_value_at(0).and_then(|value| match value {
+                runmat_builtins::NumericScalar::F64(value) => Some(value),
+                _ => None,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn integer_scalar_extrema(
+    storage: &IntegerStorage,
+    shape: Vec<usize>,
+    scalar: f64,
+    integer_is_left: bool,
+    direction: ExtremaDirection,
+    comparison: ExtremaComparison,
+    omit_nan: bool,
+) -> Result<IntegerExtrema, String> {
+    let scalar_value = storage.cast_f64_assignment(scalar);
+    let mut values = Vec::with_capacity(storage.len());
+    let mut indices = Vec::with_capacity(storage.len());
+    for index in 0..storage.len() {
+        let integer = storage_value(storage, index);
+        let choose_integer = choose_integer_over_scalar(
+            &integer,
+            scalar,
+            integer_is_left,
+            direction,
+            comparison,
+            omit_nan,
+        );
+        if choose_integer {
+            values.push(integer);
+            indices.push(if integer_is_left { 1.0 } else { 2.0 });
+        } else {
+            values.push(scalar_value.clone());
+            indices.push(if integer_is_left { 2.0 } else { 1.0 });
+        }
+    }
+    Ok(IntegerExtrema {
+        values: integer_storage_into_value(storage.from_same_class_values(values)?, shape.clone())?,
+        indices: numeric_tensor_into_value(indices, shape)?,
+    })
+}
+
+fn choose_integer_over_scalar(
+    integer: &IntValue,
+    scalar: f64,
+    integer_is_left: bool,
+    direction: ExtremaDirection,
+    comparison: ExtremaComparison,
+    omit_nan: bool,
+) -> bool {
+    if scalar.is_nan() {
+        return omit_nan;
+    }
+    let ordering = compare_integer_to_scalar(integer, scalar, comparison);
+    match (direction, integer_is_left) {
+        (ExtremaDirection::Min, true) => ordering != Ordering::Greater,
+        (ExtremaDirection::Max, true) => ordering != Ordering::Less,
+        (ExtremaDirection::Min, false) => ordering == Ordering::Less,
+        (ExtremaDirection::Max, false) => ordering == Ordering::Greater,
+    }
+}
+
+fn compare_integer_to_scalar(
+    integer: &IntValue,
+    scalar: f64,
+    comparison: ExtremaComparison,
+) -> Ordering {
+    let natural = || compare_extended(&extended_from_integer(integer), scalar);
+    match comparison {
+        ExtremaComparison::Natural => natural(),
+        ExtremaComparison::Absolute => compare_extended(
+            &Extended::from_u64(
+                u64::try_from(absolute_value(integer))
+                    .expect("absolute 64-bit integer magnitude fits u64"),
+            ),
+            scalar.abs(),
+        )
+        .then_with(natural),
+    }
+}
+
+fn compare_extended(integer: &Extended, scalar: f64) -> Ordering {
+    if scalar == f64::INFINITY {
+        return Ordering::Less;
+    }
+    if scalar == f64::NEG_INFINITY {
+        return Ordering::Greater;
+    }
+    let scalar = Extended::from_f64(scalar).expect("non-NaN finite scalar");
+    let difference = integer.subtract(&scalar);
+    if difference.is_zero() {
+        Ordering::Equal
+    } else if difference.is_negative() {
+        Ordering::Less
+    } else {
+        Ordering::Greater
+    }
+}
+
+fn extended_from_integer(value: &IntValue) -> Extended {
+    match value {
+        IntValue::I8(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::I16(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::I32(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::I64(value) => Extended::from_i128(i128::from(*value)),
+        IntValue::U8(value) => Extended::from_u64(u64::from(*value)),
+        IntValue::U16(value) => Extended::from_u64(u64::from(*value)),
+        IntValue::U32(value) => Extended::from_u64(u64::from(*value)),
+        IntValue::U64(value) => Extended::from_u64(*value),
+    }
 }
 
 /// Reduces an integer tensor by saturated native addition along zero-based
@@ -789,6 +1045,56 @@ mod tests {
     }
 
     #[test]
+    fn extrema_first_tie_indices_are_one_for_every_integer_class() {
+        let prototypes = [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ];
+
+        for prototype in prototypes {
+            let one = prototype.cast_exact_assignment(&IntValue::I8(1));
+            let two = prototype.cast_exact_assignment(&IntValue::I8(2));
+            for (values, direction, expected) in [
+                (
+                    vec![one.clone(), one.clone(), two.clone()],
+                    ExtremaDirection::Min,
+                    one.clone(),
+                ),
+                (
+                    vec![two.clone(), two.clone(), one.clone()],
+                    ExtremaDirection::Max,
+                    two.clone(),
+                ),
+            ] {
+                let storage = prototype
+                    .from_same_class_values(values)
+                    .expect("same-class storage");
+                let result = extrema(
+                    &storage,
+                    &[3, 1],
+                    vec![1, 1],
+                    &[0],
+                    &[true, false],
+                    &[1],
+                    false,
+                    false,
+                    direction,
+                    ExtremaComparison::Natural,
+                )
+                .expect("extrema");
+                assert_eq!(result.values, Value::Int(expected));
+                assert_eq!(result.indices, Value::Num(1.0));
+            }
+        }
+    }
+
+    #[test]
     fn extrema_absolute_comparison_handles_int64_minimum_without_overflow() {
         let storage = IntegerStorage::I64(vec![i64::MIN, -3, 3]);
         let result = extrema(
@@ -856,5 +1162,130 @@ mod tests {
                     .expect("unchanged input")
             )
         );
+    }
+
+    #[test]
+    fn cumulative_arithmetic_saturates_forward_and_reverse_for_every_integer_class() {
+        macro_rules! assert_scan {
+            ($variant:ident, $input:expr, $expected:expr, $direction:expr, $operation:expr) => {{
+                let result = cumulative(
+                    &IntegerStorage::$variant($input),
+                    &[3, 1],
+                    1,
+                    $direction,
+                    $operation,
+                )
+                .expect("cumulative scan");
+                assert_eq!(
+                    result,
+                    Value::Tensor(
+                        Tensor::new_integer(IntegerStorage::$variant($expected), vec![3, 1])
+                            .expect("expected cumulative scan")
+                    )
+                );
+            }};
+        }
+        macro_rules! assert_signed_class {
+            ($variant:ident, $ty:ty) => {{
+                let max = <$ty>::MAX;
+                assert_scan!(
+                    $variant,
+                    vec![max, 1, -1],
+                    vec![max, max, max - 1],
+                    CumulativeDirection::Forward,
+                    CumulativeOperation::Sum
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 1, -1],
+                    vec![max, 0, -1],
+                    CumulativeDirection::Reverse,
+                    CumulativeOperation::Sum
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, -1],
+                    vec![max, max, -max],
+                    CumulativeDirection::Forward,
+                    CumulativeOperation::Product
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, -1],
+                    vec![<$ty>::MIN, -2, -1],
+                    CumulativeDirection::Reverse,
+                    CumulativeOperation::Product
+                );
+            }};
+        }
+        macro_rules! assert_unsigned_class {
+            ($variant:ident, $ty:ty) => {{
+                let max = <$ty>::MAX;
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, 0],
+                    vec![max, max, max],
+                    CumulativeDirection::Forward,
+                    CumulativeOperation::Sum
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, 0],
+                    vec![max, 2, 0],
+                    CumulativeDirection::Reverse,
+                    CumulativeOperation::Sum
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, 1],
+                    vec![max, max, max],
+                    CumulativeDirection::Forward,
+                    CumulativeOperation::Product
+                );
+                assert_scan!(
+                    $variant,
+                    vec![max, 2, 1],
+                    vec![max, 2, 1],
+                    CumulativeDirection::Reverse,
+                    CumulativeOperation::Product
+                );
+            }};
+        }
+
+        assert_signed_class!(I8, i8);
+        assert_signed_class!(I16, i16);
+        assert_signed_class!(I32, i32);
+        assert_signed_class!(I64, i64);
+        assert_unsigned_class!(U8, u8);
+        assert_unsigned_class!(U16, u16);
+        assert_unsigned_class!(U32, u32);
+        assert_unsigned_class!(U64, u64);
+    }
+
+    #[test]
+    fn cumulative_arithmetic_preserves_all_integer_empty_shapes() {
+        for storage in [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ] {
+            for direction in [CumulativeDirection::Forward, CumulativeDirection::Reverse] {
+                for operation in [CumulativeOperation::Sum, CumulativeOperation::Product] {
+                    assert_eq!(
+                        cumulative(&storage, &[0, 3], 1, direction, operation)
+                            .expect("empty cumulative scan"),
+                        Value::Tensor(
+                            Tensor::new_integer(storage.clone(), vec![0, 3])
+                                .expect("expected empty cumulative scan")
+                        )
+                    );
+                }
+            }
+        }
     }
 }

@@ -33,7 +33,7 @@ fn logical_size_numel_ndims() {
     let sz = runmat_runtime::call_builtin("size", std::slice::from_ref(&v)).unwrap();
     if let Value::Tensor(t) = sz {
         // Verify row vector and product equals numel
-        let dims = t.data.clone();
+        let dims = t.materialize_f64().clone();
         assert!(t.rows() == 1 || t.cols() == 1);
         let prod: usize = dims.iter().map(|x| *x as usize).product();
         let ne = runmat_runtime::call_builtin("numel", std::slice::from_ref(&v)).unwrap();

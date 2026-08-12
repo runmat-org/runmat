@@ -176,12 +176,12 @@ mod tests {
 
     fn x_data(handle: f64) -> Vec<f64> {
         let value = get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap();
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     fn y_data(handle: f64) -> Vec<f64> {
         let value = get_builtin(vec![Value::Num(handle), Value::String("YData".into())]).unwrap();
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     #[test]

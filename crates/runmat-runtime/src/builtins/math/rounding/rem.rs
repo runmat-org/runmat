@@ -2,9 +2,12 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -15,6 +18,9 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::math::elementwise::integer_arithmetic::{
+    reject_integer_logical_operands, try_integer_remainder, IntegerRemainderOp,
+};
 use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -85,14 +91,14 @@ const REM_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Dividend input (numeric/logical/char/complex).",
+        description: "Real dividend input (numeric/logical/char).",
     },
     BuiltinParamDescriptor {
         name: "B",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Divisor input (numeric/logical/char/complex).",
+        description: "Real divisor input (numeric/logical/char).",
     },
 ];
 const REM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -103,7 +109,7 @@ const REM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
 const REM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REM.INVALID_INPUT",
     identifier: Some("RunMat:rem:InvalidInput"),
-    when: "Inputs cannot be interpreted as numeric, logical, char, or complex operands.",
+    when: "Inputs are complex or cannot be interpreted as real numeric, logical, or char operands.",
     message: "rem: invalid input",
 };
 const REM_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -130,6 +136,35 @@ pub const REM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &REM_ERRORS,
 };
 
+const REM_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "A is an integer array or a compatible real scalar double.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
+        notes: "B is an integer array or a compatible real scalar double.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "R = rem(A, B)",
+        inputs: &REM_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
+        notes: "Native integer storage uses exact truncating-remainder semantics; integer GPU inputs gather when no semantically complete provider path is available.",
+    }];
+
 fn rem_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -151,14 +186,27 @@ fn rem_error_with_message(
 #[runtime_builtin(
     name = "rem",
     category = "math/rounding",
-    summary = "MATLAB-compatible remainder a - b .* fix(a./b) with support for complex values and broadcasting.",
+    summary = "MATLAB-compatible real remainder a - b .* fix(a./b) with broadcasting.",
     keywords = "rem,remainder,truncate,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),
     descriptor(crate::builtins::math::rounding::rem::REM_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::rounding::rem::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::rounding::rem"
 )]
 async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if matches!(&lhs, Value::Complex(_, _) | Value::ComplexTensor(_))
+        || matches!(&rhs, Value::Complex(_, _) | Value::ComplexTensor(_))
+    {
+        return Err(rem_error_with_detail(
+            &REM_ERROR_INVALID_INPUT,
+            "inputs must be real",
+        ));
+    }
+    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
+    reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME)
+        .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?;
     match (lhs, rhs) {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => rem_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
@@ -174,7 +222,16 @@ async fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
-    if a.device_id == b.device_id {
+    if runmat_accelerate_api::handle_integer_type(&a).is_some()
+        && runmat_accelerate_api::handle_integer_type(&b).is_some()
+        && a.device_id == b.device_id
+    {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
+            if let Ok(out) = provider.elem_rem(&a, &b).await {
+                return Ok(gpu_helpers::resident_gpu_value(out));
+            }
+        }
+    } else if a.device_id == b.device_id {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&a) {
             if a.shape == b.shape {
                 if let Ok(div) = provider.elem_div(&a, &b).await {
@@ -212,6 +269,11 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
 }
 
 fn rem_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if let Some(result) = try_integer_remainder(&lhs, &rhs, IntegerRemainderOp::Rem, BUILTIN_NAME)
+        .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?
+    {
+        return Ok(result);
+    }
     if let Some(result) = scalar_rem_value(&lhs, &rhs) {
         return Ok(result);
     }
@@ -226,16 +288,25 @@ fn rem_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 fn compute_rem_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
         .map_err(|err| rem_error_with_detail(&REM_ERROR_SIZE_MISMATCH, err))?;
+    let dtype = if a.numeric_dtype() == NumericDType::F32 && b.numeric_dtype() == NumericDType::F32
+    {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
+        let tensor = Tensor::new_with_dtype(Vec::new(), plan.output_shape().to_vec(), dtype)
             .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        result[out_idx] = rem_real_scalar(a.data[idx_a], b.data[idx_b]);
+        result[out_idx] = rem_real_scalar(
+            tensor::tensor_value_f64(a, idx_a),
+            tensor::tensor_value_f64(b, idx_b),
+        );
     }
-    let tensor = Tensor::new(result, plan.output_shape().to_vec())
+    let tensor = Tensor::new_with_dtype(result, plan.output_shape().to_vec(), dtype)
         .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -250,8 +321,8 @@ fn compute_rem_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<Va
     }
     let mut result = vec![(0.0f64, 0.0f64); plan.len()];
     for (out_idx, idx_a, idx_b) in plan.iter() {
-        let (ar, ai) = a.data[idx_a];
-        let (br, bi) = b.data[idx_b];
+        let (ar, ai) = a.materialize_f64()[idx_a];
+        let (br, bi) = b.materialize_f64()[idx_b];
         result[out_idx] = rem_complex_scalar(ar, ai, br, bi);
     }
     let tensor = ComplexTensor::new(result, plan.output_shape().to_vec())
@@ -305,7 +376,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -317,7 +388,10 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
 fn scalar_complex_value(value: &Value) -> Option<(f64, f64)> {
     match value {
         Value::Complex(re, im) => Some((*re, *im)),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 => ct.data.first().copied(),
+        Value::ComplexTensor(ct) if tensor::is_scalar_complex_tensor(ct) => {
+            let value = tensor::complex_tensor_value_complex64(ct, 0);
+            Some((value.re, value.im))
+        }
         _ => None,
     }
 }
@@ -355,9 +429,9 @@ fn complex_div(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
+        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
+        Value::Complex(value.re, value.im)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -417,8 +491,14 @@ fn align_numeric_arrays(lhs: NumericArray, rhs: NumericArray) -> BuiltinResult<N
 fn into_complex(input: NumericArray) -> BuiltinResult<ComplexTensor> {
     match input {
         NumericArray::Real(t) => {
-            let Tensor { data, shape, .. } = t;
-            let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
+            let shape = t.shape.clone();
+            let complex = t
+                .into_numeric_storage()
+                .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))?
+                .materialize_f64()
+                .into_iter()
+                .map(|real| (real, 0.0))
+                .collect();
             ComplexTensor::new(complex, shape)
                 .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))
         }
@@ -433,11 +513,36 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor, Type,
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor,
+        Type,
     };
 
     fn rem_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::rem_builtin(lhs, rhs))
+    }
+
+    #[test]
+    fn rem_real_arrays_preserve_native_single_storage_including_empty() {
+        let lhs = Tensor::from_f32(vec![5.5, -5.5], vec![1, 2]).unwrap();
+        let rhs = Tensor::from_f32(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let output = compute_rem_real(&lhs, &rhs).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("expected native-single tensor")
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            runmat_builtins::NumericStorage::F32(vec![1.5, -1.5])
+        );
+
+        let lhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let rhs = Tensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
+        let Value::Tensor(output) = compute_rem_real(&lhs, &rhs).unwrap() else {
+            panic!("expected empty native-single tensor")
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            runmat_builtins::NumericStorage::F32(Vec::new())
+        );
     }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {
@@ -573,7 +678,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 assert_eq!(
-                    t.data
+                    t.materialize_f64()
                         .iter()
                         .map(|v| (v * 10.0).round() / 10.0)
                         .collect::<Vec<_>>(),
@@ -586,18 +691,11 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn rem_complex_support() {
+    fn rem_rejects_complex_operands() {
         let lhs = ComplexTensor::new(vec![(3.0, 4.0), (-2.0, 5.0)], vec![1, 2]).unwrap();
         let rhs = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).unwrap();
-        let result =
-            rem_builtin(Value::ComplexTensor(lhs), Value::ComplexTensor(rhs)).expect("complex rem");
-        match result {
-            Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![(0.0, 0.0), (0.0, 1.0)]);
-            }
-            other => panic!("expected complex tensor, got {other:?}"),
-        }
+        assert!(rem_builtin(Value::ComplexTensor(lhs), Value::ComplexTensor(rhs)).is_err());
+        assert!(rem_builtin(Value::Complex(2.0, 0.0), Value::Num(1.0)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -614,7 +712,7 @@ pub(crate) mod tests {
                     .iter()
                     .map(|&ch| rem_real_scalar(ch as u32 as f64, 5.0))
                     .collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -627,7 +725,7 @@ pub(crate) mod tests {
         let value =
             rem_builtin(Value::LogicalArray(logical), Value::Num(2.0)).expect("logical rem");
         match value {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 0.0, 1.0, 0.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -641,7 +739,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, -2.0, 1.0, -2.0, 1.0, -2.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, -2.0, 1.0, -2.0, 1.0, -2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -654,11 +752,11 @@ pub(crate) mod tests {
             let numer = Tensor::new(vec![-5.0, -3.0, 0.0, 1.0, 6.0, 9.0], vec![3, 2]).unwrap();
             let denom = Tensor::new(vec![4.0; 6], vec![3, 2]).unwrap();
             let numer_view = runmat_accelerate_api::HostTensorView {
-                data: &numer.data,
+                data: &numer.materialize_f64(),
                 shape: &numer.shape,
             };
             let denom_view = runmat_accelerate_api::HostTensorView {
-                data: &denom.data,
+                data: &denom.materialize_f64(),
                 shape: &denom.shape,
             };
             let numer_handle = provider.upload(&numer_view).expect("upload numer");
@@ -670,19 +768,61 @@ pub(crate) mod tests {
             .expect("rem");
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.shape, vec![3, 2]);
-            assert_eq!(gathered.data, vec![-1.0, -3.0, 0.0, 1.0, 2.0, 1.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![-1.0, -3.0, 0.0, 1.0, 2.0, 1.0]
+            );
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn rem_int_inputs_promote() {
+    fn rem_int_inputs_preserve_exact_class() {
         let result =
             rem_builtin(Value::Int(IntValue::I32(-7)), Value::Int(IntValue::I32(4))).expect("rem");
         match result {
-            Value::Num(v) => assert!((v + 3.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
+            Value::Int(IntValue::I32(v)) => assert_eq!(v, -3),
+            other => panic!("expected int32 scalar result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rem_scalar_fast_path_reads_typed_integer_storage_exactly() {
+        let lhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).expect("lhs tensor");
+
+        assert_eq!(scalar_real_value(&Value::Tensor(lhs.clone())), Some(-7.0));
+
+        let result = rem_builtin(Value::Tensor(lhs), Value::Num(4.0)).expect("rem");
+        match result {
+            Value::Int(IntValue::I16(v)) => assert_eq!(v, -3),
+            other => panic!("expected int16 scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rem_dense_integer_arrays_preserve_exact_storage_without_mirror() {
+        let lhs = Tensor::new_integer(IntegerStorage::I64(vec![-7, 7]), vec![2, 1]).expect("lhs");
+        let rhs =
+            Tensor::new_integer(IntegerStorage::I64(vec![4, -4, 0]), vec![1, 3]).expect("rhs");
+
+        let result = rem_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("rem");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![-3, 3, -3, 3, 0, 0]))
+        );
+
+        let lhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("lhs");
+        assert_eq!(
+            rem_builtin(Value::Tensor(lhs), Value::Num(2.0)).expect("rem"),
+            Value::Int(IntValue::U64(1))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -710,13 +850,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let numer_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &numer.data,
+                data: &numer.materialize_f64(),
                 shape: &numer.shape,
             })
             .expect("upload numer");
         let denom_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
-                data: &denom.data,
+                data: &denom.materialize_f64(),
                 shape: &denom.shape,
             })
             .expect("upload denom");
@@ -735,7 +875,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (gpu, cpu) in gpu_tensor.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!(
                 (gpu - cpu).abs() <= tol,
                 "|{gpu} - {cpu}| exceeded tolerance {tol}"

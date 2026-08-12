@@ -42,6 +42,7 @@ rfd = { version = "0.15", optional = true }
 thiserror = { workspace = true }
 runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }
+runmat-builtins = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = "24.0.0"

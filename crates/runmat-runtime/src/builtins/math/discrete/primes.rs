@@ -2,13 +2,16 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, IntValue, IntegerStorage, NumericDType, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "primes";
@@ -66,6 +69,26 @@ pub const PRIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "n",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "Input must be a real integer-valued scalar upper bound.",
+}];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "p = primes(n)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "Returns a same-class row; values below two produce an empty row and interactive GPU input is unsupported.",
+    }];
+
 fn primes_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
     Type::tensor()
 }
@@ -74,9 +97,14 @@ fn primes_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
 enum OutputKind {
     F64,
     F32,
+    I8,
+    I16,
+    I32,
+    I64,
     U8,
     U16,
     U32,
+    U64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -92,6 +120,7 @@ struct PrimeRequest {
     keywords = "primes,prime,numbers,discrete,number theory",
     type_resolver(primes_type),
     descriptor(crate::builtins::math::discrete::primes::PRIMES_DESCRIPTOR),
+    integer_capabilities(crate::builtins::math::discrete::primes::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::discrete::primes"
 )]
 async fn primes_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -150,32 +179,43 @@ async fn scalar_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<PrimeRequest>
 }
 
 fn scalar_from_tensor(tensor: Tensor) -> BuiltinResult<PrimeRequest> {
-    if tensor.data.len() != 1 {
+    if !tensor_utils::is_scalar_tensor(&tensor) {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
             "n must be a scalar value",
         ));
     }
-    let output = match tensor.dtype {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage
+            .value_at(0)
+            .expect("integer storage length matches tensor data length");
+        return scalar_from_int(value);
+    }
+    let output = match tensor.numeric_dtype() {
         NumericDType::F32 => OutputKind::F32,
-        NumericDType::U8 => OutputKind::U8,
-        NumericDType::U16 => OutputKind::U16,
-        NumericDType::U32 => OutputKind::U32,
         NumericDType::F64 => OutputKind::F64,
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => unreachable!("integer dtype must have authoritative storage"),
     };
-    scalar_from_f64(tensor.data[0], output)
+    scalar_from_f64(tensor_utils::tensor_value_f64(&tensor, 0), output)
 }
 
 fn scalar_from_int(value: IntValue) -> BuiltinResult<PrimeRequest> {
     let (limit, output) = match value {
-        IntValue::I8(v) => (signed_limit(i64::from(v)), OutputKind::F64),
-        IntValue::I16(v) => (signed_limit(i64::from(v)), OutputKind::F64),
-        IntValue::I32(v) => (signed_limit(i64::from(v)), OutputKind::F64),
-        IntValue::I64(v) => (signed_limit(v), OutputKind::F64),
+        IntValue::I8(v) => (signed_limit(i64::from(v)), OutputKind::I8),
+        IntValue::I16(v) => (signed_limit(i64::from(v)), OutputKind::I16),
+        IntValue::I32(v) => (signed_limit(i64::from(v)), OutputKind::I32),
+        IntValue::I64(v) => (signed_limit(v), OutputKind::I64),
         IntValue::U8(v) => (u64::from(v), OutputKind::U8),
         IntValue::U16(v) => (u64::from(v), OutputKind::U16),
         IntValue::U32(v) => (u64::from(v), OutputKind::U32),
-        IntValue::U64(v) => (v, OutputKind::F64),
+        IntValue::U64(v) => (v, OutputKind::U64),
     };
     Ok(PrimeRequest { limit, output })
 }
@@ -201,7 +241,7 @@ fn scalar_from_f64(value: f64, output: OutputKind) -> BuiltinResult<PrimeRequest
     }
     let limit = if rounded < 2.0 {
         0
-    } else if rounded > u64::MAX as f64 {
+    } else if rounded >= u64::MAX as f64 {
         return Err(error_with_detail(&ERROR_INVALID_INPUT, "n is too large"));
     } else {
         rounded as u64
@@ -211,16 +251,47 @@ fn scalar_from_f64(value: f64, output: OutputKind) -> BuiltinResult<PrimeRequest
 
 fn primes_value(request: PrimeRequest) -> BuiltinResult<Value> {
     let primes = sieve_primes(request.limit);
-    let data = primes.iter().map(|&p| p as f64).collect::<Vec<_>>();
-    let shape = vec![1, data.len()];
-    let dtype = match request.output {
-        OutputKind::F64 => NumericDType::F64,
-        OutputKind::F32 => NumericDType::F32,
-        OutputKind::U8 => NumericDType::U8,
-        OutputKind::U16 => NumericDType::U16,
-        OutputKind::U32 => NumericDType::U32,
+    let shape = vec![1, primes.len()];
+    let tensor = match request.output {
+        OutputKind::F64 => Tensor::new_with_dtype(
+            primes.iter().map(|&prime| prime as f64).collect(),
+            shape,
+            NumericDType::F64,
+        ),
+        OutputKind::F32 => {
+            Tensor::from_f32(primes.iter().map(|&prime| prime as f32).collect(), shape)
+        }
+        OutputKind::I8 => Tensor::new_integer(
+            IntegerStorage::I8(primes.iter().map(|&prime| prime as i8).collect()),
+            shape,
+        ),
+        OutputKind::I16 => Tensor::new_integer(
+            IntegerStorage::I16(primes.iter().map(|&prime| prime as i16).collect()),
+            shape,
+        ),
+        OutputKind::I32 => Tensor::new_integer(
+            IntegerStorage::I32(primes.iter().map(|&prime| prime as i32).collect()),
+            shape,
+        ),
+        OutputKind::I64 => Tensor::new_integer(
+            IntegerStorage::I64(primes.iter().map(|&prime| prime as i64).collect()),
+            shape,
+        ),
+        OutputKind::U8 => Tensor::new_integer(
+            IntegerStorage::U8(primes.iter().map(|&prime| prime as u8).collect()),
+            shape,
+        ),
+        OutputKind::U16 => Tensor::new_integer(
+            IntegerStorage::U16(primes.iter().map(|&prime| prime as u16).collect()),
+            shape,
+        ),
+        OutputKind::U32 => Tensor::new_integer(
+            IntegerStorage::U32(primes.iter().map(|&prime| prime as u32).collect()),
+            shape,
+        ),
+        OutputKind::U64 => Tensor::new_integer(IntegerStorage::U64(primes), shape),
     };
-    Tensor::new_with_dtype(data, shape, dtype)
+    tensor
         .map(Value::Tensor)
         .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))
 }
@@ -276,9 +347,9 @@ mod tests {
     fn primes_returns_row_vector_of_double_primes() {
         let out = call(Value::Num(25.0)).expect("primes");
         assert_eq!(out.shape, vec![1, 9]);
-        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert_eq!(
-            out.data,
+            out.materialize_f64(),
             vec![2.0, 3.0, 5.0, 7.0, 11.0, 13.0, 17.0, 19.0, 23.0]
         );
     }
@@ -288,39 +359,70 @@ mod tests {
         for value in [Value::Num(1.0), Value::Num(0.0), Value::Num(-8.0)] {
             let out = call(value).expect("primes");
             assert_eq!(out.shape, vec![1, 0]);
-            assert!(out.data.is_empty());
+            assert!(out.is_empty());
         }
     }
 
     #[test]
-    fn primes_preserves_supported_numeric_array_dtype() {
-        let single = Tensor::new_with_dtype(vec![12.0], vec![1, 1], NumericDType::F32).unwrap();
+    fn primes_preserves_floating_and_exact_integer_output_classes() {
+        let single = Tensor::from_f32(vec![12.0], vec![1, 1]).unwrap();
         let out = call(Value::Tensor(single)).expect("single primes");
-        assert_eq!(out.dtype, NumericDType::F32);
-        assert_eq!(out.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
+        assert_eq!(out.numeric_dtype(), NumericDType::F32);
+        assert_eq!(out.materialize_f64(), vec![2.0, 3.0, 5.0, 7.0, 11.0]);
 
-        let out = call(Value::Int(IntValue::U16(12))).expect("uint16 primes");
-        assert_eq!(out.dtype, NumericDType::U16);
-        assert_eq!(out.shape, vec![1, 5]);
-        assert_eq!(out.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
-    }
+        let expected_primes = vec![2, 3, 5, 7, 11];
+        let cases = [
+            (
+                IntValue::I8(12),
+                IntegerStorage::I8(expected_primes.iter().map(|&v| v as i8).collect()),
+            ),
+            (
+                IntValue::I16(12),
+                IntegerStorage::I16(expected_primes.iter().map(|&v| v as i16).collect()),
+            ),
+            (
+                IntValue::I32(12),
+                IntegerStorage::I32(expected_primes.iter().map(|&v| v as i32).collect()),
+            ),
+            (
+                IntValue::I64(12),
+                IntegerStorage::I64(expected_primes.iter().map(|&v| v as i64).collect()),
+            ),
+            (
+                IntValue::U8(12),
+                IntegerStorage::U8(expected_primes.iter().map(|&v| v as u8).collect()),
+            ),
+            (
+                IntValue::U16(12),
+                IntegerStorage::U16(expected_primes.iter().map(|&v| v as u16).collect()),
+            ),
+            (
+                IntValue::U32(12),
+                IntegerStorage::U32(expected_primes.iter().map(|&v| v as u32).collect()),
+            ),
+            (IntValue::U64(12), IntegerStorage::U64(expected_primes)),
+        ];
 
-    #[test]
-    fn primes_accepts_signed_integer_and_uint64_scalar_bounds() {
-        let signed = call(Value::Int(IntValue::I32(12))).expect("signed integer primes");
-        assert_eq!(signed.dtype, NumericDType::F64);
-        assert_eq!(signed.shape, vec![1, 5]);
-        assert_eq!(signed.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
+        for (input, expected) in cases {
+            let out = call(Value::Int(input)).expect("integer primes");
+            assert_eq!(out.shape, vec![1, 5]);
+            assert_eq!(out.integer_storage(), Some(&expected));
+        }
+
+        let input = Tensor::new_integer(IntegerStorage::I64(vec![12]), vec![1, 1])
+            .expect("exact int64 tensor");
+        let out = call(Value::Tensor(input)).expect("integer tensor primes");
+        assert_eq!(
+            out.integer_storage(),
+            Some(&IntegerStorage::I64(vec![2, 3, 5, 7, 11]))
+        );
 
         let negative = call(Value::Int(IntValue::I16(-4))).expect("negative integer primes");
-        assert_eq!(negative.dtype, NumericDType::F64);
         assert_eq!(negative.shape, vec![1, 0]);
-        assert!(negative.data.is_empty());
-
-        let unsigned = call(Value::Int(IntValue::U64(12))).expect("uint64 primes");
-        assert_eq!(unsigned.dtype, NumericDType::F64);
-        assert_eq!(unsigned.shape, vec![1, 5]);
-        assert_eq!(unsigned.data, vec![2.0, 3.0, 5.0, 7.0, 11.0]);
+        assert_eq!(
+            negative.integer_storage(),
+            Some(&IntegerStorage::I16(Vec::new()))
+        );
     }
 
     #[test]
@@ -342,6 +444,14 @@ mod tests {
         assert!(block_on(primes_builtin(Value::Num(10.5), Vec::new())).is_err());
         assert!(block_on(primes_builtin(Value::Num(f64::INFINITY), Vec::new())).is_err());
         assert!(block_on(primes_builtin(Value::Bool(true), Vec::new())).is_err());
+    }
+
+    #[test]
+    fn primes_rejects_unrepresentable_double_u64_boundary_before_casting() {
+        let err = block_on(primes_builtin(Value::Num(u64::MAX as f64), Vec::new()))
+            .expect_err("unrepresentable u64 boundary should fail before cast");
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+        assert!(err.to_string().contains("n is too large"));
     }
 
     #[test]

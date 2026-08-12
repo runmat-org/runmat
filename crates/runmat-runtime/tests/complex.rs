@@ -71,8 +71,8 @@ fn complex_array_elementwise_add() {
     if let Value::ComplexTensor(t) = c {
         assert_eq!(t.rows, 2);
         assert_eq!(t.cols, 2);
-        assert_eq!(t.data[0], (3.0, 0.0));
-        assert_eq!(t.data[1], (2.0, 1.0));
+        assert_eq!(t.as_f64_slice().expect("double complex")[0], (3.0, 0.0));
+        assert_eq!(t.as_f64_slice().expect("double complex")[1], (2.0, 1.0));
     } else {
         panic!("expected ComplexTensor");
     }

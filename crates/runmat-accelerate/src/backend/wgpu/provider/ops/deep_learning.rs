@@ -42,7 +42,181 @@ struct CrossentropyParams {
     _pad1: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SoftmaxRowsParams {
+    rows: u32,
+    cols: u32,
+    row_offset: u32,
+    _pad0: u32,
+}
+
 impl WgpuProvider {
+    pub(crate) fn elu_exec(&self, input: &GpuTensorHandle, alpha: f64) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(input)?;
+        ensure!(
+            entry.storage != GpuTensorStorage::ComplexInterleaved
+                && runmat_accelerate_api::handle_storage(input)
+                    != GpuTensorStorage::ComplexInterleaved,
+            "activation_elu: complex inputs are not supported"
+        );
+        let alpha_tensor = self.fill_exec(&entry.shape, alpha)?;
+        let shader = match self.precision {
+            NumericPrecision::F64 => ELU_SHADER_F64,
+            NumericPrecision::F32 => ELU_SHADER_F32,
+        };
+        let result = self.fused_elementwise_with_telemetry_exec(
+            shader,
+            &[input.clone(), alpha_tensor.clone()],
+            &entry.shape,
+            entry.len,
+        );
+        let _ = self.free_exec(&alpha_tensor);
+        result
+    }
+
+    /// Execute one stable softmax reduction per column-major matrix row. The
+    /// output remains device-resident; only the error flag is read back so an
+    /// invalid normalization can retain CPU-compatible error semantics.
+    pub(crate) fn softmax_rows_exec(&self, input: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(input)?;
+        ensure!(
+            entry.storage == GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_storage(input) == GpuTensorStorage::Real,
+            "activation_softmax_rows: complex inputs are not supported"
+        );
+        ensure!(
+            entry.shape.len() == 2,
+            "activation_softmax_rows: input must be a 2-D tensor"
+        );
+        let rows = entry.shape[0];
+        let cols = entry.shape[1];
+        ensure!(
+            rows <= u32::MAX as usize && cols <= u32::MAX as usize,
+            "activation_softmax_rows: tensor shape exceeds GPU dispatch limits"
+        );
+        let output = self.create_storage_buffer_checked(entry.len, "runmat-softmax-rows-out")?;
+        if entry.len == 0 {
+            return Ok(self.register_existing_buffer(output, entry.shape, 0));
+        }
+        let error_buffer =
+            self.device_ref()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("runmat-softmax-rows-error"),
+                    contents: bytes_of(&0u32),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                });
+        let shader = softmax_rows_shader(self.precision);
+        let layout_tag = "runmat-softmax-rows-layout";
+        let bind_layout = self.cached_bind_group_layout(layout_tag, |device| {
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some(layout_tag),
+                entries: &softmax_rows_bind_layout_entries(),
+            })
+        });
+        let pipeline_layout =
+            self.device_ref()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("runmat-softmax-rows-pipeline-layout"),
+                    bind_group_layouts: &[bind_layout.as_ref()],
+                    push_constant_ranges: &[],
+                });
+        let shader_module = self
+            .device_ref()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("runmat-softmax-rows-shader"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader.clone())),
+            });
+        let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
+        let pipeline_key =
+            self.compute_pipeline_hash_bytes(shader.as_bytes(), layout_tag, Some(workgroup_size));
+        let pipeline = self.get_or_create_pipeline(
+            pipeline_key,
+            &pipeline_layout,
+            &shader_module,
+            "runmat-softmax-rows-pipeline",
+            Some(shader.as_bytes()),
+            Some(layout_tag),
+            Some(workgroup_size),
+        );
+        let chunk_rows = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
+        for row_offset in (0..rows).step_by(chunk_rows) {
+            let params = self.uniform_buffer(
+                &SoftmaxRowsParams {
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    row_offset: row_offset as u32,
+                    _pad0: 0,
+                },
+                "runmat-softmax-rows-params",
+            );
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-softmax-rows-bind"),
+                    layout: bind_layout.as_ref(),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: output.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: error_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let workgroups = (rows - row_offset).min(chunk_rows) as u32;
+            crate::backend::wgpu::dispatch::creation::run(
+                self.device_ref(),
+                self.queue_ref(),
+                pipeline.as_ref(),
+                &bind_group,
+                workgroups,
+                "runmat-softmax-rows-encoder",
+                "runmat-softmax-rows-pass",
+            );
+        }
+        let error_size = std::mem::size_of::<u32>() as u64;
+        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-softmax-rows-error-staging"),
+            size: error_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder =
+            self.device_ref()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-softmax-rows-error-copy"),
+                });
+        encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
+        self.submit(encoder);
+        let code = self
+            .map_readback_bytes_sync(staging, error_size, "softmax_rows")
+            .and_then(|bytes| {
+                Ok(u32::from_le_bytes(
+                    bytes
+                        .get(..4)
+                        .ok_or_else(|| anyhow!("activation_softmax_rows: short error readback"))?
+                        .try_into()
+                        .map_err(|_| anyhow!("activation_softmax_rows: invalid error readback"))?,
+                ))
+            })?;
+        ensure!(
+            code == 0,
+            "activation_softmax_rows: softmax produced invalid normalization"
+        );
+        Ok(self.register_existing_buffer(output, entry.shape, entry.len))
+    }
+
     pub(crate) fn crossentropy_terms_exec(
         &self,
         request: &ProviderCrossentropyRequest<'_>,
@@ -842,6 +1016,152 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     )
 }
 
+fn softmax_rows_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 4] {
+    std::array::from_fn(|binding| wgpu::BindGroupLayoutEntry {
+        binding: binding as u32,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: if binding == 2 {
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            }
+        } else {
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage {
+                    read_only: binding == 0,
+                },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            }
+        },
+        count: None,
+    })
+}
+
+fn softmax_rows_shader(precision: NumericPrecision) -> String {
+    let ty = precision.as_str();
+    let max_finite = match precision {
+        NumericPrecision::F64 => "1.7976931348623157e308",
+        NumericPrecision::F32 => "3.4028234663852886e38",
+    };
+    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
+    format!(
+        r#"
+const MAX_FINITE_SOFTMAX: {ty} = {ty}({max_finite});
+
+struct Tensor {{ data: array<{ty}> }};
+struct Params {{ rows: u32, cols: u32, row_offset: u32, pad0: u32 }};
+struct ErrorState {{ code: atomic<u32> }};
+
+@group(0) @binding(0) var<storage, read> input: Tensor;
+@group(0) @binding(1) var<storage, read_write> output: Tensor;
+@group(0) @binding(2) var<uniform> params: Params;
+@group(0) @binding(3) var<storage, read_write> errors: ErrorState;
+
+var<workgroup> scratch: array<{ty}, {workgroup}>;
+var<workgroup> denominator: {ty};
+
+fn is_finite_softmax(value: {ty}) -> bool {{
+  return (value == value) && (abs(value) < MAX_FINITE_SOFTMAX);
+}}
+
+@compute @workgroup_size({workgroup})
+fn main(
+  @builtin(workgroup_id) workgroup_id: vec3<u32>,
+  @builtin(local_invocation_id) local_id: vec3<u32>,
+) {{
+  let row = workgroup_id.x + params.row_offset;
+  let lane = local_id.x;
+  var local_max = -MAX_FINITE_SOFTMAX;
+  var column = lane;
+  loop {{
+    if (column >= params.cols) {{ break; }}
+    local_max = max(local_max, input.data[row + column * params.rows]);
+    column = column + {workgroup}u;
+  }}
+  scratch[lane] = local_max;
+  workgroupBarrier();
+
+  var stride = {workgroup}u / 2u;
+  loop {{
+    if (lane < stride) {{ scratch[lane] = max(scratch[lane], scratch[lane + stride]); }}
+    workgroupBarrier();
+    if (stride == 1u) {{ break; }}
+    stride = stride / 2u;
+  }}
+  let row_max = scratch[0u];
+
+  var local_sum = {ty}(0.0);
+  column = lane;
+  loop {{
+    if (column >= params.cols) {{ break; }}
+    let value = exp(input.data[row + column * params.rows] - row_max);
+    output.data[row + column * params.rows] = value;
+    local_sum = local_sum + value;
+    column = column + {workgroup}u;
+  }}
+  scratch[lane] = local_sum;
+  workgroupBarrier();
+  stride = {workgroup}u / 2u;
+  loop {{
+    if (lane < stride) {{ scratch[lane] = scratch[lane] + scratch[lane + stride]; }}
+    workgroupBarrier();
+    if (stride == 1u) {{ break; }}
+    stride = stride / 2u;
+  }}
+  if (lane == 0u) {{
+    denominator = scratch[0u];
+    if (!(is_finite_softmax(denominator) && denominator > {ty}(0.0))) {{
+      atomicMax(&errors.code, 1u);
+    }}
+  }}
+  workgroupBarrier();
+
+  column = lane;
+  loop {{
+    if (column >= params.cols) {{ break; }}
+    output.data[row + column * params.rows] = output.data[row + column * params.rows] / denominator;
+    column = column + {workgroup}u;
+  }}
+}}
+"#,
+        ty = ty,
+        max_finite = max_finite,
+        workgroup = workgroup,
+    )
+}
+
+const ELU_SHADER_F64: &str = r#"
+struct Tensor { data: array<f64> };
+struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> alpha: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x; if (idx >= params.len) { return; }
+  let value = input0.data[idx];
+  output.data[idx] = select(alpha.data[idx] * (exp(value) - f64(1.0)), value, value > f64(0.0));
+}
+"#;
+
+const ELU_SHADER_F32: &str = r#"
+struct Tensor { data: array<f32> };
+struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
+@group(0) @binding(0) var<storage, read> input0: Tensor;
+@group(0) @binding(1) var<storage, read> alpha: Tensor;
+@group(0) @binding(2) var<storage, read_write> output: Tensor;
+@group(0) @binding(3) var<uniform> params: Params;
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x; if (idx >= params.len) { return; }
+  let value = input0.data[idx];
+  output.data[idx] = select(alpha.data[idx] * (exp(value) - 1.0), value, value > 0.0);
+}
+"#;
+
 fn adam_update_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 9] {
     std::array::from_fn(|binding| {
         let read_only = binding <= 3;
@@ -1048,6 +1368,97 @@ mod tests {
         ] {
             provider.free(handle).ok();
         }
+    }
+
+    #[test]
+    fn elu_wgpu_matches_cpu_branch_semantics() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let shape = [2usize, 2usize];
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[-2.0, 0.0, 3.0, f64::NAN],
+                shape: &shape,
+            })
+            .expect("upload input");
+        let output =
+            pollster::block_on(provider.activation_elu(&input, 1.25)).expect("resident ELU");
+        let actual = pollster::block_on(provider.download(&output)).expect("download output");
+        let expected = [1.25 * ((-2.0_f64).exp() - 1.0), 0.0, 3.0, f64::NAN];
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
+        };
+        assert_eq!(actual.shape, shape);
+        for (actual, expected) in actual.data.iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() < tolerance || (actual.is_nan() && expected.is_nan()),
+                "got {actual}, expected {expected}"
+            );
+        }
+        provider.free(&input).ok();
+        provider.free(&output).ok();
+    }
+
+    #[test]
+    fn softmax_rows_wgpu_is_stable_and_resident() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let shape = [2usize, 3usize];
+        let input = provider
+            .upload(&HostTensorView {
+                // Column-major rows: [1000, 0] and [1001, -1] and [999, 1].
+                data: &[1000.0, 0.0, 1001.0, -1.0, 999.0, 1.0],
+                shape: &shape,
+            })
+            .expect("upload input");
+        let output =
+            pollster::block_on(provider.activation_softmax_rows(&input)).expect("resident softmax");
+        let actual = pollster::block_on(provider.download(&output)).expect("download output");
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
+        };
+        let e = std::f64::consts::E;
+        let expected = [
+            1.0 / (1.0 + e + 1.0 / e),
+            1.0 / (1.0 + 1.0 / e + e),
+            e / (1.0 + e + 1.0 / e),
+            (1.0 / e) / (1.0 + 1.0 / e + e),
+            (1.0 / e) / (1.0 + e + 1.0 / e),
+            e / (1.0 + 1.0 / e + e),
+        ];
+        assert_eq!(actual.shape, shape);
+        for (actual, expected) in actual.data.iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() < tolerance,
+                "got {actual}, expected {expected}"
+            );
+        }
+        provider.free(&input).ok();
+        provider.free(&output).ok();
+    }
+
+    #[test]
+    fn softmax_rows_wgpu_reports_invalid_normalization() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let shape = [1usize, 2usize];
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[f64::INFINITY, 0.0],
+                shape: &shape,
+            })
+            .expect("upload input");
+        let error = pollster::block_on(provider.activation_softmax_rows(&input))
+            .expect_err("infinite input must not produce a normalization");
+        assert!(error
+            .to_string()
+            .contains("softmax produced invalid normalization"));
+        provider.free(&input).ok();
     }
 
     #[test]

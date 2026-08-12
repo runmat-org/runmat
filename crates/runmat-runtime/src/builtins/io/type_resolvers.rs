@@ -108,8 +108,8 @@ pub fn fread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
 }
 
-pub fn frewind_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
+pub fn frewind_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Void
 }
 
 pub fn fwrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
@@ -221,8 +221,8 @@ pub fn copyfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn delete_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
+pub fn delete_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::Void
 }
 
 pub fn dir_type(args: &[Type], ctx: &ResolveContext) -> Type {
@@ -284,7 +284,7 @@ pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 
 pub fn getenv_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.is_empty() {
-        return struct_type(args, _ctx);
+        return Type::Unknown;
     }
     match args.first() {
         Some(Type::Cell { .. }) => Type::cell_of(Type::String),
@@ -567,7 +567,7 @@ mod tests {
     assert_resolver!(addpath_type_resolver, addpath_type, &[], Type::String);
     assert_resolver!(cd_type_resolver, cd_type, &[], Type::String);
     assert_resolver!(copyfile_type_resolver, copyfile_type, &[], Type::Num);
-    assert_resolver!(delete_type_resolver, delete_type, &[], Type::Num);
+    assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
     assert_resolver!(
         dir_type_resolver,
         dir_type,
@@ -595,12 +595,7 @@ mod tests {
         &[],
         Type::Union(vec![Type::String, Type::Num])
     );
-    assert_resolver!(
-        getenv_type_resolver,
-        getenv_type,
-        &[],
-        Type::Struct { known_fields: None }
-    );
+    assert_resolver!(getenv_type_resolver, getenv_type, &[], Type::Unknown);
     assert_resolver!(ls_type_resolver, ls_type, &[], Type::String);
     assert_resolver!(mkdir_type_resolver, mkdir_type, &[], Type::Num);
     assert_resolver!(movefile_type_resolver, movefile_type, &[], Type::Num);

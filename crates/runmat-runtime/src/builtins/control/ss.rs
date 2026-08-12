@@ -10,9 +10,12 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+use crate::builtins::common::{
+    spec::{
+        BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+        ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    },
+    tensor,
 };
 use crate::builtins::control::type_resolvers::ss_type;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
@@ -365,6 +368,9 @@ fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
     let sample_time = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         other => {
             return Err(ss_error_with_detail(
                 &SS_ERROR_INVALID_SAMPLE_TIME,
@@ -401,7 +407,12 @@ impl RealMatrix {
     async fn parse(label: &str, value: Value) -> BuiltinResult<Self> {
         let gathered = dispatcher::gather_if_needed_async(&value).await?;
         let tensor = match gathered {
-            Value::Tensor(tensor) => tensor,
+            Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor).map_err(|err| {
+                ss_error_with_detail(
+                    &SS_ERROR_INTERNAL,
+                    format!("failed to normalize {label}: {err}"),
+                )
+            })?,
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|err| {
                 ss_error_with_detail(&SS_ERROR_INTERNAL, format!("failed to build tensor: {err}"))
             })?,
@@ -430,7 +441,8 @@ impl RealMatrix {
                 format!("{label} must be a 2-D matrix, got shape {:?}", tensor.shape),
             ));
         }
-        if tensor.data.iter().any(|value| !value.is_finite()) {
+        let values = tensor::tensor_values_f64_cow(&tensor);
+        if values.iter().any(|value| !value.is_finite()) {
             return Err(ss_error_with_detail(
                 &SS_ERROR_UNSUPPORTED_INPUT,
                 format!("{label} must contain only finite real values"),
@@ -523,7 +535,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn run_ss(a: Value, b: Value, c: Value, d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(ss_builtin(a, b, c, d, rest))
@@ -543,7 +555,7 @@ mod tests {
         match value {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, shape);
-                assert_eq!(tensor.data, data);
+                assert_eq!(tensor.materialize_f64(), data);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -617,6 +629,35 @@ mod tests {
         .expect("ss");
 
         assert_eq!(property(&sys, "Ts"), &Value::Num(0.25));
+    }
+
+    #[test]
+    fn ss_typed_integer_matrices_and_sample_time_cross_double_boundary_exactly() {
+        fn mirrorless_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+            let tensor = Tensor::new_integer(storage, shape).unwrap();
+            Value::Tensor(tensor)
+        }
+
+        let sys = run_ss(
+            mirrorless_integer_tensor(IntegerStorage::I16(vec![0, -2, 1, -3]), vec![2, 2]),
+            mirrorless_integer_tensor(IntegerStorage::U16(vec![0, 1]), vec![2, 1]),
+            mirrorless_integer_tensor(IntegerStorage::I8(vec![1, 0]), vec![1, 2]),
+            mirrorless_integer_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+            vec![Value::from("Ts"), {
+                let ts = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
+                Value::Tensor(ts)
+            }],
+        )
+        .expect("ss");
+
+        assert_tensor(property(&sys, "A"), &[2, 2], &[0.0, -2.0, 1.0, -3.0]);
+        assert_tensor(property(&sys, "B"), &[2, 1], &[0.0, 1.0]);
+        assert_tensor(property(&sys, "C"), &[1, 2], &[1.0, 0.0]);
+        assert_tensor(property(&sys, "D"), &[1, 1], &[0.0]);
+        assert_eq!(property(&sys, "Ts"), &Value::Num(1.0));
+        assert!(
+            matches!(property(&sys, "A"), Value::Tensor(tensor) if tensor.integer_storage().is_none())
+        );
     }
 
     #[test]
@@ -707,7 +748,7 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

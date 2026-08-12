@@ -106,7 +106,7 @@ fn repelem_row_vector_scalar_form() {
     let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(2.0)]).unwrap();
     if let Value::Tensor(t) = v {
         assert_eq!(t.shape, vec![1, 6]);
-        assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+        assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
     } else {
         panic!("expected tensor")
     }
@@ -120,7 +120,7 @@ fn repelem_row_vector_count_form() {
     let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Tensor(counts)]).unwrap();
     if let Value::Tensor(t) = v {
         assert_eq!(t.shape, vec![1, 6]);
-        assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
+        assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
     } else {
         panic!("expected tensor")
     }
@@ -141,11 +141,11 @@ fn repelem_matrix_block_form() {
     .unwrap();
     if let Value::Tensor(t) = v {
         assert_eq!(t.shape, vec![6, 9]);
-        assert_eq!(t.data[0], 8.0);
-        assert_eq!(t.data[1], 8.0);
-        assert_eq!(t.data[6], 8.0);
-        assert_eq!(t.data[7], 8.0);
-        assert_eq!(t.data[8], 3.0);
+        assert_eq!(t.materialize_f64()[0], 8.0);
+        assert_eq!(t.materialize_f64()[1], 8.0);
+        assert_eq!(t.materialize_f64()[6], 8.0);
+        assert_eq!(t.materialize_f64()[7], 8.0);
+        assert_eq!(t.materialize_f64()[8], 3.0);
     } else {
         panic!("expected tensor")
     }
@@ -158,7 +158,7 @@ fn repelem_empty_column_preserves_orientation() {
     let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(3.0)]).unwrap();
     if let Value::Tensor(t) = v {
         assert_eq!(t.shape, vec![0, 1]);
-        assert!(t.data.is_empty());
+        assert!(t.materialize_f64().is_empty());
     } else {
         panic!("expected tensor")
     }
@@ -171,7 +171,7 @@ fn repelem_single_factor_uses_unique_nd_non_singleton_axis() {
     let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(2.0)]).unwrap();
     if let Value::Tensor(t) = v {
         assert_eq!(t.shape, vec![1, 1, 6]);
-        assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+        assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
     } else {
         panic!("expected tensor")
     }
@@ -225,7 +225,7 @@ fn linspace_basic() {
     .unwrap();
     if let Value::Tensor(t) = v {
         assert_eq!(t.shape, vec![1, 5]);
-        assert!((t.data[4] - 1.0).abs() < 1e-9);
+        assert!((t.materialize_f64()[4] - 1.0).abs() < 1e-9);
     } else {
         panic!("expected tensor")
     }
@@ -257,7 +257,7 @@ fn diag_vector_to_matrix_and_back() {
     let d = rt::call_builtin("diag", &[m]).unwrap();
     if let Value::Tensor(dt) = d {
         assert_eq!(dt.shape, vec![3, 1]);
-        assert!((dt.data[2] - 3.0).abs() < 1e-9);
+        assert!((dt.materialize_f64()[2] - 3.0).abs() < 1e-9);
     } else {
         panic!("expected tensor")
     }

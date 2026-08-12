@@ -169,7 +169,7 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::Neg => {
-            arithmetic_ops::unary(stack, |value| async move {
+            arithmetic_ops::unary_arithmetic(stack, |value| async move {
                 match &value {
                     Value::Object(obj) => {
                         let args = vec![Value::Object(obj.clone())];
@@ -221,7 +221,7 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::UPlus => {
-            arithmetic_ops::unary(stack, |value| async move {
+            arithmetic_ops::unary_arithmetic(stack, |value| async move {
                 match &value {
                     Value::Object(obj) => {
                         let args = vec![Value::Object(obj.clone())];

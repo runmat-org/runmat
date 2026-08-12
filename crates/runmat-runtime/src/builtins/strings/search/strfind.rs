@@ -443,21 +443,24 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
             }
         }
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            let len = tensor::tensor_element_len(tensor);
+            if len != 1 {
                 Err(strfind_error_with_message(
                     format!(
                         "strfind: option values must be scalar numeric values (received {} elements)",
-                        tensor.data.len()
+                        len
                     ),
                     &STRFIND_ERROR_INVALID_OPTION,
                 ))
-            } else if !tensor.data[0].is_finite() {
+            } else if let Some(value) = tensor.integer_storage().and_then(|storage| storage.value_at(0)) {
+                Ok(!value.is_zero())
+            } else if !tensor::tensor_value_f64(tensor, 0).is_finite() {
                 Err(strfind_error_with_message(
                     "strfind: option values must be finite numeric scalars",
                     &STRFIND_ERROR_INVALID_OPTION,
                 ))
             } else {
-                Ok(tensor.data[0] != 0.0)
+                Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
             }
         }
         other => value_to_owned_string(other)
@@ -483,7 +486,9 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, CharArray, ResolveContext, StringArray, Tensor, Type};
+    use runmat_builtins::{
+        CellArray, CharArray, IntegerStorage, ResolveContext, StringArray, Tensor, Type,
+    };
 
     fn run_strfind(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strfind_builtin(text, pattern, rest))
@@ -501,7 +506,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
-                assert_eq!(tensor.data, vec![1.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0]);
             }
             other => panic!("expected 1x1 tensor result, got {other:?}"),
         }
@@ -519,7 +524,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![1.0, 8.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 8.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -537,7 +542,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -555,7 +560,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 4]);
-                assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, 4.0]);
+                assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -583,15 +588,15 @@ pub(crate) mod tests {
                 let second = cell.get(1, 0).unwrap();
                 let third = cell.get(2, 0).unwrap();
                 match first {
-                    Value::Tensor(tensor) => assert!(tensor.data.is_empty()),
+                    Value::Tensor(tensor) => assert!(tensor.materialize_f64().is_empty()),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
                 match second {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![4.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![4.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
                 match third {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0, 5.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 5.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
             }
@@ -618,15 +623,15 @@ pub(crate) mod tests {
                 let second = cell.get(0, 1).unwrap();
                 let third = cell.get(0, 2).unwrap();
                 match first {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
                 match second {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
                 match third {
-                    Value::Tensor(tensor) => assert!(tensor.data.is_empty()),
+                    Value::Tensor(tensor) => assert!(tensor.materialize_f64().is_empty()),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
             }
@@ -648,7 +653,7 @@ pub(crate) mod tests {
                 assert_eq!(cell.rows, 1);
                 assert_eq!(cell.cols, 1);
                 match cell.get(0, 0).unwrap() {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 4.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 4.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
             }
@@ -670,7 +675,31 @@ pub(crate) mod tests {
                 assert_eq!(cell.rows, 1);
                 assert_eq!(cell.cols, 1);
                 match cell.get(0, 0).unwrap() {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![3.0, 4.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 4.0]),
+                    other => panic!("expected tensor inside cell, got {other:?}"),
+                }
+            }
+            other => panic!("expected cell output, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strfind_force_cell_output_typed_integer_tensor_reads_exact_storage() {
+        let flag =
+            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer tensor");
+        let result = run_strfind(
+            Value::String("mission".into()),
+            Value::String("s".into()),
+            vec![Value::String("ForceCellOutput".into()), Value::Tensor(flag)],
+        )
+        .expect("strfind");
+        match result {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 1);
+                assert_eq!(cell.cols, 1);
+                match cell.get(0, 0).unwrap() {
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 4.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
             }
@@ -693,7 +722,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![3.0, 4.0]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 4.0]);
             }
             other => panic!("expected numeric tensor result, got {other:?}"),
         }
@@ -749,7 +778,7 @@ pub(crate) mod tests {
                 assert_eq!(cell.rows, 1);
                 assert_eq!(cell.cols, 1);
                 match cell.get(0, 0).unwrap() {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
             }
@@ -772,7 +801,7 @@ pub(crate) mod tests {
                 assert_eq!(cell.rows, 1);
                 assert_eq!(cell.cols, 1);
                 match cell.get(0, 0).unwrap() {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
             }
@@ -792,7 +821,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 0]);
-                assert!(tensor.data.is_empty());
+                assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -812,7 +841,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 0]);
-                assert!(tensor.data.is_empty());
+                assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -834,15 +863,15 @@ pub(crate) mod tests {
                 assert_eq!(cell.rows, 3);
                 assert_eq!(cell.cols, 1);
                 match cell.get(0, 0).unwrap() {
-                    Value::Tensor(tensor) => assert!(tensor.data.is_empty()),
+                    Value::Tensor(tensor) => assert!(tensor.materialize_f64().is_empty()),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
                 match cell.get(1, 0).unwrap() {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![2.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
                 match cell.get(2, 0).unwrap() {
-                    Value::Tensor(tensor) => assert_eq!(tensor.data, vec![1.0]),
+                    Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
                     other => panic!("expected tensor inside cell, got {other:?}"),
                 }
             }

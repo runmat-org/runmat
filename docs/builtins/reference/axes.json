@@ -33,7 +33,9 @@
     "`axes(ax)` makes an existing axes handle current.",
     "`axes('Parent', fig, ...)` creates axes in the requested figure and applies the remaining axes properties.",
     "`axes(ax, property, value, ...)` selects an existing axes and applies the supplied properties.",
-    "`Position` and `Units` round-trip through `get`, `set`, and dot-property access. Explicit `Position` values participate in renderer viewport layout without disabling per-axes fast paths."
+    "`Position` and `Units` round-trip through `get`, `set`, and dot-property access. Explicit `Position` values participate in renderer viewport layout without disabling per-axes fast paths.",
+    "Supported numeric ruler, aspect-ratio, layout, font-size, and tick-label-rotation properties accept all eight integer classes. Authoritative integer storage is validated before one deliberate conversion into host `double` graphics state; the returned axes handle is opaque graphics state rather than integer data.",
+    "GPU-resident property values reject before provider access because `axes` is a host graphics-state operation and exposes no interactive GPU-array input surface."
   ],
   "examples": [
     {
@@ -96,6 +98,6 @@
   },
   "gpu_residency": "`axes` returns host-side handles and does not change array GPU residency.",
   "gpu_behavior": [
-    "`axes` performs no provider dispatch; it updates plotting registry state and renderer axes metadata."
+    "`axes` performs no provider dispatch; it updates plotting registry state and renderer axes metadata. Resident property values reject rather than gathering."
   ]
 }

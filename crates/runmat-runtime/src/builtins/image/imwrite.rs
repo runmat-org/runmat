@@ -8,7 +8,7 @@ use image::{ImageBuffer, Luma, Rgb, Rgba, RgbaImage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, NumericDType, Tensor, Value,
+    IntegerStorage, LogicalArray, NumericDType, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -461,7 +461,7 @@ fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(a) if a.data.len() == 1 => Ok(if a.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
@@ -553,9 +553,10 @@ fn tensor_from_numeric_like(value: &Value, label: &str) -> BuiltinResult<Tensor>
         Value::Num(n) => Tensor::new(vec![*n], vec![1, 1]).map_err(|err| {
             imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, format!("{label}: {err}"))
         }),
-        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|err| {
-            imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, format!("{label}: {err}"))
-        }),
+        Value::Int(i) => Tensor::new_integer(IntegerStorage::from_scalar(i.clone()), vec![1, 1])
+            .map_err(|err| {
+                imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, format!("{label}: {err}"))
+            }),
         Value::Bool(b) => {
             Tensor::new(vec![if *b { 1.0 } else { 0.0 }], vec![1, 1]).map_err(|err| {
                 imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, format!("{label}: {err}"))
@@ -616,14 +617,14 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
     let pixels = rows.checked_mul(cols).ok_or_else(|| {
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
     })?;
-    if tensor.data.len() != pixels * channels {
+    if tensor.len() != pixels * channels {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_IMAGE,
             "image data length does not match shape",
         ));
     }
 
-    let mut data = if tensor.dtype == NumericDType::U16 {
+    let mut data = if tensor.numeric_dtype() == NumericDType::U16 {
         PixelData::U16(vec![0u16; pixels * channels])
     } else {
         PixelData::U8(vec![0u8; pixels * channels])
@@ -633,11 +634,10 @@ fn materialize_direct_image(tensor: &Tensor) -> BuiltinResult<MaterializedImage>
             for channel in 0..channels {
                 let src = row + rows * col + pixels * channel;
                 let dst = (row * cols + col) * channels + channel;
+                let value = tensor_numeric_value(tensor, src, "image")?;
                 match &mut data {
-                    PixelData::U8(data) => data[dst] = value_to_u8(tensor.data[src], tensor.dtype),
-                    PixelData::U16(data) => {
-                        data[dst] = value_to_u16(tensor.data[src], tensor.dtype)
-                    }
+                    PixelData::U8(data) => data[dst] = value_to_u8(value),
+                    PixelData::U16(data) => data[dst] = value_to_u16(value),
                 }
             }
         }
@@ -671,15 +671,24 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
     let byte_len = pixels.checked_mul(3).ok_or_else(|| {
         imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_IMAGE, "image dimensions overflow")
     })?;
+    if indexed.len() != pixels || map.len() != map.shape[0] * 3 {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            "indexed image or colormap data length does not match shape",
+        ));
+    }
     let mut data = vec![0u8; byte_len];
     for row in 0..rows {
         for col in 0..cols {
             let pixel = row + rows * col;
-            let map_idx = map_index(indexed.data[pixel], indexed.dtype, map.shape[0])?;
+            let map_idx = map_index(
+                tensor_numeric_value(indexed, pixel, "indexed image")?,
+                map.shape[0],
+            )?;
             let dst = (row * cols + col) * 3;
             for channel in 0..3 {
                 let src = map_idx + map.shape[0] * channel;
-                data[dst + channel] = value_to_u8(map.data[src], map.dtype);
+                data[dst + channel] = value_to_u8(tensor_numeric_value(map, src, "colormap")?);
             }
         }
     }
@@ -691,52 +700,169 @@ fn materialize_indexed_image(indexed: &Tensor, map: &Tensor) -> BuiltinResult<Ma
     })
 }
 
-fn map_index(value: f64, dtype: NumericDType, map_rows: usize) -> BuiltinResult<usize> {
+fn tensor_numeric_value(
+    tensor: &Tensor,
+    index: usize,
+    label: &str,
+) -> BuiltinResult<NumericScalar> {
+    tensor.numeric_value_at(index).ok_or_else(|| {
+        imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            format!(
+                "{label} {} storage is unavailable at element {index}",
+                tensor.numeric_dtype().class_name()
+            ),
+        )
+    })
+}
+
+fn map_index(value: NumericScalar, map_rows: usize) -> BuiltinResult<usize> {
+    let index = match value {
+        NumericScalar::F64(value) => floating_map_index(value)?,
+        NumericScalar::F32(value) => floating_map_index(f64::from(value))?,
+        NumericScalar::U8(value) => usize::from(value),
+        NumericScalar::U16(value) => usize::from(value),
+        NumericScalar::I8(value) => one_based_signed_index(i128::from(value))?,
+        NumericScalar::I16(value) => one_based_signed_index(i128::from(value))?,
+        NumericScalar::I32(value) => one_based_signed_index(i128::from(value))?,
+        NumericScalar::I64(value) => one_based_signed_index(i128::from(value))?,
+        NumericScalar::U32(value) => one_based_unsigned_index(u128::from(value))?,
+        NumericScalar::U64(value) => one_based_unsigned_index(u128::from(value))?,
+    };
+    if index >= map_rows {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            format!(
+                "indexed image value {} is outside the colormap",
+                numeric_scalar_text(value)
+            ),
+        ));
+    }
+    Ok(index)
+}
+
+fn floating_map_index(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_IMAGE,
             "indexed image values must be finite",
         ));
     }
-    let index = if matches!(dtype, NumericDType::U8 | NumericDType::U16) {
-        value.round() as isize
-    } else {
-        value.round() as isize - 1
-    };
-    if index < 0 || index as usize >= map_rows {
+    let rounded = value.round();
+    if rounded < 1.0 || rounded > usize::MAX as f64 {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_IMAGE,
             format!("indexed image value {value} is outside the colormap"),
         ));
     }
-    Ok(index as usize)
+    Ok(rounded as usize - 1)
 }
 
-fn value_to_u8(value: f64, dtype: NumericDType) -> u8 {
-    let scaled = match dtype {
-        NumericDType::U8 => value,
-        NumericDType::U16 => value / 257.0,
-        NumericDType::U32 => value / (u32::MAX as f64) * 255.0,
-        NumericDType::F64 | NumericDType::F32 => value.clamp(0.0, 1.0) * 255.0,
-    };
-    if scaled.is_nan() {
-        0
-    } else {
-        scaled.round().clamp(0.0, 255.0) as u8
+fn one_based_signed_index(value: i128) -> BuiltinResult<usize> {
+    if value < 1 {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            format!("indexed image value {value} is outside the colormap"),
+        ));
+    }
+    usize::try_from(value - 1).map_err(|_| {
+        imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            format!("indexed image value {value} is outside the colormap"),
+        )
+    })
+}
+
+fn one_based_unsigned_index(value: u128) -> BuiltinResult<usize> {
+    if value == 0 {
+        return Err(imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            "indexed image value 0 is outside the colormap",
+        ));
+    }
+    usize::try_from(value - 1).map_err(|_| {
+        imwrite_error_with_detail(
+            &IMWRITE_ERROR_INVALID_IMAGE,
+            format!("indexed image value {value} is outside the colormap"),
+        )
+    })
+}
+
+fn value_to_u8(value: NumericScalar) -> u8 {
+    match value {
+        NumericScalar::F64(value) => normalized_float_to_u8(value),
+        NumericScalar::F32(value) => normalized_float_to_u8(f64::from(value)),
+        integer => scaled_integer(integer, u8::MAX as u128) as u8,
     }
 }
 
-fn value_to_u16(value: f64, dtype: NumericDType) -> u16 {
-    let scaled = match dtype {
-        NumericDType::U16 => value,
-        NumericDType::U8 => value * 257.0,
-        NumericDType::U32 => value / (u32::MAX as f64) * 65535.0,
-        NumericDType::F64 | NumericDType::F32 => value.clamp(0.0, 1.0) * 65535.0,
-    };
+fn value_to_u16(value: NumericScalar) -> u16 {
+    match value {
+        NumericScalar::F64(value) => normalized_float_to_u16(value),
+        NumericScalar::F32(value) => normalized_float_to_u16(f64::from(value)),
+        integer => scaled_integer(integer, u16::MAX as u128) as u16,
+    }
+}
+
+fn normalized_float_to_u8(value: f64) -> u8 {
+    let scaled = value.clamp(0.0, 1.0) * u8::MAX as f64;
     if scaled.is_nan() {
         0
     } else {
-        scaled.round().clamp(0.0, 65535.0) as u16
+        scaled.round() as u8
+    }
+}
+
+fn normalized_float_to_u16(value: f64) -> u16 {
+    let scaled = value.clamp(0.0, 1.0) * u16::MAX as f64;
+    if scaled.is_nan() {
+        0
+    } else {
+        scaled.round() as u16
+    }
+}
+
+fn scaled_integer(value: NumericScalar, output_max: u128) -> u128 {
+    let (offset, input_max) = match value {
+        NumericScalar::I8(value) => (
+            (i128::from(value) - i128::from(i8::MIN)) as u128,
+            u128::from(u8::MAX),
+        ),
+        NumericScalar::I16(value) => (
+            (i128::from(value) - i128::from(i16::MIN)) as u128,
+            u128::from(u16::MAX),
+        ),
+        NumericScalar::I32(value) => (
+            (i128::from(value) - i128::from(i32::MIN)) as u128,
+            u128::from(u32::MAX),
+        ),
+        NumericScalar::I64(value) => (
+            (i128::from(value) - i128::from(i64::MIN)) as u128,
+            u128::from(u64::MAX),
+        ),
+        NumericScalar::U8(value) => (u128::from(value), u128::from(u8::MAX)),
+        NumericScalar::U16(value) => (u128::from(value), u128::from(u16::MAX)),
+        NumericScalar::U32(value) => (u128::from(value), u128::from(u32::MAX)),
+        NumericScalar::U64(value) => (u128::from(value), u128::from(u64::MAX)),
+        NumericScalar::F64(_) | NumericScalar::F32(_) => {
+            unreachable!("floating image samples use normalized conversion")
+        }
+    };
+    (offset * output_max + input_max / 2) / input_max
+}
+
+fn numeric_scalar_text(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => value.to_string(),
+        NumericScalar::F32(value) => value.to_string(),
+        NumericScalar::I8(value) => value.to_string(),
+        NumericScalar::I16(value) => value.to_string(),
+        NumericScalar::I32(value) => value.to_string(),
+        NumericScalar::I64(value) => value.to_string(),
+        NumericScalar::U8(value) => value.to_string(),
+        NumericScalar::U16(value) => value.to_string(),
+        NumericScalar::U32(value) => value.to_string(),
+        NumericScalar::U64(value) => value.to_string(),
     }
 }
 
@@ -747,7 +873,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
             "Alpha must be an MxN array matching the image dimensions",
         ));
     }
-    if alpha.data.len() != image.rows * image.cols {
+    if alpha.len() != image.rows * image.cols {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
             "Alpha data length does not match shape",
@@ -778,7 +904,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
                         }
                         _ => unreachable!(),
                     }
-                    rgba[dst + 3] = value_to_u8(alpha.data[alpha_idx], alpha.dtype);
+                    rgba[dst + 3] = value_to_u8(tensor_numeric_value(alpha, alpha_idx, "Alpha")?);
                 }
             }
             PixelData::U8(rgba)
@@ -805,7 +931,7 @@ fn apply_alpha(image: &mut MaterializedImage, alpha: &Tensor) -> BuiltinResult<(
                         }
                         _ => unreachable!(),
                     }
-                    rgba[dst + 3] = value_to_u16(alpha.data[alpha_idx], alpha.dtype);
+                    rgba[dst + 3] = value_to_u16(tensor_numeric_value(alpha, alpha_idx, "Alpha")?);
                 }
             }
             PixelData::U16(rgba)
@@ -1159,11 +1285,16 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use image::io::Reader as ImageReader;
+    use runmat_builtins::IntegerStorage;
     use std::fs;
     use tempfile::tempdir;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>, dtype: NumericDType) -> Tensor {
         Tensor::new_with_dtype(data, shape, dtype).expect("tensor")
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
     }
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -1178,6 +1309,31 @@ mod tests {
             vec![255.0, 0.0, 0.0, 0.0, 0.0, 255.0],
             vec![1, 2, 3],
             NumericDType::U8,
+        );
+
+        call(vec![
+            Value::Tensor(rgb),
+            Value::from(path.to_string_lossy().as_ref()),
+        ])
+        .unwrap();
+
+        let decoded = ImageReader::open(&path)
+            .unwrap()
+            .decode()
+            .unwrap()
+            .to_rgb8();
+        assert_eq!(decoded.dimensions(), (2, 1));
+        assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0]);
+        assert_eq!(decoded.get_pixel(1, 0).0, [0, 0, 255]);
+    }
+
+    #[test]
+    fn writes_typed_integer_png_rgb_from_exact_storage() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("typed-rgb.png");
+        let rgb = typed_tensor(
+            IntegerStorage::U8(vec![255, 0, 0, 0, 0, 255]),
+            vec![1, 2, 3],
         );
 
         call(vec![
@@ -1220,6 +1376,129 @@ mod tests {
     }
 
     #[test]
+    fn writes_typed_integer_png_alpha_from_exact_storage() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("typed-alpha.png");
+        let image = tensor(vec![1.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::F64);
+        let alpha = typed_tensor(IntegerStorage::U8(vec![128]), vec![1, 1]);
+
+        call(vec![
+            Value::Tensor(image),
+            Value::from(path.to_string_lossy().as_ref()),
+            Value::from("Alpha"),
+            Value::Tensor(alpha),
+        ])
+        .unwrap();
+
+        let decoded = ImageReader::open(&path)
+            .unwrap()
+            .decode()
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0, 128]);
+    }
+
+    #[test]
+    fn imwrite_numeric_scalar_reads_typed_integer_tensor_exactly() {
+        let scalar = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("scalar");
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(scalar), "LoopCount").unwrap(),
+            u64::MAX as f64
+        );
+
+        let vector =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![1, 2]), vec![1, 2])
+                .expect("vector");
+        assert!(numeric_scalar(&Value::Tensor(vector), "LoopCount").is_err());
+
+        for storage in [
+            runmat_builtins::IntegerStorage::I8(vec![1]),
+            runmat_builtins::IntegerStorage::I16(vec![1]),
+            runmat_builtins::IntegerStorage::I32(vec![1]),
+            runmat_builtins::IntegerStorage::I64(vec![1]),
+            runmat_builtins::IntegerStorage::U8(vec![1]),
+            runmat_builtins::IntegerStorage::U16(vec![1]),
+            runmat_builtins::IntegerStorage::U32(vec![1]),
+            runmat_builtins::IntegerStorage::U64(vec![1]),
+        ] {
+            let scalar = Tensor::new_integer(storage, vec![1, 1]).expect("scalar");
+            assert_eq!(
+                numeric_scalar(&Value::Tensor(scalar), "LoopCount").unwrap(),
+                1.0
+            );
+        }
+    }
+
+    #[test]
+    fn integer_image_scaling_is_exact_for_every_native_class() {
+        for (minimum, midpoint, maximum) in [
+            (
+                NumericScalar::I8(i8::MIN),
+                NumericScalar::I8(0),
+                NumericScalar::I8(i8::MAX),
+            ),
+            (
+                NumericScalar::I16(i16::MIN),
+                NumericScalar::I16(0),
+                NumericScalar::I16(i16::MAX),
+            ),
+            (
+                NumericScalar::I32(i32::MIN),
+                NumericScalar::I32(0),
+                NumericScalar::I32(i32::MAX),
+            ),
+            (
+                NumericScalar::I64(i64::MIN),
+                NumericScalar::I64(0),
+                NumericScalar::I64(i64::MAX),
+            ),
+            (
+                NumericScalar::U8(0),
+                NumericScalar::U8(128),
+                NumericScalar::U8(u8::MAX),
+            ),
+            (
+                NumericScalar::U16(0),
+                NumericScalar::U16(32768),
+                NumericScalar::U16(u16::MAX),
+            ),
+            (
+                NumericScalar::U32(0),
+                NumericScalar::U32(1 << 31),
+                NumericScalar::U32(u32::MAX),
+            ),
+            (
+                NumericScalar::U64(0),
+                NumericScalar::U64((1_u64 << 63) + 1),
+                NumericScalar::U64(u64::MAX),
+            ),
+        ] {
+            assert_eq!(value_to_u8(minimum), 0);
+            assert_eq!(value_to_u8(midpoint), 128);
+            assert_eq!(value_to_u8(maximum), u8::MAX);
+            assert_eq!(value_to_u16(minimum), 0);
+            assert!((32768..=32896).contains(&value_to_u16(midpoint)));
+            assert_eq!(value_to_u16(maximum), u16::MAX);
+        }
+    }
+
+    #[test]
+    fn indexed_integer_values_are_checked_without_floating_conversion() {
+        assert_eq!(map_index(NumericScalar::U8(0), 2).unwrap(), 0);
+        assert_eq!(map_index(NumericScalar::U16(1), 2).unwrap(), 1);
+        assert_eq!(map_index(NumericScalar::I64(1), 2).unwrap(), 0);
+        assert_eq!(map_index(NumericScalar::U64(2), 2).unwrap(), 1);
+
+        let error = map_index(NumericScalar::U64(u64::MAX), 2).unwrap_err();
+        assert!(error.message.contains(&u64::MAX.to_string()));
+        assert!(map_index(NumericScalar::I64(i64::MIN), 2).is_err());
+    }
+
+    #[test]
     fn writes_uint16_png_without_downcasting() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("gray16.png");
@@ -1254,6 +1533,30 @@ mod tests {
             vec![2, 3],
             NumericDType::U8,
         );
+
+        call(vec![
+            Value::Tensor(x),
+            Value::Tensor(map),
+            Value::from(path.to_string_lossy().as_ref()),
+        ])
+        .unwrap();
+
+        let decoded = ImageReader::open(&path)
+            .unwrap()
+            .decode()
+            .unwrap()
+            .to_rgb8();
+        assert_eq!(decoded.dimensions(), (2, 1));
+        assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0]);
+        assert_eq!(decoded.get_pixel(1, 0).0, [0, 0, 255]);
+    }
+
+    #[test]
+    fn writes_typed_integer_indexed_gif_from_exact_storage() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("typed-indexed.gif");
+        let x = typed_tensor(IntegerStorage::U8(vec![0, 1]), vec![1, 2]);
+        let map = typed_tensor(IntegerStorage::U8(vec![255, 0, 0, 0, 0, 255]), vec![2, 3]);
 
         call(vec![
             Value::Tensor(x),

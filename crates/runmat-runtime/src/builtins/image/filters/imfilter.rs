@@ -279,8 +279,9 @@ async fn imfilter_gpu(
         other => {
             let tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, other)
                 .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
+            let tensor_values = tensor::tensor_values_f64_cow(&tensor);
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor_values,
                 shape: &tensor.shape,
             };
             match provider.upload(&view) {
@@ -408,14 +409,14 @@ fn parse_scalar(builtin: &str, value: &Value) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                Ok(t.data[0])
+            if tensor::is_scalar_tensor(t) {
+                Ok(tensor::tensor_value_f64(t, 0))
             } else {
                 Err(filter_error(
                     builtin,
                     format!(
                         "{builtin}: expected scalar value, got tensor of size {}",
-                        t.data.len()
+                        tensor_element_len(t)
                     ),
                 ))
             }
@@ -438,6 +439,10 @@ fn parse_scalar(builtin: &str, value: &Value) -> BuiltinResult<f64> {
             format!("{builtin}: expected numeric scalar, got {:?}", other),
         )),
     }
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor.len()
 }
 
 /// Core host implementation of `imfilter`, shared with the in-process acceleration provider.
@@ -479,7 +484,7 @@ pub fn build_imfilter_plan(
     options: &ImfilterOptions,
     builtin: &str,
 ) -> BuiltinResult<ImfilterPlan> {
-    if kernel.data.is_empty() || kernel.shape.contains(&0) {
+    if kernel.is_empty() || kernel.shape.contains(&0) {
         return Err(filter_error(
             builtin,
             format!("{builtin}: filter must be non-empty along every dimension"),
@@ -551,7 +556,8 @@ pub fn apply_imfilter_tensor(
     builtin: &str,
 ) -> BuiltinResult<Tensor> {
     let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
-    let data = plan.evaluate(&image.data, options);
+    let image_values = tensor::tensor_values_f64_cow(image);
+    let data = plan.evaluate(&image_values, options);
     Tensor::new(data, plan.final_shape.clone())
         .map_err(|e| filter_error(builtin, format!("{builtin}: {e}")))
 }
@@ -627,7 +633,8 @@ fn build_kernel_points(
 ) -> Vec<ImfilterKernelPoint> {
     let rank = kernel_shape.len();
     let strides = compute_strides(kernel_shape);
-    let total = kernel.data.len();
+    let values = tensor::tensor_values_f64_cow(kernel);
+    let total = values.len();
     let mut points = Vec::with_capacity(total);
     if total == 0 {
         return points;
@@ -637,9 +644,9 @@ fn build_kernel_points(
     for _ in 0..total {
         let linear = index_to_linear(&index, &strides);
         let value = match mode {
-            ImfilterMode::Correlation => kernel.data[linear],
+            ImfilterMode::Correlation => values[linear],
             ImfilterMode::Convolution => {
-                kernel.data[flipped_linear_index(&index, kernel_shape, &strides)]
+                values[flipped_linear_index(&index, kernel_shape, &strides)]
             }
         };
         let offsets = index
@@ -788,10 +795,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{Tensor, Value};
+    use runmat_builtins::{IntegerStorage, Tensor, Value};
 
     fn simple_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
+    }
+
+    fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
     }
 
     fn error_message(err: &crate::RuntimeError) -> String {
@@ -807,7 +818,10 @@ pub(crate) mod tests {
         let result =
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
-        assert!(result.data.iter().all(|&v| (v - 10.0).abs() < 1e-12));
+        assert!(result
+            .materialize_f64()
+            .iter()
+            .all(|&v| (v - 10.0).abs() < 1e-12));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -823,7 +837,7 @@ pub(crate) mod tests {
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
         let expected = [18.0, 24.0, 21.0, 27.0];
-        for (got, exp) in result.data.iter().zip(expected.iter()) {
+        for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }
     }
@@ -841,7 +855,7 @@ pub(crate) mod tests {
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![3, 3]);
         let expected = [4.0, 14.0, 6.0, 11.0, 30.0, 11.0, 6.0, 14.0, 4.0];
-        for (got, exp) in result.data.iter().zip(expected.iter()) {
+        for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }
     }
@@ -858,7 +872,7 @@ pub(crate) mod tests {
         let result =
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![1, 1]);
-        assert!((result.data[0] - 10.0).abs() < 1e-12);
+        assert!((result.materialize_f64()[0] - 10.0).abs() < 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -881,13 +895,30 @@ pub(crate) mod tests {
             apply_imfilter_tensor(&image, &kernel, &conv_opts, IMFILTER_BUILTIN).expect("conv");
         assert_eq!(conv.shape, corr_flipped.shape);
         for ((a, b), c) in conv
-            .data
+            .materialize_f64()
             .iter()
-            .zip(corr_flipped.data.iter())
-            .zip(corr.data.iter())
+            .zip(corr_flipped.materialize_f64().iter())
+            .zip(corr.materialize_f64().iter())
         {
             assert!((a - b).abs() < 1e-12 || (a - c).abs() < 1e-8);
         }
+    }
+
+    #[test]
+    fn imfilter_reads_typed_integer_image_and_kernel_storage_exactly() {
+        let image = typed_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]);
+        let kernel = typed_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]);
+
+        let result = apply_imfilter_tensor(
+            &image,
+            &kernel,
+            &ImfilterOptions::default(),
+            IMFILTER_BUILTIN,
+        )
+        .expect("imfilter");
+
+        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.materialize_f64(), vec![2.0, 6.0, 4.0, 8.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -902,7 +933,7 @@ pub(crate) mod tests {
         let result =
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         let expected = [5.0, 5.0, 5.0, 5.0];
-        for (got, exp) in result.data.iter().zip(expected.iter()) {
+        for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }
     }
@@ -914,11 +945,11 @@ pub(crate) mod tests {
             let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0], 2, 2);
             let kernel = simple_tensor(&[1.0, 1.0, 1.0, 1.0], 2, 2);
             let image_view = HostTensorView {
-                data: &image.data,
+                data: &image.materialize_f64(),
                 shape: &image.shape,
             };
             let kernel_view = HostTensorView {
-                data: &kernel.data,
+                data: &kernel.materialize_f64(),
                 shape: &kernel.shape,
             };
             let image_handle = provider.upload(&image_view).expect("upload image");
@@ -932,9 +963,34 @@ pub(crate) mod tests {
             let gathered = test_support::gather(value).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
             let expected = [1.0, 5.0, 3.0, 12.0];
-            for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (got, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < 1e-12);
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_image_host_typed_integer_kernel_uploads_exact_storage() {
+        test_support::with_test_provider(|provider| {
+            let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0], 2, 2);
+            let image_view = HostTensorView {
+                data: &image.materialize_f64(),
+                shape: &image.shape,
+            };
+            let image_handle = provider.upload(&image_view).expect("upload image");
+            let kernel = typed_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]);
+
+            let value = block_on(imfilter_builtin(
+                Value::GpuTensor(image_handle),
+                Value::Tensor(kernel),
+                Vec::new(),
+            ))
+            .expect("imfilter");
+            let gathered = test_support::gather(value).expect("gather");
+
+            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 8.0, 4.0, 10.0]);
         });
     }
 
@@ -951,7 +1007,7 @@ pub(crate) mod tests {
         )
         .expect("imfilter");
         assert_eq!(result.shape, vec![2, 2]);
-        for value in result.data {
+        for value in result.materialize_f64() {
             assert!((value - (10.0 / 9.0)).abs() < 1e-12);
         }
     }
@@ -969,7 +1025,7 @@ pub(crate) mod tests {
             apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
         assert_eq!(result.shape, vec![3, 2]);
         let expected = [1.0, 5.0, 9.0, 6.0, 25.0, 35.0];
-        for (got, exp) in result.data.iter().zip(expected.iter()) {
+        for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12);
         }
     }
@@ -996,9 +1052,27 @@ pub(crate) mod tests {
         .expect("imfilter builtin");
         let via_tensor = tensor::value_into_tensor_for("imfilter", via_builtin).expect("tensor");
         assert_eq!(manual_res.shape, via_tensor.shape);
-        for (a, b) in manual_res.data.iter().zip(via_tensor.data.iter()) {
+        for (a, b) in manual_res
+            .materialize_f64()
+            .iter()
+            .zip(via_tensor.materialize_f64().iter())
+        {
             assert!((a - b).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn parse_scalar_reads_typed_integer_tensor_exactly() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("scalar");
+        assert_eq!(
+            parse_scalar(IMFILTER_BUILTIN, &Value::Tensor(scalar)).unwrap(),
+            u64::MAX as f64
+        );
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).expect("vector");
+        assert!(parse_scalar(IMFILTER_BUILTIN, &Value::Tensor(vector)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1044,7 +1118,7 @@ pub(crate) mod tests {
         .expect("imfilter");
         match result {
             Value::Tensor(t) => {
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
                 assert_eq!(t.shape, vec![0, 0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1091,11 +1165,11 @@ pub(crate) mod tests {
         .expect("cpu");
 
         let image_view = HostTensorView {
-            data: &image.data,
+            data: &image.materialize_f64(),
             shape: &image.shape,
         };
         let kernel_view = HostTensorView {
-            data: &kernel.data,
+            data: &kernel.materialize_f64(),
             shape: &kernel.shape,
         };
         let image_handle = provider.upload(&image_view).expect("upload image");
@@ -1114,7 +1188,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (a, b) in cpu.data.iter().zip(gathered.data.iter()) {
+        for (a, b) in cpu
+            .materialize_f64()
+            .iter()
+            .zip(gathered.materialize_f64().iter())
+        {
             assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
         }
     }

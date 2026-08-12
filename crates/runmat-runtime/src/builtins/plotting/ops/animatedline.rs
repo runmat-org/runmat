@@ -1,9 +1,12 @@
 //! MATLAB-compatible `animatedline` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{Line3Plot, LinePlot};
@@ -14,15 +17,16 @@ use super::op_common::{apply_axes_target, AxesTarget};
 use super::plot::build_line_plot_for_builtin;
 use super::plot3::build_line3_plot_for_builtin;
 use super::plotting_error;
-use super::properties::{resolve_plot_handle, set_properties, PlotHandle};
+use super::properties::{
+    animated_line_maximum_from_value, resolve_plot_handle, set_properties, PlotHandle,
+};
 use super::state::{
     append_active_plot, current_axes_state, current_figure_handle,
     line_color_for_target_axes_series_index, register_animated_line_handle, PlotChildHandleState,
     PlotRenderOptions,
 };
-use super::style::{
-    parse_line_style_args, value_as_f64, value_as_string, LineAppearance, LineStyleParseOptions,
-};
+use super::style::{parse_line_style_args, value_as_string, LineAppearance, LineStyleParseOptions};
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
@@ -92,6 +96,89 @@ const ANIMATEDLINE_ERRORS: [BuiltinErrorDescriptor; 2] = [
     ANIMATEDLINE_ERROR_INTERNAL,
 ];
 
+const ANIMATEDLINE_2D_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Starting X coordinates independently accept every integer class or other documented coordinate data.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Starting Y coordinates independently accept every integer class or other documented coordinate data.",
+    },
+];
+
+const ANIMATEDLINE_3D_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Starting X coordinates independently accept every integer class or other documented coordinate data.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "y",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Starting Y coordinates independently accept every integer class or other documented coordinate data.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "z",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Starting Z coordinates independently accept every integer class or other documented coordinate data.",
+    },
+];
+
+const ANIMATEDLINE_MAXIMUM_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "MaximumNumPoints",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The point limit accepts every integer class as a positive scalar; positive floating infinity selects an unbounded limit.",
+    }];
+
+pub const ANIMATEDLINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "an = animatedline(integer_x, integer_y)",
+        inputs: &ANIMATEDLINE_2D_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Coordinate vectors must have equal element counts. Host integer storage is read authoritatively before values enter the f64 graphics domain; GPU arrays gather because animated graphics state and rendering are client-side.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "an = animatedline(integer_x, integer_y, integer_z)",
+        inputs: &ANIMATEDLINE_3D_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "All three coordinate vectors must have equal element counts. Host integer storage is read authoritatively before values enter the f64 graphics domain; GPU arrays gather because animated graphics state and rendering are client-side.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "an = animatedline(..., \"MaximumNumPoints\", integer_n)",
+        inputs: &ANIMATEDLINE_MAXIMUM_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The limit is parsed from authoritative scalar integer storage, must be positive and representable as a host point count, and may gather from a resident scalar because the retained-point state is client-side.",
+    },
+];
+
 pub const ANIMATEDLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ANIMATEDLINE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -108,6 +195,9 @@ pub const ANIMATEDLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::animatedline::ANIMATEDLINE_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::plotting::animatedline::ANIMATEDLINE_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::plotting::animatedline"
 )]
 pub async fn animatedline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -256,7 +346,7 @@ async fn parse_animatedline_args(
                 axes_target = Some((handle, axes_index));
             }
             "maximumnumpoints" => {
-                maximum_num_points = maximum_from_value(&value)?;
+                maximum_num_points = maximum_from_value(value).await?;
             }
             _ => {
                 style_tokens.push(Value::String(key.clone()));
@@ -329,6 +419,9 @@ fn build_object(
 }
 
 async fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        return Err(animatedline_err(format!("{name} must not be logical data")));
+    }
     let tensor = NumericInput::from_value(value, BUILTIN_NAME)?
         .into_tensor_async(BUILTIN_NAME)
         .await?;
@@ -337,7 +430,7 @@ async fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
             "{name} must be a scalar or vector"
         )));
     }
-    Ok(tensor.data)
+    Ok(tensor_utils::tensor_into_values_f64(tensor))
 }
 
 fn is_numeric_value(value: &Value) -> bool {
@@ -351,20 +444,14 @@ fn is_vector_tensor(tensor: &Tensor) -> bool {
     tensor.rows() == 1 || tensor.cols() == 1
 }
 
-fn maximum_from_value(value: &Value) -> BuiltinResult<Option<usize>> {
-    let Some(maximum) = value_as_f64(value) else {
-        return Err(animatedline_err("MaximumNumPoints must be numeric"));
-    };
-    if maximum.is_infinite() && maximum.is_sign_positive() {
-        return Ok(None);
+async fn maximum_from_value(value: Value) -> BuiltinResult<Option<usize>> {
+    if matches!(value, Value::GpuTensor(_)) {
+        let tensor = NumericInput::from_value(value, BUILTIN_NAME)?
+            .into_tensor_async(BUILTIN_NAME)
+            .await?;
+        return animated_line_maximum_from_value(&Value::Tensor(tensor), BUILTIN_NAME);
     }
-    if !maximum.is_finite() || maximum <= 0.0 {
-        return Err(animatedline_err("MaximumNumPoints must be positive or Inf"));
-    }
-    if maximum > usize::MAX as f64 {
-        return Err(animatedline_err("MaximumNumPoints is too large"));
-    }
-    Ok(Some(maximum.floor() as usize))
+    animated_line_maximum_from_value(&value, BUILTIN_NAME)
 }
 
 fn trim_initial_points(
@@ -394,10 +481,22 @@ fn animatedline_err(detail: impl AsRef<str>) -> crate::RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::gpu_helpers;
+    use crate::builtins::common::test_support;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
+
+    #[cfg(feature = "wgpu")]
+    fn register_wgpu_provider_available() -> bool {
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_ok()
+            && runmat_accelerate_api::provider().is_some()
+    }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -417,6 +516,11 @@ mod tests {
         assert!(labels.contains(&"an = animatedline()"));
         assert!(labels.contains(&"an = animatedline(x, y, z)"));
         assert!(labels.contains(&"an = animatedline(ax, ...)"));
+        assert_eq!(ANIMATEDLINE_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(
+            ANIMATEDLINE_INTEGER_CAPABILITIES[2].overload,
+            BuiltinIntegerOverloadKind::StructuralParameter
+        );
     }
 
     #[test]
@@ -458,6 +562,17 @@ mod tests {
     }
 
     #[test]
+    fn animatedline_rejects_unrepresentable_maximum_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(block_on(maximum_from_value(Value::Num(boundary))).is_err());
+        assert!(block_on(maximum_from_value(Value::Num(2.5))).is_err());
+    }
+
+    #[test]
     fn animatedline_accepts_property_constructor_data() {
         let _guard = setup();
         let handle = block_on(animatedline_builtin(vec![
@@ -478,6 +593,204 @@ mod tests {
     }
 
     #[test]
+    fn animatedline_reads_typed_integer_constructor_data_exactly() {
+        let _guard = setup();
+        let handle = block_on(animatedline_builtin(vec![
+            integer_vector(&[1, 2]),
+            integer_vector(&[10, 20]),
+            integer_vector(&[100, 200]),
+        ]))
+        .unwrap();
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle.clone(), Value::String("XData".into())]).unwrap()),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle.clone(), Value::String("YData".into())]).unwrap()),
+            vec![10.0, 20.0]
+        );
+        assert_eq!(
+            tensor_data(get_builtin(vec![handle, Value::String("ZData".into())]).unwrap()),
+            vec![100.0, 200.0]
+        );
+    }
+
+    #[test]
+    fn animatedline_accepts_all_integer_coordinate_classes_and_mixed_double() {
+        let _guard = setup();
+        for storage in all_integer_storages() {
+            let handle = block_on(animatedline_builtin(vec![
+                integer_value(storage.clone()),
+                vector(&[10.0, 20.0]),
+                integer_value(storage),
+            ]))
+            .expect("all documented integer coordinates must construct");
+            assert_eq!(
+                tensor_data(
+                    get_builtin(vec![handle.clone(), Value::String("XData".into())]).unwrap()
+                ),
+                vec![1.0, 2.0]
+            );
+            assert_eq!(
+                tensor_data(
+                    get_builtin(vec![handle.clone(), Value::String("YData".into())]).unwrap()
+                ),
+                vec![10.0, 20.0]
+            );
+            assert_eq!(
+                tensor_data(get_builtin(vec![handle, Value::String("ZData".into())]).unwrap()),
+                vec![1.0, 2.0]
+            );
+        }
+    }
+
+    #[test]
+    fn animatedline_reads_all_integer_maximum_classes_exactly() {
+        let _guard = setup();
+        for storage in all_integer_scalar_storages(2) {
+            let maximum = storage.value_at(0).expect("integer scalar");
+            let handle = block_on(animatedline_builtin(vec![
+                vector(&[1.0, 2.0, 3.0]),
+                vector(&[4.0, 5.0, 6.0]),
+                Value::String("MaximumNumPoints".into()),
+                Value::Int(maximum),
+            ]))
+            .expect("documented integer maximum must construct");
+            assert_eq!(
+                tensor_data(get_builtin(vec![handle, Value::String("XData".into())]).unwrap()),
+                vec![2.0, 3.0]
+            );
+        }
+        if usize::BITS == 64 {
+            let wide = 9_007_199_254_740_993_u64;
+            assert_eq!(
+                block_on(maximum_from_value(Value::Int(
+                    runmat_builtins::IntValue::U64(wide)
+                )))
+                .expect("wide exact maximum"),
+                Some(wide as usize)
+            );
+            assert_eq!(
+                block_on(maximum_from_value(Value::Int(
+                    runmat_builtins::IntValue::U64(u64::MAX)
+                )))
+                .expect("full-width exact maximum"),
+                Some(usize::MAX)
+            );
+        }
+        for invalid in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Int(runmat_builtins::IntValue::U8(0)),
+        ] {
+            assert!(block_on(maximum_from_value(invalid)).is_err());
+        }
+    }
+
+    #[test]
+    fn animatedline_set_accepts_all_integer_maximum_classes() {
+        let _guard = setup();
+        for storage in all_integer_scalar_storages(2) {
+            let handle = block_on(animatedline_builtin(vec![
+                vector(&[1.0, 2.0, 3.0]),
+                vector(&[4.0, 5.0, 6.0]),
+            ]))
+            .expect("animated line");
+            let plot_handle = resolve_plot_handle(&handle, BUILTIN_NAME).expect("plot handle");
+            set_properties(
+                plot_handle,
+                &[
+                    Value::String("MaximumNumPoints".into()),
+                    integer_value(storage),
+                ],
+                BUILTIN_NAME,
+            )
+            .expect("typed integer MaximumNumPoints property");
+            assert_eq!(
+                tensor_data(get_builtin(vec![handle, Value::String("XData".into())]).unwrap()),
+                vec![2.0, 3.0]
+            );
+        }
+    }
+
+    #[test]
+    fn animatedline_gathers_all_integer_coordinate_and_maximum_classes() {
+        let _guard = setup();
+        test_support::with_test_provider(|provider| {
+            for (coordinate, maximum) in all_integer_storages()
+                .into_iter()
+                .zip(all_integer_scalar_storages(2))
+            {
+                let coordinate_tensor =
+                    Tensor::new_integer(coordinate, vec![1, 2]).expect("coordinate tensor");
+                let maximum_tensor =
+                    Tensor::new_integer(maximum, vec![1, 1]).expect("maximum tensor");
+                let coordinate_handle = gpu_helpers::upload_tensor(provider, &coordinate_tensor)
+                    .expect("coordinate upload");
+                let maximum_handle =
+                    gpu_helpers::upload_tensor(provider, &maximum_tensor).expect("maximum upload");
+                let handle = block_on(animatedline_builtin(vec![
+                    Value::GpuTensor(coordinate_handle),
+                    vector(&[10.0, 20.0]),
+                    Value::String("MaximumNumPoints".into()),
+                    Value::GpuTensor(maximum_handle),
+                ]))
+                .expect("resident documented integer inputs");
+                assert_eq!(
+                    tensor_data(get_builtin(vec![handle, Value::String("XData".into())]).unwrap()),
+                    vec![1.0, 2.0]
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn animatedline_wgpu_gathers_all_integer_coordinate_and_maximum_classes() {
+        let _plot_guard = setup();
+        let _accel_guard = test_support::accel_test_lock();
+        if !register_wgpu_provider_available() {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        for (coordinate, maximum) in all_integer_storages()
+            .into_iter()
+            .zip(all_integer_scalar_storages(2))
+        {
+            let coordinate_tensor =
+                Tensor::new_integer(coordinate, vec![1, 2]).expect("coordinate tensor");
+            let maximum_tensor = Tensor::new_integer(maximum, vec![1, 1]).expect("maximum tensor");
+            let coordinate_handle = gpu_helpers::upload_tensor(provider, &coordinate_tensor)
+                .expect("coordinate upload");
+            let maximum_handle =
+                gpu_helpers::upload_tensor(provider, &maximum_tensor).expect("maximum upload");
+            let handle = block_on(animatedline_builtin(vec![
+                Value::GpuTensor(coordinate_handle),
+                vector(&[10.0, 20.0]),
+                Value::String("MaximumNumPoints".into()),
+                Value::GpuTensor(maximum_handle),
+            ]))
+            .expect("resident WGPU integer inputs");
+            assert_eq!(
+                tensor_data(get_builtin(vec![handle, Value::String("XData".into())]).unwrap()),
+                vec![1.0, 2.0]
+            );
+        }
+    }
+
+    #[test]
+    fn animatedline_rejects_undocumented_logical_coordinates() {
+        let _guard = setup();
+        let error = block_on(animatedline_builtin(vec![
+            Value::String("XData".into()),
+            Value::Bool(true),
+            Value::String("YData".into()),
+            Value::Num(2.0),
+        ]))
+        .expect_err("logical coordinates are not documented");
+        assert!(error.message().contains("must not be logical"));
+    }
+
+    #[test]
     fn animatedline_rejects_3d_marker_constructor() {
         let _guard = setup();
         let err = block_on(animatedline_builtin(vec![
@@ -492,19 +805,54 @@ mod tests {
     }
 
     fn vector(values: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            data: values.to_vec(),
-            integer_data: None,
-            rows: 1,
-            cols: values.len(),
-            shape: vec![1, values.len()],
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(
+            Tensor::new(values.to_vec(), vec![1, values.len()]).expect("animatedline row vector"),
+        )
+    }
+
+    fn integer_vector(values: &[i16]) -> Value {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(values.to_vec()),
+            vec![1, values.len()],
+        )
+        .unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn integer_value(storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        Value::Tensor(Tensor::new_integer(storage, vec![1, len]).expect("integer vector"))
+    }
+
+    fn all_integer_storages() -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![1, 2]),
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I32(vec![1, 2]),
+            IntegerStorage::I64(vec![1, 2]),
+            IntegerStorage::U8(vec![1, 2]),
+            IntegerStorage::U16(vec![1, 2]),
+            IntegerStorage::U32(vec![1, 2]),
+            IntegerStorage::U64(vec![1, 2]),
+        ]
+    }
+
+    fn all_integer_scalar_storages(value: u8) -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![value as i8]),
+            IntegerStorage::I16(vec![value as i16]),
+            IntegerStorage::I32(vec![value as i32]),
+            IntegerStorage::I64(vec![value as i64]),
+            IntegerStorage::U8(vec![value]),
+            IntegerStorage::U16(vec![value as u16]),
+            IntegerStorage::U32(vec![value as u32]),
+            IntegerStorage::U64(vec![value as u64]),
+        ]
     }
 
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected tensor, got {other:?}"),
         }
     }

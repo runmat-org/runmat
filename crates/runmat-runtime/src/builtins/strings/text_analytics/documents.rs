@@ -6,13 +6,17 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, ClassDef, LogicalArray, ObjectInstance, PropertyDef, ResolveContext, StringArray,
-    Tensor, Type, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, ClassDef, IntegerStorage, LogicalArray, NumericScalar,
+    ObjectInstance, PropertyDef, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::stopwords::{
@@ -205,6 +209,15 @@ const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
 
+const ERROR_BAG_OF_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BAGOFWORDS.INVALID_INPUT",
+    identifier: Some("RunMat:bagOfWords:InvalidInput"),
+    when: "Inputs do not match a supported bagOfWords form.",
+    message: "bagOfWords: invalid input",
+};
+
+const BAG_OF_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_BAG_OF_WORDS_INVALID_INPUT];
+
 const ERROR_REMOVE_LONG_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REMOVELONGWORDS.INVALID_INPUT",
     identifier: Some("RunMat:removeLongWords:InvalidInput"),
@@ -327,8 +340,29 @@ pub const BAG_OF_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     ],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
+    errors: &BAG_OF_WORDS_ERRORS,
 };
+
+const BAG_OF_WORDS_COUNTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "counts",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Explicit count matrices accept every integer class and require nonnegative values.",
+    }];
+
+pub const BAG_OF_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "bag = bagOfWords(uniqueWords, integer_counts)",
+        inputs: &BAG_OF_WORDS_COUNTS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Counts remain authoritative through nonnegative-integer validation and vocabulary-column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object.",
+    }];
 
 pub const REMOVE_SHORT_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -413,6 +447,7 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
         "addEntityDetails" => ERROR_ADD_ENTITY_DETAILS_INVALID_INPUT,
         "addDependencyDetails" => ERROR_ADD_DEPENDENCY_DETAILS_INVALID_INPUT,
         "vaderSentimentScores" => ERROR_VADER_SENTIMENT_SCORES_INVALID_INPUT,
+        "bagOfWords" => ERROR_BAG_OF_WORDS_INVALID_INPUT,
         _ => ERROR_INVALID_INPUT,
     };
     let builder = build_runtime_error(message).with_builtin(fn_name);
@@ -524,9 +559,18 @@ pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_bui
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::documents::BAG_OF_WORDS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::text_analytics::documents::BAG_OF_WORDS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 async fn bag_of_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
+        return Err(text_analytics_error(
+            "bagOfWords",
+            "bagOfWords: GPU-resident inputs are not supported",
+        ));
+    }
     let gathered = gather_args(args, "bagOfWords").await?;
     match gathered.as_slice() {
         [] => bag_from_documents(Vec::new()),
@@ -579,7 +623,7 @@ async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<V
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
-            let shape = shape_from_object(&object);
+            let shape = shape_from_object(&object, "removeShortWords")?;
             let options = options_from_document_object(&object);
             tokenized_document_value(documents, shape, options, None)
         }
@@ -1373,7 +1417,7 @@ fn parse_remove_words_selector(value: &Value) -> BuiltinResult<RemoveWordsSelect
 fn parse_remove_words_indices(value: &Value) -> BuiltinResult<Vec<usize>> {
     let raw = match value {
         Value::Num(value) => vec![*value],
-        Value::Tensor(tensor) => tensor.data.clone(),
+        Value::Tensor(tensor) => tensor_utils::tensor_values_f64(tensor),
         other => {
             return Err(text_analytics_error(
                 "removeWords",
@@ -2083,7 +2127,12 @@ pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document
                 .collect::<BuiltinResult<Vec<_>>>()
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    tokenized_document_value(documents, shape_from_object(object), options, None)
+    tokenized_document_value(
+        documents,
+        shape_from_object(object, fn_name)?,
+        options,
+        None,
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2131,13 +2180,124 @@ pub(in crate::builtins::strings) fn erase_punctuation_tokenized_document(
         ));
     }
     let selected_types = parse_erase_punctuation_args(args)?;
-    transform_tokenized_document(&object, "erasePunctuation", |token, token_type| {
-        if !selected_types.contains(token_type.as_str()) {
+    transform_tokenized_document_by_type_name(&object, "erasePunctuation", |token, token_type| {
+        if !selected_types.contains(token_type) {
             return Ok(Some(token.to_string()));
         }
         let cleaned = remove_punctuation_and_symbols(token);
         Ok((!cleaned.is_empty()).then_some(cleaned))
     })
+}
+
+pub(in crate::builtins::strings) fn erase_urls_tokenized_document(
+    object: ObjectInstance,
+) -> BuiltinResult<Value> {
+    if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
+        return Err(text_analytics_error(
+            "eraseURLs",
+            format!(
+                "eraseURLs: expected tokenizedDocument object, got {}",
+                object.class_name
+            ),
+        ));
+    }
+    transform_tokenized_document_by_type_name(&object, "eraseURLs", |token, token_type| {
+        Ok((token_type != "web-address").then(|| token.to_string()))
+    })
+}
+
+fn transform_tokenized_document_by_type_name(
+    object: &ObjectInstance,
+    fn_name: &str,
+    mut transform: impl FnMut(&str, &str) -> BuiltinResult<Option<String>>,
+) -> BuiltinResult<Value> {
+    let options = options_from_document_object(object);
+    let source_documents = documents_from_object(object, fn_name)?;
+    let explicit_types = explicit_type_details(object, &source_documents, fn_name)?;
+    let mut output_documents = Vec::with_capacity(source_documents.len());
+    let mut output_types = explicit_types
+        .as_ref()
+        .map(|_| Vec::with_capacity(source_documents.len()));
+
+    for (document_index, document) in source_documents.into_iter().enumerate() {
+        let mut transformed_document = Vec::with_capacity(document.len());
+        let mut transformed_types = output_types
+            .as_ref()
+            .map(|_| Vec::with_capacity(document.len()));
+        for (token_index, token) in document.into_iter().enumerate() {
+            let explicit_type = explicit_types
+                .as_ref()
+                .and_then(|documents| documents.get(document_index))
+                .and_then(|types| types.get(token_index));
+            let derived_type;
+            let token_type = if let Some(explicit_type) = explicit_type {
+                explicit_type.as_str()
+            } else {
+                derived_type = document_token_type_with_options(&token, &options);
+                derived_type.as_str()
+            };
+            if let Some(transformed) = transform(&token, token_type)? {
+                transformed_document.push(transformed);
+                if let Some(types) = &mut transformed_types {
+                    types.push(token_type.to_string());
+                }
+            }
+        }
+        output_documents.push(transformed_document);
+        if let (Some(all_types), Some(types)) = (&mut output_types, transformed_types) {
+            all_types.push(types);
+        }
+    }
+
+    tokenized_document_value(
+        output_documents,
+        shape_from_object(object, fn_name)?,
+        options,
+        output_types,
+    )
+}
+
+fn explicit_type_details(
+    object: &ObjectInstance,
+    documents: &[Vec<String>],
+    fn_name: &str,
+) -> BuiltinResult<Option<Vec<Vec<String>>>> {
+    let Some(value) = object.properties.get("TypeDetails") else {
+        return Ok(None);
+    };
+    let Value::Cell(cell) = value else {
+        return Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: invalid token type details"),
+        ));
+    };
+    if cell.data.len() != documents.len() {
+        return Err(text_analytics_error(
+            fn_name,
+            format!("{fn_name}: token type details do not match document shape"),
+        ));
+    }
+    let mut all_types = Vec::with_capacity(documents.len());
+    for (value, document) in cell.data.iter().zip(documents) {
+        let types = match value {
+            Value::StringArray(array) => array.data.clone(),
+            Value::String(text) if document.len() == 1 => vec![text.clone()],
+            _ => {
+                return Err(text_analytics_error(
+                    fn_name,
+                    format!("{fn_name}: invalid token type details"),
+                ))
+            }
+        };
+        if types.len() != document.len() {
+            return Err(text_analytics_error(
+                fn_name,
+                format!("{fn_name}: token type details do not match document tokens"),
+            ));
+        }
+        all_types.push(types);
+    }
+    Ok(Some(all_types))
 }
 
 fn parse_erase_punctuation_args(args: Vec<Value>) -> BuiltinResult<HashSet<String>> {
@@ -2278,14 +2438,31 @@ fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => match tensor.data[0] {
-            0.0 => Ok(false),
-            1.0 => Ok(true),
-            other => Err(text_analytics_error(
-                fn_name,
-                format!("{fn_name}: logical scalar option must be true or false, got {other}"),
-            )),
-        },
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return match value.try_to_u64() {
+                    Some(0) => Ok(false),
+                    Some(1) => Ok(true),
+                    _ => Err(text_analytics_error(
+                        fn_name,
+                        format!(
+                            "{fn_name}: logical scalar option must be true or false, got {value:?}"
+                        ),
+                    )),
+                };
+            }
+            match tensor_utils::tensor_value_f64(tensor, 0) {
+                0.0 => Ok(false),
+                1.0 => Ok(true),
+                other => Err(text_analytics_error(
+                    fn_name,
+                    format!("{fn_name}: logical scalar option must be true or false, got {other}"),
+                )),
+            }
+        }
         other => Err(text_analytics_error(
             fn_name,
             format!("{fn_name}: logical scalar option must be true or false, got {other:?}"),
@@ -2399,13 +2576,10 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
             object
                 .properties
                 .get("NumDocuments")
-                .and_then(|value| match value {
-                    Value::Num(n) if n.is_finite() && *n >= 0.0 => Some(*n as usize),
-                    _ => None,
-                })
+                .and_then(nonnegative_dimension)
         })
         .unwrap_or(1);
-    let shape = shape_from_object(object);
+    let shape = shape_from_object(object, fn_name)?;
     let cells = shape.iter().try_fold(1usize, |acc, dim| {
         acc.checked_mul(*dim).ok_or_else(|| {
             text_analytics_error(
@@ -2425,21 +2599,76 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
     Ok(shape)
 }
 
-fn shape_from_object(object: &ObjectInstance) -> Vec<usize> {
+fn shape_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<usize>> {
     if let Some(Value::Tensor(tensor)) = object.properties.get("Shape") {
-        tensor.data.iter().map(|value| *value as usize).collect()
-    } else {
-        vec![
-            object
-                .properties
-                .get("NumDocuments")
-                .and_then(|value| match value {
-                    Value::Num(n) => Some(*n as usize),
-                    _ => None,
+        (0..tensor.len())
+            .map(|index| {
+                let value = tensor
+                    .numeric_value_at(index)
+                    .expect("tensor storage length matches shape");
+                nonnegative_numeric_usize(value).ok_or_else(|| {
+                    text_analytics_error(
+                        fn_name,
+                        format!(
+                            "{fn_name}: tokenizedDocument Shape property has invalid dimension {value:?}"
+                        ),
+                    )
                 })
-                .unwrap_or(1),
-            1,
-        ]
+            })
+            .collect()
+    } else {
+        let num_documents = match object.properties.get("NumDocuments") {
+            Some(value) => nonnegative_dimension(value).ok_or_else(|| {
+                text_analytics_error(
+                    fn_name,
+                    format!(
+                        "{fn_name}: tokenizedDocument NumDocuments property is invalid: {value:?}"
+                    ),
+                )
+            })?,
+            None => 1,
+        };
+        Ok(vec![num_documents, 1])
+    }
+}
+
+fn nonnegative_dimension(value: &Value) -> Option<usize> {
+    match value {
+        Value::Num(value) => nonnegative_platform_usize(*value),
+        Value::Int(value) => value.try_to_usize(),
+        _ => None,
+    }
+}
+
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
+}
+
+fn nonnegative_numeric_usize(value: NumericScalar) -> Option<usize> {
+    match value {
+        NumericScalar::F64(value) => nonnegative_platform_usize(value),
+        NumericScalar::F32(value) => nonnegative_platform_usize(f64::from(value)),
+        value => value.into_int_value()?.try_to_usize(),
+    }
+}
+
+pub(in crate::builtins::strings::text_analytics) fn is_nonnegative_integer_count(
+    value: NumericScalar,
+) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.is_finite() && value >= 0.0 && value.fract() == 0.0,
+        NumericScalar::F32(value) => value.is_finite() && value >= 0.0 && value.fract() == 0.0,
+        value => value
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .try_to_u64()
+            .is_some(),
     }
 }
 
@@ -2503,11 +2732,20 @@ fn bag_from_documents(documents: Vec<Vec<String>>) -> BuiltinResult<Value> {
 
 fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinResult<Value> {
     let raw_words = words_from_word_vector_preserving_missing(words, "bagOfWords")?;
-    let Value::Tensor(tensor) = counts else {
-        return Err(text_analytics_error(
-            "bagOfWords",
-            format!("bagOfWords: counts must be a numeric matrix, got {counts:?}"),
-        ));
+    let tensor = match counts {
+        Value::Tensor(tensor) => tensor.clone(),
+        Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
+            .map_err(|err| text_analytics_error("bagOfWords", err))?,
+        Value::Int(value) => {
+            Tensor::new_integer(IntegerStorage::from_scalar(value.clone()), vec![1, 1])
+                .map_err(|err| text_analytics_error("bagOfWords", err))?
+        }
+        other => {
+            return Err(text_analytics_error(
+                "bagOfWords",
+                format!("bagOfWords: counts must be a numeric matrix, got {other:?}"),
+            ))
+        }
     };
     if tensor.cols != raw_words.len() {
         return Err(text_analytics_error(
@@ -2519,11 +2757,13 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
             ),
         ));
     }
-    if tensor
-        .data
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0 || value.fract() != 0.0)
-    {
+    if (0..tensor.len()).any(|index| {
+        !is_nonnegative_integer_count(
+            tensor
+                .numeric_value_at(index)
+                .expect("tensor storage length matches shape"),
+        )
+    }) {
         return Err(text_analytics_error(
             "bagOfWords",
             "bagOfWords: counts must be nonnegative integers",
@@ -2550,9 +2790,10 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
         keep_cols.len(),
         "bagOfWords",
     )?);
+    let values = tensor_utils::tensor_values_f64_cow(&tensor);
     for col in keep_cols {
         for row in 0..tensor.rows {
-            filtered_counts.push(tensor.data[row + col * tensor.rows]);
+            filtered_counts.push(values[row + col * tensor.rows]);
         }
     }
     bag_object(vocabulary, filtered_counts, tensor.rows)
@@ -2648,10 +2889,11 @@ fn filter_bag_columns(
         .collect::<Vec<_>>();
     let mut new_vocab = Vec::with_capacity(keep.len());
     let mut new_counts = Vec::with_capacity(counts.rows * keep.len());
+    let count_values = tensor_utils::tensor_values_f64_cow(&counts);
     for col in keep {
         new_vocab.push(vocabulary[col].clone());
         for row in 0..counts.rows {
-            new_counts.push(counts.data[row + col * counts.rows]);
+            new_counts.push(count_values[row + col * counts.rows]);
         }
     }
     bag_object(new_vocab, new_counts, counts.rows)
@@ -2783,29 +3025,53 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_prese
 }
 
 fn parse_positive_integer(value: &Value, fn_name: &str) -> BuiltinResult<usize> {
-    let n = match value {
-        Value::Num(n) => *n,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
-        other => {
-            return Err(text_analytics_error(
-                fn_name,
-                format!("{fn_name}: length must be a positive integer scalar, got {other:?}"),
-            ))
+    let parsed = match value {
+        Value::Num(value) => positive_platform_usize(*value),
+        Value::Int(value) => value.try_to_usize().filter(|value| *value > 0),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|value| *value > 0)
+            } else {
+                positive_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
+            }
         }
+        _ => None,
     };
-    if !n.is_finite() || n <= 0.0 || n.fract() != 0.0 {
-        return Err(text_analytics_error(
+    parsed.ok_or_else(|| {
+        text_analytics_error(
             fn_name,
-            format!("{fn_name}: length must be a positive integer, got {n}"),
-        ));
+            format!("{fn_name}: length must be a positive integer scalar, got {value:?}"),
+        )
+    })
+}
+
+fn positive_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+        return None;
     }
-    Ok(n as usize)
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builtins::table::table_from_columns;
+    use runmat_builtins::{IntegerStorage, NumericStorage};
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_integer_vector(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
+    }
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tokenized_document_builtin(args))
@@ -2890,9 +3156,9 @@ mod tests {
             vec!["an", "example", "of", "a", "short", "sentence", "second"]
         );
         let lengths = tensor_property(&doc, "DocumentLengths");
-        assert_eq!(lengths.data, vec![6.0, 4.0]);
+        assert_eq!(lengths.materialize_f64(), vec![6.0, 4.0]);
         let shape = tensor_property(&doc, "Shape");
-        assert_eq!(shape.data, vec![2.0, 1.0]);
+        assert_eq!(shape.materialize_f64(), vec![2.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2932,16 +3198,69 @@ mod tests {
         );
         let lengths = tensor_property(&doc, "DocumentLengths");
         assert_eq!(lengths.shape, vec![1, 1]);
-        assert_eq!(lengths.data, vec![0.0]);
+        assert_eq!(lengths.materialize_f64(), vec![0.0]);
         let shape = tensor_property(&doc, "Shape");
-        assert_eq!(shape.data, vec![1.0, 1.0]);
+        assert_eq!(shape.materialize_f64(), vec![1.0, 1.0]);
 
         let bag = object(run_bag(vec![Value::Object(doc)]).expect("bag"));
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(1.0)));
         assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(0.0)));
         let counts = tensor_property(&bag, "Counts");
         assert_eq!(counts.shape, vec![1, 0]);
-        assert!(counts.data.is_empty());
+        assert!(counts.materialize_f64().is_empty());
+    }
+
+    #[test]
+    fn tokenized_document_shape_metadata_requires_exact_platform_dimensions() {
+        let mut document = object(
+            run_tokenized(vec![Value::StringArray(
+                StringArray::new(vec!["first".into(), "second".into()], vec![2, 1]).unwrap(),
+            )])
+            .expect("tokenized"),
+        );
+
+        document.properties.remove("Shape");
+        document.properties.insert(
+            "NumDocuments".to_string(),
+            Value::Int(runmat_builtins::IntValue::U16(2)),
+        );
+        assert_eq!(
+            document_shape_from_object(&document, "test").unwrap(),
+            vec![2, 1]
+        );
+
+        document
+            .properties
+            .insert("NumDocuments".to_string(), Value::Num(1.5));
+        assert!(document_shape_from_object(&document, "test").is_err());
+
+        document.properties.insert(
+            "Shape".to_string(),
+            Value::Tensor(Tensor::new(vec![1.5, 1.0], vec![1, 2]).unwrap()),
+        );
+        assert!(document_shape_from_object(&document, "test").is_err());
+
+        document.properties.insert(
+            "Shape".to_string(),
+            Value::Tensor(Tensor::new(vec![usize::MAX as f64 + 1.0, 1.0], vec![1, 2]).unwrap()),
+        );
+        assert!(document_shape_from_object(&document, "test").is_err());
+    }
+
+    #[test]
+    fn tokenized_document_shape_reads_native_single_storage() {
+        let mut document = object(run_tokenized(Vec::new()).expect("tokenized"));
+        document.properties.insert(
+            "Shape".to_string(),
+            Value::Tensor(
+                Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0, 1.0]), vec![1, 2])
+                    .expect("single shape"),
+            ),
+        );
+        assert_eq!(
+            document_shape_from_object(&document, "test").unwrap(),
+            vec![1, 1]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3250,10 +3569,10 @@ mod tests {
             panic!("expected Counts");
         };
         assert_eq!(counts.shape, vec![2, 7]);
-        assert_eq!(counts.data[0], 1.0);
-        assert_eq!(counts.data[1], 0.0);
-        assert_eq!(counts.data[3 * 2], 1.0);
-        assert_eq!(counts.data[3 * 2 + 1], 1.0);
+        assert_eq!(counts.materialize_f64()[0], 1.0);
+        assert_eq!(counts.materialize_f64()[1], 0.0);
+        assert_eq!(counts.materialize_f64()[3 * 2], 1.0);
+        assert_eq!(counts.materialize_f64()[3 * 2 + 1], 1.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3265,6 +3584,103 @@ mod tests {
             object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(2.0)));
+    }
+
+    #[test]
+    fn bag_of_words_accepts_all_integer_count_classes_with_double_model_metadata() {
+        let words =
+            || StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).expect("words");
+        let counts = [
+            IntegerStorage::I8(vec![2, 3]),
+            IntegerStorage::I16(vec![2, 3]),
+            IntegerStorage::I32(vec![2, 3]),
+            IntegerStorage::I64(vec![2, 3]),
+            IntegerStorage::U8(vec![2, 3]),
+            IntegerStorage::U16(vec![2, 3]),
+            IntegerStorage::U32(vec![2, 3]),
+            IntegerStorage::U64(vec![2, 3]),
+        ];
+        for storage in counts {
+            let counts = Tensor::new_integer(storage, vec![1, 2]).expect("integer counts");
+            let bag = object(
+                run_bag(vec![Value::StringArray(words()), Value::Tensor(counts)])
+                    .expect("integer bag"),
+            );
+            let actual = tensor_property(&bag, "Counts");
+            assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+            assert_eq!(actual.materialize_f64(), vec![2.0, 3.0]);
+        }
+    }
+
+    #[test]
+    fn bag_of_words_accepts_exact_integer_scalar_counts() {
+        let words = StringArray::new(vec!["alpha".into()], vec![1, 1]).expect("words");
+        let bag = object(
+            run_bag(vec![
+                Value::StringArray(words),
+                Value::Int(runmat_builtins::IntValue::U64(7)),
+            ])
+            .expect("scalar integer count"),
+        );
+        let actual = tensor_property(&bag, "Counts");
+        assert_eq!(actual.shape, vec![1, 1]);
+        assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(actual.materialize_f64(), vec![7.0]);
+    }
+
+    #[test]
+    fn bag_of_words_wide_counts_cross_only_the_documented_double_property_boundary() {
+        let words = StringArray::new(vec!["wide".into()], vec![1, 1]).expect("words");
+        let wide = (1_u64 << 53) + 1;
+        let counts =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("counts");
+        let bag =
+            object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
+        let actual = tensor_property(&bag, "Counts");
+        assert_eq!(actual.numeric_dtype(), runmat_builtins::NumericDType::F64);
+        assert_eq!(actual.materialize_f64(), vec![wide as f64]);
+    }
+
+    #[test]
+    fn bag_of_words_rejects_resident_inputs_before_provider_access() {
+        let resident = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 9_363_001,
+        };
+        let error =
+            run_bag(vec![Value::GpuTensor(resident)]).expect_err("resident input must reject");
+        assert_eq!(error.identifier(), Some("RunMat:bagOfWords:InvalidInput"));
+    }
+
+    #[test]
+    fn bag_of_words_integer_capability_covers_all_classes() {
+        assert_eq!(BAG_OF_WORDS_INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(
+            BAG_OF_WORDS_INTEGER_CAPABILITIES[0].inputs[0].classes,
+            crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES
+        );
+    }
+
+    #[test]
+    fn bag_of_words_accepts_native_single_and_exact_integer_counts() {
+        let words = StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap();
+        let single = Tensor::from_numeric_storage(NumericStorage::F32(vec![2.0, 3.0]), vec![1, 2])
+            .expect("single counts");
+        let bag = object(
+            run_bag(vec![
+                Value::StringArray(words.clone()),
+                Value::Tensor(single),
+            ])
+            .expect("single bag"),
+        );
+        assert_eq!(
+            tensor_property(&bag, "Counts").materialize_f64(),
+            vec![2.0, 3.0]
+        );
+
+        let negative = Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
+        assert!(run_bag(vec![Value::StringArray(words), Value::Tensor(negative),]).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3294,7 +3710,7 @@ mod tests {
         );
         let counts = tensor_property(&bag, "Counts");
         assert_eq!(counts.shape, vec![2, 2]);
-        assert_eq!(counts.data, vec![1.0, 0.0, 2.0, 3.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3333,7 +3749,7 @@ mod tests {
             panic!("expected Counts");
         };
         assert_eq!(counts.shape, vec![1, 3]);
-        assert_eq!(counts.data, vec![1.0, 1.0, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3368,7 +3784,7 @@ mod tests {
         let counts = tensor_property(&filtered_bag, "Counts");
         assert_eq!(counts.shape, vec![2, 7]);
         assert_eq!(
-            counts.data,
+            counts.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
         );
     }
@@ -3422,7 +3838,7 @@ mod tests {
         );
         let counts = tensor_property(&filtered_bag, "Counts");
         assert_eq!(counts.shape, vec![2, 3]);
-        assert_eq!(counts.data, vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3544,6 +3960,62 @@ mod tests {
         );
     }
 
+    #[test]
+    fn erase_punctuation_honors_and_preserves_custom_type_details() {
+        let words =
+            StringArray::new(vec!["C++".to_string(), "plain".to_string()], vec![1, 2]).unwrap();
+        let mut docs = object(
+            run_tokenized(vec![
+                Value::StringArray(words),
+                Value::String("TokenizeMethod".to_string()),
+                Value::String("none".to_string()),
+            ])
+            .expect("tokenized"),
+        );
+        docs.properties.insert(
+            "TypeDetails".to_string(),
+            type_details_cell(&[vec!["language".to_string(), "letters".to_string()]])
+                .expect("type details"),
+        );
+        let filtered = object(
+            erase_punctuation_tokenized_document(
+                docs,
+                vec![
+                    Value::String("TokenTypes".to_string()),
+                    Value::String("language".to_string()),
+                ],
+            )
+            .expect("erase custom type"),
+        );
+        assert_eq!(documents_property(&filtered), vec![vec!["C", "plain"]]);
+        assert_eq!(
+            type_details_property(&filtered),
+            vec![vec!["language", "letters"]]
+        );
+    }
+
+    #[test]
+    fn erase_urls_supports_r2026a_tokenized_documents_and_preserves_shape() {
+        let input = StringArray::new(
+            vec![
+                "visit https://example.com now".to_string(),
+                "plain words".to_string(),
+            ],
+            vec![2, 1],
+        )
+        .unwrap();
+        let docs = object(run_tokenized(vec![Value::StringArray(input)]).expect("tokenized"));
+        let filtered = object(erase_urls_tokenized_document(docs).expect("erase URLs"));
+        assert_eq!(
+            documents_property(&filtered),
+            vec![vec!["visit", "now"], vec!["plain", "words"]]
+        );
+        assert_eq!(
+            tensor_property(&filtered, "Shape").materialize_f64(),
+            vec![2.0, 1.0]
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unimplemented_japanese_tokenization() {
@@ -3602,5 +4074,80 @@ mod tests {
         let fractional =
             run_remove_short(docs, Value::Num(1.5)).expect_err("expected fractional rejection");
         assert!(fractional.to_string().contains("positive integer"));
+    }
+
+    #[test]
+    fn text_analytics_lengths_preserve_typed_integers_and_validate_f64_bounds() {
+        assert_eq!(
+            parse_positive_integer(&Value::Int(runmat_builtins::IntValue::U16(3)), "test").unwrap(),
+            3
+        );
+        assert_eq!(
+            parse_positive_integer(
+                &poisoned_integer_scalar(IntegerStorage::U64(vec![9])),
+                "test"
+            )
+            .unwrap(),
+            9
+        );
+        assert!(parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::U8(vec![1])),
+            "test"
+        )
+        .unwrap());
+        assert!(!parse_bool_scalar(
+            &poisoned_integer_scalar(IntegerStorage::I16(vec![0])),
+            "test"
+        )
+        .unwrap());
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(parse_positive_integer(&value, "test").is_err());
+        }
+    }
+
+    #[test]
+    fn remove_words_indices_read_typed_integer_storage_exactly() {
+        let tensor = poisoned_integer_vector(IntegerStorage::U16(vec![1, 3]), vec![1, 2]);
+
+        assert_eq!(
+            parse_remove_words_indices(&Value::Tensor(tensor)).expect("indices"),
+            vec![0, 2]
+        );
+    }
+
+    #[test]
+    fn bag_column_filters_read_typed_integer_storage_exactly() {
+        let mut bag = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
+        bag.properties.insert(
+            "Vocabulary".to_string(),
+            Value::StringArray(
+                StringArray::new(vec!["keep".to_string(), "drop".to_string()], vec![1, 2]).unwrap(),
+            ),
+        );
+        bag.properties.insert(
+            "Counts".to_string(),
+            Value::Tensor(poisoned_integer_vector(
+                IntegerStorage::U16(vec![1, 2, 3, 4]),
+                vec![2, 2],
+            )),
+        );
+        bag.properties
+            .insert("NumWords".to_string(), Value::Num(2.0));
+        bag.properties
+            .insert("NumDocuments".to_string(), Value::Num(2.0));
+
+        let filtered = object(
+            run_remove_words(vec![Value::Object(bag), Value::String("drop".to_string())])
+                .expect("filtered"),
+        );
+
+        assert_eq!(string_array_property(&filtered, "Vocabulary"), vec!["keep"]);
+        let counts = tensor_property(&filtered, "Counts");
+        assert_eq!(counts.shape, vec![2, 1]);
+        assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
     }
 }

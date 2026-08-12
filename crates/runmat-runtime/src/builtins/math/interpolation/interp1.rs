@@ -742,10 +742,16 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
+    }
+
+    fn int_row(storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        let tensor = Tensor::new_integer(storage, vec![1, len]).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -763,7 +769,7 @@ mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.data, vec![15.0, 30.0]);
+        assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0]);
     }
 
     #[test]
@@ -778,7 +784,21 @@ mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.data, vec![10.0, 40.0]);
+        assert_eq!(tensor.materialize_f64(), vec![10.0, 40.0]);
+    }
+
+    #[test]
+    fn interp1_reads_typed_integer_x_y_and_query_exactly() {
+        let result = run(vec![
+            int_row(IntegerStorage::I16(vec![1, 2, 3])),
+            int_row(IntegerStorage::U16(vec![10, 20, 40])),
+            int_row(IntegerStorage::I16(vec![1, 2])),
+        ])
+        .expect("interp1");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0]);
     }
 
     #[test]
@@ -796,7 +816,7 @@ mod tests {
             };
             assert_eq!(handle.shape, vec![1, 2]);
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.data, vec![15.0, 30.0]);
+            assert_eq!(gathered.materialize_f64(), vec![15.0, 30.0]);
             let _ = provider.free(&y);
         });
     }
@@ -827,7 +847,7 @@ mod tests {
             };
             assert_eq!(handle.shape, vec![1, 2, 2]);
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.data, vec![15.0, 30.0, 150.0, 300.0]);
+            assert_eq!(gathered.materialize_f64(), vec![15.0, 30.0, 150.0, 300.0]);
             let _ = provider.free(&y);
             let _ = provider.free(&xq);
         });
@@ -853,7 +873,7 @@ mod tests {
                 panic!("expected resident gpu output");
             };
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.data, vec![99.0]);
+            assert_eq!(gathered.materialize_f64(), vec![99.0]);
             let _ = provider.free(&y);
         });
     }

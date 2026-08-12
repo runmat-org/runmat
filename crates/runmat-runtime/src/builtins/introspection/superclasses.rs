@@ -345,7 +345,7 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -360,7 +360,7 @@ mod tests {
             |provider| {
                 let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
                 let view = HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 };
                 provider.upload(&view).expect("upload")

@@ -1,0 +1,18 @@
+{
+  "title": "fea.step",
+  "category": "fea",
+  "keywords": ["fea", "step", "analysis", "solver"],
+  "summary": "Create a typed FEA analysis step.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
+  "description": "`fea.step(id, kind)` creates a `fea.Step` from a text identifier and analysis kind.",
+  "behaviors": [
+    "Exactly two text scalar inputs are required. Supported kinds are the analysis step kinds exposed by the selected model family.",
+    "Direct integer and resident numeric inputs have no role and reject before object construction.",
+    "The constructor is host-side and does not invoke a solver, provider, or native OCCT geometry path."
+  ],
+  "examples": [{ "description": "Create a transient step", "input": "step = fea.step(\"transient_1\", \"transient\");" }],
+  "faqs": [{ "question": "Where are step counts configured?", "answer": "Use the solver-specific `fea.runOptions` count fields; `fea.step` only identifies a typed analysis step." }],
+  "links": [{ "label": "FEA operation reference", "url": "../../fea/operation-reference" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

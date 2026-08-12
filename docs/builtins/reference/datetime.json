@@ -10,7 +10,7 @@
     "Format",
     "MATLAB compatibility"
   ],
-  "summary": "Create datetime arrays from text, components, or serial date numbers and interoperate with MATLAB date/time helper functions.",
+  "summary": "Create host datetime arrays from date vectors, text, calendar components, or explicit serial-date conversions.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -28,13 +28,16 @@
   "tested": {
     "integration": "runmat-vm/tests/datetime.rs"
   },
-  "description": "`datetime` constructs datetime objects from component values, text inputs, and serial date-number forms. Supported creation paths, `Format` display behavior, elapsed-duration arithmetic, calendar-duration arithmetic, legacy serial-date helpers, and common business-day helpers follow current MATLAB/RunMat datetime semantics.",
+  "description": "`datetime` constructs host-side datetime objects from m-by-3 or m-by-6 date vectors, text, and the documented 3-, 6-, or 7-component forms. All eight integer classes are read from authoritative storage before RunMat crosses into its current floating serial-date representation. `ConvertFrom='datenum'` is implemented; other documented conversion epochs, time zones, locale and pivot-year options, and general nanosecond fidelity remain explicit gaps.",
   "behaviors": [
     "`datetime()` with no arguments returns the current local date and time.",
-    "`datetime(Y, M, D)` and `datetime(Y, M, D, H, MN, S)` construct datetimes from numeric components. Scalar inputs expand to match non-scalar component arrays.",
-    "`datetime(text)` accepts string scalars, string arrays, and character vectors. Supported text includes common ISO-like forms, `dd-MMM-yyyy` forms, and `now`.",
+    "`datetime(dateVectors)` accepts m-by-3 and m-by-6 numeric matrices. `datetime(Y, M, D)`, `datetime(Y, M, D, H, MN, S)`, and `datetime(Y, M, D, H, MN, S, MS)` accept single, double, and all eight integer classes; scalar inputs expand to matching non-scalar component arrays.",
+    "Calendar components normalize by carrying into adjacent units. NaN components produce NaT and infinite components retain the corresponding infinite serial marker within the current host representation.",
+    "`datetime(text)` accepts string scalars, string arrays, and character vectors. Supported text includes common ISO-like forms, `dd-MMM-yyyy`, `now`, `today`, `tomorrow`, and `yesterday`.",
     "`datetime(serials, 'ConvertFrom', 'datenum')` interprets numeric values as MATLAB serial date numbers.",
-    "`datetime(serials)` also accepts raw serial date numbers for the current implementation, producing datetime values directly from those serials.",
+    "A one-argument numeric value that is not an m-by-3 or m-by-6 date-vector matrix is interpreted as a raw serial date only when RunMat compatibility extensions are enabled. MATLAB-compatible mode requires the explicit `ConvertFrom` form.",
+    "Four- and five-component forms, logical numeric inputs, and gathering resident numeric arrays are compatibility-gated RunMat extensions. The resident gate is checked before provider access and the result is always a host datetime object.",
+    "Only `Format`, `InputFormat`, and `ConvertFrom='datenum'` are currently implemented. Other documented `ConvertFrom` values and the `Locale`, `PivotYear`, `TimeZone`, `Epoch`, and `TicksPerSecond` options report unsupported-input errors rather than silently approximating semantics.",
     "The `Format` property controls text rendering. Assigning `t.Format = 'yyyy-MM-dd HH:mm:ss'` updates how the object displays without changing the stored point in time.",
     "Linear indexing `t(k)` is supported and returns datetime values.",
     "Comparison operators and `plus`/`minus` day arithmetic are supported. Subtracting two datetime values returns numeric day deltas.",
@@ -100,7 +103,7 @@
     },
     {
       "question": "Does `datetime` run on the GPU?",
-      "answer": "No. datetime values are represented as host-side objects. Numeric inputs may be gathered first, but the resulting datetime object remains on the CPU."
+      "answer": "No public resident datetime type is implemented. MATLAB-compatible mode rejects resident numeric constructor inputs before provider access; RunMat extension mode may gather them and still returns a host-side datetime object."
     }
   ],
   "links": [
@@ -129,8 +132,8 @@
     "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
   },
-  "gpu_residency": "No. RunMat represents `datetime` values as host-side objects with an internal serial-date tensor and a `Format` property. Even when the constructor receives gathered numeric data, the resulting object remains resident on the CPU.",
+  "gpu_residency": "No. RunMat represents `datetime` values as host-side objects with an internal serial-date tensor and a `Format` property. Resident numeric constructor input is compatibility-gated before provider access, and an enabled extension gathers to a CPU result.",
   "gpu_behavior": [
-    "`datetime` does not allocate GPU objects or invoke provider kernels. If a numeric input originates on the GPU, RunMat gathers it before building the datetime object."
+    "`datetime` does not allocate GPU objects or invoke provider kernels. MATLAB-compatible mode rejects resident inputs before lookup; RunMat extension mode gathers before building the host object."
   ]
 }

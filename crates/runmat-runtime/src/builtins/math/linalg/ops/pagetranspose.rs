@@ -325,8 +325,8 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::{
-        CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, SparseTensor,
-        StringArray, StructValue, Tensor, Type,
+        CellArray, CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray,
+        ResolveContext, SparseTensor, StringArray, StructValue, Tensor, Type,
     };
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -335,6 +335,35 @@ mod tests {
 
     fn call_one(value: Value) -> BuiltinResult<Value> {
         call(vec![value])
+    }
+
+    #[test]
+    fn pagetranspose_preserves_typed_complex_integer_components_exactly() {
+        let input = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 1_u64 << 63]),
+                IntegerStorage::U64((1..=12).collect()),
+            )
+            .expect("storage"),
+            vec![2, 3, 2],
+        )
+        .expect("tensor");
+
+        let Value::ComplexTensor(result) =
+            call_one(Value::ComplexTensor(input)).expect("pagetranspose")
+        else {
+            panic!("expected complex tensor");
+        };
+        let storage = result.integer_storage().expect("exact integer storage");
+        assert_eq!(result.shape, vec![3, 2, 2]);
+        assert_eq!(
+            storage.real,
+            IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 1_u64 << 63,])
+        );
+        assert_eq!(
+            storage.imag,
+            IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 12])
+        );
     }
 
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
@@ -414,7 +443,7 @@ mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2, 2]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0, 7.0, 9.0, 11.0, 8.0, 10.0, 12.0]
                 );
             }
@@ -433,7 +462,7 @@ mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_eq!(out.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -447,7 +476,7 @@ mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec![(1.0, 2.0), (3.0, -4.0)]);
+                assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -531,7 +560,7 @@ mod tests {
                 assert_eq!(out.cols, 2);
                 assert_eq!(out.col_ptrs, vec![0, 1, 3]);
                 assert_eq!(out.row_indices, vec![1, 0, 2]);
-                assert_eq!(out.values, vec![5.0, 4.0, 6.0]);
+                assert_eq!(out.materialize_f64(), vec![5.0, 4.0, 6.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
@@ -546,7 +575,7 @@ mod tests {
         match call_one(Value::Tensor(tensor(&[], &[0, 3]))).expect("pagetranspose") {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 0]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }

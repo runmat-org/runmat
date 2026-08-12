@@ -17,7 +17,7 @@
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Prefers provider `linspace` kernels when available; otherwise the runtime uploads the host-generated vector so residency stays on device."
+    "notes": "Floating inputs prefer owning-provider `linspace` kernels and otherwise use an owning-provider upload fallback. Resident typed integers retain exact storage; int64 and uint64 resident colon are available only in RunMat mode because MATLAB GPU colon excludes those two classes."
   },
   "fusion": {
     "elementwise": false,
@@ -31,14 +31,15 @@
     "integration": "builtins::array::creation::colon::tests::colon_gpu_roundtrip",
     "wgpu": "builtins::array::creation::colon::tests::colon_wgpu_matches_cpu"
   },
-  "description": "`colon(start, stop)` and `colon(start, step, stop)` build row vectors like the MATLAB colon operator. The sequence starts at `start`, advances by `step` (defaulting by bound direction), and stops before exceeding `stop` under MATLAB/RunMat rules.",
+  "description": "`colon(start, stop)` and `colon(start, step, stop)` build row vectors like the MATLAB colon operator. The sequence starts at `start`, advances by `step` (defaulting to +1), and stops before exceeding `stop` under MATLAB/RunMat rules.",
   "behaviors": [
     "Inputs must be real scalars (numeric, logical, scalar tensors, or single-character arrays). Imaginary parts must be zero.",
-    "`colon(start, stop)` picks an increment of `+1` when `stop ≥ start`, otherwise `-1`.",
-    "`colon(start, step, stop)` uses the supplied increment. A zero increment raises an error.",
-    "When the endpoints are character scalars, the result is a row vector of characters; otherwise a double-precision row vector. Empty progressions are `1×0`.",
+    "`colon(start, stop)` always uses an increment of `+1`; when `start > stop`, the result is empty and descending sequences require an explicit negative step.",
+    "`colon(start, step, stop)` uses the supplied increment. A zero increment returns a `1×0` empty row vector in the selected output class.",
+    "When any operand is a typed integer, all typed-integer operands must use the same class and the result retains that class in exact native storage. An integral full scalar double may supply another operand, including a signed step for unsigned endpoints. Character endpoints return a character row vector; ordinary floating inputs return a floating row vector. Empty progressions are `1×0`.",
     "`stop` is included only when it lies on the arithmetic progression; otherwise the sequence stops at the last admissible value before overshooting.",
-    "Arguments may be `gpuArray` scalars; the result stays on the GPU when a provider is active.",
+    "Arguments may be resident scalar arrays and the result stays with the owning provider. Resident int64 and uint64 operands are a mode-gated RunMat extension; other documented integer classes use exact resident storage.",
+    "Logical operands and zero-imaginary complex operands are deliberate RunMat extensions and are rejected in compatibility mode.",
     "Floating-point tolerance follows MATLAB’s rules, so values that should land on `stop` are preserved even when rounding noise accumulates."
   ],
   "examples": [
@@ -49,7 +50,7 @@
     },
     {
       "description": "Counting down without specifying a step",
-      "input": "y = colon(5, 1)",
+      "input": "y = colon(5, -1, 1)",
       "output": "y = [5 4 3 2 1]"
     },
     {
@@ -89,7 +90,7 @@
     },
     {
       "question": "Can I use zero or complex increments?",
-      "answer": "No. The increment must be a finite, non-zero real scalar. Supplying `0` or a value with a non-zero imaginary part raises an error."
+      "answer": "A zero increment returns an empty `1×0` row vector. A complex increment with a non-zero imaginary part raises an error."
     },
     {
       "question": "Can I generate character sequences?",
@@ -97,7 +98,7 @@
     },
     {
       "question": "Does the function accept logical inputs?",
-      "answer": "Yes. Logical scalars are promoted to doubles (`true → 1`, `false → 0`) before building the sequence."
+      "answer": "Only in RunMat mode. Logical scalar support is an explicit RunMat extension; compatibility mode accepts the documented numeric and character domains instead."
     },
     {
       "question": "How does this differ from `linspace`?",
@@ -178,5 +179,5 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/colon.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/colon.rs"
   },
-  "gpu_residency": "RunMat automatically keeps the output on the GPU when any input scalar already resides there and an acceleration provider is active. Providers that implement the `linspace` hook (such as the wgpu backend) generate the progression entirely on device. Other providers still return a GPU tensor by uploading the host-generated vector, so downstream kernels can fuse without an extra gather."
+  "gpu_residency": "Resident floating inputs use the owning provider's `linspace` hook when available and otherwise upload the host-generated floating vector through that owner. Resident typed integers gather exact scalar storage, build the progression without a floating mirror, and upload it through the owning provider; resident int64 and uint64 require RunMat mode. Typed complex-integer resident buffers remain an explicit provider-contract gap tracked separately."
 }

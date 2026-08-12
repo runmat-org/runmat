@@ -255,7 +255,7 @@ impl AccelProvider for TestProvider {
         let spec =
             test_fspecial_spec_from_request(&request.filter).map_err(|error| anyhow!(error))?;
         let tensor = spec.generate_tensor().map_err(|error| anyhow!(error))?;
-        Ok(self.push(tensor.data.clone(), tensor.shape.clone()))
+        Ok(self.push(tensor.materialize_f64().clone(), tensor.shape.clone()))
     }
 
     fn covariance<'a>(
@@ -588,8 +588,8 @@ impl AccelProvider for TestProvider {
                 .map_err(|e| anyhow!("mrdivide (test provider): {e}"))?;
             let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
                 .map_err(|e| anyhow!("{e}"))?;
-            let Tensor { data, shape, .. } = result;
-            Ok(self.push(data, shape))
+            let data = result.materialize_f64();
+            Ok(self.push(data, result.shape))
         })
     }
 
@@ -1484,7 +1484,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                 other => panic!("expected tensor S (cpu), got {other:?}"),
             };
             assert_eq!(
-                out_cpu.data.len(),
+                out_cpu.materialize_f64().len(),
                 rows,
                 "CPU output elements should equal rows"
             );
@@ -1500,7 +1500,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                 let s_value_gpu = vars_gpu.get(s_index).expect("value for S (gpu)");
                 let gathered = gather_if_needed(s_value_gpu).expect("gather gpu");
                 let pick_alt = match &gathered {
-                    Value::Tensor(t) => t.data.len() != rows,
+                    Value::Tensor(t) => t.materialize_f64().len() != rows,
                     _ => true,
                 };
                 if !pick_alt {
@@ -1513,7 +1513,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                     let mut found: Option<runmat_builtins::Tensor> = None;
                     for v in &vars_gpu {
                         if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
-                            if t.data.len() == rows {
+                            if t.materialize_f64().len() == rows {
                                 found = Some(t);
                                 break;
                             }
@@ -1523,7 +1523,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                 }
             };
             assert_eq!(
-                out_gpu.data.len(),
+                out_gpu.materialize_f64().len(),
                 rows,
                 "GPU output elements should equal rows"
             );
@@ -1619,11 +1619,11 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
                 Value::GpuTensor(_handle) => {
                     let v = gather_if_needed(value).unwrap();
                     match v {
-                        Value::Tensor(t) => t.data,
+                        Value::Tensor(t) => t.materialize_f64(),
                         _ => panic!("expected tensor"),
                     }
                 }
-                Value::Tensor(t) => t.data.clone(),
+                Value::Tensor(t) => t.materialize_f64().clone(),
                 other => panic!("expected tensor, got {other:?}"),
             }
         };
@@ -1735,11 +1735,11 @@ fn reduction_sum_include_omit_dim1_dim2_gpu_cpu() {
         let gather_vec = |v: &Value| -> Vec<f64> {
             match v {
                 Value::GpuTensor(_) => match gather_if_needed(v).unwrap() {
-                    Value::Tensor(t) => t.data,
+                    Value::Tensor(t) => t.materialize_f64(),
                     Value::Num(n) => vec![n],
                     other => panic!("expected tensor, got {other:?}"),
                 },
-                Value::Tensor(t) => t.data.clone(),
+                Value::Tensor(t) => t.materialize_f64().clone(),
                 Value::Num(n) => vec![*n],
                 other => panic!("expected tensor, got {other:?}"),
             }
@@ -1897,11 +1897,11 @@ fn reduction_sum_include_omit_dim1_dim2_degenerate_gpu_cpu() {
             let gather_vec = |v: &Value| -> Vec<f64> {
                 match v {
                     Value::GpuTensor(_) => match gather_if_needed(v).unwrap() {
-                        Value::Tensor(t) => t.data,
+                        Value::Tensor(t) => t.materialize_f64(),
                         Value::Num(n) => vec![n],
                         other => panic!("expected tensor, got {other:?}"),
                     },
-                    Value::Tensor(t) => t.data.clone(),
+                    Value::Tensor(t) => t.materialize_f64().clone(),
                     Value::Num(n) => vec![*n],
                     other => panic!("expected tensor, got {other:?}"),
                 }
@@ -1987,10 +1987,10 @@ fn fused_elementwise_then_reduction_sum_dim1_dim2_include_gpu_cpu_small() {
         let gather_vec = |v: &Value| -> Vec<f64> {
             match v {
                 Value::GpuTensor(_) => match gather_if_needed(v).unwrap() {
-                    Value::Tensor(t) => t.data,
+                    Value::Tensor(t) => t.materialize_f64(),
                     _ => panic!("expected tensor"),
                 },
-                Value::Tensor(t) => t.data.clone(),
+                Value::Tensor(t) => t.materialize_f64().clone(),
                 _ => panic!("expected tensor"),
             }
         };
@@ -2054,10 +2054,10 @@ fn fused_elementwise_then_reduction_sum_dim1_dim2_omit_gpu_cpu_small() {
         let gather_vec = |v: &Value| -> Vec<f64> {
             match v {
                 Value::GpuTensor(_) => match gather_if_needed(v).unwrap() {
-                    Value::Tensor(t) => t.data,
+                    Value::Tensor(t) => t.materialize_f64(),
                     _ => panic!("expected tensor"),
                 },
-                Value::Tensor(t) => t.data.clone(),
+                Value::Tensor(t) => t.materialize_f64().clone(),
                 _ => panic!("expected tensor"),
             }
         };
@@ -2215,11 +2215,11 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
         let _gather_vec = |v: &Value| -> Option<Vec<f64>> {
             match v {
                 Value::GpuTensor(_) => match gather_if_needed(v).ok()? {
-                    Value::Tensor(t) => Some(t.data),
+                    Value::Tensor(t) => Some(t.materialize_f64()),
                     Value::Num(n) => Some(vec![n]),
                     _ => None,
                 },
-                Value::Tensor(t) => Some(t.data.clone()),
+                Value::Tensor(t) => Some(t.materialize_f64().clone()),
                 Value::Num(n) => Some(vec![*n]),
                 _ => None,
             }
@@ -2232,7 +2232,7 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
                     if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                         if t.shape.len() == 2 && t.shape[0] == want_rows && t.shape[1] == want_cols
                         {
-                            return Some(t.data);
+                            return Some(t.materialize_f64());
                         }
                     }
                 }
@@ -2360,10 +2360,10 @@ fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
         let gather_numvec = |value: &Value| -> Vec<f64> {
             match value {
                 Value::GpuTensor(_) => match gather_if_needed(value).expect("gather gpu tensor") {
-                    Value::Tensor(t) => t.data,
+                    Value::Tensor(t) => t.materialize_f64(),
                     other => panic!("expected gathered tensor, got {other:?}"),
                 },
-                Value::Tensor(t) => t.data.clone(),
+                Value::Tensor(t) => t.materialize_f64().clone(),
                 other => panic!("expected tensor value, got {other:?}"),
             }
         };
@@ -2435,8 +2435,8 @@ fn fused_elementwise_residency_and_gather() {
             .iter()
             .map(|x| x.sin() * x + 2.0)
             .collect();
-        assert_eq!(tensor.data.len(), expected.len());
-        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+        assert_eq!(tensor.materialize_f64().len(), expected.len());
+        for (actual, expect) in tensor.materialize_f64().iter().zip(expected.iter()) {
             assert!(
                 (actual - expect).abs() < 1e-9,
                 "mismatch: {actual} vs {expect}"
@@ -2486,9 +2486,9 @@ fn fused_literal_constant_and_extended_builtins() {
                         !fusion_residency::is_resident(handle),
                         "Residency should be cleared after gather"
                     );
-                    tensor.data
+                    tensor.materialize_f64()
                 }
-                Value::Tensor(tensor) => tensor.data.clone(),
+                Value::Tensor(tensor) => tensor.materialize_f64().clone(),
                 other => panic!("expected tensor, got {other:?}"),
             }
         };
@@ -2566,7 +2566,7 @@ fn fused_heaviside_preserves_nan_and_zero_semantics() {
             other => panic!("expected gathered tensor, got {other:?}"),
         };
 
-        assert_real_sequence_matches(&tensor.data, &[0.0, 0.5, 0.5, 1.0, f64::NAN]);
+        assert_real_sequence_matches(&tensor.materialize_f64(), &[0.0, 0.5, 0.5, 1.0, f64::NAN]);
     });
 }
 
@@ -2624,8 +2624,8 @@ fn fused_safe_followup_builtins_remain_resident() {
             .iter()
             .map(|x| x.signum() + x.trunc() + x.exp2() + x.hypot(2.0))
             .collect();
-        assert_eq!(tensor.data.len(), expected.len());
-        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+        assert_eq!(tensor.materialize_f64().len(), expected.len());
+        for (actual, expect) in tensor.materialize_f64().iter().zip(expected.iter()) {
             assert!(
                 (actual - expect).abs() < 1e-9,
                 "mismatch: {actual} vs {expect}"
@@ -2694,8 +2694,8 @@ fn fused_inverse_hyperbolic_builtins_are_plannable() {
             .iter()
             .map(|x| x.asinh() + x.atanh() + (x + 1.0).acosh())
             .collect();
-        assert_eq!(tensor.data.len(), expected.len());
-        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+        assert_eq!(tensor.materialize_f64().len(), expected.len());
+        for (actual, expect) in tensor.materialize_f64().iter().zip(expected.iter()) {
             assert!(
                 (actual - expect).abs() < 1e-9,
                 "mismatch: {actual} vs {expect}"
@@ -2878,8 +2878,8 @@ fn fused_mod_and_rem_remain_resident() {
             .iter()
             .map(|x| x.rem_euclid(2.0) + (x - 2.0 * (x / 2.0).trunc()))
             .collect();
-        assert_eq!(tensor.data.len(), expected.len());
-        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+        assert_eq!(tensor.materialize_f64().len(), expected.len());
+        for (actual, expect) in tensor.materialize_f64().iter().zip(expected.iter()) {
             assert!(
                 (actual - expect).abs() < 1e-9,
                 "mismatch: {actual} vs {expect}"
@@ -2952,8 +2952,8 @@ fn fused_mod_and_rem_broadcast_variants_remain_resident() {
             .zip(ds.iter())
             .map(|(x, d)| x.rem_euclid(*d) + (6.0 - d * (6.0 / d).trunc()))
             .collect();
-        assert_eq!(tensor.data.len(), expected.len());
-        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+        assert_eq!(tensor.materialize_f64().len(), expected.len());
+        for (actual, expect) in tensor.materialize_f64().iter().zip(expected.iter()) {
             assert!(
                 (actual - expect).abs() < 1e-9,
                 "mismatch: {actual} vs {expect}"
@@ -2967,7 +2967,7 @@ fn mod_real_expected(a: f64, b: f64) -> f64 {
         return f64::NAN;
     }
     if b == 0.0 {
-        return f64::NAN;
+        return a;
     }
     if !a.is_finite() && b.is_finite() {
         return f64::NAN;
@@ -3134,7 +3134,9 @@ fn mod_real_parity_matrix_matches_expected_values() {
             }
             let gathered = gather_if_needed(&value).expect("gather result");
             match gathered {
-                Value::Tensor(tensor) => assert_real_sequence_matches(&tensor.data, &case.expected),
+                Value::Tensor(tensor) => {
+                    assert_real_sequence_matches(&tensor.materialize_f64(), &case.expected)
+                }
                 Value::Num(num) => assert_real_sequence_matches(&[num], &case.expected),
                 other => panic!("expected real result, got {other:?}"),
             }
@@ -3212,7 +3214,9 @@ fn rem_real_parity_matrix_matches_expected_values() {
             }
             let gathered = gather_if_needed(&value).expect("gather result");
             match gathered {
-                Value::Tensor(tensor) => assert_real_sequence_matches(&tensor.data, &case.expected),
+                Value::Tensor(tensor) => {
+                    assert_real_sequence_matches(&tensor.materialize_f64(), &case.expected)
+                }
                 Value::Num(num) => assert_real_sequence_matches(&[num], &case.expected),
                 other => panic!("expected real result, got {other:?}"),
             }
@@ -3251,7 +3255,9 @@ fn fused_reduction_scalar_report_tail_matches_expected() {
             .iter()
             .filter_map(|value| match gather_if_needed(value).ok()? {
                 Value::Num(n) => Some(n),
-                Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+                Value::Tensor(tensor) if tensor.materialize_f64().len() == 1 => {
+                    Some(tensor.materialize_f64()[0])
+                }
                 _ => None,
             })
             .find(|value| (*value - expected).abs() <= tol)
@@ -3299,7 +3305,9 @@ fn fused_reduction_scalar_single_report_tail_matches_expected() {
             .iter()
             .filter_map(|value| match gather_if_needed(value).ok()? {
                 Value::Num(n) => Some(n),
-                Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+                Value::Tensor(tensor) if tensor.materialize_f64().len() == 1 => {
+                    Some(tensor.materialize_f64()[0])
+                }
                 _ => None,
             })
             .find(|value| (*value - expected).abs() <= tol)
@@ -3356,7 +3364,9 @@ fn fused_reduction_scalar_branch_report_tail_matches_expected() {
             .iter()
             .filter_map(|value| match gather_if_needed(value).ok()? {
                 Value::Num(n) => Some(n),
-                Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+                Value::Tensor(tensor) if tensor.materialize_f64().len() == 1 => {
+                    Some(tensor.materialize_f64()[0])
+                }
                 _ => None,
             })
             .find(|value| (*value - expected).abs() <= 1e-6)
@@ -3454,7 +3464,7 @@ fn centered_gram_fusion_matches_cpu() {
 
         assert_eq!(gpu_tensor.shape, vec![cols, cols], "shape mismatch");
         let tol = 1e-6;
-        for (lhs, rhs) in cov_expected.iter().zip(gpu_tensor.data.iter()) {
+        for (lhs, rhs) in cov_expected.iter().zip(gpu_tensor.materialize_f64().iter()) {
             let diff = (lhs - rhs).abs();
             assert!(
                 diff <= tol,
@@ -3492,8 +3502,8 @@ fn mean_all_gpu_matches_cpu() {
         let gathered = gather_if_needed(mu_gpu).expect("gather mu");
         let scalar = match gathered {
             Value::Tensor(t) => {
-                assert_eq!(t.data.len(), 1, "expected scalar tensor");
-                t.data[0]
+                assert_eq!(t.materialize_f64().len(), 1, "expected scalar tensor");
+                t.materialize_f64()[0]
             }
             Value::Num(n) => n,
             other => panic!("expected numeric result, got {other:?}"),
@@ -3576,7 +3586,11 @@ fn power_step_normalization_matches_cpu() {
 
         assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
         let tol = 1e-6;
-        for (lhs, rhs) in cpu_tensor.data.iter().zip(gpu_tensor.data.iter()) {
+        for (lhs, rhs) in cpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(gpu_tensor.materialize_f64().iter())
+        {
             let diff = (lhs - rhs).abs();
             assert!(
                 diff <= tol,
@@ -3647,7 +3661,11 @@ fn image_normalize_matches_cpu() {
 
         assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
         let tol = 5e-4;
-        for (lhs, rhs) in cpu_tensor.data.iter().zip(gpu_tensor.data.iter()) {
+        for (lhs, rhs) in cpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(gpu_tensor.materialize_f64().iter())
+        {
             let diff = (lhs - rhs).abs();
             assert!(
                 diff <= tol,
@@ -3763,7 +3781,11 @@ fn image_normalize_vecdim_matches_cpu() {
 
         assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
         let tol = 5e-4;
-        for (lhs, rhs) in cpu_tensor.data.iter().zip(gpu_tensor.data.iter()) {
+        for (lhs, rhs) in cpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(gpu_tensor.materialize_f64().iter())
+        {
             if lhs.is_nan() || rhs.is_nan() {
                 assert!(
                     lhs.is_nan() && rhs.is_nan(),
@@ -3888,7 +3910,7 @@ fn explained_variance_matches_cpu() {
                         .get(q_var_idx)
                         .expect("q var present after cpu run")
                 )
-                .data
+                .materialize_f64()
             );
             println!(
                 "g tensor data {:?}",
@@ -3897,7 +3919,7 @@ fn explained_variance_matches_cpu() {
                         .get(g_var_idx)
                         .expect("g var present after cpu run")
                 )
-                .data
+                .materialize_f64()
             );
         }
 
@@ -3914,8 +3936,8 @@ fn explained_variance_matches_cpu() {
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             println!("q tensor shape {:?}", q_tensor.shape);
             println!("g tensor shape {:?}", g_tensor.shape);
-            println!("q tensor data {:?}", q_tensor.data);
-            println!("g tensor data {:?}", g_tensor.data);
+            println!("q tensor data {:?}", q_tensor.materialize_f64());
+            println!("g tensor data {:?}", g_tensor.materialize_f64());
         }
 
         let rows = q_tensor.shape.first().copied().unwrap_or(0);
@@ -3931,8 +3953,8 @@ fn explained_variance_matches_cpu() {
             for i in 0..cols {
                 let mut acc = 0.0;
                 for k in 0..rows {
-                    let q_ki = q_tensor.data[k + i * rows];
-                    let g_kj = g_tensor.data[k + j * rows];
+                    let q_ki = q_tensor.materialize_f64()[k + i * rows];
+                    let g_kj = g_tensor.materialize_f64()[k + j * rows];
                     acc += q_ki * g_kj;
                 }
                 tmp[i + cols * j] = acc;
@@ -3944,7 +3966,7 @@ fn explained_variance_matches_cpu() {
             let mut acc = 0.0;
             for j in 0..rows {
                 let tmp_ij = tmp[i + cols * j];
-                let q_ji = q_tensor.data[j + rows * i];
+                let q_ji = q_tensor.materialize_f64()[j + rows * i];
                 acc += tmp_ij * q_ji;
             }
             expected_diag.push(acc);
@@ -3954,13 +3976,14 @@ fn explained_variance_matches_cpu() {
             println!("tmp runtime shape {:?}", vec![cols, rows]);
             println!("tmp expected data {:?}", tmp);
             println!("expected diag {:?}", expected_diag);
-            println!("cpu diag {:?}", cpu_tensor.data);
+            println!("cpu diag {:?}", cpu_tensor.materialize_f64());
             let tmp_idx = 4;
             if let Some(tmp_value) = vars_cpu.get(tmp_idx) {
                 if let Ok(Value::Tensor(tmp_tensor)) = gather_if_needed(tmp_value) {
                     println!(
                         "tmp var idx {tmp_idx} shape {:?} data {:?}",
-                        tmp_tensor.shape, tmp_tensor.data
+                        tmp_tensor.shape,
+                        tmp_tensor.materialize_f64()
                     );
                 }
             }
@@ -3969,17 +3992,24 @@ fn explained_variance_matches_cpu() {
                 if let Ok(Value::Tensor(prod_tensor)) = gather_if_needed(prod_value) {
                     println!(
                         "prod var idx {prod_idx} shape {:?} data {:?}",
-                        prod_tensor.shape, prod_tensor.data
+                        prod_tensor.shape,
+                        prod_tensor.materialize_f64()
                     );
                 }
             }
         }
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
-            for (lhs, rhs) in expected_diag.iter().zip(cpu_tensor.data.iter()) {
+            for (lhs, rhs) in expected_diag
+                .iter()
+                .zip(cpu_tensor.materialize_f64().iter())
+            {
                 println!("cpu diag diff {}", (lhs - rhs).abs());
             }
         } else {
-            for (lhs, rhs) in expected_diag.iter().zip(cpu_tensor.data.iter()) {
+            for (lhs, rhs) in expected_diag
+                .iter()
+                .zip(cpu_tensor.materialize_f64().iter())
+            {
                 assert!((lhs - rhs).abs() <= 1e-9, "cpu diag mismatch");
             }
         }
@@ -3997,12 +4027,18 @@ fn explained_variance_matches_cpu() {
         assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
         let tol = 1e-6;
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
-            for (lhs, rhs) in expected_diag.iter().zip(gpu_tensor.data.iter()) {
+            for (lhs, rhs) in expected_diag
+                .iter()
+                .zip(gpu_tensor.materialize_f64().iter())
+            {
                 let diff = (lhs - rhs).abs();
                 println!("gpu diag diff lhs={lhs}, rhs={rhs}, diff={diff}");
             }
         } else {
-            for (lhs, rhs) in expected_diag.iter().zip(gpu_tensor.data.iter()) {
+            for (lhs, rhs) in expected_diag
+                .iter()
+                .zip(gpu_tensor.materialize_f64().iter())
+            {
                 let diff = (lhs - rhs).abs();
                 assert!(
                     diff <= tol,
@@ -4012,8 +4048,8 @@ fn explained_variance_matches_cpu() {
         }
 
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
-            println!("Q tensor data {:?}", q_tensor.data);
-            println!("G tensor data {:?}", g_tensor.data);
+            println!("Q tensor data {:?}", q_tensor.materialize_f64());
+            println!("G tensor data {:?}", g_tensor.materialize_f64());
         }
 
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
@@ -4022,7 +4058,11 @@ fn explained_variance_matches_cpu() {
                     futures::executor::block_on(gather_if_needed_async(value))
                 {
                     if t.shape == vec![2, 2] {
-                        println!("tensor idx {idx} shape {:?} data {:?}", t.shape, t.data);
+                        println!(
+                            "tensor idx {idx} shape {:?} data {:?}",
+                            t.shape,
+                            t.materialize_f64()
+                        );
                     }
                 }
             }
@@ -4035,7 +4075,7 @@ fn explained_variance_matches_cpu() {
                 runmat_runtime::call_builtin("transpose", std::slice::from_ref(&q_tensor_value))
                     .expect("transpose");
             if let Value::Tensor(ref q_t_tensor) = q_t_value {
-                println!("q_t tensor data {:?}", q_t_tensor.data);
+                println!("q_t tensor data {:?}", q_t_tensor.materialize_f64());
             }
             let tmp_via_runtime = futures::executor::block_on(runmat_runtime::value_matmul(
                 &q_t_value,
@@ -4043,7 +4083,7 @@ fn explained_variance_matches_cpu() {
             ))
             .expect("q' * g via runtime");
             if let Value::Tensor(ref tmp_tensor) = tmp_via_runtime {
-                println!("tmp via runtime {:?}", tmp_tensor.data);
+                println!("tmp via runtime {:?}", tmp_tensor.materialize_f64());
             }
         }
     });

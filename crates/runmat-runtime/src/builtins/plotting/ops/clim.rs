@@ -1,5 +1,9 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -75,6 +79,37 @@ pub const CLIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CLIM_ERRORS,
 };
 
+pub(crate) const CLIM_INTEGER_LIMITS_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "clim-integer-limits",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "clim/caxis with typed integer limits is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ClimIntegerLimitsExtension"),
+    };
+
+pub const CLIM_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [CLIM_INTEGER_LIMITS_EXTENSION];
+
+const CLIM_INTEGER_LIMIT_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "limits",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Current public limits accept only single or double; RunMat mode admits every integer class before one explicit host f64 graphics-state conversion.",
+    }];
+
+pub const CLIM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "clim(integer_limits)",
+        inputs: &CLIM_INTEGER_LIMIT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The two-element vector is shape- and order-validated from authoritative integer storage, then stored and queried as double host graphics metadata.",
+    }];
+
 #[runtime_builtin(
     name = "clim",
     category = "plotting",
@@ -83,6 +118,8 @@ pub const CLIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     suppress_auto_output = true,
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::clim::CLIM_DESCRIPTOR),
+    extensions(crate::builtins::plotting::clim::CLIM_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::clim::CLIM_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::clim"
 )]
 pub fn clim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -90,6 +127,33 @@ pub fn clim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 pub(super) fn clim_impl(builtin: &'static str, args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Some(Value::Tensor(tensor)) = args.first() {
+        if matches!(
+            tensor.numeric_dtype(),
+            runmat_builtins::NumericDType::I8
+                | runmat_builtins::NumericDType::I16
+                | runmat_builtins::NumericDType::I32
+                | runmat_builtins::NumericDType::I64
+                | runmat_builtins::NumericDType::U8
+                | runmat_builtins::NumericDType::U16
+                | runmat_builtins::NumericDType::U32
+                | runmat_builtins::NumericDType::U64
+        ) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CLIM_INTEGER_LIMITS_EXTENSION,
+                builtin,
+            )?;
+        }
+    }
+    if args.len() == 1
+        && crate::builtins::plotting::style::value_as_string(&args[0])
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("tight"))
+    {
+        return Err(crate::builtins::plotting::plotting_error(
+            builtin,
+            format!("{builtin}: unsupported mode `tight`"),
+        ));
+    }
     match parse_limit_command(builtin, &args)? {
         LimitCommand::Query => Ok(limit_value(color_limits_snapshot())),
         LimitCommand::Set(limits) => {
@@ -124,17 +188,12 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let _ = clim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
-            data: vec![0.25, 0.75],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })])
+        let _ = clim_builtin(vec![Value::Tensor(
+            runmat_builtins::Tensor::new(vec![0.25, 0.75], vec![1, 2]).expect("color limits"),
+        )])
         .unwrap();
         let queried = clim_builtin(Vec::new()).unwrap();
         let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
-        assert_eq!(tensor.data, vec![0.25, 0.75]);
+        assert_eq!(tensor.materialize_f64(), vec![0.25, 0.75]);
     }
 }

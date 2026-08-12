@@ -8,9 +8,10 @@ use super::sequences::*;
 use super::supervised::*;
 use super::training::*;
 use futures::executor::block_on;
-use runmat_accelerate_api::{handle_precision, handle_storage, HostTensorView};
+use runmat_accelerate_api::{handle_precision, handle_storage, GpuTensorStorage, HostTensorView};
 use runmat_builtins::{
-    CellArray, LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor, Value,
+    CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage,
+    ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
 
 #[runmat_macros::runtime_builtin(
@@ -43,6 +44,45 @@ async fn deep_learning_network_grad_helper(net: Value, x: Value) -> crate::Built
     let y = forward_builtin(net.clone(), x, vec![]).await?;
     let loss = super::autodiff::dlarray_sum_builtin(y, vec![Value::String("all".into())])?;
     super::autodiff::dlgradient_builtin(loss, vec![net]).await
+}
+
+fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
+    let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+    Value::Tensor(tensor)
+}
+
+fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+    let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+    Value::Tensor(tensor)
+}
+
+#[test]
+fn dlarray_node_ids_preserve_typed_integer_bounds() {
+    let node_id = |value| {
+        let mut object = ObjectInstance::new("dlarray".to_string());
+        object
+            .properties
+            .insert("__runmat_ad_node".to_string(), value);
+        super::autodiff::dlarray_node_id(&Value::Object(object))
+    };
+
+    assert_eq!(node_id(Value::Int(IntValue::U16(7))), Some(7));
+    assert_eq!(node_id(Value::Num(7.0)), Some(7));
+    assert_eq!(node_id(Value::Int(IntValue::I8(-1))), None);
+    assert_eq!(
+        node_id(Value::Int(IntValue::U64(u64::MAX))),
+        Some(usize::MAX)
+    );
+    assert_eq!(node_id(Value::Num(7.5)), None);
+    assert_eq!(node_id(Value::Num(f64::INFINITY)), None);
+
+    let boundary = node_id(Value::Num(usize::MAX as f64));
+    if usize::BITS == 64 {
+        assert_eq!(boundary, None);
+    } else {
+        assert_eq!(boundary, Some(usize::MAX));
+    }
+    assert_eq!(node_id(Value::Num((usize::MAX as f64) + 1.0)), None);
 }
 
 fn layer_name(value: &Value) -> String {
@@ -90,6 +130,119 @@ fn layer_constructors_preserve_core_properties_and_name_values() {
         Some(&Value::String("causal".into()))
     );
     assert_eq!(layer_name(&conv), "conv");
+}
+
+#[test]
+fn layer_constructors_read_typed_integer_size_storage_exactly() {
+    let output_size = cleared_int_tensor(IntegerStorage::U16(vec![10]), vec![1, 1]);
+    let fc = block_on(fully_connected_layer_builtin(output_size, vec![])).unwrap();
+    let Value::Object(object) = &fc else {
+        panic!("expected object");
+    };
+    assert_eq!(object.properties.get("OutputSize"), Some(&Value::Num(10.0)));
+
+    let input_size = poisoned_int_tensor(IntegerStorage::U16(vec![2, 3]), vec![1, 2], f64::NAN);
+    let input = block_on(feature_input_layer_builtin(input_size, vec![])).unwrap();
+    let Value::Object(object) = &input else {
+        panic!("expected object");
+    };
+    assert_eq!(
+        object.properties.get("InputSize"),
+        Some(&Value::Tensor(
+            Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()
+        ))
+    );
+
+    let exact = (1_u64 << 53) + 1;
+    let large_input = poisoned_int_tensor(IntegerStorage::U64(vec![exact]), vec![1, 1], f64::NAN);
+    let large = block_on(feature_input_layer_builtin(large_input, vec![]));
+    if usize::BITS == 64 {
+        assert!(large.is_ok());
+    } else {
+        assert!(large.is_err());
+    }
+}
+
+#[test]
+fn deep_learning_integer_parsers_reject_unrepresentable_double_bounds() {
+    let fc_boundary = block_on(fully_connected_layer_builtin(
+        Value::Num(usize::MAX as f64),
+        vec![],
+    ));
+    if usize::BITS == 64 {
+        assert!(fc_boundary.is_err());
+    } else {
+        assert!(fc_boundary.is_ok());
+    }
+    assert!(block_on(fully_connected_layer_builtin(
+        Value::Num((usize::MAX as f64) + 1.0),
+        vec![],
+    ))
+    .is_err());
+    assert!(block_on(fully_connected_layer_builtin(
+        Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).expect("nan scalar")),
+        vec![],
+    ))
+    .is_err());
+
+    let vector_boundary = Tensor::new(vec![usize::MAX as f64], vec![1, 1]).expect("input size");
+    let feature_boundary = block_on(feature_input_layer_builtin(
+        Value::Tensor(vector_boundary),
+        vec![],
+    ));
+    if usize::BITS == 64 {
+        assert!(feature_boundary.is_err());
+    } else {
+        assert!(feature_boundary.is_ok());
+    }
+
+    let mut layer = ObjectInstance::new("nnet.cnn.layer.FullyConnectedLayer".to_string());
+    let exact = (1_u64 << 53) + 1;
+    layer
+        .properties
+        .insert("OutputSize".to_string(), Value::Int(IntValue::U64(exact)));
+    let parsed = positive_property_usize(&layer, "OutputSize", "forward");
+    if usize::BITS == 64 {
+        assert_eq!(parsed.unwrap(), exact as usize);
+    } else {
+        assert!(parsed.is_err());
+    }
+}
+
+#[test]
+fn structural_integer_parsers_ignore_poisoned_mirrors_for_every_storage_class() {
+    let storages = [
+        IntegerStorage::I8(vec![1]),
+        IntegerStorage::I16(vec![1]),
+        IntegerStorage::I32(vec![1]),
+        IntegerStorage::I64(vec![1]),
+        IntegerStorage::U8(vec![1]),
+        IntegerStorage::U16(vec![1]),
+        IntegerStorage::U32(vec![1]),
+        IntegerStorage::U64(vec![1]),
+    ];
+
+    for storage in storages {
+        let value = poisoned_int_tensor(storage, vec![1, 1], f64::NAN);
+        assert_eq!(super::positive_usize(&value, "test", "size").unwrap(), 1);
+        assert!(super::logical_scalar(&value, "test", "flag").unwrap());
+        assert_eq!(integer_scalar(&value, "BatchSize").unwrap(), 1);
+        assert!(matches!(
+            SequenceLength::parse(&value).unwrap(),
+            SequenceLength::Fixed(1)
+        ));
+    }
+}
+
+#[test]
+fn export_onnx_integer_options_reject_typed_values_beyond_i64() {
+    let value = poisoned_int_tensor(
+        IntegerStorage::U64(vec![(i64::MAX as u64) + 1]),
+        vec![1, 1],
+        f64::NAN,
+    );
+    assert!(integer_scalar(&value, "BatchSize").is_err());
+    assert!(integer_scalar(&Value::Num(i64::MAX as f64), "BatchSize").is_err());
 }
 
 #[test]
@@ -163,6 +316,26 @@ fn training_options_and_layer_graph_materialize_metadata() {
 }
 
 #[test]
+fn dlnetwork_initialize_option_reads_typed_integer_storage_exactly() {
+    let relu = block_on(relu_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("relu".into()),
+    ]))
+    .unwrap();
+    let initialize = cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]);
+    let net = block_on(dlnetwork_builtin(vec![
+        Value::Cell(CellArray::new(vec![relu], 1, 1).unwrap()),
+        Value::String("Initialize".into()),
+        initialize,
+    ]))
+    .unwrap();
+    let Value::Object(object) = net else {
+        panic!("expected network object");
+    };
+    assert_eq!(object.class_name, "dlnetwork");
+}
+
+#[test]
 fn analyze_network_counts_layers() {
     let relu = block_on(relu_layer_builtin(vec![
         Value::String("Name".into()),
@@ -206,6 +379,59 @@ fn feature_network_layers() -> Value {
     ]))
     .unwrap();
     Value::Cell(CellArray::new(vec![input, fc, softmax], 3, 1).unwrap())
+}
+
+fn dense_feature_network_layers() -> Value {
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("features".into()),
+        ],
+    ))
+    .unwrap();
+    let first = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("first".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![1.0, -1.0, 0.5, 2.0], vec![2, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![0.25, -0.5], vec![2, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let elu = block_on(elu_layer_builtin(vec![
+        Value::Num(1.25),
+        Value::String("Name".into()),
+        Value::String("elu".into()),
+    ]))
+    .unwrap();
+    let relu = block_on(relu_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("relu".into()),
+    ]))
+    .unwrap();
+    let second = block_on(fully_connected_layer_builtin(
+        Value::Num(1.0),
+        vec![
+            Value::String("Name".into()),
+            Value::String("second".into()),
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![2.0, -0.25], vec![1, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    Value::Cell(CellArray::new(vec![input, first, elu, relu, second], 5, 1).unwrap())
+}
+
+fn elu_feature_network_layers() -> Value {
+    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let elu = block_on(elu_layer_builtin(vec![Value::Num(1.25)])).unwrap();
+    Value::Cell(CellArray::new(vec![input, elu], 2, 1).unwrap())
 }
 
 #[test]
@@ -276,10 +502,10 @@ fn forward_and_predict_execute_supported_feedforward_networks() {
         panic!("expected tensor output");
     };
     assert_eq!(tensor.shape, vec![2, 2]);
-    assert!((tensor.data[0] - 0.5).abs() < 1.0e-12);
-    assert!((tensor.data[1] - 0.8807970779778823).abs() < 1.0e-12);
-    assert!((tensor.data[2] - 0.5).abs() < 1.0e-12);
-    assert!((tensor.data[3] - 0.11920292202211755).abs() < 1.0e-12);
+    assert!((tensor.materialize_f64()[0] - 0.5).abs() < 1.0e-12);
+    assert!((tensor.materialize_f64()[1] - 0.8807970779778823).abs() < 1.0e-12);
+    assert!((tensor.materialize_f64()[2] - 0.5).abs() < 1.0e-12);
+    assert!((tensor.materialize_f64()[3] - 0.11920292202211755).abs() < 1.0e-12);
 
     let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
         net,
@@ -291,7 +517,119 @@ fn forward_and_predict_execute_supported_feedforward_networks() {
         panic!("expected predict tensor");
     };
     assert_eq!(predicted.shape, vec![2, 2]);
-    assert!((predicted.data[1] - 0.8807970779778823).abs() < 1.0e-12);
+    assert!((predicted.materialize_f64()[1] - 0.8807970779778823).abs() < 1.0e-12);
+}
+
+#[test]
+fn forward_preserves_native_single_through_fully_connected_and_softmax() {
+    let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let fully_connected = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(
+                Tensor::from_f32(vec![1.0, -1.0, 0.5, 2.0], vec![2, 2]).expect("weights"),
+            ),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::from_f32(vec![0.0, 0.0], vec![2, 1]).expect("bias")),
+        ],
+    ))
+    .unwrap();
+    let softmax = block_on(softmax_layer_builtin(vec![])).unwrap();
+    let network = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input_layer, fully_connected, softmax], 3, 1).unwrap(),
+    )]))
+    .unwrap();
+    let input =
+        Value::Tensor(Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("input"));
+    let output = block_on(forward_builtin(network, input, vec![])).expect("forward");
+    let Value::Tensor(output) = output else {
+        panic!("expected tensor output");
+    };
+    let NumericStorage::F32(values) = output.into_numeric_storage().expect("output storage") else {
+        panic!("expected native single output");
+    };
+    assert_eq!(values.len(), 4);
+    assert!((values[0] - 0.26894143).abs() < 1.0e-6, "{values:?}");
+    assert!((values[1] - 0.5).abs() < 1.0e-6, "{values:?}");
+    assert!((values[2] - 0.7310586).abs() < 1.0e-6, "{values:?}");
+    assert!((values[3] - 0.5).abs() < 1.0e-6, "{values:?}");
+}
+
+#[test]
+fn forward_and_predict_read_typed_integer_storage_exactly() {
+    let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let fc = block_on(fully_connected_layer_builtin(
+        Value::Num(1.0),
+        vec![
+            Value::String("Weights".into()),
+            poisoned_int_tensor(IntegerStorage::I32(vec![10, 1]), vec![1, 2], 99.0),
+            Value::String("Bias".into()),
+            poisoned_int_tensor(IntegerStorage::I32(vec![5]), vec![1, 1], 99.0),
+        ],
+    ))
+    .unwrap();
+    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input_layer, fc], 2, 1).unwrap(),
+    )]))
+    .unwrap();
+    let input = poisoned_int_tensor(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2], 99.0);
+
+    let out = block_on(forward_builtin(net.clone(), input.clone(), vec![])).unwrap();
+    let Value::Tensor(tensor) = out else {
+        panic!("expected forward tensor output");
+    };
+    assert_eq!(tensor.shape, vec![2, 1]);
+    assert_eq!(tensor.materialize_f64(), vec![18.0, 29.0]);
+
+    let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        net,
+        input,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Tensor(predicted) = predicted else {
+        panic!("expected predict tensor output");
+    };
+    assert_eq!(predicted.shape, vec![2, 1]);
+    assert_eq!(predicted.materialize_f64(), vec![18.0, 29.0]);
+}
+
+#[test]
+fn predict_observations_in_columns_reads_typed_integer_storage_exactly() {
+    let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let fc = block_on(fully_connected_layer_builtin(
+        Value::Num(1.0),
+        vec![
+            Value::String("Weights".into()),
+            poisoned_int_tensor(IntegerStorage::I32(vec![10, 1]), vec![1, 2], 99.0),
+            Value::String("Bias".into()),
+            poisoned_int_tensor(IntegerStorage::I32(vec![5]), vec![1, 1], 99.0),
+        ],
+    ))
+    .unwrap();
+    let net = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input_layer, fc], 2, 1).unwrap(),
+    )]))
+    .unwrap();
+    let input = poisoned_int_tensor(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2], 99.0);
+
+    let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        net,
+        input,
+        vec![
+            Value::String("ObservationsIn".into()),
+            Value::String("columns".into()),
+        ],
+    ))
+    .unwrap();
+
+    let Value::Tensor(predicted) = predicted else {
+        panic!("expected predict tensor output");
+    };
+    assert_eq!(predicted.shape, vec![2, 1]);
+    assert_eq!(predicted.materialize_f64(), vec![17.0, 39.0]);
+    assert!(predicted.integer_storage().is_none());
 }
 
 #[test]
@@ -315,13 +653,18 @@ fn forward_preserves_dlarray_wrapper() {
 }
 
 #[test]
-fn forward_rejects_gpu_backed_dlarray_before_host_gather() {
+fn forward_runs_fully_connected_gpu_dlarray_without_host_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
-        let shape = [1usize, 2usize];
+        let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let cpu_input = Value::Tensor(Tensor::new(vec![1.0, 2.0, -1.0, 0.5], vec![2, 2]).unwrap());
+        let cpu = block_on(forward_builtin(net.clone(), cpu_input, vec![])).unwrap();
+        let Value::Tensor(expected) = cpu else {
+            panic!("expected CPU tensor output");
+        };
+        let shape = [2usize, 2usize];
         let handle = provider
             .upload(&HostTensorView {
-                data: &[1.0, 2.0],
+                data: &[1.0, 2.0, -1.0, 0.5],
                 shape: &shape,
             })
             .expect("upload");
@@ -332,9 +675,164 @@ fn forward_rejects_gpu_backed_dlarray_before_host_gather() {
         ))
         .expect("gpu dlarray");
 
+        let output = block_on(forward_builtin(net, dl, vec![])).expect("GPU forward");
+        let Value::Object(output) = output else {
+            panic!("expected GPU dlarray output");
+        };
+        let Some(Value::GpuTensor(handle)) = output.properties.get("Data") else {
+            panic!("expected resident GPU output data");
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let actual =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(handle.clone()))
+                .expect("gather GPU output for parity assertion");
+        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.materialize_f64(), expected.materialize_f64());
+    });
+}
+
+#[test]
+fn forward_runs_arbitrary_alpha_elu_gpu_dlarray_with_cpu_parity() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![elu_feature_network_layers()])).unwrap();
+        let values = vec![-2.0, 0.0, 3.0, f64::NAN];
+        let cpu = block_on(forward_builtin(
+            net.clone(),
+            Value::Tensor(Tensor::new(values.clone(), vec![2, 2]).unwrap()),
+            vec![],
+        ))
+        .unwrap();
+        let Value::Tensor(expected) = cpu else {
+            panic!("expected CPU tensor output");
+        };
+        let shape = [2usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("upload");
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(Value::GpuTensor(handle), vec![])).unwrap();
+        let output = block_on(forward_builtin(net, dl, vec![])).expect("GPU ELU forward");
+        let Value::Object(output) = output else {
+            panic!("expected GPU dlarray output");
+        };
+        let Some(Value::GpuTensor(handle)) = output.properties.get("Data") else {
+            panic!("expected resident GPU output data");
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let actual =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(handle.clone()))
+                .expect("gather GPU output for parity assertion");
+        assert_eq!(actual.shape, expected.shape);
+        for (actual, expected) in actual
+            .materialize_f64()
+            .iter()
+            .zip(&expected.materialize_f64())
+        {
+            assert!(actual == expected || (actual.is_nan() && expected.is_nan()));
+        }
+    });
+}
+
+#[test]
+fn forward_runs_softmax_gpu_dlarray_without_host_gather() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+        let values = [1.0, 2.0, -1.0, 0.5];
+        let cpu = block_on(forward_builtin(
+            net.clone(),
+            Value::Tensor(Tensor::new(values.to_vec(), vec![2, 2]).unwrap()),
+            vec![],
+        ))
+        .expect("CPU forward");
+        let Value::Tensor(expected) = cpu else {
+            panic!("expected CPU tensor output");
+        };
+        let shape = [2usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("upload");
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::String("CB".into())],
+        ))
+        .expect("gpu dlarray");
+
+        let output = block_on(forward_builtin(net, dl, vec![])).expect("GPU softmax forward");
+        let Value::Object(output) = output else {
+            panic!("expected GPU dlarray output");
+        };
+        let Some(Value::GpuTensor(handle)) = output.properties.get("Data") else {
+            panic!("expected resident GPU output data");
+        };
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let actual =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(handle.clone()))
+                .expect("gather GPU output for parity assertion");
+        assert_eq!(actual.shape, expected.shape);
+        for (actual, expected) in actual
+            .materialize_f64()
+            .iter()
+            .zip(&expected.materialize_f64())
+        {
+            assert!((actual - expected).abs() < 1.0e-12);
+        }
+    });
+}
+
+#[test]
+fn forward_reports_invalid_gpu_softmax_without_host_gather() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+        let values = [f64::INFINITY, 0.0, 0.0, 1.0];
+        let shape = [2usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("upload");
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(Value::GpuTensor(handle), vec![])).expect("gpu dlarray");
+
+        let error = block_on(forward_builtin(net, dl, vec![]))
+            .expect_err("infinite Softmax input must not be normalized");
+
+        assert!(error
+            .to_string()
+            .contains("softmax produced invalid normalization"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn forward_rejects_complex_gpu_dlarray_before_dense_dispatch() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let shape = [1usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &shape,
+            })
+            .expect("upload");
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+        provider.reset_telemetry();
+        let dl = block_on(dlarray_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::String("CB".into())],
+        ))
+        .expect("gpu dlarray");
+
         let err = block_on(forward_builtin(net, dl, vec![])).unwrap_err();
 
-        assert!(err.to_string().contains("GPU-backed dlarray execution"));
+        assert!(err.to_string().contains("real dlarray input"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }
@@ -424,6 +922,26 @@ fn export_onnx_network_writes_supported_feedforward_graph() {
 }
 
 #[test]
+fn export_onnx_options_read_typed_integer_storage_exactly() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("typed-options.onnx");
+    let result = block_on(export_onnx_network_builtin(vec![
+        net,
+        Value::String(path.to_string_lossy().into_owned()),
+        Value::String("OpsetVersion".into()),
+        cleared_int_tensor(IntegerStorage::U16(vec![14]), vec![1, 1]),
+        Value::String("BatchSize".into()),
+        cleared_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+        Value::String("Verbose".into()),
+        cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+    ]))
+    .unwrap();
+    assert_eq!(result, Value::OutputList(Vec::new()));
+    assert!(path.exists());
+}
+
+#[test]
 fn export_onnx_network_rejects_unexportable_forms_deterministically() {
     let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let lstm = block_on(lstm_layer_builtin(Value::Num(4.0), vec![])).unwrap();
@@ -483,17 +1001,58 @@ fn dlfeval_dlgradient_differentiates_dlarray_elementwise_loss() {
     let Value::Tensor(loss_data) = loss.properties.get("Data").unwrap() else {
         panic!("expected loss tensor");
     };
-    assert_eq!(loss_data.data, vec![14.0]);
+    assert_eq!(loss_data.materialize_f64(), vec![14.0]);
     let Value::Object(grad) = &values[1] else {
         panic!("expected gradient dlarray");
     };
     let Value::Tensor(grad_data) = grad.properties.get("Data").unwrap() else {
         panic!("expected gradient tensor");
     };
-    assert_eq!(grad_data.data, vec![2.0, 4.0, 6.0]);
+    assert_eq!(grad_data.materialize_f64(), vec![2.0, 4.0, 6.0]);
     assert_eq!(
         grad.properties.get("Format"),
         Some(&Value::String("CB".into()))
+    );
+}
+
+#[test]
+fn dlfeval_dlgradient_preserves_native_single_storage() {
+    let x = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
+        vec![Value::String("CB".into())],
+    ))
+    .expect("dlarray");
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let out = block_on(dlfeval_builtin(vec![
+        Value::FunctionHandle("__deep_learning_square_grad".into()),
+        x,
+    ]))
+    .expect("dlfeval square grad");
+    let Value::OutputList(values) = out else {
+        panic!("expected output list");
+    };
+    let Value::Object(loss) = &values[0] else {
+        panic!("expected traced loss dlarray");
+    };
+    let Value::Tensor(loss) = loss.properties.get("Data").unwrap() else {
+        panic!("expected loss tensor");
+    };
+    assert_eq!(
+        loss.clone().into_numeric_storage().expect("loss storage"),
+        NumericStorage::F32(vec![14.0])
+    );
+    let Value::Object(gradient) = &values[1] else {
+        panic!("expected gradient dlarray");
+    };
+    let Value::Tensor(gradient) = gradient.properties.get("Data").unwrap() else {
+        panic!("expected gradient tensor");
+    };
+    assert_eq!(
+        gradient
+            .clone()
+            .into_numeric_storage()
+            .expect("gradient storage"),
+        NumericStorage::F32(vec![2.0, 4.0, 6.0])
     );
 }
 
@@ -544,14 +1103,14 @@ fn dlgradient_returns_dlnetwork_learnable_gradients() {
     let Value::Tensor(weight_data) = weight_grad.properties.get("Data").unwrap() else {
         panic!("expected tensor weight gradient");
     };
-    assert_eq!(weight_data.data, vec![4.0, 4.0, 6.0, 6.0]);
+    assert_eq!(weight_data.materialize_f64(), vec![4.0, 4.0, 6.0, 6.0]);
     let Value::Object(bias_grad) = &values.data[1] else {
         panic!("expected dlarray bias gradient");
     };
     let Value::Tensor(bias_data) = bias_grad.properties.get("Data").unwrap() else {
         panic!("expected tensor bias gradient");
     };
-    assert_eq!(bias_data.data, vec![2.0, 2.0]);
+    assert_eq!(bias_data.materialize_f64(), vec![2.0, 2.0]);
 }
 
 #[test]
@@ -575,7 +1134,7 @@ fn dlupdate_traverses_dlnetwork_learnables_and_rebuilds_layers() {
     let Value::Tensor(weights) = fc.properties.get("Weights").unwrap() else {
         panic!("expected tensor weights");
     };
-    assert_eq!(weights.data, vec![2.0, -2.0, 0.0, 2.0]);
+    assert_eq!(weights.materialize_f64(), vec![2.0, -2.0, 0.0, 2.0]);
 }
 
 #[test]
@@ -723,8 +1282,34 @@ fn train_network_regression_updates_weights_and_predicts() {
         panic!("expected prediction tensor");
     };
     assert_eq!(predicted.shape, vec![4, 1]);
-    assert!((predicted.data[0] - 1.0).abs() < 0.35);
-    assert!((predicted.data[3] - 7.0).abs() < 0.35);
+    assert!((predicted.materialize_f64()[0] - 1.0).abs() < 0.35);
+    assert!((predicted.materialize_f64()[3] - 7.0).abs() < 0.35);
+}
+
+#[test]
+fn train_network_regression_reads_typed_integer_storage_exactly() {
+    let x = poisoned_int_tensor(IntegerStorage::I32(vec![0, 1, 2, 3]), vec![4, 1], 99.0);
+    let y = poisoned_int_tensor(IntegerStorage::I32(vec![1, 3, 5, 7]), vec![4, 1], 99.0);
+    let net = block_on(train_network_builtin(vec![
+        x.clone(),
+        y,
+        regression_training_layers(),
+        adam_training_options(),
+    ]))
+    .unwrap();
+
+    let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        net,
+        x,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Tensor(predicted) = predicted else {
+        panic!("expected prediction tensor");
+    };
+    assert_eq!(predicted.shape, vec![4, 1]);
+    assert!((predicted.materialize_f64()[0] - 1.0).abs() < 0.35);
+    assert!((predicted.materialize_f64()[3] - 7.0).abs() < 0.35);
 }
 
 #[test]
@@ -762,8 +1347,8 @@ fn train_network_classification_supports_string_labels() {
     let Value::Tensor(scores) = predicted else {
         panic!("expected scores");
     };
-    assert!(scores.data[0] > scores.data[4]);
-    assert!(scores.data[5] > scores.data[1]);
+    assert!(scores.materialize_f64()[0] > scores.materialize_f64()[4]);
+    assert!(scores.materialize_f64()[5] > scores.materialize_f64()[1]);
 }
 
 #[test]
@@ -850,11 +1435,28 @@ fn combvec_matches_neural_network_column_order() {
     };
     assert_eq!(t.shape, vec![3, 6]);
     assert_eq!(
-        t.data,
+        t.materialize_f64(),
         vec![
             1.0, 2.0, 10.0, 3.0, 4.0, 10.0, 1.0, 2.0, 20.0, 3.0, 4.0, 20.0, 1.0, 2.0, 30.0, 3.0,
             4.0, 30.0,
         ]
+    );
+}
+
+#[test]
+fn combvec_reads_typed_integer_storage_exactly() {
+    let out = block_on(combvec_builtin(vec![
+        poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2], 99.0),
+        poisoned_int_tensor(IntegerStorage::U16(vec![10, 20]), vec![1, 2], 99.0),
+    ]))
+    .unwrap();
+    let Value::Tensor(t) = out else {
+        panic!("expected tensor");
+    };
+    assert_eq!(t.shape, vec![3, 4]);
+    assert_eq!(
+        t.materialize_f64(),
+        vec![1.0, 2.0, 10.0, 3.0, 4.0, 10.0, 1.0, 2.0, 20.0, 3.0, 4.0, 20.0]
     );
 }
 
@@ -884,7 +1486,36 @@ fn padsequences_defaults_to_uniform_right_padding() {
         panic!("expected tensor");
     };
     assert_eq!(tensor.shape, vec![1, 2, 1, 2]);
-    assert_eq!(tensor.data, vec![1.0, 2.0, 3.0, -1.0]);
+    assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, -1.0]);
+}
+
+#[test]
+fn padsequences_reads_typed_integer_storage_exactly() {
+    let seqs = Value::Cell(
+        CellArray::new(
+            vec![
+                poisoned_int_tensor(IntegerStorage::I16(vec![1, 2]), vec![1, 2], 99.0),
+                poisoned_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1], 99.0),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    let out = block_on(padsequences_builtin(
+        seqs,
+        vec![
+            Value::Num(2.0),
+            Value::String("PaddingValue".into()),
+            Value::Num(-1.0),
+        ],
+    ))
+    .unwrap();
+    let Value::Tensor(tensor) = out else {
+        panic!("expected tensor");
+    };
+    assert_eq!(tensor.shape, vec![1, 2, 1, 2]);
+    assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, -1.0]);
 }
 
 #[test]
@@ -920,7 +1551,7 @@ fn padsequences_left_truncation_keeps_tail_for_cell_output() {
     let Value::Tensor(first) = &cell.data[0] else {
         panic!("expected tensor");
     };
-    assert_eq!(first.data, vec![2.0, 3.0]);
+    assert_eq!(first.materialize_f64(), vec![2.0, 3.0]);
 }
 
 #[test]
@@ -943,11 +1574,31 @@ fn dlarray_preserves_data_and_format_labels() {
 }
 
 #[test]
+fn dlarray_rejects_every_exact_integer_storage_class() {
+    let storages = [
+        runmat_builtins::IntegerStorage::I8(vec![1]),
+        runmat_builtins::IntegerStorage::I16(vec![1]),
+        runmat_builtins::IntegerStorage::I32(vec![1]),
+        runmat_builtins::IntegerStorage::I64(vec![1]),
+        runmat_builtins::IntegerStorage::U8(vec![1]),
+        runmat_builtins::IntegerStorage::U16(vec![1]),
+        runmat_builtins::IntegerStorage::U32(vec![1]),
+        runmat_builtins::IntegerStorage::U64(vec![1]),
+    ];
+
+    for storage in storages {
+        let data = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+        let error = block_on(dlarray_builtin(data, vec![])).expect_err("integer dlarray error");
+        assert!(error.message().contains("integer data is not supported"));
+    }
+}
+
+#[test]
 fn dlarray_preserves_gpu_array_residency() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1055,8 +1706,8 @@ fn crossentropy_gpu_reduction_none_returns_resident_losses() {
 
         let gathered = crate::builtins::common::test_support::gather(out).expect("gather losses");
         assert_eq!(gathered.shape, shape);
-        assert!((gathered.data[0] + 0.8_f64.ln()).abs() < 1.0e-12);
-        assert!((gathered.data[1] + 0.8_f64.ln()).abs() < 1.0e-12);
+        assert!((gathered.materialize_f64()[0] + 0.8_f64.ln()).abs() < 1.0e-12);
+        assert!((gathered.materialize_f64()[1] + 0.8_f64.ln()).abs() < 1.0e-12);
     });
 }
 
@@ -1133,8 +1784,8 @@ fn crossentropy_gpu_supports_host_mask_for_unreduced_losses() {
 
         let gathered = crate::builtins::common::test_support::gather(out).expect("gather losses");
         assert_eq!(gathered.shape, shape);
-        assert!((gathered.data[0] + 0.8_f64.ln()).abs() < 1.0e-12);
-        assert_eq!(gathered.data[1], 0.0);
+        assert!((gathered.materialize_f64()[0] + 0.8_f64.ln()).abs() < 1.0e-12);
+        assert_eq!(gathered.materialize_f64()[1], 0.0);
     });
 }
 
@@ -1305,8 +1956,8 @@ fn crossentropy_supports_multilabel_reduction_none_and_mask_normalization() {
         panic!("expected tensor");
     };
     assert_eq!(tensor.shape, vec![1, 2]);
-    assert!((tensor.data[0] + 0.8_f64.ln()).abs() < 1.0e-12);
-    assert!((tensor.data[1] + 0.8_f64.ln()).abs() < 1.0e-12);
+    assert!((tensor.materialize_f64()[0] + 0.8_f64.ln()).abs() < 1.0e-12);
+    assert!((tensor.materialize_f64()[1] + 0.8_f64.ln()).abs() < 1.0e-12);
 
     let masked = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
@@ -1323,6 +1974,68 @@ fn crossentropy_supports_multilabel_reduction_none_and_mask_normalization() {
         panic!("expected scalar");
     };
     assert!((loss + 0.8_f64.ln()).abs() < 1.0e-12);
+}
+
+#[test]
+fn crossentropy_unreduced_output_preserves_native_single_storage() {
+    let out = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::from_f32(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::from_f32(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("ClassificationMode".into()),
+            Value::String("multi-label".into()),
+            Value::String("Reduction".into()),
+            Value::String("none".into()),
+        ],
+    ))
+    .expect("single unreduced crossentropy");
+    let Value::Tensor(losses) = out else {
+        panic!("expected tensor");
+    };
+    assert_eq!(losses.numeric_dtype(), NumericDType::F32);
+    assert!(matches!(
+        losses.into_numeric_storage().unwrap(),
+        NumericStorage::F32(_)
+    ));
+}
+
+#[test]
+fn crossentropy_mask_reads_typed_integer_storage_exactly() {
+    let masked = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("Mask".into()),
+            poisoned_int_tensor(IntegerStorage::U8(vec![1, 0]), vec![1, 2], 2.0),
+            Value::String("NormalizationFactor".into()),
+            Value::String("mask-included".into()),
+        ],
+    ))
+    .expect("masked crossentropy");
+    let Value::Num(loss) = masked else {
+        panic!("expected scalar");
+    };
+    assert!((loss + 0.8_f64.ln()).abs() < 1.0e-12);
+}
+
+#[test]
+fn crossentropy_payloads_read_typed_integer_storage_as_double_loss_inputs() {
+    let out = block_on(crossentropy_builtin(
+        poisoned_int_tensor(IntegerStorage::U8(vec![1, 0]), vec![1, 2], 0.5),
+        poisoned_int_tensor(IntegerStorage::U8(vec![1, 0]), vec![1, 2], 0.5),
+        vec![
+            Value::String("Reduction".into()),
+            Value::String("none".into()),
+        ],
+    ))
+    .expect("integer payload crossentropy");
+    let Value::Tensor(losses) = out else {
+        panic!("expected tensor");
+    };
+    assert_eq!(losses.numeric_dtype(), NumericDType::F64);
+    assert!(losses.integer_storage().is_none());
+    assert!(losses.materialize_f64()[0].abs() < 1.0e-9);
+    assert_eq!(losses.materialize_f64()[1], 0.0);
 }
 
 #[test]
@@ -1435,18 +2148,18 @@ fn adamupdate_computes_bias_corrected_tensor_step() {
     let Value::Tensor(parameters) = &outputs[0] else {
         panic!("expected tensor parameters");
     };
-    assert!((parameters.data[0] - 0.9990000001).abs() < 1.0e-9);
-    assert!((parameters.data[1] - 2.00099999995).abs() < 1.0e-9);
+    assert!((parameters.materialize_f64()[0] - 0.9990000001).abs() < 1.0e-9);
+    assert!((parameters.materialize_f64()[1] - 2.00099999995).abs() < 1.0e-9);
     let Value::Tensor(average_grad) = &outputs[1] else {
         panic!("expected tensor averageGrad");
     };
-    assert!((average_grad.data[0] - 0.01).abs() < 1.0e-12);
-    assert!((average_grad.data[1] + 0.02).abs() < 1.0e-12);
+    assert!((average_grad.materialize_f64()[0] - 0.01).abs() < 1.0e-12);
+    assert!((average_grad.materialize_f64()[1] + 0.02).abs() < 1.0e-12);
     let Value::Tensor(average_sq_grad) = &outputs[2] else {
         panic!("expected tensor averageSqGrad");
     };
-    assert!((average_sq_grad.data[0] - 0.00001).abs() < 1.0e-12);
-    assert!((average_sq_grad.data[1] - 0.00004).abs() < 1.0e-12);
+    assert!((average_sq_grad.materialize_f64()[0] - 0.00001).abs() < 1.0e-12);
+    assert!((average_sq_grad.materialize_f64()[1] - 0.00004).abs() < 1.0e-12);
 }
 
 #[test]
@@ -1462,7 +2175,7 @@ fn adamupdate_default_call_returns_updated_parameters_directly() {
     let Value::Tensor(parameters) = out else {
         panic!("expected direct tensor output");
     };
-    assert!((parameters.data[0] - 0.9990000001).abs() < 1.0e-9);
+    assert!((parameters.materialize_f64()[0] - 0.9990000001).abs() < 1.0e-9);
 }
 
 #[test]
@@ -1555,7 +2268,7 @@ fn adamupdate_accepts_zero_decay_and_rejects_integer_tensor_state() {
     let Value::Tensor(parameters) = out else {
         panic!("expected tensor parameters");
     };
-    assert!(parameters.data[0].is_finite());
+    assert!(parameters.materialize_f64()[0].is_finite());
 
     let integer_params = Tensor::new_with_dtype(vec![1.0], vec![1, 1], NumericDType::U8).unwrap();
     let err = block_on(adamupdate_builtin(vec![
@@ -1567,6 +2280,25 @@ fn adamupdate_accepts_zero_decay_and_rejects_integer_tensor_state() {
     ]))
     .unwrap_err();
     assert!(err.to_string().contains("double or single"));
+}
+
+#[test]
+fn adamupdate_hyperparameters_read_typed_integer_storage_exactly() {
+    let out = block_on(adamupdate_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        cleared_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+        cleared_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+        cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+        cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+    ]))
+    .expect("adamupdate");
+    let Value::Tensor(parameters) = out else {
+        panic!("expected tensor parameters");
+    };
+    assert!((parameters.materialize_f64()[0] - 0.0000001).abs() < 1.0e-9);
 }
 
 #[test]
@@ -1664,7 +2396,7 @@ fn dlupdate_maps_matching_struct_and_cell_trees() {
     let Value::Tensor(weights) = out.fields.get("Weights").unwrap() else {
         panic!("expected tensor weights");
     };
-    assert_eq!(weights.data, vec![11.0, 22.0]);
+    assert_eq!(weights.materialize_f64(), vec![11.0, 22.0]);
     let Value::Cell(bias) = out.fields.get("Bias").unwrap() else {
         panic!("expected cell bias");
     };
@@ -1761,7 +2493,7 @@ fn dlupdate_maps_learnables_table_value_variable_only() {
     let Value::Tensor(weights) = &values.data[0] else {
         panic!("expected weights tensor");
     };
-    assert_eq!(weights.data, vec![11.0, 22.0]);
+    assert_eq!(weights.materialize_f64(), vec![11.0, 22.0]);
     assert_eq!(values.data[1], Value::Num(7.0));
 }
 

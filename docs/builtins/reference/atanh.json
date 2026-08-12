@@ -18,7 +18,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider's unary_atanh hook when every element satisfies |x| ≤ 1; gathers to the host when complex promotion is required or hooks are unavailable."
+    "notes": "Uses the provider's unary_atanh hook when every element satisfies |x| ≤ 1. Unsupported floating hooks use an owner-preserving fallback; real resident input that requires complex promotion is available only in RunMat mode and returns to the owning provider."
   },
   "fusion": {
     "elementwise": true,
@@ -34,10 +34,11 @@
   "description": "`Y = atanh(X)` evaluates the inverse hyperbolic tangent of each element in `X`. Real inputs in `(-1, 1)` remain real, while values with `|x| > 1` promote to complex outputs, consistent with MATLAB and RunMat principal-branch behavior.",
   "behaviors": [
     "Accepts scalars, vectors, matrices, and N-D tensors using MATLAB broadcasting semantics.",
-    "Logical values are promoted to double precision (`true → 1`, `false → 0`) before evaluation. The results follow MATLAB's rules for infinities at the endpoints (`atanh(1) = Inf`, `atanh(-1) = -Inf`).",
+    "The documented table and timetable overloads are not yet implemented in RunMat.",
+    "Documented single inputs preserve native single or complex-single storage; double inputs preserve double or complex-double storage.",
     "Real values with magnitude greater than `1` return complex numbers whose imaginary part is `±π/2`. The runtime automatically promotes the entire tensor to `Value::ComplexTensor` so downstream consumers see the MATLAB-compatible complex result.",
     "Complex inputs are evaluated with MATLAB's definition `atanh(z) = 0.5 * log((1 + z) / (1 - z))`, including correct handling of branch cuts, NaNs, and infinities.",
-    "Character arrays are treated as their numeric code points and converted to doubles before the inverse hyperbolic tangent is applied.",
+    "Typed-integer, logical, and character inputs are RunMat-only extensions. They enter an explicit double computation boundary and preserve input shape.",
     "Empty arrays return empty outputs with matching shape and type."
   ],
   "examples": [
@@ -91,7 +92,7 @@
     },
     {
       "question": "Can complex inputs stay on the GPU?",
-      "answer": "Not yet. GPU tensor handles represent real buffers. When complex outputs are required (either because the input is complex or a real value exceeds the domain), RunMat promotes the result to `Value::Complex`/`Value::ComplexTensor` on the host so the semantics match MATLAB."
+      "answer": "The public GPU contract requires potentially complex results to start from explicitly complex input. RunMat mode additionally supports real resident input that needs complex promotion, gathering and re-uploading the complex result to the same provider."
     },
     {
       "question": "Will `atanh` participate in fusion and autodiff?",
@@ -99,11 +100,11 @@
     },
     {
       "question": "Are logical and integer inputs supported?",
-      "answer": "Yes. They are promoted to doubles before evaluation. Outputs follow MATLAB's double or complex-double conventions depending on the values."
+      "answer": "They are outside the documented single/double data domain. RunMat mode retains logical and all-eight-class integer inputs as explicit extensions and converts them to double at the inverse-hyperbolic-tangent computation boundary."
     },
     {
       "question": "What if my provider does not implement `unary_atanh`?",
-      "answer": "RunMat automatically gathers the data, evaluates `atanh` on the CPU, and returns correct results. Consider enabling the in-process provider for development or the WGPU provider for production to keep the operation on the GPU."
+      "answer": "RunMat gathers the data, evaluates `atanh` on the CPU, and restores the result to the input handle's owning provider."
     }
   ],
   "links": [
@@ -168,8 +169,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/atanh.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atanh.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. The auto-offload planner keeps tensors on the GPU whenever the provider exposes a working `unary_atanh` hook and every element satisfies `|x| ≤ 1`. If any element requires complex promotion or the provider lacks native support, RunMat automatically gathers to the host and still returns MATLAB-compatible results. Manual `gpuArray` / `gather` remains available for workflows that demand explicit residency control.",
+  "gpu_residency": "The auto-offload planner keeps documented floating inputs on the GPU whenever the provider exposes `unary_atanh` and every element satisfies `|x| ≤ 1`. Unsupported hooks use owner-preserving fallback. RunMat mode also permits real resident input that requires complex promotion and restores the complex result to the same provider.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU when:\n\n1. A provider is registered and implements the `unary_atanh` hook. 2. Every element satisfies `|x| ≤ 1` (allowing the endpoints for the ±Inf behaviour).\n\nThe runtime first calls the provider's `reduce_min`/`reduce_max` hooks to prove that the entire operand stays within the real domain `[-1, 1]`. If those hooks are missing, return an error, or detect a value outside the domain, RunMat gathers the tensor to the host, performs the computation with the CPU reference implementation, and returns MATLAB-accurate complex results. Users do not need to micromanage residency with `gpuArray`/`gather`; the runtime transparently falls back only when necessary."
+    "RunMat Accelerate keeps tensors on the GPU when a provider implements `unary_atanh` and the extremum reductions prove that every element lies in `[-1, 1]`. Missing floating hooks use an owner-preserving gather fallback. Real resident input that requires complex promotion is rejected in MATLAB-compatible modes and is an explicit RunMat-only extension that restores the complex result to the owning provider."
   ]
 }

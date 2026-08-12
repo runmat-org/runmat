@@ -74,6 +74,10 @@ pub(super) struct BufferEntry {
     pub(super) shape: Vec<usize>,
     pub(super) storage: GpuTensorStorage,
     pub(super) precision: NumericPrecision,
+    /// Exact integer payloads use a word-packed ABI and must never be passed
+    /// to the floating-point kernel paths.
+    pub(super) integer_type: Option<runmat_accelerate_api::IntegerElementType>,
+    pub(super) allocated_bytes: u64,
     pub(super) usage: BufferUsageClass,
     pub(super) last_submission_id: Option<u32>,
 }

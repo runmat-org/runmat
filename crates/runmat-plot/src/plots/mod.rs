@@ -37,7 +37,7 @@ pub use mesh::{
     MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshRegion, MeshScalarField,
     MeshTriangleRange, MeshVectorField,
 };
-pub use patch::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
+pub use patch::{PatchData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 pub use pie::PieChart;
 pub use quiver::{QuiverGpuSource, QuiverPlot};
 pub use reference_line::{ReferenceLine, ReferenceLineOrientation};

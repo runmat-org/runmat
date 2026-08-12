@@ -245,6 +245,7 @@ fn ifftn_error_with_message(
     builtin_path = "crate::builtins::math::fft::ifftn"
 )]
 async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "ifftn")?;
     let (sizes, symmetric) = parse_ifftn_arguments(&rest)?;
     match value {
         Value::GpuTensor(handle) => ifftn_gpu(handle, sizes, symmetric).await,
@@ -495,8 +496,8 @@ mod tests {
         let freq = fft_complex_tensor(b, None, Some(3)).unwrap();
         let back = ifftn_complex_tensor(freq, None).unwrap();
         assert_eq!(back.shape, vec![2, 2, 2]);
-        for (idx, (re, im)) in back.data.iter().enumerate() {
-            assert!((*re - input.data[idx]).abs() < 1e-10);
+        for (idx, (re, im)) in back.materialize_f64().iter().enumerate() {
+            assert!((*re - input.materialize_f64()[idx]).abs() < 1e-10);
             assert!(im.abs() < 1e-10);
         }
     }
@@ -517,7 +518,11 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2, 2]);
-                for (got, expected) in t.data.iter().zip(input.data.iter()) {
+                for (got, expected) in t
+                    .materialize_f64()
+                    .iter()
+                    .zip(input.materialize_f64().iter())
+                {
                     assert!((*got - *expected).abs() < 1e-10);
                 }
             }

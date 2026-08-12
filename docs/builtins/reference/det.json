@@ -13,10 +13,11 @@
     "elementwise": false,
     "reduction": false,
     "precisions": [
+      "f32",
       "f64"
     ],
     "broadcasting": "none",
-    "notes": "Uses provider LU factorization when available; real matrices re-upload a scalar result, while complex inputs gather to the host."
+    "notes": "Uses owner-resolved provider LU for floating storage. Typed integer, logical, and complex storage use an explicit gathered fallback; restoration requires the owner to physically support the computed precision, and results are validated against input owner/device and computed shape/storage/precision."
   },
   "fusion": {
     "elementwise": false,
@@ -27,15 +28,15 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::math::linalg::solve::det::tests",
-    "gpu": "builtins::math::linalg::solve::det::tests::det_gpu_roundtrip_matches_cpu",
+    "gpu": "builtins::math::linalg::solve::det::tests::det_rejects_aliased_or_mistyped_provider_lu_results_and_frees_safely",
     "wgpu": "builtins::math::linalg::solve::det::tests::det_wgpu_matches_cpu"
   },
   "description": "`det(A)` returns the determinant of real or complex square matrix `A`. Scalar and empty-matrix cases (`det([]) = 1`) follow MATLAB and RunMat conventions.",
   "behaviors": [
     "Inputs must be 2-D square matrices. RunMat rejects non-square or higher-rank inputs with the MATLAB error `\"det: input must be a square matrix.\"`",
     "Determinants are computed from an LU factorization with partial pivoting, ensuring numerical behavior that mirrors MATLAB. Singular matrices return `0` (within floating-point round-off).",
-    "Logical and integer inputs are promoted to double precision before evaluation.",
-    "Complex inputs are handled with full complex arithmetic. The result has complex type whenever the input is complex.",
+    "MATLAB documents single and double matrices. Integer and logical matrices are separately gated RunMat-only extensions; integer values must be exactly representable as double rather than silently rounded.",
+    "Single input produces a single result. Complex input retains complex result storage and its single/double class.",
     "The determinant of the empty matrix (`[]`) is `1`."
   ],
   "examples": [
@@ -97,7 +98,7 @@
     },
     {
       "question": "Do logical inputs work?",
-      "answer": "Yes. Logical arrays are promoted to doubles before computing the determinant."
+      "answer": "Logical matrices are a named RunMat-only extension. Strict MATLAB compatibility mode rejects them before data access."
     },
     {
       "question": "Is the determinant computed exactly?",
@@ -154,8 +155,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/linalg/solve/det.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/solve/det.rs"
   },
-  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB). The fusion planner keeps producers on the GPU, `det` invokes the provider's `lu` hook when available, and real determinants are re-uploaded as device scalars so subsequent kernels keep their residency. When the provider lacks `lu`, RunMat transparently gathers the matrix, computes the determinant with the host fallback, and re-uploads the scalar for real inputs. Complex determinants currently return host scalars until device complex scalars land. `gpuArray` and `gather` remain available for explicit residency control and MATLAB compatibility.",
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat. Floating storage uses the owning provider's `lu` hook when available. Explicit fallback paths gather through that owner and restore real or complex scalar results to the same device while preserving single/double precision.",
   "gpu_behavior": [
-    "When a GPU acceleration provider is active, RunMat first asks the provider for an LU factorization via the `lu` hook. Providers that implement it keep the factors on device, multiply the diagonal of `U`, and re-upload the scalar determinant for real inputs so downstream kernels keep running on the GPU. Complex matrices currently gather to the host for the final scalar. Providers that do not expose `lu` (including the current fallback backends) automatically route to the shared CPU implementation with no user intervention required."
+    "RunMat resolves the provider from the input handle rather than a global provider. Floating matrices use its `lu` hook when possible; typed integer, logical, complex, and unsupported-provider cases gather explicitly. Re-uploaded results must match the input owner/device and the computed shape, storage, and precision or they are freed and rejected."
   ]
 }

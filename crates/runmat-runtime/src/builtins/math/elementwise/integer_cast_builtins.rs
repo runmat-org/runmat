@@ -24,7 +24,8 @@ macro_rules! define_integer_cast_builtin {
 
             use crate::builtins::common::spec::{
                 BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy,
-                GpuOpKind, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+                GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+                ShapeRequirements,
             };
             use crate::builtins::math::elementwise::integer_cast::{
                 cast_value, CastError, IntegerTarget,
@@ -84,14 +85,14 @@ macro_rules! define_integer_cast_builtin {
                 op_kind: GpuOpKind::Elementwise,
                 supported_precisions: &[ScalarType::F32, ScalarType::F64],
                 broadcast: BroadcastSemantics::Matlab,
-                provider_hooks: &[],
+                provider_hooks: &[ProviderHook::Custom("cast_to_integer")],
                 constant_strategy: ConstantStrategy::InlineLiteral,
-                residency: ResidencyPolicy::GatherImmediately,
+                residency: ResidencyPolicy::NewHandle,
                 nan_mode: ReductionNaN::Include,
                 two_pass_threshold: None,
                 workgroup_size: None,
                 accepts_nan_mode: false,
-                notes: "Providers do not yet expose exact integer buffers; gpuArray inputs gather and return an exact host integer tensor.",
+                notes: "Real gpuArray inputs use the provider resident integer-cast hook and return native integer gpuArray storage. Complex gpuArray integer casts remain unsupported until typed complex integer provider storage exists.",
             };
 
             #[runmat_macros::register_fusion_spec(builtin_path = $path)]
@@ -102,7 +103,7 @@ macro_rules! define_integer_cast_builtin {
                 elementwise: None,
                 reduction: None,
                 emits_nan: false,
-                notes: "Integer casts are host-side until providers support exact integer buffers.",
+                notes: "Resident integer casts use provider-native integer storage; fusion can target the provider hook when integer buffers are supported.",
             };
 
             #[runtime_builtin(
@@ -170,6 +171,19 @@ define_integer_cast_builtin!(
     "RM.INT16.INTERNAL"
 );
 define_integer_cast_builtin!(
+    int32,
+    int32_builtin,
+    "int32",
+    IntegerTarget::I32,
+    "Convert scalars and arrays to int32 using MATLAB saturating rounding.",
+    "int32,cast,integer,conversion,gpuArray",
+    crate::builtins::math::elementwise::integer_cast_builtins::int32::DESCRIPTOR,
+    "crate::builtins::math::elementwise::integer_cast_builtins::int32",
+    "RM.INT32.INVALID_ARGUMENT",
+    "RM.INT32.INVALID_INPUT",
+    "RM.INT32.INTERNAL"
+);
+define_integer_cast_builtin!(
     int64,
     int64_builtin,
     "int64",
@@ -181,6 +195,45 @@ define_integer_cast_builtin!(
     "RM.INT64.INVALID_ARGUMENT",
     "RM.INT64.INVALID_INPUT",
     "RM.INT64.INTERNAL"
+);
+define_integer_cast_builtin!(
+    uint8,
+    uint8_builtin,
+    "uint8",
+    IntegerTarget::U8,
+    "Convert scalars and arrays to uint8 using MATLAB saturating rounding.",
+    "uint8,cast,integer,conversion,gpuArray",
+    crate::builtins::math::elementwise::integer_cast_builtins::uint8::DESCRIPTOR,
+    "crate::builtins::math::elementwise::integer_cast_builtins::uint8",
+    "RM.UINT8.INVALID_ARGUMENT",
+    "RM.UINT8.INVALID_INPUT",
+    "RM.UINT8.INTERNAL"
+);
+define_integer_cast_builtin!(
+    uint16,
+    uint16_builtin,
+    "uint16",
+    IntegerTarget::U16,
+    "Convert scalars and arrays to uint16 using MATLAB saturating rounding.",
+    "uint16,cast,integer,conversion,gpuArray",
+    crate::builtins::math::elementwise::integer_cast_builtins::uint16::DESCRIPTOR,
+    "crate::builtins::math::elementwise::integer_cast_builtins::uint16",
+    "RM.UINT16.INVALID_ARGUMENT",
+    "RM.UINT16.INVALID_INPUT",
+    "RM.UINT16.INTERNAL"
+);
+define_integer_cast_builtin!(
+    uint32,
+    uint32_builtin,
+    "uint32",
+    IntegerTarget::U32,
+    "Convert scalars and arrays to uint32 using MATLAB saturating rounding.",
+    "uint32,cast,integer,conversion,gpuArray",
+    crate::builtins::math::elementwise::integer_cast_builtins::uint32::DESCRIPTOR,
+    "crate::builtins::math::elementwise::integer_cast_builtins::uint32",
+    "RM.UINT32.INVALID_ARGUMENT",
+    "RM.UINT32.INVALID_INPUT",
+    "RM.UINT32.INTERNAL"
 );
 define_integer_cast_builtin!(
     uint64,
@@ -200,7 +253,10 @@ define_integer_cast_builtin!(
 mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{
+        AccelProvider, HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView,
+        HostTensorView, IntegerElementType,
+    };
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
     #[test]
@@ -277,12 +333,12 @@ mod tests {
     }
 
     #[test]
-    fn uint64_gpu_input_gathers_to_exact_host_tensor() {
+    fn uint64_gpu_input_stays_resident_with_exact_integer_storage() {
         test_support::with_test_provider(|provider| {
             let source = Tensor::new(vec![-1.0, 4.4], vec![1, 2]).expect("source");
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &source.data,
+                    data: &source.materialize_f64(),
                     shape: &source.shape,
                 })
                 .expect("upload");
@@ -292,23 +348,87 @@ mod tests {
             ))
             .expect("uint64 GPU conversion");
 
-            match output {
-                Value::Tensor(tensor) => assert_eq!(
-                    tensor.integer_storage(),
-                    Some(&IntegerStorage::U64(vec![0, 4]))
-                ),
-                other => panic!("expected exact host tensor, got {other:?}"),
-            }
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident gpuArray result");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            assert_eq!(
+                block_on(provider.download_integer(&handle))
+                    .expect("download uint64 cast")
+                    .data,
+                HostIntegerDataOwned::U64(vec![0, 4])
+            );
         });
     }
 
     #[test]
-    fn integer_casts_reject_complex_inputs_with_builtin_identifiers() {
-        let error = block_on(super::uint64::uint64_builtin(
-            Value::Complex(1.0, 0.0),
+    fn integer_cast_gpu_dispatch_uses_input_handle_owner() {
+        let _guard = test_support::accel_test_lock();
+        let provider_a: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        let provider_b: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+            Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+        );
+        unsafe {
+            runmat_accelerate_api::register_provider(provider_a);
+            runmat_accelerate_api::register_provider(provider_b);
+        }
+        let _current = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider_b));
+
+        let input = provider_a
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::U64(&[0, 1_u64 << 63, u64::MAX]),
+                shape: &[1, 3],
+            })
+            .expect("upload provider-a integer");
+        assert_eq!(input.device_id, provider_a.device_id());
+        assert_eq!(
+            runmat_accelerate_api::provider()
+                .expect("current provider")
+                .device_id(),
+            provider_b.device_id()
+        );
+
+        let output = block_on(super::int64::int64_builtin(
+            Value::GpuTensor(input),
             Vec::new(),
         ))
-        .expect_err("complex input should fail");
-        assert_eq!(error.identifier(), Some("RunMat:uint64:InvalidInput"));
+        .expect("int64 GPU conversion");
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident gpuArray output");
+        };
+        assert_eq!(output.device_id, provider_a.device_id());
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&output),
+            Some(IntegerElementType::I64)
+        );
+        assert_eq!(
+            block_on(provider_a.download_integer(&output))
+                .expect("download provider-a cast")
+                .data,
+            HostIntegerDataOwned::I64(vec![0, i64::MAX, i64::MAX])
+        );
+    }
+
+    #[test]
+    fn integer_casts_preserve_complex_storage_even_when_imaginary_part_rounds_to_zero() {
+        let output = block_on(super::uint64::uint64_builtin(
+            Value::Complex(1.0, 1e-48),
+            Vec::new(),
+        ))
+        .expect("complex input should convert");
+        assert!(matches!(
+            output,
+            Value::ComplexTensor(tensor)
+                if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                    == Some((
+                        &IntegerStorage::U64(vec![1]),
+                        &IntegerStorage::U64(vec![0]),
+                    ))
+        ));
     }
 }

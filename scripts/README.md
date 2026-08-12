@@ -1,7 +1,6 @@
 # Scripts Layout
 
-Top-level `scripts/` is intentionally minimal. Keep stable human and CI
-entrypoints at the root; keep implementation scripts under their owning domain.
+Top-level `scripts/` is intentionally minimal. Keep stable human and CI entrypoints at the root; keep implementation scripts under their owning domain.
 
 Primary organization:
 
@@ -12,8 +11,10 @@ Primary organization:
 - `scripts/fea/reference_data/`: benchmark/reference baseline data files.
 - `scripts/metadata/`: metadata tooling assets.
 - `scripts/runtime/`: runtime/testing helper scripts (wasm/headless verification, etc.).
+- `scripts/development/`: reproducible development audits and migration inventories.
 
 Stable entrypoints:
 
 - `scripts/test-wasm-headless.sh`: full local/CI WASM headless verification.
 - `scripts/test-fea-scripts.sh`: FEA governance and reporting script unit tests.
+- `scripts/development/integer-storage-census.sh`: stable lexical baseline for the authoritative numeric-storage migration. Its output is a discovery frontier, not a defect count.

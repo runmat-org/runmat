@@ -2680,7 +2680,7 @@ fn execute_request_honors_top_level_await_host_policy() {
             name: "request-await-policy.m".to_string(),
             text: "y = await(1);".to_string(),
         },
-        compatibility: CompatMode::Matlab,
+        compatibility: CompatMode::RunMat,
         host_policy: abi::HostExecutionPolicy {
             top_level_await: false,
             dynamic_eval: true,
@@ -10426,6 +10426,66 @@ fn dynamic_workspace_evalin_base_and_assignin_update_base_workspace() {
 }
 
 #[test]
+fn dynamic_workspace_assignin_session_delta_preserves_all_integer_classes() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        assignin('base', 'ai_i8', int8([-128 127]));
+        assignin('base', 'ai_i16', int16([-32768 32767]));
+        assignin('base', 'ai_i32', int32([-2147483648 2147483647]));
+        assignin('base', 'ai_i64', int64([-7 9]));
+        assignin('base', 'ai_u8', uint8([0 255]));
+        assignin('base', 'ai_u16', uint16([0 65535]));
+        assignin('base', 'ai_u32', uint32([0 4294967295]));
+        base = uint64(9007199254740992);
+        assignin('base', 'ai_u64', base + uint64([1 2]));
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("assign exact integer values");
+    for (name, expected) in [
+        (
+            "ai_i8",
+            runmat_builtins::IntegerStorage::I8(vec![-128, 127]),
+        ),
+        (
+            "ai_i16",
+            runmat_builtins::IntegerStorage::I16(vec![-32768, 32767]),
+        ),
+        (
+            "ai_i32",
+            runmat_builtins::IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+        ),
+        ("ai_i64", runmat_builtins::IntegerStorage::I64(vec![-7, 9])),
+        (
+            "ai_u8",
+            runmat_builtins::IntegerStorage::U8(vec![0, u8::MAX]),
+        ),
+        (
+            "ai_u16",
+            runmat_builtins::IntegerStorage::U16(vec![0, u16::MAX]),
+        ),
+        (
+            "ai_u32",
+            runmat_builtins::IntegerStorage::U32(vec![0, u32::MAX]),
+        ),
+        (
+            "ai_u64",
+            runmat_builtins::IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                9_007_199_254_740_994,
+            ]),
+        ),
+    ] {
+        assert!(
+            matches!(
+                outcome_named_upsert_value(&outcome, name),
+                Some(runmat_builtins::Value::Tensor(tensor))
+                    if tensor.integer_storage() == Some(&expected)
+            ),
+            "missing exact session upsert {name}={expected:?}"
+        );
+    }
+}
+
+#[test]
 fn dynamic_workspace_evalin_caller_from_function_targets_script_workspace() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
@@ -12886,6 +12946,7 @@ fn arrayfun_session_function_uses_semantic_registry() {
 #[test]
 fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let source = "name = 'inc'; A = [2, 3]; B = arrayfun(name, A); y = B(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
@@ -12918,6 +12979,7 @@ fn cellfun_unresolved_external_callback_reports_undefined_function_identifier() 
 #[test]
 fn arrayfun_unresolved_external_callback_reports_undefined_function_identifier() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let outcome =
         execute_text_request(&mut session, "A = [2, 3]; y = arrayfun('pkg.callback', A);")
             .expect("unresolved external arrayfun callback should surface a runtime diagnostic");

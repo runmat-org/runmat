@@ -1,7 +1,7 @@
 //! MATLAB-compatible `rref` builtin using Gauss-Jordan row reduction.
 
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -227,6 +227,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     let eval = match value {
         Value::GpuTensor(handle) => rref_gpu(handle, tol).await?,
         other => rref_eval_from_value(other, tol)?,
@@ -242,11 +243,7 @@ async fn rref_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Rr
 
     if let Value::Tensor(matrix) = &eval.reduced {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let view = HostTensorView {
-                data: &matrix.data,
-                shape: &matrix.shape,
-            };
-            let uploaded = provider.upload(&view).map_err(|err| {
+            let uploaded = gpu_helpers::upload_tensor(provider, matrix).map_err(|err| {
                 internal_error(format!("{NAME}: failed to upload reduced matrix ({err})"))
             })?;
             eval.reduced = Value::GpuTensor(uploaded);
@@ -295,8 +292,9 @@ impl RrefEval {
 
 fn rref_real_eval(matrix: Tensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
-    let tolerance = tol.unwrap_or_else(|| default_real_tolerance(&matrix.data, rows, cols));
-    let (reduced, pivots) = rref_real_impl(matrix.data, rows, cols, tolerance)?;
+    let data = tensor::tensor_into_values_f64(matrix);
+    let tolerance = tol.unwrap_or_else(|| default_real_tolerance(&data, rows, cols));
+    let (reduced, pivots) = rref_real_impl(data, rows, cols, tolerance)?;
     let reduced = Tensor::new(reduced, vec![rows, cols])
         .map_err(|e| internal_error(format!("{NAME}: {e}")))?;
     Ok(RrefEval {
@@ -307,9 +305,10 @@ fn rref_real_eval(matrix: Tensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
 
 fn rref_complex_eval(matrix: ComplexTensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
-    let tolerance = tol.unwrap_or_else(|| default_complex_tolerance(&matrix.data, rows, cols));
+    let tolerance =
+        tol.unwrap_or_else(|| default_complex_tolerance(&matrix.materialize_f64(), rows, cols));
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .into_iter()
         .map(|(re, im)| Complex64::new(re, im))
         .collect();
@@ -609,7 +608,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -723,7 +723,7 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 3]);
                 assert_close(
-                    &out.data,
+                    &out.materialize_f64(),
                     &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 2.0, 0.0],
                     1e-12,
                 );
@@ -733,7 +733,7 @@ pub(crate) mod tests {
         match &values[1] {
             Value::Tensor(pivots) => {
                 assert_eq!(pivots.shape, vec![1, 2]);
-                assert_eq!(pivots.data, vec![1.0, 2.0]);
+                assert_eq!(pivots.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected pivot tensor, got {other:?}"),
         }
@@ -747,7 +747,27 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_close(&out.data, &[1.0, 0.0, 0.0, 1.0, -1.0, 2.0], 1e-12);
+                assert_close(
+                    &out.materialize_f64(),
+                    &[1.0, 0.0, 0.0, 1.0, -1.0, 2.0],
+                    1e-12,
+                );
+            }
+            other => panic!("expected tensor R, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rref_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 2, 4]), vec![2, 2]).unwrap();
+
+        let result = rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                assert_close(&out.materialize_f64(), &[1.0, 0.0, 2.0, 0.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
@@ -762,7 +782,7 @@ pub(crate) mod tests {
         match &values[0] {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_close(&out.data, &[0.0, 1.0, 2.0], 1e-12);
+                assert_close(&out.materialize_f64(), &[0.0, 1.0, 2.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
@@ -780,7 +800,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
-                assert_close(&out.data, &[1.0, 0.0, 0.0], 1e-12);
+                assert_close(&out.materialize_f64(), &[1.0, 0.0, 0.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
@@ -794,7 +814,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![0, 3]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected 0x3 tensor R, got {other:?}"),
         }
@@ -804,7 +824,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 0]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected 3x0 tensor R, got {other:?}"),
         }
@@ -820,7 +840,7 @@ pub(crate) mod tests {
         match &values[0] {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_close(&out.data, &[1.0, 0.0, 0.0, 0.0], 1e-12);
+                assert_close(&out.materialize_f64(), &[1.0, 0.0, 0.0, 0.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
@@ -839,14 +859,14 @@ pub(crate) mod tests {
         match &values[0] {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![0.0; 6]);
+                assert_eq!(out.materialize_f64(), vec![0.0; 6]);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
         match &values[1] {
             Value::Tensor(pivots) => {
                 assert_eq!(pivots.shape, vec![1, 0]);
-                assert!(pivots.data.is_empty());
+                assert!(pivots.materialize_f64().is_empty());
             }
             other => panic!("expected empty pivot tensor, got {other:?}"),
         }
@@ -865,7 +885,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_complex_close(
-                    &out.data,
+                    &out.materialize_f64(),
                     &[(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
                     1e-12,
                 );
@@ -887,7 +907,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_complex_close(
-                    &out.data,
+                    &out.materialize_f64(),
                     &[(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
                     1e-12,
                 );
@@ -912,7 +932,7 @@ pub(crate) mod tests {
         match &values[0] {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_close(&out.data, &[1.0, 0.0, 0.0, 1.0], 1e-12);
+                assert_close(&out.materialize_f64(), &[1.0, 0.0, 0.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
@@ -927,12 +947,12 @@ pub(crate) mod tests {
         match &values[0] {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![0.0, 0.0, 0.0, 0.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
         match &values[1] {
-            Value::Tensor(pivots) => assert!(pivots.data.is_empty()),
+            Value::Tensor(pivots) => assert!(pivots.materialize_f64().is_empty()),
             other => panic!("expected empty pivot tensor, got {other:?}"),
         }
     }
@@ -946,15 +966,15 @@ pub(crate) mod tests {
         match &values[0] {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert!(out.data[0].is_nan());
-                assert!(out.data[1].is_nan());
-                assert_eq!(out.data[2], 0.0);
-                assert_eq!(out.data[3], 1.0);
+                assert!(out.materialize_f64()[0].is_nan());
+                assert!(out.materialize_f64()[1].is_nan());
+                assert_eq!(out.materialize_f64()[2], 0.0);
+                assert_eq!(out.materialize_f64()[3], 1.0);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
         match &values[1] {
-            Value::Tensor(pivots) => assert_eq!(pivots.data, vec![1.0, 2.0]),
+            Value::Tensor(pivots) => assert_eq!(pivots.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected pivot tensor, got {other:?}"),
         }
     }
@@ -1014,14 +1034,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = rref_builtin(Value::GpuTensor(handle), Vec::new()).expect("rref");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_close(&gathered.data, &[1.0, 0.0, 2.0, 0.0], 1e-12);
+            assert_close(&gathered.materialize_f64(), &[1.0, 0.0, 2.0, 0.0], 1e-12);
         });
     }
 
@@ -1031,7 +1051,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1042,7 +1062,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(_) => {
                     let gathered = test_support::gather(values[0].clone()).expect("gather");
                     assert_eq!(gathered.shape, vec![2, 2]);
-                    assert_close(&gathered.data, &[1.0, 0.0, 2.0, 0.0], 1e-12);
+                    assert_close(&gathered.materialize_f64(), &[1.0, 0.0, 2.0, 0.0], 1e-12);
                 }
                 other => panic!("expected gpu tensor R, got {other:?}"),
             }

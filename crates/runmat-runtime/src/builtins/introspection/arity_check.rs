@@ -6,6 +6,8 @@ use runmat_hir::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 
+use crate::builtins::common::tensor;
+
 const NO_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
 
 const ARITY_CHECK_INPUTS: [BuiltinParamDescriptor; 2] = [
@@ -186,14 +188,36 @@ fn parse_finite_arity_bound(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> crate::BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .ok_or_else(|| descriptor_error(builtin, error));
+    }
+    if let Value::Tensor(tensor) = value {
+        if !tensor::is_scalar_tensor(tensor) {
+            return Err(descriptor_error(builtin, error));
+        }
+        if let Some(storage) = tensor.integer_storage() {
+            return storage
+                .value_at(0)
+                .and_then(|value| value.try_to_usize())
+                .ok_or_else(|| descriptor_error(builtin, error));
+        }
+    }
     let number = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         _ => return Err(descriptor_error(builtin, error)),
     };
 
-    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 || number > usize::MAX as f64 {
+    if !number.is_finite()
+        || number < 0.0
+        || number.fract() != 0.0
+        || number > usize::MAX as f64
+        || (usize::BITS == 64 && number == usize::MAX as f64)
+    {
         return Err(descriptor_error(builtin, error));
     }
     Ok(number as usize)
@@ -209,9 +233,10 @@ fn parse_max_arity_bound(
             Ok(ArityBound::Unbounded)
         }
         Value::Tensor(tensor)
-            if tensor.data.len() == 1
-                && tensor.data[0].is_infinite()
-                && tensor.data[0].is_sign_positive() =>
+            if tensor::is_scalar_tensor(tensor) && {
+                let value = tensor::tensor_value_f64(tensor, 0);
+                value.is_infinite() && value.is_sign_positive()
+            } =>
         {
             Ok(ArityBound::Unbounded)
         }
@@ -338,6 +363,7 @@ pub fn nargoutchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn narginchk_uses_runtime_call_count_context() {
@@ -367,5 +393,39 @@ mod tests {
             err.identifier(),
             Some("RunMat:NargoutchkContextUnavailable")
         );
+    }
+
+    #[test]
+    fn arity_bounds_read_typed_integer_tensor_storage_exactly() {
+        let _guard = replace_call_counts(vec![(2, 1)]);
+        let min =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer min");
+        let max =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer max");
+
+        let value = dispatch_narginchk(vec![Value::Tensor(min), Value::Tensor(max)])
+            .expect("narginchk succeeds");
+        assert_eq!(value, Value::Num(0.0));
+
+        assert_eq!(
+            parse_finite_arity_bound(
+                &Value::Int(IntValue::U16(2)),
+                "narginchk",
+                &NARGINCHK_ERROR_BOUNDS_INVALID
+            )
+            .unwrap(),
+            2
+        );
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(
+                parse_finite_arity_bound(&value, "narginchk", &NARGINCHK_ERROR_BOUNDS_INVALID)
+                    .is_err()
+            );
+        }
     }
 }

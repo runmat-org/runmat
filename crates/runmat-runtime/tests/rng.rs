@@ -33,9 +33,9 @@ fn randn_single_stats_are_unit() {
     let Value::Tensor(tensor) = tensor_value else {
         panic!("expected tensor result from randn single");
     };
-    assert_eq!(tensor.dtype, NumericDType::F32);
+    assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
 
-    let (mean, variance) = mean_variance(&tensor.data);
+    let (mean, variance) = mean_variance(&tensor.materialize_f64());
     assert!(mean.abs() < 0.02, "mean drift too high for single: {mean}");
     assert!(
         (variance - 1.0).abs() < 0.05,
@@ -53,9 +53,9 @@ fn randn_double_stats_are_unit() {
     let Value::Tensor(tensor) = tensor_value else {
         panic!("expected tensor result from randn double");
     };
-    assert_eq!(tensor.dtype, NumericDType::F64);
+    assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
 
-    let (mean, variance) = mean_variance(&tensor.data);
+    let (mean, variance) = mean_variance(&tensor.materialize_f64());
     assert!(mean.abs() < 0.01, "mean drift too high for double: {mean}");
     assert!(
         (variance - 1.0).abs() < 0.02,

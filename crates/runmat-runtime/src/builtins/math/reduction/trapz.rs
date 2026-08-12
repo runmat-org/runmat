@@ -15,8 +15,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::math::reduction::integration_common::{
     canonical_shape_complex, canonical_shape_tensor, default_dimension_from_shape, dim_product,
     gather_host_value, interval_width, is_dimension_candidate, is_scalar_like, pad_shape_for_dim,
-    parse_optional_dim, promote_real_value_to_gpu, spacing_from_gpu_or_host_value,
-    spacing_from_value, value_has_gpu_tensor, value_into_complex_tensor, SpacingSpec,
+    parse_optional_dim, promote_real_value_to_gpu, real_tensor_values,
+    spacing_from_gpu_or_host_value, spacing_from_value, value_has_gpu_tensor,
+    value_into_complex_tensor, SpacingSpec,
 };
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -223,6 +224,12 @@ fn trapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 )]
 async fn trapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(first, rest)?;
+    if crate::builtins::common::validation::is_typed_complex_integer(&parsed.y) {
+        return Err(trapz_error_with_detail(
+            &TRAPZ_ERROR_INVALID_INPUT,
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     if let Value::GpuTensor(handle) = &parsed.y {
         if let Some(provider) = runmat_accelerate_api::provider() {
             let shape = if handle.shape.is_empty() {
@@ -366,6 +373,7 @@ pub(crate) fn trapz_tensor(
     let stride_after = dim_product(&shape[dim..]);
     let block = stride_before * len_dim;
     let mut output = vec![0.0f64; stride_before * stride_after];
+    let values = real_tensor_values(tensor);
 
     if len_dim > 1 {
         for after in 0..stride_after {
@@ -376,7 +384,7 @@ pub(crate) fn trapz_tensor(
                     let idx0 = base + before + k * stride_before;
                     let idx1 = idx0 + stride_before;
                     let width = interval_width(spacing, idx0, idx1, k);
-                    acc += 0.5 * width * (tensor.data[idx0] + tensor.data[idx1]);
+                    acc += 0.5 * width * (values[idx0] + values[idx1]);
                 }
                 output[after * stride_before + before] = acc;
             }
@@ -417,8 +425,8 @@ fn trapz_complex_tensor(
                     let idx0 = base + before + k * stride_before;
                     let idx1 = idx0 + stride_before;
                     let width = interval_width(spacing, idx0, idx1, k);
-                    let (re0, im0) = tensor.data[idx0];
-                    let (re1, im1) = tensor.data[idx1];
+                    let (re0, im0) = tensor.materialize_f64()[idx0];
+                    let (re1, im1) = tensor.materialize_f64()[idx1];
                     acc.0 += 0.5 * width * (re0 + re1);
                     acc.1 += 0.5 * width * (im0 + im1);
                 }
@@ -440,7 +448,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, LiteralValue};
+    use runmat_builtins::{IntValue, IntegerStorage, LiteralValue};
 
     fn run_trapz(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::trapz_builtin(first, rest))
@@ -484,6 +492,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn trapz_reads_typed_integer_values_and_spacing_exactly() {
+        let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("x");
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2]), vec![1, 3]).expect("y");
+
+        let value = run_trapz(Value::Tensor(x), vec![Value::Tensor(y)]).expect("trapz");
+
+        assert_eq!(value, Value::Num(3.5));
+    }
+
+    #[test]
     fn trapz_matrix_dimension_two() {
         let y = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let value = run_trapz(Value::Tensor(y), vec![Value::Int(IntValue::I32(2))]).expect("trapz");
@@ -491,7 +509,7 @@ pub(crate) mod tests {
             panic!("expected tensor result");
         };
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![4.0, 10.0]);
+        assert_eq!(out.materialize_f64(), vec![4.0, 10.0]);
     }
 
     #[test]
@@ -574,7 +592,7 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload");
@@ -584,7 +602,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data, vec![4.0]);
+            assert_eq!(gathered.materialize_f64(), vec![4.0]);
         });
     }
 
@@ -627,7 +645,7 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
@@ -638,7 +656,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert_eq!(gathered.data, vec![3.5]);
+            assert_eq!(gathered.materialize_f64(), vec![3.5]);
         });
     }
 
@@ -649,13 +667,13 @@ pub(crate) mod tests {
             let y = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
             let y_handle = provider
                 .upload(&HostTensorView {
-                    data: &y.data,
+                    data: &y.materialize_f64(),
                     shape: &y.shape,
                 })
                 .expect("upload y");
             let x_handle = provider
                 .upload(&HostTensorView {
-                    data: &x.data,
+                    data: &x.materialize_f64(),
                     shape: &x.shape,
                 })
                 .expect("upload x");
@@ -669,7 +687,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert_eq!(gathered.data, vec![6.5, 15.5]);
+            assert_eq!(gathered.materialize_f64(), vec![6.5, 15.5]);
         });
     }
 
@@ -688,7 +706,7 @@ pub(crate) mod tests {
         let cpu = run_trapz(Value::Tensor(x.clone()), vec![Value::Tensor(y.clone())]).unwrap();
         let y_handle = provider
             .upload(&HostTensorView {
-                data: &y.data,
+                data: &y.materialize_f64(),
                 shape: &y.shape,
             })
             .unwrap();
@@ -703,6 +721,6 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
         assert_eq!(gathered.shape, vec![1, 1]);
-        assert!((gathered.data[0] - expected).abs() < tol);
+        assert!((gathered.materialize_f64()[0] - expected).abs() < tol);
     }
 }

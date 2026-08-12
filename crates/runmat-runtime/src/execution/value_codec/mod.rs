@@ -10,7 +10,8 @@ pub use error::ValueCodecError;
 mod tests {
     use crate::execution::RuntimeExecutionServices;
     use runmat_builtins::{
-        CellArray, CharArray, IntValue, MException, StringArray, StructValue, Tensor, Value,
+        CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+        MException, StringArray, StructValue, Tensor, Value,
     };
 
     use runmat_execution::value::{InlineValue, ValuePayload};
@@ -71,6 +72,78 @@ mod tests {
         let payload = encode_inline_value(&value).unwrap();
         let decoded = decode_inline_value(&payload).unwrap();
         assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn native_complex_classes_round_trip_without_widening() {
+        let single = Value::ComplexTensor(
+            ComplexTensor::from_f32(
+                vec![
+                    (f32::from_bits(0x8000_0000), f32::from_bits(0x7fc0_0042)),
+                    (f32::MAX, f32::MIN_POSITIVE),
+                ],
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        let Value::ComplexTensor(decoded_single) =
+            decode_inline_value(&encode_inline_value(&single).unwrap()).unwrap()
+        else {
+            panic!("expected decoded single complex tensor");
+        };
+        let decoded_values = decoded_single.as_f32_slice().unwrap();
+        assert_eq!(decoded_values[0].0.to_bits(), 0x8000_0000);
+        assert_eq!(decoded_values[0].1.to_bits(), 0x7fc0_0042);
+        assert_eq!(decoded_values[1], (f32::MAX, f32::MIN_POSITIVE));
+        assert_eq!(decoded_single.shape, vec![1, 2]);
+
+        let integer_components = [
+            (
+                IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+                IntegerStorage::I8(vec![i8::MAX, i8::MIN]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+                IntegerStorage::I16(vec![i16::MAX, i16::MIN]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+                IntegerStorage::I32(vec![i32::MAX, i32::MIN]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                IntegerStorage::I64(vec![i64::MAX, i64::MIN]),
+            ),
+            (
+                IntegerStorage::U8(vec![u8::MIN, u8::MAX]),
+                IntegerStorage::U8(vec![u8::MAX, u8::MIN]),
+            ),
+            (
+                IntegerStorage::U16(vec![u16::MIN, u16::MAX]),
+                IntegerStorage::U16(vec![u16::MAX, u16::MIN]),
+            ),
+            (
+                IntegerStorage::U32(vec![u32::MIN, u32::MAX]),
+                IntegerStorage::U32(vec![u32::MAX, u32::MIN]),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MIN, u64::MAX]),
+                IntegerStorage::U64(vec![u64::MAX, u64::MIN]),
+            ),
+        ];
+        for (real, imaginary) in integer_components {
+            let value = Value::ComplexTensor(
+                ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(real, imaginary).unwrap(),
+                    vec![2, 1],
+                )
+                .unwrap(),
+            );
+            assert_eq!(
+                decode_inline_value(&encode_inline_value(&value).unwrap()).unwrap(),
+                value
+            );
+        }
     }
 
     #[test]

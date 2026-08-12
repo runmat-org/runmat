@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::Tensor;
 
@@ -133,6 +134,9 @@ fn interp1q_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     builtin_path = "crate::builtins::math::interpolation::interp1q"
 )]
 async fn interp1q_builtin(x: Value, v: Value, xq: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, "interp1q")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&v, "interp1q")?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&xq, "interp1q")?;
     let x = gather_interp_input(x).await?;
     let v = gather_interp_input(v).await?;
     let xq = gather_interp_input(xq).await?;
@@ -183,7 +187,12 @@ fn reshape_matrix_output(
     } else {
         shape.extend(series.trailing_shape.iter().copied());
     }
-    Tensor::new(tensor.data, shape)
+    let storage = tensor.into_numeric_storage().map_err(|err| {
+        build_runtime_error(format!("interp1q: {err}"))
+            .with_builtin(NAME)
+            .build()
+    })?;
+    Tensor::from_numeric_storage(storage, shape)
         .map(Value::Tensor)
         .map_err(|err| {
             build_runtime_error(format!("interp1q: {err}"))
@@ -291,7 +300,10 @@ async fn real_coordinate_data_from_value(
         Value::Num(value) => Ok((vec![value], vec![1, 1])),
         Value::Int(value) => Ok((vec![value.to_f64()], vec![1, 1])),
         Value::Bool(value) => Ok((vec![if value { 1.0 } else { 0.0 }], vec![1, 1])),
-        Value::Tensor(tensor) => Ok((tensor.data, tensor.shape)),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            Ok((tensor_utils::tensor_into_values_f64(tensor), shape))
+        }
         Value::LogicalArray(array) => Ok((
             array
                 .data
@@ -305,11 +317,15 @@ async fn real_coordinate_data_from_value(
             Ok((vec![re], vec![1, 1]))
         }
         Value::ComplexTensor(tensor) => {
-            for &(_, im) in &tensor.data {
+            for &(_, im) in &tensor.materialize_f64() {
                 validate_real_coordinate(label, im)?;
             }
             Ok((
-                tensor.data.into_iter().map(|(re, _)| re).collect(),
+                tensor
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|(re, _)| re)
+                    .collect(),
                 tensor.shape,
             ))
         }
@@ -335,11 +351,17 @@ async fn numeric_data_from_value(
             vec![1, 1],
             false,
         )),
-        Value::Tensor(tensor) => Ok((
-            tensor.data.into_iter().map(|re| (re, 0.0)).collect(),
-            tensor.shape,
-            false,
-        )),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            Ok((
+                tensor_utils::tensor_into_values_f64(tensor)
+                    .into_iter()
+                    .map(|re| (re, 0.0))
+                    .collect(),
+                shape,
+                false,
+            ))
+        }
         Value::LogicalArray(array) => Ok((
             array
                 .data
@@ -355,11 +377,11 @@ async fn numeric_data_from_value(
         }
         Value::ComplexTensor(tensor) => {
             if label == "X" || label == "Xq" {
-                for &(_, im) in &tensor.data {
+                for &(_, im) in &tensor.materialize_f64() {
                     validate_real_coordinate(label, im)?;
                 }
             }
-            Ok((tensor.data, tensor.shape, true))
+            Ok((tensor.materialize_f64(), tensor.shape, true))
         }
         other => Err(error_with_detail(
             &ERROR_INVALID_INPUT,
@@ -463,10 +485,16 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ComplexTensor, Tensor};
+    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
+    }
+
+    fn int_row(storage: IntegerStorage) -> Value {
+        let len = storage.len();
+        let tensor = Tensor::new_integer(storage, vec![1, len]).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -481,7 +509,48 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![15.0, 30.0]);
+        assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0]);
+    }
+
+    #[test]
+    fn interp1q_reads_typed_integer_x_v_and_query_exactly() {
+        let out = block_on(interp1q_builtin(
+            int_row(IntegerStorage::I16(vec![1, 2, 3])),
+            int_row(IntegerStorage::U16(vec![10, 20, 40])),
+            int_row(IntegerStorage::I16(vec![1, 2])),
+        ))
+        .expect("interp1q");
+        let Value::Tensor(tensor) = out else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0]);
+    }
+
+    #[test]
+    fn interp1q_rejects_typed_complex_integer_inputs() {
+        let typed_complex = || {
+            Value::ComplexTensor(
+                ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        IntegerStorage::U64(vec![u64::MAX]),
+                        IntegerStorage::U64(vec![1]),
+                    )
+                    .expect("storage"),
+                    vec![1, 1],
+                )
+                .expect("tensor"),
+            )
+        };
+
+        for (x, v, xq) in [
+            (typed_complex(), row(&[1.0]), row(&[1.0])),
+            (row(&[1.0]), typed_complex(), row(&[1.0])),
+            (row(&[1.0]), row(&[1.0]), typed_complex()),
+        ] {
+            let err = block_on(interp1q_builtin(x, v, xq))
+                .expect_err("typed complex integer input must reject");
+            assert!(err.message().contains("complex numbers with integer types"));
+        }
     }
 
     #[test]
@@ -517,7 +586,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.data, vec![15.0, 30.0, 150.0, 300.0]);
+        assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0, 150.0, 300.0]);
     }
 
     #[test]
@@ -532,7 +601,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![(15.0, 2.0), (30.0, 5.0)]);
+        assert_eq!(tensor.materialize_f64(), vec![(15.0, 2.0), (30.0, 5.0)]);
     }
 
     #[test]
@@ -572,7 +641,7 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![2, 2]);
         assert_eq!(
-            tensor.data,
+            tensor.materialize_f64(),
             vec![(15.0, 2.0), (30.0, 5.0), (150.0, -2.0), (300.0, -5.0)]
         );
     }

@@ -15,10 +15,11 @@
     "elementwise": false,
     "reduction": false,
     "precisions": [
-      "f64"
+      "single",
+      "double"
     ],
     "broadcasting": "none",
-    "notes": "Uses the provider random_exponential hook (Philox CSPRNG + inverse-transform sampling) when an F64-precision provider is active. F32 providers and providers without the hook fall back to host generation."
+    "notes": "The scalar-double provider hook is used only when its returned handle passes ownership, shape, storage, class, and physical-precision validation before RNG state advances. Array means, native single, and resident means use host fallback; restoration requires the exact source owner to physically support the output precision."
   },
   "fusion": {
     "elementwise": false,
@@ -33,12 +34,15 @@
   },
   "description": "`exprnd(mu, ...)` draws exponential random samples using mean parameter `mu`. It supports MATLAB-compatible scalar expansion and explicit output-size signatures.",
   "behaviors": [
-    "`exprnd(mu)` returns a scalar double drawn from `Exp(mu)`.",
+    "`exprnd(mu)` returns one sample per element of `mu` and preserves the shape and single/double precision of `mu`.",
     "`exprnd(mu, n)` returns an `n × n` matrix of samples.",
     "`exprnd(mu, m, n)` returns an `m × n` matrix of samples.",
     "`exprnd(mu, sz)` accepts a size vector and returns an array with shape `sz`.",
-    "`mu` must be a positive scalar; `exprnd` errors if `mu <= 0`.",
-    "All outputs are double precision regardless of input type."
+    "A scalar `mu` expands to an explicitly requested output shape; a nonscalar `mu` requires that shape to match exactly.",
+    "Zero or negative size extents produce an empty array, and trailing singleton dimensions beyond dimension two are ignored.",
+    "`mu` must contain finite positive values; logical and complex means reject.",
+    "MATLAB documents `mu` and size controls as single or double. RunMat can additionally accept typed-integer means and sizes only when RunMat extensions are enabled.",
+    "Resident fallback returns output only to the exact mean input owner and only when that owner physically supports the required precision; otherwise the correctly typed output remains on the host. Native array-mean/single provider hooks and independent CPU/GPU random streams remain provider-ABI work."
   ],
   "examples": [
     {

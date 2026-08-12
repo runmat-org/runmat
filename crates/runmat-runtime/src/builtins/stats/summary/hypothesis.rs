@@ -513,8 +513,8 @@ fn parse_kstest_cdf_table(tensor: &Tensor) -> BuiltinResult<CdfSpec> {
     let rows = tensor.shape[0];
     let mut points = Vec::with_capacity(rows);
     for row in 0..rows {
-        let x = tensor.data[row];
-        let f = tensor.data[row + rows];
+        let x = tensor::tensor_value_f64(tensor, row);
+        let f = tensor::tensor_value_f64(tensor, row + rows);
         if !x.is_finite() || !f.is_finite() || !(0.0..=1.0).contains(&f) {
             return Err(kstest_invalid_argument(
                 "kstest: CDF table values must be finite and probabilities must be in [0,1]",
@@ -574,7 +574,9 @@ fn kstest_scalar_number(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_values_f64(tensor).first().copied()
+        }
         _ => None,
     }
 }
@@ -583,10 +585,8 @@ fn evaluate_kstest(x: &Tensor, options: &KstestOptions) -> BuiltinResult<KstestE
     if !is_kstest_vector_shape(&x.shape) {
         return Err(kstest_invalid_argument("kstest: x must be a vector"));
     }
-    let mut sample = x
-        .data
-        .iter()
-        .copied()
+    let mut sample = tensor::tensor_values_f64(x)
+        .into_iter()
         .filter(|value| !value.is_nan())
         .collect::<Vec<_>>();
     sample.sort_by(f64::total_cmp);
@@ -833,7 +833,9 @@ fn scalar_number(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_values_f64(tensor).first().copied()
+        }
         _ => None,
     }
 }
@@ -866,14 +868,16 @@ fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResult<Evaluatio
     let mut sd_equal_data = Vec::with_capacity(tests);
     let mut sd_x_data = Vec::with_capacity(tests);
     let mut sd_y_data = Vec::with_capacity(tests);
+    let x_values = x.materialize_f64();
+    let y_values = y.materialize_f64();
 
     for linear in 0..tests {
         let result = if vector_collapse {
-            evaluate_pair(&x.data, &y.data, options)
+            evaluate_pair(&x_values, &y_values, options)
         } else {
             let coords = coords_from_linear(linear, &out_shape);
-            let xs = sample_along_dim(x, &x_shape, &coords, dim);
-            let ys = sample_along_dim(y, &y_shape, &coords, dim);
+            let xs = sample_along_dim(&x_values, &x_shape, &coords, dim);
+            let ys = sample_along_dim(&y_values, &y_shape, &coords, dim);
             evaluate_pair(&xs, &ys, options)
         };
         h_data.push(u8::from(result.h));
@@ -1093,18 +1097,13 @@ fn is_nonempty_vector_shape(shape: &[usize]) -> bool {
     shape.iter().all(|dim| *dim > 0) && shape.iter().filter(|dim| **dim > 1).count() <= 1
 }
 
-fn sample_along_dim(
-    tensor: &Tensor,
-    shape: &[usize],
-    out_coords: &[usize],
-    dim: usize,
-) -> Vec<f64> {
+fn sample_along_dim(data: &[f64], shape: &[usize], out_coords: &[usize], dim: usize) -> Vec<f64> {
     let mut values = Vec::with_capacity(shape[dim]);
     let mut coords = out_coords.to_vec();
     coords.resize(shape.len(), 0);
     for idx in 0..shape[dim] {
         coords[dim] = idx;
-        values.push(tensor.data[linear_index(&coords, shape)]);
+        values.push(data[linear_index(&coords, shape)]);
     }
     values
 }
@@ -1161,6 +1160,7 @@ fn interval_shape(out_shape: &[usize], dim: usize) -> Vec<usize> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn output_list(value: Value) -> Vec<Value> {
         match value {
@@ -1174,6 +1174,16 @@ mod tests {
             (actual - expected).abs() <= tol,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -1194,8 +1204,8 @@ mod tests {
         match &outputs[2] {
             Value::Tensor(ci) => {
                 assert_eq!(ci.shape, vec![2, 1]);
-                assert_close(ci.data[0], -6.031_813, 1.0e-6);
-                assert_close(ci.data[1], 1.031_813, 1.0e-6);
+                assert_close(ci.materialize_f64()[0], -6.031_813, 1.0e-6);
+                assert_close(ci.materialize_f64()[1], 1.031_813, 1.0e-6);
             }
             other => panic!("expected ci tensor, got {other:?}"),
         }
@@ -1250,8 +1260,8 @@ mod tests {
         }
         match &outputs[2] {
             Value::Tensor(ci) => {
-                assert_eq!(ci.data[0], f64::NEG_INFINITY);
-                assert!(ci.data[1] < 0.0);
+                assert_eq!(ci.materialize_f64()[0], f64::NEG_INFINITY);
+                assert!(ci.materialize_f64()[1] < 0.0);
             }
             other => panic!("expected ci tensor, got {other:?}"),
         }
@@ -1259,8 +1269,8 @@ mod tests {
             Value::Struct(stats) => match stats.fields.get("sd").unwrap() {
                 Value::Tensor(sd) => {
                     assert_eq!(sd.shape, vec![2, 1]);
-                    assert_close(sd.data[0], 1.290_994, 1.0e-6);
-                    assert_close(sd.data[1], 1.290_994, 1.0e-6);
+                    assert_close(sd.materialize_f64()[0], 1.290_994, 1.0e-6);
+                    assert_close(sd.materialize_f64()[1], 1.290_994, 1.0e-6);
                 }
                 other => panic!("expected unequal sd tensor, got {other:?}"),
             },
@@ -1330,6 +1340,43 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message.contains("Dim"));
+    }
+
+    #[test]
+    fn ttest2_numeric_options_read_typed_integer_storage_exactly() {
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0, 8.0], vec![4, 1]).unwrap());
+        let out = block_on(ttest2_builtin(
+            x,
+            y,
+            vec![
+                Value::from("Dim"),
+                poisoned_integer_scalar(IntegerStorage::U64(vec![1])),
+            ],
+        ))
+        .unwrap();
+        assert_eq!(out, Value::Bool(false));
+
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        let err = block_on(ttest2_builtin(
+            x,
+            y,
+            vec![
+                Value::from("Alpha"),
+                poisoned_integer_scalar(IntegerStorage::I64(vec![1])),
+            ],
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("Alpha"));
+    }
+
+    #[test]
+    fn ttest2_sample_values_read_typed_integer_storage_exactly() {
+        let x = poisoned_integer_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![4, 1]);
+        let y = poisoned_integer_tensor(IntegerStorage::U16(vec![1, 2, 4, 8]), vec![4, 1]);
+        let out = block_on(ttest2_builtin(x, y, Vec::new())).unwrap();
+        assert_eq!(out, Value::Bool(false));
     }
 
     #[test]
@@ -1475,6 +1522,20 @@ mod tests {
     }
 
     #[test]
+    fn kstest_reads_typed_integer_sample_and_cdf_table_exactly() {
+        let sample = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1]), vec![2, 1]);
+        let cdf = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1, 0, 1]), vec![2, 2]);
+        let _guard = crate::output_count::push_output_count(Some(4));
+        let outputs =
+            output_list(block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap());
+        assert_eq!(outputs[0], Value::Bool(false));
+        match outputs[2] {
+            Value::Num(stat) => assert!(stat.is_finite()),
+            ref other => panic!("expected statistic, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn kstest_rejects_bad_options_cdf_and_outputs() {
         let sample = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap());
         let err = block_on(kstest_builtin(
@@ -1559,5 +1620,19 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(5));
         let err = block_on(kstest_builtin(sample, Vec::new())).unwrap_err();
         assert!(err.message.contains("too many output arguments"));
+    }
+
+    #[test]
+    fn kstest_alpha_reads_typed_integer_storage_exactly() {
+        let sample = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap());
+        let err = block_on(kstest_builtin(
+            sample,
+            vec![
+                Value::from("Alpha"),
+                poisoned_integer_scalar(IntegerStorage::U64(vec![1])),
+            ],
+        ))
+        .unwrap_err();
+        assert!(err.message.contains("Alpha"));
     }
 }

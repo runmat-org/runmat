@@ -14,11 +14,15 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray,
+    NumericStorage, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
@@ -193,6 +197,42 @@ pub const CIRCSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CIRCSHIFT_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Array elements are permuted without changing or materializing their native integer class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "K",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Shift scalars/vectors are parsed exactly for integer storage and must be finite integer-valued when floating.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Dimension scalars/vectors are parsed exactly, must be positive, and cannot contain duplicates.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "B = circshift(A, K, dim)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "All eight integer array classes preserve exact storage and shape; provider execution or exact gather/re-upload preserves residency where supported.",
+    }];
+
 fn circshift_error(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -232,6 +272,7 @@ fn circshift_internal(message: impl Into<String>) -> RuntimeError {
     accel = "custom",
     type_resolver(preserve_array_type),
     descriptor(crate::builtins::array::shape::circshift::CIRCSHIFT_DESCRIPTOR),
+    integer_capabilities(crate::builtins::array::shape::circshift::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::array::shape::circshift"
 )]
 async fn circshift_builtin(
@@ -369,6 +410,7 @@ fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<C
 fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
     match token {
         ArgToken::Number(value) => coerce_dim_value(*value).map(|dim| vec![dim]),
+        ArgToken::Integer(value) => coerce_integer_dim_value(value).map(|dim| vec![dim]),
         ArgToken::Vector(values) => {
             if values.is_empty() {
                 return None;
@@ -377,6 +419,7 @@ fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
             for value in values {
                 let dim = match value {
                     ArgToken::Number(num) => coerce_dim_value(*num)?,
+                    ArgToken::Integer(value) => coerce_integer_dim_value(value)?,
                     _ => return None,
                 };
                 dims.push(dim);
@@ -385,6 +428,10 @@ fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
         }
         _ => None,
     }
+}
+
+fn coerce_integer_dim_value(value: &IntValue) -> Option<usize> {
+    value.try_to_usize().filter(|&dim| dim >= 1)
 }
 
 fn coerce_dim_value(value: f64) -> Option<usize> {
@@ -403,15 +450,10 @@ fn coerce_dim_value(value: f64) -> Option<usize> {
 
 fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < isize::MIN as i64 || raw > isize::MAX as i64 {
-                return Err(circshift_invalid_shift(
-                    "circshift: shift magnitude is too large",
-                ));
-            }
-            Ok(vec![raw as isize])
-        }
+        Value::Int(i) => i
+            .try_to_isize()
+            .map(|shift| vec![shift])
+            .ok_or_else(|| circshift_invalid_shift("circshift: shift magnitude is too large")),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(circshift_invalid_shift(
@@ -432,13 +474,15 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
             Ok(vec![rounded as isize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
+            if !is_vector_shape(&tensor.shape) && tensor_element_len(tensor) != 0 {
                 return Err(circshift_invalid_shift(
                     "circshift: shifts must be specified as a scalar or vector",
                 ));
             }
-            tensor
-                .data
+            if let Some(parsed) = integer_tensor_shift_vector(tensor) {
+                return parsed;
+            }
+            tensor::tensor_values_f64_cow(tensor)
                 .iter()
                 .map(|val| numeric_to_isize(*val))
                 .collect::<Result<Vec<_>, _>>()
@@ -494,11 +538,13 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
 fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
         Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 1 {
+            let dim = i.try_to_usize().ok_or_else(|| {
+                circshift_invalid_dims("circshift: dimensions must be positive integers")
+            })?;
+            if dim < 1 {
                 return Err(circshift_invalid_dims("circshift: dimensions must be >= 1"));
             }
-            Ok(vec![raw as usize])
+            Ok(vec![dim])
         }
         Value::Num(n) => {
             if !n.is_finite() {
@@ -518,13 +564,20 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             Ok(vec![rounded as usize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
+            if !is_vector_shape(&tensor.shape) && tensor_element_len(tensor) != 0 {
                 return Err(circshift_invalid_dims(
                     "circshift: dimension vectors must be row or column vectors",
                 ));
             }
-            let mut dims = Vec::with_capacity(tensor.data.len());
-            for &val in &tensor.data {
+            if let Some(parsed) =
+                tensor::integer_tensor_dimension_vector(tensor, "circshift", false)
+            {
+                return parsed.map_err(|_| {
+                    circshift_invalid_dims("circshift: dimensions must be positive integers")
+                });
+            }
+            let mut dims = Vec::with_capacity(tensor_element_len(tensor));
+            for &val in tensor::tensor_values_f64_cow(tensor).iter() {
                 if !val.is_finite() {
                     return Err(circshift_invalid_dims(
                         "circshift: dimensions must be finite integers",
@@ -599,6 +652,30 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             "circshift: unsupported dimension argument type",
         )),
     }
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor.len()
+}
+
+fn integer_tensor_shift_vector(tensor: &Tensor) -> Option<crate::BuiltinResult<Vec<isize>>> {
+    let storage = tensor.integer_storage()?;
+    Some(
+        (0..storage.len())
+            .map(|idx| {
+                let value = storage
+                    .value_at(idx)
+                    .expect("integer tensor storage length matches element count");
+                integer_to_shift(&value)
+            })
+            .collect(),
+    )
+}
+
+fn integer_to_shift(value: &IntValue) -> crate::BuiltinResult<isize> {
+    value
+        .try_to_isize()
+        .ok_or_else(|| circshift_invalid_shift("circshift: shift magnitude is too large"))
 }
 
 fn numeric_to_isize(value: f64) -> crate::BuiltinResult<isize> {
@@ -688,46 +765,18 @@ fn build_shift_plan(
     })
 }
 
-fn normalize_shift_amount(shift: isize, len: usize) -> usize {
-    if len <= 1 {
-        return 0;
-    }
-    let len_isize = len as isize;
-    let mut normalized = shift % len_isize;
-    if normalized < 0 {
-        normalized += len_isize;
-    }
-    normalized as usize
-}
-
 fn circshift_tensor(
     tensor: Tensor,
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Tensor> {
-    let Tensor { data, shape, .. } = tensor;
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| circshift_internal(format!("circshift: {e}")))?;
     let plan = build_shift_plan(&shape, dims, shifts)?;
-    if data.is_empty() || plan.is_noop() {
-        return Tensor::new(data, shape).map_err(|e| circshift_internal(format!("circshift: {e}")));
-    }
-    let ShiftPlan {
-        ext_shape,
-        positive,
-        ..
-    } = plan;
-    let rotated = circshift_generic(&data, &ext_shape, &positive)?;
-    Tensor::new(rotated, ext_shape).map_err(|e| circshift_internal(format!("circshift: {e}")))
-}
-
-fn circshift_complex_tensor(
-    tensor: ComplexTensor,
-    dims: &[usize],
-    shifts: &[isize],
-) -> crate::BuiltinResult<ComplexTensor> {
-    let ComplexTensor { data, shape, .. } = tensor;
-    let plan = build_shift_plan(&shape, dims, shifts)?;
-    if data.is_empty() || plan.is_noop() {
-        return ComplexTensor::new(data, shape)
+    if storage.is_empty() || plan.is_noop() {
+        return Tensor::from_numeric_storage(storage, shape)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
     let ShiftPlan {
@@ -735,8 +784,68 @@ fn circshift_complex_tensor(
         positive,
         ..
     } = plan;
-    let rotated = circshift_generic(&data, &ext_shape, &positive)?;
-    ComplexTensor::new(rotated, ext_shape)
+    let storage = circshift_numeric_storage(storage, &ext_shape, &positive)?;
+    Tensor::from_numeric_storage(storage, ext_shape)
+        .map_err(|e| circshift_internal(format!("circshift: {e}")))
+}
+
+fn circshift_numeric_storage(
+    storage: NumericStorage,
+    shape: &[usize],
+    positive: &[usize],
+) -> crate::BuiltinResult<NumericStorage> {
+    macro_rules! shift {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(circshift_generic(&$values, shape, positive)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => shift!(values, F64),
+        NumericStorage::F32(values) => shift!(values, F32),
+        NumericStorage::I8(values) => shift!(values, I8),
+        NumericStorage::I16(values) => shift!(values, I16),
+        NumericStorage::I32(values) => shift!(values, I32),
+        NumericStorage::I64(values) => shift!(values, I64),
+        NumericStorage::U8(values) => shift!(values, U8),
+        NumericStorage::U16(values) => shift!(values, U16),
+        NumericStorage::U32(values) => shift!(values, U32),
+        NumericStorage::U64(values) => shift!(values, U64),
+    })
+}
+
+fn circshift_complex_tensor(
+    tensor: ComplexTensor,
+    dims: &[usize],
+    shifts: &[isize],
+) -> crate::BuiltinResult<ComplexTensor> {
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_complex_storage();
+    let plan = build_shift_plan(&shape, dims, shifts)?;
+    if storage.is_empty() || plan.is_noop() {
+        return ComplexTensor::from_complex_storage(storage, shape)
+            .map_err(|e| circshift_internal(format!("circshift: {e}")));
+    }
+    let ShiftPlan {
+        ext_shape,
+        positive,
+        ..
+    } = plan;
+    let rotated = match storage {
+        ComplexStorage::F64(values) => {
+            ComplexStorage::F64(circshift_generic(&values, &ext_shape, &positive)?)
+        }
+        ComplexStorage::F32(values) => {
+            ComplexStorage::F32(circshift_generic(&values, &ext_shape, &positive)?)
+        }
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
+            storage
+                .reorder(|values| {
+                    circshift_generic(values, &ext_shape, &positive).map_err(|e| e.to_string())
+                })
+                .map_err(|e| circshift_internal(format!("circshift: {e}")))?,
+        ),
+    };
+    ComplexTensor::from_complex_storage(rotated, ext_shape)
         .map_err(|e| circshift_internal(format!("circshift: {e}")))
 }
 
@@ -785,53 +894,21 @@ fn circshift_char_array(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Value> {
-    let mut row_shift = 0isize;
-    let mut col_shift = 0isize;
-    for (&axis, &shift) in dims.iter().zip(shifts.iter()) {
-        match axis {
-            0 => row_shift = shift,
-            1 => col_shift = shift,
-            _ => {
-                if shift != 0 {
-                    return Err(circshift_invalid_dims(
-                        "circshift: character arrays only support dimensions 1 and 2",
-                    ));
-                }
-            }
-        }
-    }
-    let CharArray { data, rows, cols } = array;
-    if data.is_empty() {
-        return CharArray::new(data, rows, cols)
+    let shape = array.shape.clone();
+    let plan = build_shift_plan(&shape, dims, shifts)?;
+    let data = array.to_column_major();
+    if data.is_empty() || plan.is_noop() {
+        return CharArray::from_column_major(data, shape)
             .map(Value::CharArray)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
-    let row_shift = normalize_shift_amount(row_shift, rows);
-    let col_shift = normalize_shift_amount(col_shift, cols);
-    if row_shift == 0 && col_shift == 0 {
-        return CharArray::new(data, rows, cols)
-            .map(Value::CharArray)
-            .map_err(|e| circshift_internal(format!("circshift: {e}")));
-    }
-    let mut out = vec!['\0'; data.len()];
-    for row in 0..rows {
-        for col in 0..cols {
-            let src_row = if rows == 0 {
-                0
-            } else {
-                (row + rows - row_shift) % rows
-            };
-            let src_col = if cols == 0 {
-                0
-            } else {
-                (col + cols - col_shift) % cols
-            };
-            let dst_idx = row * cols + col;
-            let src_idx = src_row * cols + src_col;
-            out[dst_idx] = data[src_idx];
-        }
-    }
-    CharArray::new(out, rows, cols)
+    let ShiftPlan {
+        ext_shape,
+        positive,
+        ..
+    } = plan;
+    let rotated = circshift_generic(&data, &ext_shape, &positive)?;
+    CharArray::from_column_major(rotated, ext_shape)
         .map(Value::CharArray)
         .map_err(|e| circshift_internal(format!("circshift: {e}")))
 }
@@ -846,16 +923,20 @@ async fn circshift_gpu(
         return Ok(Value::GpuTensor(handle));
     }
 
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let mut working = handle.clone();
-        if plan.ext_shape != working.shape {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none()
+            && plan.ext_shape != working.shape
+        {
             match provider.reshape(&working, &plan.ext_shape) {
                 Ok(reshaped) => working = reshaped,
                 Err(_) => return circshift_gpu_fallback(handle, dims, shifts).await,
             }
         }
-        if let Ok(out) = provider.circshift(&working, &plan.provider) {
-            return Ok(Value::GpuTensor(out));
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            if let Ok(out) = provider.circshift(&working, &plan.provider) {
+                return Ok(Value::GpuTensor(out));
+            }
         }
     }
 
@@ -869,13 +950,8 @@ async fn circshift_gpu_fallback(
 ) -> crate::BuiltinResult<Value> {
     let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let rotated = circshift_tensor(host_tensor, dims, shifts)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &rotated.data,
-            shape: &rotated.shape,
-        };
-        return provider
-            .upload(&view)
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        return gpu_helpers::upload_tensor(provider, &rotated)
             .map(Value::GpuTensor)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
@@ -942,9 +1018,9 @@ fn circshift_generic<T: Clone>(
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
-        Value::Complex(re, im)
+    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
+        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
+        Value::Complex(value.re, value.im)
     } else {
         Value::ComplexTensor(tensor)
     }
@@ -963,7 +1039,90 @@ pub(crate) mod tests {
         block_on(super::circshift_builtin(value, shift, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
+
+    #[test]
+    fn circshift_typed_argument_parsers_preserve_signed_values_and_ranges() {
+        assert_eq!(
+            value_to_shift_vector(&Value::Int(IntValue::I64(-1))).expect("signed shift"),
+            vec![-1]
+        );
+        #[cfg(target_pointer_width = "64")]
+        {
+            let exact_shift = 9_007_199_254_740_993_i64;
+            let shift_tensor =
+                Tensor::new_integer(IntegerStorage::I64(vec![-1, exact_shift]), vec![1, 2])
+                    .expect("shift vector");
+            assert_eq!(
+                value_to_shift_vector(&Value::Tensor(shift_tensor)).expect("typed shift vector"),
+                vec![-1, exact_shift as isize]
+            );
+        }
+        let non_vector_shift =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2])
+                .expect("non-vector shift");
+        let shift_shape_err = value_to_shift_vector(&Value::Tensor(non_vector_shift))
+            .expect_err("non-vector typed shift must reject");
+        assert_eq!(
+            shift_shape_err.identifier(),
+            CIRCSHIFT_ERROR_INVALID_SHIFT.identifier
+        );
+        let shift_err = value_to_shift_vector(&Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("unrepresentable typed shift must not saturate");
+        assert_eq!(
+            shift_err.identifier(),
+            CIRCSHIFT_ERROR_INVALID_SHIFT.identifier
+        );
+
+        assert_eq!(
+            value_to_dims_vector(&Value::Int(IntValue::U64(2))).expect("uint64 dimension"),
+            vec![2]
+        );
+        #[cfg(target_pointer_width = "64")]
+        {
+            let exact_dim = 9_007_199_254_740_993_u64;
+            let dim_tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![2, exact_dim]), vec![1, 2])
+                    .expect("dimension vector");
+            assert_eq!(
+                value_to_dims_vector(&Value::Tensor(dim_tensor)).expect("typed dimension vector"),
+                vec![2, exact_dim as usize]
+            );
+        }
+        let non_vector_dims =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![2, 2])
+                .expect("non-vector dims");
+        let dims_shape_err = value_to_dims_vector(&Value::Tensor(non_vector_dims))
+            .expect_err("non-vector typed dimension vector must reject");
+        assert_eq!(
+            dims_shape_err.identifier(),
+            CIRCSHIFT_ERROR_INVALID_DIMS.identifier
+        );
+        let dims_err = value_to_dims_vector(&Value::Int(IntValue::I64(-1)))
+            .expect_err("negative typed dimension must reject");
+        assert_eq!(
+            dims_err.identifier(),
+            CIRCSHIFT_ERROR_INVALID_DIMS.identifier
+        );
+    }
+
+    #[test]
+    fn circshift_integer_tokens_parse_exact_dimensions() {
+        assert_eq!(
+            dims_from_token(&ArgToken::Integer(IntValue::U16(2))),
+            Some(vec![2])
+        );
+        assert_eq!(
+            dims_from_token(&ArgToken::Vector(vec![
+                ArgToken::Integer(IntValue::U8(1)),
+                ArgToken::Integer(IntValue::U16(2)),
+            ])),
+            Some(vec![1, 2])
+        );
+        assert_eq!(dims_from_token(&ArgToken::Integer(IntValue::I8(0))), None);
+        assert_eq!(dims_from_token(&ArgToken::Integer(IntValue::I8(-1))), None);
+    }
 
     #[test]
     fn circshift_type_preserves_tensor_shape() {
@@ -981,6 +1140,64 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn circshift_preserves_all_exact_real_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7, 9, 11]),
+            IntegerStorage::I16(vec![-300, 400, 900, 1_200]),
+            IntegerStorage::I32(vec![i32::MIN, 0, 7, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, -1, 1, i64::MAX]),
+            IntegerStorage::U8(vec![0, 7, 9, u8::MAX]),
+            IntegerStorage::U16(vec![0, 700, 900, u16::MAX]),
+            IntegerStorage::U32(vec![0, 9_007_199, 42, u32::MAX]),
+            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, 42, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let input = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("input");
+            let Value::Tensor(output) = circshift_builtin(
+                Value::Tensor(input),
+                Value::Int(IntValue::I32(1)),
+                vec![Value::Int(IntValue::I32(2))],
+            )
+            .expect("circshift") else {
+                panic!("expected exact real integer output");
+            };
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[2].clone(),
+                            values[3].clone(),
+                            values[0].clone(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected shifted storage")
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn circshift_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("single");
+        let Value::Tensor(output) = circshift_builtin(
+            Value::Tensor(input),
+            Value::Int(IntValue::I32(1)),
+            vec![Value::Int(IntValue::I32(2))],
+        )
+        .expect("circshift") else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![3.0, 4.0, 1.0, 2.0])
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn circshift_vector_positive_shift() {
@@ -994,7 +1211,30 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![5, 1]);
-                assert_eq!(out.data, vec![4.0, 5.0, 1.0, 2.0, 3.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0, 3.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn circshift_large_integer_tensor_shift_uses_exact_modulo() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![5, 1]).unwrap();
+        let shift = 9_007_199_254_740_993_i64;
+        let shift_tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![shift]), vec![1, 1]).expect("shift");
+        let result = circshift_builtin(
+            Value::Tensor(tensor),
+            Value::Tensor(shift_tensor),
+            Vec::new(),
+        )
+        .expect("circshift");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![5, 1]);
+                assert_eq!(out.materialize_f64(), vec![3.0, 4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1010,7 +1250,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1027,7 +1267,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
+                assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1046,7 +1286,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![2.0, 4.0, 1.0, 3.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 4.0, 1.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1069,7 +1309,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
+                assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1113,7 +1353,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, expected.shape);
-                assert_eq!(out.data, expected.data);
+                assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1175,7 +1415,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                assert_eq!(out.data, tensor.data);
+                assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1241,7 +1481,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1253,7 +1493,7 @@ pub(crate) mod tests {
             .expect("circshift");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![4.0, 2.0, 3.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![4.0, 2.0, 3.0, 1.0]);
         });
     }
 
@@ -1274,7 +1514,7 @@ pub(crate) mod tests {
         .expect("cpu circshift");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload tensor");
@@ -1285,7 +1525,7 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(expected) => {
                 assert_eq!(expected.shape, gathered.shape);
-                assert_eq!(expected.data, gathered.data);
+                assert_eq!(expected.materialize_f64(), gathered.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

@@ -16,6 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::timing::type_resolvers::timeit_type;
 
 const TARGET_BATCH_SECONDS: f64 = 0.005;
@@ -229,18 +230,15 @@ fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeErro
 }
 
 fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeError> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            timeit_error_with_message(
+                TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
+                &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
+            )
+        });
+    }
     match value {
-        Value::Int(iv) => {
-            let raw = iv.to_i64();
-            if raw < 0 {
-                Err(timeit_error_with_message(
-                    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
-                    &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
-                ))
-            } else {
-                Ok(raw as usize)
-            }
-        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(timeit_error_with_message(
@@ -261,6 +259,12 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
                     &TIMEIT_ERROR_NUM_OUTPUTS_INTEGER,
                 ));
             }
+            if !fits_platform_usize(rounded) {
+                return Err(timeit_error_with_message(
+                    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
+                    &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
+                ));
+            }
             Ok(rounded as usize)
         }
         _ => Err(timeit_error_with_message(
@@ -268,6 +272,10 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
             &TIMEIT_ERROR_NUM_OUTPUTS_SCALAR,
         )),
     }
+}
+
+fn fits_platform_usize(value: f64) -> bool {
+    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
 async fn determine_loop_count(callable: &TimeitCallable) -> Result<usize, crate::RuntimeError> {
@@ -489,8 +497,43 @@ fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn output_count_preserves_representable_uint64() {
+        assert_eq!(
+            parse_non_negative_integer(&Value::Int(IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_non_negative_integer(&Value::Int(IntValue::I64(-1))).is_err());
+    }
+
+    #[test]
+    fn output_count_reads_typed_integer_scalar_storage_exactly() {
+        let count = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1])
+            .expect("typed output count");
+
+        assert_eq!(
+            parse_non_negative_integer(&Value::Tensor(count)).unwrap(),
+            2
+        );
+
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("negative output count");
+        assert!(parse_non_negative_integer(&Value::Tensor(negative)).is_err());
+    }
+
+    #[test]
+    fn output_count_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_non_negative_integer(&Value::Num(boundary)).is_err());
+    }
+
     use futures::executor::block_on;
-    use runmat_builtins::{Closure, IntValue};
+    use runmat_builtins::{Closure, IntValue, IntegerStorage, Tensor};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -826,6 +869,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_measures_time() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         COUNTER_DEFAULT.store(0, Ordering::SeqCst);
         let result = block_on(timeit_builtin(default_handle(), Vec::new())).expect("timeit");
         match result {
@@ -842,6 +886,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_accepts_num_outputs_argument() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
         let args = vec![Value::Int(IntValue::I32(3))];
         let _ = block_on(timeit_builtin(outputs_handle(), args)).expect("timeit numOutputs");
@@ -855,6 +900,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn timeit_supports_zero_outputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         COUNTER_ZERO_OUTPUTS.store(0, Ordering::SeqCst);
         let args = vec![Value::Int(IntValue::I32(0))];
         let _ = block_on(timeit_builtin(zero_outputs_handle(), args)).expect("timeit zero outputs");

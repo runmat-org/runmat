@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::type_resolvers::text_concat_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -337,11 +338,11 @@ fn default_dimension(shape: &[usize]) -> usize {
 fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Int(i) => {
-            let v = i.to_i64();
-            if v <= 0 {
-                return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
-            }
-            Ok(Some(v as usize))
+            let v = i
+                .try_to_usize()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| join_error(&JOIN_ERROR_DIMENSION_TYPE))?;
+            Ok(Some(v))
         }
         Value::Num(n) => {
             if !n.is_finite() || *n <= 0.0 {
@@ -351,10 +352,17 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
             if (rounded - n).abs() > f64::EPSILON {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
-            Ok(Some(rounded as usize))
+            parse_dimension_float(rounded)
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
-            let val = t.data[0];
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                let dim = int
+                    .try_to_usize()
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| join_error(&JOIN_ERROR_DIMENSION_TYPE))?;
+                return Ok(Some(dim));
+            }
+            let val = tensor::tensor_value_f64(t, 0);
             if !val.is_finite() || val <= 0.0 {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
@@ -362,10 +370,21 @@ fn value_to_dimension(value: &Value) -> BuiltinResult<Option<usize>> {
             if (rounded - val).abs() > f64::EPSILON {
                 return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
             }
-            Ok(Some(rounded as usize))
+            parse_dimension_float(rounded)
         }
         _ => Ok(None),
     }
+}
+
+fn parse_dimension_float(rounded: f64) -> BuiltinResult<Option<usize>> {
+    if rounded > usize::MAX.saturating_sub(1) as f64 {
+        return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
+    }
+    let parsed = rounded as usize;
+    if parsed as f64 != rounded || parsed == usize::MAX {
+        return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE));
+    }
+    Ok(Some(parsed))
 }
 
 struct JoinInput {
@@ -742,7 +761,7 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
 
     fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::join_builtin(text, rest))
@@ -873,6 +892,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn join_dimension_parser_preserves_typed_integer_tensor_bounds() {
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("dim");
+        assert_eq!(value_to_dimension(&Value::Tensor(dim)).unwrap(), Some(2));
+
+        let zero = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1]).expect("dim");
+        assert!(value_to_dimension(&Value::Tensor(zero)).is_err());
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative dim");
+        assert!(value_to_dimension(&Value::Tensor(negative)).is_err());
+        assert!(value_to_dimension(&Value::Num(1.0e300)).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,8 +1,9 @@
 //! MATLAB-compatible `argsort` builtin returning permutation indices.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,12 +22,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("sort_dim")],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: true,
-    notes: "Shares provider hooks with `sort`; when unavailable tensors are gathered to host memory before computing indices.",
+    notes: "Shares provider hooks with `sort`; host fallback gathers when needed and restores permutation indices to a new resident handle.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -211,11 +212,19 @@ const ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinE
     message: "sort: unsupported ComparisonMethod",
 };
 
-const ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ARGSORT.MISSINGPLACEMENT_UNSUPPORTED",
-    identifier: Some("RunMat:sort:MissingPlacementUnsupported"),
-    when: "MissingPlacement option is provided but unsupported.",
-    message: "sort: the 'MissingPlacement' option is not supported yet",
+const ARGSORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING: BuiltinErrorDescriptor =
+    BuiltinErrorDescriptor {
+        code: "RM.ARGSORT.MISSINGPLACEMENT_REQUIRES_STRING",
+        identifier: Some("RunMat:sort:MissingPlacementRequiresString"),
+        when: "MissingPlacement option value is not string-like.",
+        message: "sort: 'MissingPlacement' requires a string value",
+    };
+
+const ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARGSORT.MISSINGPLACEMENT_UNKNOWN",
+    identifier: Some("RunMat:sort:MissingPlacementUnknown"),
+    when: "MissingPlacement option value is not one of 'auto'/'first'/'last'.",
+    message: "sort: unsupported MissingPlacement",
 };
 
 const ARGSORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -225,11 +234,12 @@ const ARGSORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescr
     message: "sort: invalid argument sequence",
 };
 
-const ARGSORT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const ARGSORT_ERRORS: [BuiltinErrorDescriptor; 6] = [
     ARGSORT_ERROR_INVALID_DIMENSION,
     ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
     ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN,
-    ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
+    ARGSORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
+    ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN,
     ARGSORT_ERROR_INVALID_ARGUMENT,
 ];
 
@@ -238,6 +248,12 @@ pub const ARGSORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ARGSORT_ERRORS,
+};
+
+const ARGSORT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::AliasOf,
+    canonical_builtin: Some("sort"),
+    notes: "argsort delegates to sort and returns its one-based permutation-index output, so sort's documented exact integer input, dimension, and resident-provider contract is canonical.",
 };
 
 #[runtime_builtin(
@@ -249,6 +265,7 @@ pub const ARGSORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     sink = true,
     type_resolver(index_output_type),
     descriptor(crate::builtins::array::sorting_sets::argsort::ARGSORT_DESCRIPTOR),
+    integer_audit(crate::builtins::array::sorting_sets::argsort::ARGSORT_INTEGER_AUDIT),
     builtin_path = "crate::builtins::array::sorting_sets::argsort"
 )]
 async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -263,14 +280,16 @@ pub(crate) mod tests {
     use super::ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING;
     use super::ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN;
     use super::ARGSORT_ERROR_INVALID_DIMENSION;
-    use super::ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED;
+    use super::ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN;
     use futures::executor::block_on;
 
     fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::argsort_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        ComplexTensor, IntValue, IntegerStorage, ResolveContext, Tensor, Type, Value,
+    };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -279,11 +298,25 @@ pub(crate) mod tests {
         let indices = argsort_builtin(Value::Tensor(tensor), Vec::new()).expect("argsort");
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![2.0, 3.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]);
                 assert_eq!(t.shape, vec![3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn argsort_preserves_exact_uint64_ordering_from_sort() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            vec![3, 1],
+        )
+        .expect("input");
+        let indices = argsort_builtin(Value::Tensor(tensor), Vec::new()).expect("argsort");
+        let Value::Tensor(indices) = indices else {
+            panic!("expected index tensor");
+        };
+        assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 1.0]);
     }
 
     #[test]
@@ -301,7 +334,7 @@ pub(crate) mod tests {
         let indices =
             argsort_builtin(Value::Tensor(tensor), vec![Value::from("descend")]).expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 4.0, 3.0, 2.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 3.0, 2.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -329,7 +362,7 @@ pub(crate) mod tests {
         )
         .expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 4.0, 3.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 3.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -340,7 +373,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![f64::NAN, 4.0, 1.0, 2.0], vec![4, 1]).unwrap();
         let indices = argsort_builtin(Value::Tensor(tensor), Vec::new()).expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 4.0, 2.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 4.0, 2.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -370,7 +403,10 @@ pub(crate) mod tests {
         let indices = argsort_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(5))])
             .expect("argsort");
         match indices {
-            Value::Tensor(t) => assert!(t.data.iter().all(|v| (*v - 1.0).abs() < f64::EPSILON)),
+            Value::Tensor(t) => assert!(t
+                .materialize_f64()
+                .iter()
+                .all(|v| (*v - 1.0).abs() < f64::EPSILON)),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -386,16 +422,26 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn argsort_invalid_argument_errors() {
+    fn argsort_supports_missing_placement_and_rejects_unknown_values() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let indices = argsort_builtin(
+            Value::Tensor(tensor.clone()),
+            vec![Value::from("MissingPlacement"), Value::from("first")],
+        )
+        .expect("missing placement");
+        let Value::Tensor(indices) = indices else {
+            panic!("expected indices");
+        };
+        assert_eq!(indices.materialize_f64(), vec![1.0, 2.0]);
+
         let err = argsort_builtin(
             Value::Tensor(tensor),
-            vec![Value::from("MissingPlacement"), Value::from("auto")],
+            vec![Value::from("MissingPlacement"), Value::from("middle")],
         )
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.identifier
+            ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN.identifier
         );
     }
 
@@ -438,7 +484,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![2.0, 2.0, 1.0, 2.0], vec![4, 1]).unwrap();
         let indices = argsort_builtin(Value::Tensor(tensor), Vec::new()).expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![3.0, 1.0, 2.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 2.0, 4.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -454,7 +500,7 @@ pub(crate) mod tests {
         )
         .expect("argsort");
         match indices {
-            Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0, 1.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -465,15 +511,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let indices = argsort_builtin(Value::GpuTensor(handle), Vec::new()).expect("argsort");
-            match indices {
-                Value::Tensor(t) => assert_eq!(t.data, vec![2.0, 3.0, 1.0]),
-                other => panic!("expected tensor result, got {other:?}"),
-            }
+            assert!(matches!(indices, Value::GpuTensor(_)));
+            let indices = test_support::gather(indices).expect("gather indices");
+            assert_eq!(indices.materialize_f64(), vec![2.0, 3.0, 1.0]);
         });
     }
 
@@ -487,7 +532,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 5.0, -1.0, 2.0], vec![4, 1]).unwrap();
         let cpu_indices = argsort_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let gpu_handle = runmat_accelerate_api::provider()
@@ -500,11 +545,9 @@ pub(crate) mod tests {
             Value::Tensor(t) => t,
             other => panic!("expected tensor, got {other:?}"),
         };
-        let gpu_tensor = match gpu_indices {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor, got {other:?}"),
-        };
+        assert!(matches!(gpu_indices, Value::GpuTensor(_)));
+        let gpu_tensor = test_support::gather(gpu_indices).expect("gather GPU indices");
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
-        assert_eq!(gpu_tensor.data, cpu_tensor.data);
+        assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

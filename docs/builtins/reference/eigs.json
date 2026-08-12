@@ -8,7 +8,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "`eigs` is currently a host residency sink. gpuArray inputs are gathered before the exact dense fallback, and outputs are host tensors until a provider-side partial eigensolver lands."
+    "notes": "In `runmat` compatibility mode, gpuArray arguments are accepted as a RunMat extension. `eigs` gathers them before the exact dense fallback and returns host tensors until a provider-side partial eigensolver lands."
   },
   "fusion": {
     "elementwise": false,
@@ -20,14 +20,17 @@
   "tested": {
     "unit": "builtins::math::linalg::factor::eigs::tests"
   },
-  "description": "`eigs(A)` returns a subset of eigenvalues. RunMat accepts dense, complex, logical, and small sparse or gpuArray compatibility inputs by materializing them on the host, computes the exact full eigendecomposition through the shared `eig` path, and selects the requested subset.",
+  "description": "`eigs(A)` returns a subset of eigenvalues. MATLAB-compatible coefficient matrices `A` and `B` use class `single` or `double`; in `runmat` compatibility mode, supported integer and logical coefficient matrices are accepted as a RunMat extension. Inputs are materialized on the host, decomposed through the shared exact `eig` path, and reduced to the requested subset.",
   "behaviors": [
     "`eigs(A)` returns up to six eigenvalues with largest magnitude.",
     "`eigs(A,k)` clamps `k` to `size(A,2)` when larger than the matrix order.",
+    "Typed-integer `k` is an exact documented structural control. Typed-integer `sigma` and typed-integer `StartVector` are separately named RunMat-only extensions because the public data-type lists for those roles are single and double.",
+    "Admitted integer coefficient and sigma values must be exactly representable at the explicit binary64 dense-fallback boundary; integer k and CholeskyPermutation are parsed structurally without a floating mirror.",
     "`eigs(A,k,sigma)` supports numeric `sigma` and the documented text selectors `largestabs`, `smallestabs`, `largestreal`, `smallestreal`, `bothendsreal`, `largestimag`, `smallestimag`, and `bothendsimag`, plus documented short aliases.",
     "`eigs(A,B,...)` solves the generalized problem by reusing `eig(A,B)` and then selecting the requested subset.",
     "Two outputs return selected right eigenvectors and a diagonal eigenvalue matrix. Three outputs append convergence flag `0` because the current exact fallback either succeeds fully or raises an error.",
-    "Options supplied as a struct or name-value pairs are validated for MATLAB-compatible field names, value shapes, subspace-dimension minimums, and generalized-problem sigma constraints. Iterative controls such as tolerance, maximum iterations, subspace dimension, start vector, display, and failure treatment do not change the exact fallback result.",
+    "Options supplied as a struct or name-value pairs are validated for MATLAB-compatible field names, value shapes, subspace-dimension minimums, and generalized-problem sigma constraints. Iterative controls such as tolerance, maximum iterations, subspace dimension, start vector, display, and failure treatment do not change the current dense fallback result.",
+    "Single coefficient or StartVector data preserves single output storage, matching the R2025a-and-later precision rule.",
     "Function-handle `Afun` forms are intentionally rejected with a deterministic unsupported-form error until RunMat has iterative operator eigensolver support.",
     "Sparse inputs are materialized to dense host tensors for compatibility only. Very large sparse problems are not a completed high-performance `eigs` path and should be queued for a future sparse/provider implementation."
   ],
@@ -51,7 +54,7 @@
   "faqs": [
     {
       "question": "Does `eigs` use an iterative sparse algorithm?",
-      "answer": "Not yet. RunMat currently uses an exact dense fallback through `eig`, then applies `eigs` subset ordering. This is correct for small and medium compatibility cases but is not the final high-performance sparse path."
+      "answer": "Not yet. RunMat currently uses a dense fallback through `eig`, then applies `eigs` subset ordering. It covers small and medium value-selection cases but does not reproduce iterative convergence, failure-treatment, or performance behavior."
     },
     {
       "question": "Which sigma selectors are supported?",
@@ -81,7 +84,7 @@
     "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/eigs.rs"
   },
   "gpu_behavior": [
-    "`eigs` currently gathers gpuArray inputs and returns host tensors because subset eigenvalue selection needs host-side ordering.",
+    "R2026a does not document GPU Array support for `eigs`. RunMat retains gpuArray arguments behind its explicit extension mode, gathers them, and returns host tensors because subset eigenvalue selection needs host-side ordering.",
     "The builtin is explicitly marked `ResidencyPolicy::GatherImmediately` so the runtime does not imply a false GPU fast path.",
     "A future provider implementation should add a true partial eigensolver hook in `runmat-accelerate` and parity tests against this exact fallback."
   ]

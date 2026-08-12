@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -212,6 +212,13 @@ impl RoundStrategy {
 )]
 async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let strategy = parse_arguments(&rest)?;
+    if !matches!(strategy, RoundStrategy::Integer) && has_exact_integer_storage(&value) {
+        return Err(builtin_error_with_detail(
+            &ROUND_ERROR_INVALID_INPUT,
+            "integer inputs support only the round(X) form",
+        ));
+    }
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => round_gpu(handle, strategy).await,
         Value::Complex(re, im) => Ok(Value::Complex(
@@ -230,6 +237,15 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             "expected numeric or logical input",
         )),
         other => round_numeric(other, strategy),
+    }
+}
+
+fn has_exact_integer_storage(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
+        _ => false,
     }
 }
 
@@ -255,7 +271,9 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
 fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> {
     match value {
         Value::Num(n) => Ok(Value::Num(round_scalar(n, strategy))),
-        Value::Int(i) => Ok(Value::Num(round_scalar(i.to_f64(), strategy))),
+        // MATLAB integer values are already integral. Preserve their exact
+        // class and bits instead of routing 64-bit values through f64.
+        Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Num(round_scalar(
             if b { 1.0 } else { 0.0 },
             strategy,
@@ -269,16 +287,33 @@ fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> 
     }
 }
 
-fn round_tensor(mut tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor> {
-    for value in &mut tensor.data {
-        *value = round_scalar(*value, strategy);
-    }
-    Ok(tensor)
+fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = match tensor
+        .into_numeric_storage()
+        .map_err(|err| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, err))?
+    {
+        NumericStorage::F64(values) => NumericStorage::F64(
+            values
+                .into_iter()
+                .map(|value| round_scalar(value, strategy))
+                .collect(),
+        ),
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| round_scalar(f64::from(value), strategy) as f32)
+                .collect(),
+        ),
+        storage => storage,
+    };
+    Tensor::from_numeric_storage(storage, shape)
+        .map_err(|err| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, err))
 }
 
 fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinResult<Value> {
     let data = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (round_scalar(re, strategy), round_scalar(im, strategy)))
         .collect::<Vec<_>>();
@@ -368,7 +403,9 @@ fn parse_digits(value: &Value) -> BuiltinResult<i32> {
     let err =
         || builtin_error_with_detail(&ROUND_ERROR_INVALID_DIGITS, "N must be an integer scalar");
     let raw = match value {
-        Value::Int(i) => i.to_i64(),
+        Value::Int(i) => i.try_to_i64().ok_or_else(|| {
+            builtin_error_with_detail(&ROUND_ERROR_INVALID_DIGITS, "integer overflow in N")
+        })?,
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(err());
@@ -446,6 +483,15 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn round_typed_digit_parser_rejects_unrepresentable_uint64() {
+        assert_eq!(
+            parse_digits(&Value::Int(IntValue::I32(-3))).expect("digits"),
+            -3
+        );
+        assert!(parse_digits(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+    }
+
+    #[test]
     fn round_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = ROUND_DESCRIPTOR
             .signatures
@@ -506,6 +552,78 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn round_integer_scalars_preserve_class_and_exact_64_bit_values() {
+        let signed = Value::Int(IntValue::I64(i64::MIN));
+        assert_eq!(
+            round_builtin(signed.clone(), Vec::new()).expect("round"),
+            signed
+        );
+
+        let unsigned = Value::Int(IntValue::U64(u64::MAX));
+        assert_eq!(
+            round_builtin(unsigned.clone(), Vec::new()).expect("round"),
+            unsigned
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn round_integer_inputs_reject_digit_rounding_forms() {
+        let scalar = round_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            vec![Value::Int(IntValue::I32(-1))],
+        )
+        .expect_err("integer scalar digit round must fail");
+        assert_error_contains(&scalar, "integer inputs support only");
+        assert_eq!(scalar.identifier(), ROUND_ERROR_INVALID_INPUT.identifier);
+
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![1, i64::MAX]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+        let array = round_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))])
+            .expect_err("integer array digit round must fail");
+        assert_error_contains(&array, "integer inputs support only");
+        assert_eq!(array.identifier(), ROUND_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn round_preserves_native_single_and_exact_integer_tensor_storage() {
+        let single =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.75]), vec![1, 2])
+                .unwrap();
+        let Value::Tensor(single) =
+            round_builtin(Value::Tensor(single), Vec::new()).expect("round single")
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            single.into_numeric_storage(),
+            Ok(NumericStorage::F32(vec![1.0, -3.0]))
+        );
+
+        let integer = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let Value::Tensor(integer) =
+            round_builtin(Value::Tensor(integer), Vec::new()).expect("round integer")
+        else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(
+            integer.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![
+                9_007_199_254_740_993,
+                u64::MAX,
+            ]))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn round_tensor_decimals() {
         let tensor = Tensor::new(vec![1.2345, 2.499, 3.5001], vec![3, 1]).unwrap();
         let result = round_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))])
@@ -514,7 +632,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 1]);
                 let expected = [1.23, 2.5, 3.5];
-                for (a, b) in t.data.iter().zip(expected.iter()) {
+                for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12, "expected {b}, got {a}");
                 }
             }
@@ -530,7 +648,7 @@ pub(crate) mod tests {
             .expect("round");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![100.0, 100.0, 200.0]);
+                assert_eq!(t.materialize_f64(), vec![100.0, 100.0, 200.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -581,14 +699,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-2.5, -0.2, 0.5, 1.8], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = round_builtin(Value::GpuTensor(handle), Vec::new()).expect("round");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![-3.0, 0.0, 1.0, 2.0]);
+            assert_eq!(gathered.materialize_f64(), vec![-3.0, 0.0, 1.0, 2.0]);
         });
     }
 
@@ -597,7 +715,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.2345, 2.499, 149.9, 150.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -612,7 +730,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![0.0, 0.0, 100.0, 200.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 100.0, 200.0]);
         });
     }
 
@@ -621,7 +739,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0012345, 12.3456, 98765.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -636,7 +754,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(result).expect("gather");
             let expected = [0.00123, 12.3, 98800.0];
-            for (actual, expected) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, expected) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!(
                     (actual - expected).abs() < 1e-10,
                     "expected {expected}, got {actual}"

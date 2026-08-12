@@ -8,15 +8,15 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, ResolveContext, Tensor, Value,
+    ComplexTensor, IntegerStorage, LogicalArray, ResolveContext, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::type_resolvers::symrcm_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -204,12 +204,17 @@ async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a real tensor.
 pub fn symrcm_host_real_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    symrcm_host_real_data(&tensor.shape, &tensor.data)
+    if let Some(storage) = tensor.integer_storage() {
+        return adjacency_from_integer_storage(&tensor.shape, storage)
+            .map(|adjacency| symmetric_reverse_cuthill_mckee(&adjacency));
+    }
+    let values = tensor::tensor_values_f64_cow(tensor);
+    symrcm_host_real_data(&tensor.shape, &values)
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a complex tensor.
 pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Vec<usize>> {
-    symrcm_host_complex_data(&tensor.shape, &tensor.data)
+    symrcm_host_complex_data(&tensor.shape, &tensor.materialize_f64())
 }
 
 /// Host implementation for dense real data.
@@ -227,6 +232,14 @@ pub fn symrcm_host_complex_data(shape: &[usize], data: &[(f64, f64)]) -> Builtin
 fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency(n, n, data, |value| *value != 0.0)
+}
+
+fn adjacency_from_integer_storage(
+    shape: &[usize],
+    storage: &IntegerStorage,
+) -> BuiltinResult<Vec<Vec<usize>>> {
+    let n = ensure_square_matrix_shape(shape)?;
+    build_adjacency_from_integer_storage(n, storage)
 }
 
 fn adjacency_from_complex_data(
@@ -292,6 +305,49 @@ where
         }
     }
 
+    Ok(adjacency
+        .into_iter()
+        .map(|set| {
+            let mut neighbours: Vec<usize> = set.into_iter().collect();
+            neighbours.sort_unstable();
+            neighbours
+        })
+        .collect())
+}
+
+fn build_adjacency_from_integer_storage(
+    rows: usize,
+    storage: &IntegerStorage,
+) -> BuiltinResult<Vec<Vec<usize>>> {
+    if rows == 0 {
+        return Ok(Vec::new());
+    }
+    let expected = rows.checked_mul(rows).ok_or_else(|| {
+        symrcm_error_with_detail(
+            &SYMRCM_ERROR_INTERNAL,
+            "matrix dimensions overflow when computing adjacency",
+        )
+    })?;
+    if storage.len() < expected {
+        return Err(symrcm_error_with_detail(
+            &SYMRCM_ERROR_INVALID_INPUT,
+            "data does not match matrix dimensions",
+        ));
+    }
+
+    let mut adjacency: Vec<HashSet<usize>> = vec![HashSet::new(); rows];
+    for col in 0..rows {
+        for row in 0..rows {
+            if row == col {
+                continue;
+            }
+            let idx = row + col * rows;
+            if storage.value_at(idx).is_some_and(|value| !value.is_zero()) {
+                adjacency[row].insert(col);
+                adjacency[col].insert(row);
+            }
+        }
+    }
     Ok(adjacency
         .into_iter()
         .map(|set| {
@@ -379,7 +435,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{LogicalArray, Type};
+    use runmat_builtins::{IntegerStorage, LogicalArray, Type};
 
     fn tensor_from_entries(rows: usize, cols: usize, entries: &[(usize, usize, f64)]) -> Tensor {
         let mut data = vec![0.0; rows * cols];
@@ -398,7 +454,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -448,7 +504,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert_eq!(t.data, vec![1.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -472,8 +528,58 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
-                assert_eq!(t.data, vec![5.0, 4.0, 3.0, 2.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn symrcm_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I16(vec![
+                0, 1, 0, 0, 0, //
+                1, 0, 1, 0, 0, //
+                0, 1, 0, 1, 0, //
+                0, 0, 1, 0, 1, //
+                0, 0, 0, 1, 0,
+            ]),
+            vec![5, 5],
+        )
+        .expect("integer path graph");
+
+        let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn symrcm_reads_wide_integer_storage_without_the_float_mirror() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![
+                0,
+                i64::MIN,
+                0, //
+                i64::MAX,
+                0,
+                -1, //
+                0,
+                1,
+                0,
+            ]),
+            vec![3, 3],
+        )
+        .expect("integer path graph");
+
+        let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
+        match result {
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![3.0, 2.0, 1.0]),
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
@@ -492,7 +598,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 4]);
-                assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -507,7 +613,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 4]);
-                assert_eq!(t.data, vec![2.0, 1.0, 4.0, 3.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 1.0, 4.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -522,7 +628,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
-                assert_eq!(t.data, vec![5.0, 4.0, 3.0, 2.0, 1.0]);
+                assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -537,7 +643,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!(t.data == vec![2.0, 1.0] || t.data == vec![1.0, 2.0]);
+                assert!(
+                    t.materialize_f64() == vec![2.0, 1.0] || t.materialize_f64() == vec![1.0, 2.0]
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -549,7 +657,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = tensor_from_entries(4, 4, &[(0, 1, 1.0), (1, 2, 1.0), (2, 3, 1.0)]);
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -557,7 +665,7 @@ pub(crate) mod tests {
             match result {
                 Value::Tensor(t) => {
                     assert_eq!(t.shape, vec![1, 4]);
-                    assert_eq!(t.data, vec![4.0, 3.0, 2.0, 1.0]);
+                    assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]);
                 }
                 other => panic!("expected tensor result, got {other:?}"),
             }
@@ -572,7 +680,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -654,7 +762,7 @@ pub(crate) mod tests {
         let expected = symrcm_host_real_tensor(&tensor).expect("host symrcm");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -664,7 +772,7 @@ pub(crate) mod tests {
                 let expected_f: Vec<f64> =
                     expected.into_iter().map(|idx| (idx + 1) as f64).collect();
                 assert_eq!(t.shape, vec![1, 5]);
-                assert_eq!(t.data, expected_f);
+                assert_eq!(t.materialize_f64(), expected_f);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

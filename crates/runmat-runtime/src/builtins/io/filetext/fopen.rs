@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     Tensor, Value,
 };
@@ -14,6 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{
     helpers::{char_array_value, extract_scalar_string, normalize_encoding_label},
     registry::{self, FileInfo, RegisteredFile},
@@ -50,6 +55,57 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "fopen";
+
+const FOPEN_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fopen-integer-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "integer-class fopen query identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FopenIntegerIdExtension"),
+};
+const FOPEN_SINGLE_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fopen-single-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "single-precision fopen query identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FopenSingleIdExtension"),
+};
+const FOPEN_RESIDENT_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fopen-resident-fileid",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "provider-resident fopen query identifiers are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FopenResidentIdExtension"),
+};
+const FOPEN_LEGACY_ALL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fopen-legacy-all",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "legacy fopen no-argument and 'all' listing forms are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FopenLegacyAllExtension"),
+};
+pub const FOPEN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    FOPEN_INTEGER_ID_EXTENSION,
+    FOPEN_SINGLE_ID_EXTENSION,
+    FOPEN_RESIDENT_ID_EXTENSION,
+    FOPEN_LEGACY_ALL_EXTENSION,
+];
+
+const FOPEN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "fileID",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "R2026a documents double query identifiers; typed integer identifiers are checked exactly as one gated RunMat extension.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "filename = fopen(integer_fileID)",
+        inputs: &FOPEN_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "A successful query returns host character metadata; integer identifiers never cross a floating mirror.",
+    }];
 
 const FOPEN_OUTPUT_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "fid",
@@ -429,6 +485,8 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fopen_type),
     descriptor(crate::builtins::io::filetext::fopen::FOPEN_DESCRIPTOR),
+    extensions(crate::builtins::io::filetext::fopen::FOPEN_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::filetext::fopen::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::filetext::fopen"
 )]
 async fn fopen_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -795,6 +853,19 @@ impl Permission {
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FopenEval> {
+    if args.is_empty()
+        || args
+            .first()
+            .is_some_and(|value| matches_keyword(value, "all"))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &FOPEN_LEGACY_ALL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if let Some(first) = args.first() {
+        preflight_query_fid(first)?;
+    }
     let gathered = gather_args(args).await?;
     if gathered.is_empty() {
         return handle_all(&[]);
@@ -904,9 +975,75 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
 
 fn is_numeric_value(value: &Value) -> bool {
     matches!(value, Value::Num(_) | Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.len() == 1)
+}
+
+fn preflight_query_fid(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Int(_) => crate::compatibility::ensure_builtin_extension_enabled(
+            &FOPEN_INTEGER_ID_EXTENSION,
+            BUILTIN_NAME,
+        ),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FOPEN_INTEGER_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_builtins::NumericDType::F32 => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FOPEN_SINGLE_ID_EXTENSION,
+                BUILTIN_NAME,
+            )
+        }
+        Value::GpuTensor(handle) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &FOPEN_RESIDENT_ID_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FOPEN_INTEGER_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &FOPEN_SINGLE_ID_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn parse_fid(value: &Value) -> BuiltinResult<i32> {
+    if let Value::Int(value) = value {
+        return value.try_to_i32().ok_or_else(|| {
+            fopen_error_with_detail(
+                &FOPEN_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            )
+        });
+    }
+    if let Value::Tensor(tensor) = value {
+        if tensor::is_scalar_tensor(tensor) {
+            if let Some(integer) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return integer.try_to_i32().ok_or_else(|| {
+                    fopen_error_with_detail(
+                        &FOPEN_ERROR_INVALID_INPUT,
+                        "file identifier is out of range",
+                    )
+                });
+            }
+        }
+    }
     let num: f64 = value.try_into().map_err(|_| {
         fopen_error_with_detail(
             &FOPEN_ERROR_INVALID_INPUT,
@@ -1056,6 +1193,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
+    use runmat_builtins::{IntValue, IntegerStorage};
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
@@ -1096,6 +1234,32 @@ pub(crate) mod tests {
         assert!(labels.contains(&"fids = fopen(\"all\")"));
         assert!(labels.contains(&"fids = fopen(\"all\", machinefmt)"));
         assert!(labels.contains(&"[fids, names, machinefmts, encodings] = fopen(\"all\")"));
+    }
+
+    #[test]
+    fn fopen_integer_capability_and_extension_policy_are_explicit() {
+        assert_eq!(INTEGER_CAPABILITIES.len(), 1);
+        assert_eq!(INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = preflight_query_fid(&Value::Int(IntValue::I32(3))).unwrap_err();
+        assert_eq!(
+            integer.identifier(),
+            Some("RunMat:compatibility:FopenIntegerIdExtension")
+        );
+        let legacy = run_evaluate(&[]).err().expect("legacy form is gated");
+        assert_eq!(
+            legacy.identifier(),
+            Some("RunMat:compatibility:FopenLegacyAllExtension")
+        );
+    }
+
+    #[test]
+    fn fopen_query_classifies_typed_integer_scalar_tensors_exactly() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1])
+            .expect("typed identifier");
+        assert!(is_numeric_value(&Value::Tensor(tensor.clone())));
+        assert_eq!(parse_fid(&Value::Tensor(tensor)).unwrap(), 3);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1162,6 +1326,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_all_lists_handles() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_all");
@@ -1172,28 +1337,28 @@ pub(crate) mod tests {
 
         let list_eval = run_evaluate(&[Value::from("all")]).expect("fopen all");
         let list = list_eval.as_list().expect("list result");
-        assert!(!list.handles.data.is_empty());
+        assert!(!list.handles.materialize_f64().is_empty());
         assert!(list
             .handles
-            .data
+            .materialize_f64()
             .iter()
             .any(|v| (*v - fid).abs() < f64::EPSILON));
 
         if let Value::Cell(names) = &list.names {
-            assert_eq!(names.data.len(), list.handles.data.len());
-            assert_eq!(names.rows, list.handles.data.len());
+            assert_eq!(names.data.len(), list.handles.materialize_f64().len());
+            assert_eq!(names.rows, list.handles.materialize_f64().len());
             assert_eq!(names.cols, 1);
         } else {
             panic!("expected cell array for names");
         }
         if let Value::Cell(machinefmts) = &list.machinefmts {
-            assert_eq!(machinefmts.rows, list.handles.data.len());
+            assert_eq!(machinefmts.rows, list.handles.materialize_f64().len());
             assert_eq!(machinefmts.cols, 1);
         } else {
             panic!("expected cell array for machine formats");
         }
         if let Value::Cell(encodings) = &list.encodings {
-            assert_eq!(encodings.rows, list.handles.data.len());
+            assert_eq!(encodings.rows, list.handles.materialize_f64().len());
             assert_eq!(encodings.cols, 1);
         } else {
             panic!("expected cell array for encodings");
@@ -1206,6 +1371,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fopen_all_machinefmt_filters_entries() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = registry_guard();
         registry::reset_for_tests();
         let native_path = unique_path("fopen_native");
@@ -1228,8 +1394,8 @@ pub(crate) mod tests {
         let list_eval =
             run_evaluate(&[Value::from("all"), Value::from("ieee-be")]).expect("fopen all filter");
         let list = list_eval.as_list().expect("list result");
-        assert_eq!(list.handles.data.len(), 1);
-        assert!((list.handles.data[0] - be_fid).abs() < f64::EPSILON);
+        assert_eq!(list.handles.materialize_f64().len(), 1);
+        assert!((list.handles.materialize_f64()[0] - be_fid).abs() < f64::EPSILON);
 
         let _ = registry::close(native_fid as i32);
         let _ = registry::close(be_fid as i32);

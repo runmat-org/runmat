@@ -33,7 +33,9 @@
       "builtins::io::audio::tests::audioread_reads_mono_pcm16_as_normalized_double",
       "builtins::io::audio::tests::audioread_stereo_output_is_column_major_by_channel",
       "builtins::io::audio::tests::audioread_sample_range_is_one_based_inclusive_and_returns_fs",
-      "builtins::io::audio::tests::audioread_native_uint8_preserves_dtype_and_values",
+      "builtins::io::audio::tests::audioread_native_pcm8_uses_exact_uint8_storage",
+      "builtins::io::audio::tests::audioread_sample_range_rejects_all_typed_integer_classes",
+      "builtins::io::audio::tests::audioread_infinite_endpoint_reads_through_last_frame",
       "builtins::io::audio::tests::audioread_reads_float32_wave",
       "builtins::io::audio::tests::audioread_reads_via_active_filesystem_provider"
     ]
@@ -43,8 +45,8 @@
     "Accepts scalar string, scalar string-array, or row character-vector filenames and reads through RunMat's filesystem abstraction.",
     "Supports WAV/RF64 containers with PCM 8-bit unsigned, PCM 16/24/32-bit signed, IEEE float 32-bit, IEEE float 64-bit, and WAVE_FORMAT_EXTENSIBLE PCM/float subformats.",
     "By default, PCM samples are returned as normalized double values. Unsigned 8-bit PCM maps around zero, and signed PCM maps by the signed full-scale denominator.",
-    "The optional sample range is a two-element one-based inclusive frame range: `audioread(filename, [first last])`.",
-    "The optional datatype argument supports `\"double\"` and `\"native\"`. Native output preserves `uint8` and `single` dtype tags where RunMat can represent them; other decoded classes keep host f64 storage with raw source values.",
+    "The optional sample range is a two-element double, one-based inclusive frame range: `audioread(filename, [first last])`. A last value of `Inf` reads through the final frame; typed-integer ranges reject.",
+    "The optional datatype argument supports `\"double\"` and `\"native\"`. For supported WAV/RF64 files, native output uses exact `uint8` storage for 8-bit unsigned PCM, `int16` storage for 16-bit signed PCM, left-aligned `int32` storage for 24-bit signed PCM, ordinary `int32` storage for 32-bit signed PCM, `single` for 32-bit IEEE float, and `double` for 64-bit IEEE float.",
     "Compressed containers such as FLAC, MP3, Ogg/Vorbis, and AIFF metadata are recognized by `audioinfo`; sample decoding for those codecs is not currently implemented."
   ],
   "examples": [
@@ -91,6 +93,6 @@
   },
   "gpu_residency": "`audioread` always returns host-resident tensors because file I/O and audio decoding occur on the CPU. Use `gpuArray` after reading if later processing should use device residency.",
   "gpu_behavior": [
-    "`audioread` does not dispatch provider kernels and is not fusion eligible. GPU-resident scalar string inputs are gathered before decoding, and decoded sample tensors remain on the host."
+    "`audioread` does not dispatch provider kernels and is not fusion eligible. GPU-resident inputs reject before provider access because the public API has no interactive GPU-array surface; decoded sample tensors remain on the host."
   ]
 }

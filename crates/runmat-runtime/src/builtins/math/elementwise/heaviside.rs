@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, Tensor, Value,
+    CharArray, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -230,12 +230,29 @@ fn heaviside_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn heaviside_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&value| heaviside_scalar(value))
-        .collect();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| heaviside_error_with_detail(&HEAVISIDE_ERROR_INTERNAL, e))?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(heaviside_scalar).collect())
+        }
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| heaviside_scalar(f64::from(value)) as f32)
+                .collect(),
+        ),
+        integer => NumericStorage::F64(
+            integer
+                .materialize_f64()
+                .into_iter()
+                .map(heaviside_scalar)
+                .collect(),
+        ),
+    };
+    Tensor::from_numeric_storage(output, shape)
         .map_err(|e| heaviside_error_with_detail(&HEAVISIDE_ERROR_INTERNAL, e))
 }
 
@@ -279,6 +296,16 @@ pub(crate) mod tests {
 
     fn heaviside_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::heaviside_builtin(value))
+    }
+
+    #[test]
+    fn heaviside_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![-1.0, 0.0, 2.0], vec![1, 3]).unwrap();
+        let output = heaviside_tensor(input).unwrap();
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 0.5, 1.0])
+        );
     }
 
     struct UnsupportedHeavisideProvider;
@@ -438,7 +465,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -452,7 +479,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![0.5, 1.0, 0.5, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![0.5, 1.0, 0.5, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -486,7 +513,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 6]);
-                assert!(out.data.iter().all(|&value| value == 1.0));
+                assert!(out.materialize_f64().iter().all(|&value| value == 1.0));
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -541,7 +568,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-3.0, -0.0, 0.0, 2.5], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -552,7 +579,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![0.0, 0.5, 0.5, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 0.5, 0.5, 1.0]);
         });
     }
 
@@ -571,7 +598,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
-                assert_eq!(out.data, vec![0.0, 0.5, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 0.5, 1.0]);
             }
             other => panic!("expected host tensor fallback, got {other:?}"),
         }
@@ -607,7 +634,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![-3.0, -0.0, 0.0, 4.0, f64::NAN], vec![1, 5]).unwrap();
         let cpu = heaviside_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -619,7 +646,11 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(cpu_tensor) => {
                 assert_eq!(gathered.shape, cpu_tensor.shape);
-                for (actual, expected) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+                for (actual, expected) in gathered
+                    .materialize_f64()
+                    .iter()
+                    .zip(cpu_tensor.materialize_f64().iter())
+                {
                     if actual.is_nan() && expected.is_nan() {
                         continue;
                     }

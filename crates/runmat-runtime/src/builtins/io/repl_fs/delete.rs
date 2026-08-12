@@ -6,9 +6,12 @@ use std::path::{Path, PathBuf};
 
 use glob::{Pattern, PatternError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CellArray, CharArray, NumericScalar, StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -33,7 +36,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Host-only filesystem operation. GPU-resident path values are gathered automatically before deletion.",
+        "Host-only filesystem operation. Resident arguments are rejected before provider access.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::delete")]
@@ -50,13 +53,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "delete";
 
-const DELETE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Always 0 on success; function primarily acts as a sink.",
-}];
 const DELETE_INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "filename",
     ty: BuiltinParamType::Any,
@@ -80,18 +76,67 @@ const DELETE_INPUTS_VARIADIC: [BuiltinParamDescriptor; 2] = [
         description: "Additional filename/pattern/handle inputs.",
     },
 ];
-const DELETE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "status = delete(filename)",
-        inputs: &DELETE_INPUTS_ONE,
-        outputs: &DELETE_OUTPUT,
+const DELETE_INPUTS_SYMLINK: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filename, filename collection, or wildcard pattern.",
     },
-    BuiltinSignatureDescriptor {
-        label: "status = delete(filename1, filename2, ...)",
-        inputs: &DELETE_INPUTS_VARIADIC,
-        outputs: &DELETE_OUTPUT,
+    BuiltinParamDescriptor {
+        name: "ResolveSymbolicLinks",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name of the symbolic-link resolution option.",
+    },
+    BuiltinParamDescriptor {
+        name: "tf",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: Some("false"),
+        description: "Scalar logical or numeric zero/one selecting link-target deletion.",
     },
 ];
+const DELETE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "delete(filename)",
+        inputs: &DELETE_INPUTS_ONE,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "delete(filename1, filename2, ...)",
+        inputs: &DELETE_INPUTS_VARIADIC,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "delete(___, ResolveSymbolicLinks=tf)",
+        inputs: &DELETE_INPUTS_SYMLINK,
+        outputs: &[],
+    },
+];
+
+const DELETE_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "ResolveSymbolicLinks",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented numeric/logical flag accepts only exact scalar zero or one; MATLAB's numeric category includes every built-in integer class.",
+    }];
+
+pub const DELETE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "delete(filename, \"ResolveSymbolicLinks\", integer_tf)",
+        inputs: &DELETE_INTEGER_CONTROL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The flag is read exactly from authoritative integer storage before any filesystem access; deletion has no MATLAB-facing output.",
+    }];
 const DELETE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.INVALID_INPUT",
     identifier: Some("RunMat:delete:InvalidInput"),
@@ -182,6 +227,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::delete_type),
     descriptor(crate::builtins::io::repl_fs::delete::DELETE_DESCRIPTOR),
+    integer_capabilities(crate::builtins::io::repl_fs::delete::DELETE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
 async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -191,9 +237,22 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "delete: missing filename input",
         ));
     }
-    let gathered = gather_arguments(&args).await?;
+    if args.iter().any(crate::value_contains_gpu) {
+        return Err(delete_error_with(
+            &DELETE_ERROR_INVALID_INPUT,
+            "delete: resident arguments are not supported",
+        ));
+    }
+    let (operands, resolve_symbolic_links) = parse_delete_options(&args)?;
+    let gathered = gather_arguments(operands).await?;
 
     if gathered.iter().all(is_handle_input) {
+        if resolve_symbolic_links.is_some() {
+            return Err(delete_error_with(
+                &DELETE_ERROR_INVALID_INPUT,
+                "delete: ResolveSymbolicLinks is only valid for filename inputs",
+            ));
+        }
         return delete_handles(&gathered).await;
     }
 
@@ -214,13 +273,117 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     for raw in raw_targets {
-        delete_target(&raw).await?;
+        delete_target(&raw, resolve_symbolic_links.unwrap_or(false)).await?;
     }
 
     Ok(Value::Num(0.0))
 }
 
-async fn delete_target(raw: &str) -> BuiltinResult<()> {
+fn parse_delete_options(args: &[Value]) -> BuiltinResult<(&[Value], Option<bool>)> {
+    if args.len() >= 2
+        && args
+            .last()
+            .and_then(option_name)
+            .is_some_and(|name| name.eq_ignore_ascii_case("ResolveSymbolicLinks"))
+    {
+        return Err(delete_error_with(
+            &DELETE_ERROR_INVALID_INPUT,
+            "delete: ResolveSymbolicLinks requires a scalar logical or numeric value",
+        ));
+    }
+    if args.len() >= 3 {
+        if let Some(name) = option_name(&args[args.len() - 2]) {
+            if name.eq_ignore_ascii_case("ResolveSymbolicLinks") {
+                return Ok((
+                    &args[..args.len() - 2],
+                    Some(exact_zero_one(&args[args.len() - 1])?),
+                ));
+            }
+            if looks_like_option_value(&args[args.len() - 1]) {
+                return Err(delete_error_with(
+                    &DELETE_ERROR_INVALID_INPUT,
+                    format!("delete: unsupported option '{name}'"),
+                ));
+            }
+        }
+    }
+    Ok((args, None))
+}
+
+fn looks_like_option_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Bool(_)
+            | Value::Int(_)
+            | Value::Num(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn option_name(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        _ => None,
+    }
+}
+
+fn exact_zero_one(value: &Value) -> BuiltinResult<bool> {
+    let numeric = match value {
+        Value::Bool(flag) => return Ok(*flag),
+        Value::LogicalArray(array) if array.data.len() == 1 => return Ok(array.data[0] != 0),
+        Value::Int(value) => {
+            return if value.is_zero() {
+                Ok(false)
+            } else if value.try_to_u64() == Some(1) {
+                Ok(true)
+            } else {
+                Err(delete_error_with(
+                    &DELETE_ERROR_INVALID_INPUT,
+                    "delete: ResolveSymbolicLinks must be scalar logical or numeric 0 or 1",
+                ))
+            }
+        }
+        Value::Num(value) => NumericScalar::F64(*value),
+        Value::Tensor(tensor) if tensor.len() == 1 => {
+            tensor.numeric_value_at(0).ok_or_else(|| {
+                delete_error_with(
+                    &DELETE_ERROR_INVALID_INPUT,
+                    "delete: ResolveSymbolicLinks must be numeric or logical",
+                )
+            })?
+        }
+        _ => {
+            return Err(delete_error_with(
+                &DELETE_ERROR_INVALID_INPUT,
+                "delete: ResolveSymbolicLinks must be scalar logical or numeric 0 or 1",
+            ))
+        }
+    };
+    match numeric {
+        NumericScalar::F64(0.0) => Ok(false),
+        NumericScalar::F64(1.0) => Ok(true),
+        NumericScalar::F32(0.0) => Ok(false),
+        NumericScalar::F32(1.0) => Ok(true),
+        value if value.into_int_value().is_some_and(|value| value.is_zero()) => Ok(false),
+        value
+            if value
+                .into_int_value()
+                .is_some_and(|value| value.try_to_u64() == Some(1)) =>
+        {
+            Ok(true)
+        }
+        _ => Err(delete_error_with(
+            &DELETE_ERROR_INVALID_INPUT,
+            "delete: ResolveSymbolicLinks must be scalar logical or numeric 0 or 1",
+        )),
+    }
+}
+
+async fn delete_target(raw: &str, resolve_symbolic_links: bool) -> BuiltinResult<()> {
     let expanded = expand_user_path(raw, "delete")
         .map_err(|msg| delete_error_with(&DELETE_ERROR_INVALID_INPUT, msg))?;
     if expanded.is_empty() {
@@ -231,13 +394,17 @@ async fn delete_target(raw: &str) -> BuiltinResult<()> {
     }
 
     if contains_wildcards(&expanded) {
-        delete_with_pattern(&expanded, raw).await
+        delete_with_pattern(&expanded, raw, resolve_symbolic_links).await
     } else {
-        delete_single_path_async(&PathBuf::from(&expanded), raw).await
+        delete_single_path_async(&PathBuf::from(&expanded), raw, resolve_symbolic_links).await
     }
 }
 
-async fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
+async fn delete_with_pattern(
+    pattern: &str,
+    display: &str,
+    resolve_symbolic_links: bool,
+) -> BuiltinResult<()> {
     validate_wildcard_pattern(pattern, display)?;
 
     if let Err(PatternError { msg, .. }) = Pattern::new(pattern) {
@@ -287,15 +454,58 @@ async fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> 
 
     for path in matches {
         let display_path = path_to_string(&path);
-        delete_single_path_async(&path, &display_path).await?;
+        delete_single_path_async(&path, &display_path, resolve_symbolic_links).await?;
     }
     Ok(())
 }
 
-async fn delete_single_path_async(path: &Path, display: &str) -> BuiltinResult<()> {
-    match vfs::metadata_async(path).await {
+async fn delete_single_path_async(
+    path: &Path,
+    display: &str,
+    resolve_symbolic_links: bool,
+) -> BuiltinResult<()> {
+    let link_metadata = vfs::symlink_metadata_async(path).await;
+    if resolve_symbolic_links
+        && link_metadata
+            .as_ref()
+            .is_ok_and(runmat_filesystem::FsMetadata::is_symlink)
+    {
+        let target = vfs::canonicalize_async(path).await.map_err(|err| {
+            delete_error_with(
+                &DELETE_ERROR_OS_ERROR,
+                format!(
+                    "delete: unable to resolve symbolic link '{}' ({err})",
+                    display
+                ),
+            )
+        })?;
+        let metadata = vfs::metadata_async(&target).await.map_err(|err| {
+            delete_error_with(
+                &DELETE_ERROR_OS_ERROR,
+                format!(
+                    "delete: unable to inspect symbolic-link target '{}' ({err})",
+                    display
+                ),
+            )
+        })?;
+        return if metadata.is_dir() {
+            vfs::remove_dir_async(&target).await
+        } else {
+            vfs::remove_file_async(&target).await
+        }
+        .map_err(|err| {
+            delete_error_with(
+                &DELETE_ERROR_OS_ERROR,
+                format!(
+                    "delete: unable to delete symbolic-link target '{}' ({err})",
+                    display
+                ),
+            )
+        });
+    }
+    match link_metadata {
         Ok(meta) => {
-            if meta.is_dir() {
+            if meta.is_dir() && !meta.is_symlink() {
                 return Err(delete_error_with(
                     &DELETE_ERROR_IS_DIRECTORY,
                     format!(
@@ -332,7 +542,7 @@ async fn delete_single_path_async(path: &Path, display: &str) -> BuiltinResult<(
 
 #[cfg(test)]
 fn delete_single_path(path: &Path, display: &str) -> BuiltinResult<()> {
-    futures::executor::block_on(delete_single_path_async(path, display))
+    futures::executor::block_on(delete_single_path_async(path, display, false))
 }
 
 fn validate_wildcard_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
@@ -564,7 +774,7 @@ fn push_nonempty_target(text: &str, targets: &mut Vec<String>) -> BuiltinResult<
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::{CharArray, StringArray, Value};
+    use runmat_builtins::{CharArray, IntegerStorage, StringArray, Tensor, Value};
     use std::fs::File;
     use tempfile::tempdir;
 
@@ -584,8 +794,83 @@ pub(crate) mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"status = delete(filename)"));
-        assert!(labels.contains(&"status = delete(filename1, filename2, ...)"));
+        assert!(labels.contains(&"delete(filename)"));
+        assert!(labels.contains(&"delete(filename1, filename2, ...)"));
+        assert!(labels.contains(&"delete(___, ResolveSymbolicLinks=tf)"));
+    }
+
+    #[test]
+    fn resolve_symbolic_links_accepts_every_integer_class_only_at_zero_or_one() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            assert!(exact_zero_one(&value).unwrap());
+        }
+        assert!(!exact_zero_one(&Value::Int(runmat_builtins::IntValue::U64(0))).unwrap());
+        assert!(exact_zero_one(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))).is_err());
+        let nonscalar = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
+        assert!(exact_zero_one(&Value::Tensor(nonscalar)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_symbolic_link_can_remove_link_or_target_and_leaves_link_when_resolved() {
+        use std::os::unix::fs::symlink;
+
+        let _lock = REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("target.txt");
+        let link = temp.path().join("target-link");
+        File::create(&target).unwrap();
+        symlink(&target, &link).unwrap();
+        delete_builtin(vec![
+            Value::from(link.to_string_lossy().to_string()),
+            Value::from("ResolveSymbolicLinks"),
+            Value::Bool(false),
+        ])
+        .unwrap();
+        assert!(target.exists());
+        assert!(std::fs::symlink_metadata(&link).is_err());
+
+        symlink(&target, &link).unwrap();
+        delete_builtin(vec![
+            Value::from(link.to_string_lossy().to_string()),
+            Value::from("ResolveSymbolicLinks"),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+        ])
+        .unwrap();
+        assert!(!target.exists());
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        let folder_target = temp.path().join("empty-folder");
+        let folder_link = temp.path().join("empty-folder-link");
+        std::fs::create_dir(&folder_target).unwrap();
+        symlink(&folder_target, &folder_link).unwrap();
+        delete_builtin(vec![
+            Value::from(folder_link.to_string_lossy().to_string()),
+            Value::from("ResolveSymbolicLinks"),
+            Value::Bool(true),
+        ])
+        .unwrap();
+        assert!(!folder_target.exists());
+        assert!(std::fs::symlink_metadata(&folder_link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -603,6 +888,62 @@ pub(crate) mod tests {
             .expect("delete");
         assert_eq!(result, Value::Num(0.0));
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn delete_rejects_malformed_options_before_deleting_any_path() {
+        let _lock = REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("must-remain.txt");
+        File::create(&target).unwrap();
+        let path = Value::from(target.to_string_lossy().to_string());
+
+        let unknown = delete_builtin(vec![
+            path.clone(),
+            Value::from("UnknownOption"),
+            Value::Bool(true),
+        ])
+        .expect_err("unknown option must reject");
+        assert_eq!(unknown.identifier(), ident(&DELETE_ERROR_INVALID_INPUT));
+        assert!(target.exists());
+
+        let missing = delete_builtin(vec![path, Value::from("ResolveSymbolicLinks")])
+            .expect_err("missing option value must reject");
+        assert_eq!(missing.identifier(), ident(&DELETE_ERROR_INVALID_INPUT));
+        assert!(target.exists());
+    }
+
+    #[test]
+    fn delete_rejects_nested_resident_input_before_provider_access() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let nested = crate::make_cell(vec![resident], 1, 1).unwrap();
+        let error = delete_builtin(vec![nested]).expect_err("nested resident path must reject");
+        assert_eq!(error.identifier(), ident(&DELETE_ERROR_INVALID_INPUT));
+        assert!(!error.message().to_ascii_lowercase().contains("provider"));
+    }
+
+    #[test]
+    fn delete_uses_documented_sequential_multi_target_mutation() {
+        let _lock = REPL_FS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let temp = tempdir().unwrap();
+        let first = temp.path().join("first.txt");
+        let missing = temp.path().join("missing.txt");
+        File::create(&first).unwrap();
+        let error = delete_builtin(vec![
+            Value::from(first.to_string_lossy().to_string()),
+            Value::from(missing.to_string_lossy().to_string()),
+        ])
+        .expect_err("later missing target must stop sequential deletion");
+        assert_eq!(error.identifier(), ident(&DELETE_ERROR_FILE_NOT_FOUND));
+        assert!(!first.exists(), "earlier targets are deleted sequentially");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -752,7 +1093,7 @@ pub(crate) mod tests {
     #[test]
     fn delete_errors_on_invalid_pattern() {
         let pattern = "{invalid*";
-        let err = futures::executor::block_on(delete_target(pattern))
+        let err = futures::executor::block_on(delete_target(pattern, false))
             .expect_err("invalid pattern should error");
         assert_eq!(err.identifier(), ident(&DELETE_ERROR_INVALID_PATTERN));
     }
@@ -767,7 +1108,8 @@ pub(crate) mod tests {
         let temp = tempdir().expect("temp dir");
         let missing = temp.path().join("missing.txt");
         let missing_str = missing.to_string_lossy().to_string();
-        let err = futures::executor::block_on(delete_target(&missing_str)).expect_err("error");
+        let err =
+            futures::executor::block_on(delete_target(&missing_str, false)).expect_err("error");
         assert_eq!(err.identifier(), ident(&DELETE_ERROR_FILE_NOT_FOUND));
     }
 
@@ -816,6 +1158,25 @@ pub(crate) mod tests {
             }
             other => panic!("expected handle result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn delete_rejects_symbolic_link_option_for_handle_input() {
+        let handle = futures::executor::block_on(crate::new_handle_object_builtin(
+            "DeleteResolveOptionHandle".to_string(),
+        ))
+        .expect("handle");
+        let error = delete_builtin(vec![
+            handle.clone(),
+            Value::from("ResolveSymbolicLinks"),
+            Value::Bool(false),
+        ])
+        .expect_err("filename-only option must reject for handles");
+        assert_eq!(error.identifier(), ident(&DELETE_ERROR_INVALID_INPUT));
+        assert!(matches!(
+            futures::executor::block_on(crate::isvalid_builtin(handle)).unwrap(),
+            Value::Bool(true)
+        ));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

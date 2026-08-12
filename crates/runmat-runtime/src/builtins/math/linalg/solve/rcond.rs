@@ -141,6 +141,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::solve::rcond"
 )]
 async fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     let estimate = match value {
         Value::GpuTensor(handle) => return rcond_gpu(handle).await,
         Value::ComplexTensor(matrix) => rcond_complex_tensor(&matrix)?,
@@ -311,10 +312,11 @@ fn rcond_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<f64> {
     if rows == 0 {
         return Ok(f64::INFINITY);
     }
-    if matrix.data.len() == 1 {
-        return Ok(if matrix.data[0] == 0.0 { 0.0 } else { 1.0 });
+    let values = tensor::tensor_values_f64_cow(matrix);
+    if values.len() == 1 {
+        return Ok(if values[0] == 0.0 { 0.0 } else { 1.0 });
     }
-    let a = DMatrix::from_column_slice(rows, cols, &matrix.data);
+    let a = DMatrix::from_column_slice(rows, cols, &values);
     let svd = SVD::new(a, false, false);
     Ok(singular_value_rcond(svd.singular_values.as_slice()))
 }
@@ -329,13 +331,13 @@ fn rcond_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<f64> {
     if rows == 0 {
         return Ok(f64::INFINITY);
     }
-    if matrix.data.len() == 1 {
-        let (re, im) = matrix.data[0];
+    if matrix.materialize_f64().len() == 1 {
+        let (re, im) = matrix.materialize_f64()[0];
         let magnitude = re.hypot(im);
         return Ok(if magnitude == 0.0 { 0.0 } else { 1.0 });
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -390,7 +392,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -402,6 +404,17 @@ pub(crate) mod tests {
         let result = rcond_builtin(Value::Tensor(tensor)).expect("rcond");
         match result {
             Value::Num(value) => assert!((value - 1.0).abs() < 1e-12),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rcond_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2])
+            .expect("integer");
+        let result = rcond_builtin(Value::Tensor(tensor)).expect("rcond");
+        match result {
+            Value::Num(value) => assert!((value - 0.5).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
     }
@@ -519,14 +532,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 0.5], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu_value = rcond_builtin(Value::GpuTensor(handle)).expect("rcond");
             let gathered = test_support::gather(gpu_value).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
-            assert!((gathered.data[0] - 0.25).abs() < 1e-12);
+            assert!((gathered.materialize_f64()[0] - 0.25).abs() < 1e-12);
         });
     }
 
@@ -553,7 +566,7 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -561,7 +574,7 @@ pub(crate) mod tests {
         let gpu_value = rcond_builtin(Value::GpuTensor(handle)).expect("gpu rcond");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, vec![1, 1]);
-        assert!((gathered.data[0] - cpu_scalar).abs() < tol);
+        assert!((gathered.materialize_f64()[0] - cpu_scalar).abs() < tol);
     }
 
     fn rcond_builtin(value: Value) -> BuiltinResult<Value> {

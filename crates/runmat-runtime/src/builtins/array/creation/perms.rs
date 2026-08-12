@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, NumericStorage, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -184,16 +184,53 @@ fn evaluate_host(value: Value) -> BuiltinResult<Value> {
 fn perms_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let elements = vector_len(&tensor.shape)?;
     let rows = checked_output_rows(elements)?;
-    let data = permuted_columns(&tensor.data, rows, elements)?;
-    Tensor::new_with_dtype(data, vec![rows, elements], tensor.dtype)
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")))?;
+    let storage = permute_numeric_storage(storage, rows, elements)?;
+    Tensor::from_numeric_storage(storage, vec![rows, elements])
         .map(Value::Tensor)
         .map_err(|e| perms_error_with(&ERROR_INTERNAL, format!("perms: {e}")))
+}
+
+fn permute_numeric_storage(
+    storage: NumericStorage,
+    rows: usize,
+    elements: usize,
+) -> BuiltinResult<NumericStorage> {
+    macro_rules! permute {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(permuted_columns(&$values, rows, elements)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => permute!(values, F64),
+        NumericStorage::F32(values) => permute!(values, F32),
+        NumericStorage::I8(values) => permute!(values, I8),
+        NumericStorage::I16(values) => permute!(values, I16),
+        NumericStorage::I32(values) => permute!(values, I32),
+        NumericStorage::I64(values) => permute!(values, I64),
+        NumericStorage::U8(values) => permute!(values, U8),
+        NumericStorage::U16(values) => permute!(values, U16),
+        NumericStorage::U32(values) => permute!(values, U32),
+        NumericStorage::U64(values) => permute!(values, U64),
+    })
 }
 
 fn perms_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let elements = vector_len(&tensor.shape)?;
     let rows = checked_output_rows(elements)?;
-    let data = permuted_columns(&tensor.data, rows, elements)?;
+    if let Some(storage) = tensor.integer_storage() {
+        let storage = storage
+            .reorder(|values| {
+                permuted_columns(values, rows, elements).map_err(|error| error.to_string())
+            })
+            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")))?;
+        return ComplexTensor::new_integer(storage, vec![rows, elements])
+            .map(Value::ComplexTensor)
+            .map_err(|error| perms_error_with(&ERROR_INTERNAL, format!("perms: {error}")));
+    }
+    let data = permuted_columns(&tensor.materialize_f64(), rows, elements)?;
     ComplexTensor::new(data, vec![rows, elements])
         .map(Value::ComplexTensor)
         .map_err(|e| perms_error_with(&ERROR_INTERNAL, format!("perms: {e}")))
@@ -366,7 +403,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, NumericDType};
+    use runmat_builtins::{IntValue, IntegerStorage, NumericDType};
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(super::perms_builtin(value, Vec::new()))
@@ -376,7 +413,7 @@ mod tests {
         (0..tensor.rows)
             .map(|row| {
                 (0..tensor.cols)
-                    .map(|col| tensor.data[col * tensor.rows + row])
+                    .map(|col| tensor.materialize_f64()[col * tensor.rows + row])
                     .collect()
             })
             .collect()
@@ -386,7 +423,7 @@ mod tests {
         (0..tensor.rows)
             .map(|row| {
                 (0..tensor.cols)
-                    .map(|col| tensor.data[col * tensor.rows + row])
+                    .map(|col| tensor.materialize_f64()[col * tensor.rows + row])
                     .collect()
             })
             .collect()
@@ -424,7 +461,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![6, 3]);
-        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert_eq!(
             tensor_rows(&out),
             vec![
@@ -478,13 +515,47 @@ mod tests {
     }
 
     #[test]
-    fn numeric_dtype_is_preserved_for_tensors() {
-        let tensor = Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::U32).unwrap();
+    fn native_single_storage_is_preserved_for_tensors() {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let Value::Tensor(out) = call(Value::Tensor(tensor)).expect("perms") else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::U32);
-        assert_eq!(tensor_rows(&out), vec![vec![2.0, 1.0], vec![1.0, 2.0]]);
+        assert_eq!(
+            out.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![2.0, 1.0, 1.0, 2.0])
+        );
+    }
+
+    #[test]
+    fn exact_integer_tensor_classes_and_values_are_preserved() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7]),
+            IntegerStorage::I16(vec![-300, 400]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let expected = storage
+                .from_exact_values_like(vec![
+                    values[1].clone(),
+                    values[0].clone(),
+                    values[0].clone(),
+                    values[1].clone(),
+                ])
+                .expect("expected storage");
+            let input = Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor");
+            let Value::Tensor(output) = call(Value::Tensor(input)).expect("perms") else {
+                panic!("expected exact integer tensor");
+            };
+            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
     }
 
     #[test]
@@ -574,14 +645,14 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.materialize_f64().is_empty());
 
         let empty_literal = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
         let Value::Tensor(out) = call(Value::Tensor(empty_literal)).expect("perms []") else {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![1, 0]);
-        assert!(out.data.is_empty());
+        assert!(out.materialize_f64().is_empty());
     }
 
     #[test]
@@ -590,14 +661,7 @@ mod tests {
         let err = call(Value::Tensor(matrix)).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
 
-        let sparse = Value::SparseTensor(runmat_builtins::SparseTensor {
-            rows: 1,
-            cols: 1,
-            col_ptrs: vec![0, 0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        });
+        let sparse = Value::SparseTensor(runmat_builtins::SparseTensor::zeros(1, 1));
         let err = call(sparse).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:perms:InvalidInput"));
     }
@@ -615,7 +679,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .expect("upload");
@@ -632,7 +696,7 @@ mod tests {
             let logical_tensor = Tensor::new(vec![0.0, 1.0, 1.0], vec![1, 3]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &logical_tensor.data,
+                    data: &logical_tensor.materialize_f64(),
                     shape: &logical_tensor.shape,
                 })
                 .expect("upload logical");

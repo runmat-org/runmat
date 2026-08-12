@@ -4,7 +4,7 @@ use regex::Regex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -278,6 +278,11 @@ enum NumericData {
         rows: usize,
         cols: usize,
     },
+    IntegerComplex {
+        storage: IntegerComplexStorage,
+        rows: usize,
+        cols: usize,
+    },
     Integer {
         storage: IntegerStorage,
         rows: usize,
@@ -364,7 +369,12 @@ fn is_local_token(value: &Value) -> BuiltinResult<bool> {
 fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Int(i) => {
-            let digits = i.to_i64();
+            let digits = i.try_to_i64().ok_or_else(|| {
+                num2str_error_with_message(
+                    format!("num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"),
+                    &NUM2STR_ERROR_INVALID_PRECISION,
+                )
+            })?;
             validate_precision(digits)?;
             Ok(Some(digits as usize))
         }
@@ -385,8 +395,18 @@ fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
             validate_precision(rounded as i64)?;
             Ok(Some(rounded as usize))
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
-            let value = t.data[0];
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                let digits = int.try_to_i64().ok_or_else(|| {
+                    num2str_error_with_message(
+                        format!("num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"),
+                        &NUM2STR_ERROR_INVALID_PRECISION,
+                    )
+                })?;
+                validate_precision(digits)?;
+                return Ok(Some(digits as usize));
+            }
+            let value = tensor::tensor_value_f64(t, 0);
             if !value.is_finite() {
                 return Err(num2str_error_with_message(
                     "num2str: precision must be finite",
@@ -620,21 +640,17 @@ fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
-    if rows == 0 || cols == 0 {
-        return Ok(NumericData::Real {
-            data: tensor.data,
-            rows,
-            cols,
-        });
-    }
-    match tensor.integer_data {
-        Some(storage) => Ok(NumericData::Integer {
-            storage,
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|_| num2str_error(&NUM2STR_ERROR_INVALID_INPUT))?;
+    match storage.into_integer_storage() {
+        Ok(storage) => Ok(NumericData::Integer {
+            storage: storage.clone(),
             rows,
             cols,
         }),
-        None => Ok(NumericData::Real {
-            data: tensor.data,
+        Err(storage) => Ok(NumericData::Real {
+            data: storage.materialize_f64(),
             rows,
             cols,
         }),
@@ -650,8 +666,15 @@ fn complex_tensor_to_data(tensor: ComplexTensor) -> BuiltinResult<NumericData> {
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
+    if let Some(storage) = tensor.integer_storage() {
+        return Ok(NumericData::IntegerComplex {
+            storage: storage.clone(),
+            rows,
+            cols,
+        });
+    }
     Ok(NumericData::Complex {
-        data: tensor.data,
+        data: tensor.materialize_f64(),
         rows,
         cols,
     })
@@ -669,6 +692,11 @@ fn format_numeric_data(data: NumericData, options: &FormatOptions) -> BuiltinRes
         NumericData::Complex { data, rows, cols } => {
             format_complex_matrix(&data, rows, cols, options)
         }
+        NumericData::IntegerComplex {
+            storage,
+            rows,
+            cols,
+        } => format_integer_complex_matrix(&storage, rows, cols, options),
         NumericData::Integer {
             storage,
             rows,
@@ -809,6 +837,89 @@ fn integer_storage_decimal(storage: &IntegerStorage, index: usize) -> String {
         IntegerStorage::U16(values) => values[index].to_string(),
         IntegerStorage::U32(values) => values[index].to_string(),
         IntegerStorage::U64(values) => values[index].to_string(),
+    }
+}
+
+fn format_integer_complex_matrix(
+    storage: &IntegerComplexStorage,
+    rows: usize,
+    cols: usize,
+    options: &FormatOptions,
+) -> BuiltinResult<CharArray> {
+    if rows == 0 {
+        return CharArray::new(Vec::new(), 0, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
+    }
+    if cols == 0 {
+        return CharArray::new(Vec::new(), rows, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
+    }
+
+    let mut entries = vec![
+        vec![
+            CellEntry {
+                text: String::new(),
+                width: 0
+            };
+            cols
+        ];
+        rows
+    ];
+    let mut col_widths = vec![0usize; cols];
+
+    for (col, width) in col_widths.iter_mut().enumerate() {
+        for (row, row_entries) in entries.iter_mut().enumerate() {
+            let text = format_integer_complex(storage, row + col * rows, options);
+            let entry_width = text.chars().count();
+            row_entries[col] = CellEntry {
+                text,
+                width: entry_width,
+            };
+            *width = (*width).max(entry_width);
+        }
+    }
+
+    if cols > 1 {
+        for (idx, width) in col_widths.iter_mut().enumerate() {
+            if idx > 0 {
+                *width += 1;
+            }
+        }
+    }
+
+    rows_to_char_array(assemble_rows(entries, col_widths))
+}
+
+fn format_integer_complex(
+    storage: &IntegerComplexStorage,
+    index: usize,
+    options: &FormatOptions,
+) -> String {
+    let real_raw = integer_storage_decimal(&storage.real, index);
+    let imag_raw = integer_storage_decimal(&storage.imag, index);
+    let real_is_zero = real_raw == "0";
+    let real_str = format_integer(real_raw, &options.spec, options.decimal);
+    let Some(imag_abs_raw) = integer_abs_decimal(&imag_raw) else {
+        return real_str;
+    };
+    let imag_str = format_integer(imag_abs_raw, &options.spec, options.decimal);
+    let imag_sign = if imag_raw.starts_with('-') { '-' } else { '+' };
+
+    if real_is_zero {
+        if imag_sign == '-' {
+            return format!("-{imag_str}i");
+        }
+        return format!("{imag_str}i");
+    }
+
+    format!("{real_str} {imag_sign} {imag_str}i")
+}
+
+fn integer_abs_decimal(value: &str) -> Option<String> {
+    if value == "0" {
+        None
+    } else {
+        Some(value.strip_prefix('-').unwrap_or(value).to_string())
     }
 }
 
@@ -1235,7 +1346,7 @@ pub(crate) mod tests {
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::num2str_builtin(value, rest))
     }
-    use runmat_builtins::{IntValue, LogicalArray, Tensor};
+    use runmat_builtins::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor};
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -1268,6 +1379,26 @@ pub(crate) mod tests {
             }
             other => panic!("expected char array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn num2str_precision_parser_preserves_typed_integer_tensor_bounds() {
+        let precision =
+            Tensor::new_integer(IntegerStorage::U64(vec![52]), vec![1, 1]).expect("precision");
+        assert_eq!(
+            try_extract_precision(&Value::Tensor(precision)).unwrap(),
+            Some(52)
+        );
+
+        let too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![53]), vec![1, 1]).expect("precision");
+        assert!(try_extract_precision(&Value::Tensor(too_large)).is_err());
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("precision");
+        assert!(try_extract_precision(&Value::Tensor(negative)).is_err());
+
+        assert!(try_extract_precision(&Value::Int(IntValue::U64(u64::MAX))).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1363,6 +1494,52 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn num2str_complex_integer_tensor_reads_exact_storage_without_mirror() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("complex integer storage");
+        let tensor =
+            ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer tensor");
+
+        let out = num2str_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("num2str");
+        match out {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, "1.84467440737096e+19 + 7i  9.00719925474099e+15");
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn num2str_complex_integer_tensor_fixed_format_keeps_exact_digits() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![7, 0]),
+        )
+        .expect("complex integer storage");
+        let tensor =
+            ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex integer tensor");
+
+        let out = num2str_builtin(
+            Value::ComplexTensor(tensor),
+            vec![Value::String("%.0f".to_string())],
+        )
+        .expect("num2str");
+        match out {
+            Value::CharArray(ca) => {
+                let text: String = ca.data.iter().collect();
+                assert_eq!(text, format!("{} + 7i  9007199254740993", u64::MAX));
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn num2str_local_decimal() {
         std::env::set_var("RUNMAT_DECIMAL_SEPARATOR", ",");
         let out =
@@ -1397,7 +1574,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![10.5, 20.5], vec![1, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

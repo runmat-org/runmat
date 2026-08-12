@@ -385,7 +385,9 @@ pub(crate) mod tests {
 
     fn rows_from_value(value: Value) -> Vec<String> {
         match value {
-            Value::CharArray(CharArray { data, rows, cols }) => {
+            Value::CharArray(CharArray {
+                data, rows, cols, ..
+            }) => {
                 let mut out = Vec::with_capacity(rows);
                 for r in 0..rows {
                     let mut row = String::with_capacity(cols);

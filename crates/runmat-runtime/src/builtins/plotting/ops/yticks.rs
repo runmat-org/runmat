@@ -128,14 +128,8 @@ mod tests {
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
 
     fn tensor(data: Vec<f64>) -> Value {
-        Value::Tensor(runmat_builtins::Tensor {
-            rows: 1,
-            cols: data.len(),
-            shape: vec![1, data.len()],
-            data,
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        let len = data.len();
+        Value::Tensor(runmat_builtins::Tensor::new(data, vec![1, len]).expect("y tick row"))
     }
 
     #[test]
@@ -154,7 +148,9 @@ mod tests {
         .unwrap();
         let queried = yticks_builtin(Vec::new()).unwrap();
         assert_eq!(
-            runmat_builtins::Tensor::try_from(&queried).unwrap().data,
+            runmat_builtins::Tensor::try_from(&queried)
+                .unwrap()
+                .materialize_f64(),
             vec![1.0, 3.0, 9.0]
         );
         let mode = get_builtin(vec![ax.clone(), Value::String("YTickMode".into())]).unwrap();

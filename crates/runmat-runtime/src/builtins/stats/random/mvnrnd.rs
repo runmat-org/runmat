@@ -248,17 +248,18 @@ fn parse_means(mu: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
     if mu.shape.len() > 2 {
         return Err(invalid("mvnrnd: mu must be a vector or 2-D matrix"));
     }
-    if mu.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor::tensor_values_f64(mu);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid("mvnrnd: mu values must be finite"));
     }
     match mu.shape.as_slice() {
-        [] => Ok(vec![vec![mu.data[0]]]),
-        [len] => Ok(vec![mu.data[..*len].to_vec()]),
-        [rows, cols] if *rows == 1 => Ok(vec![(0..*cols).map(|col| mu.data[col]).collect()]),
+        [] => Ok(vec![vec![values[0]]]),
+        [len] => Ok(vec![values[..*len].to_vec()]),
+        [rows, cols] if *rows == 1 => Ok(vec![(0..*cols).map(|col| values[col]).collect()]),
         [rows, cols] => {
             let mut out = Vec::with_capacity(*rows);
             for row in 0..*rows {
-                out.push((0..*cols).map(|col| mu.data[col * rows + row]).collect());
+                out.push((0..*cols).map(|col| values[col * rows + row]).collect());
             }
             Ok(out)
         }
@@ -267,20 +268,21 @@ fn parse_means(mu: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
 }
 
 fn parse_covariances(sigma: &Tensor, dimension: usize) -> BuiltinResult<Vec<DMatrix<f64>>> {
-    if sigma.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor::tensor_values_f64(sigma);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid("mvnrnd: Sigma values must be finite"));
     }
     match sigma.shape.as_slice() {
-        [] if dimension == 1 => Ok(vec![DMatrix::from_element(1, 1, sigma.data[0])]),
-        [1] if dimension == 1 => Ok(vec![DMatrix::from_element(1, 1, sigma.data[0])]),
+        [] if dimension == 1 => Ok(vec![DMatrix::from_element(1, 1, values[0])]),
+        [1] if dimension == 1 => Ok(vec![DMatrix::from_element(1, 1, values[0])]),
         [rows, cols] if *rows == 1 && *cols == dimension => {
-            Ok(vec![diagonal_page(&sigma.data[..dimension], dimension)])
+            Ok(vec![diagonal_page(&values[..dimension], dimension)])
         }
         [rows, cols] => {
             if *rows != dimension || *cols != dimension {
                 return Err(invalid("mvnrnd: Sigma must be d-by-d for d columns in mu"));
             }
-            Ok(vec![matrix_page(&sigma.data, dimension, 0)])
+            Ok(vec![matrix_page(&values, dimension, 0)])
         }
         [rows, cols, pages] => {
             if *rows == 1 && *cols == dimension {
@@ -288,7 +290,7 @@ fn parse_covariances(sigma: &Tensor, dimension: usize) -> BuiltinResult<Vec<DMat
                 for page in 0..*pages {
                     let offset = page * dimension;
                     out.push(diagonal_page(
-                        &sigma.data[offset..offset + dimension],
+                        &values[offset..offset + dimension],
                         dimension,
                     ));
                 }
@@ -299,7 +301,7 @@ fn parse_covariances(sigma: &Tensor, dimension: usize) -> BuiltinResult<Vec<DMat
             }
             let mut out = Vec::with_capacity(*pages);
             for page in 0..*pages {
-                out.push(matrix_page(&sigma.data, dimension, page));
+                out.push(matrix_page(&values, dimension, page));
             }
             Ok(out)
         }
@@ -325,12 +327,23 @@ fn diagonal_page(diagonal: &[f64], dimension: usize) -> DMatrix<f64> {
 }
 
 async fn parse_n(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| invalid("mvnrnd: n must be a positive scalar integer"));
+    }
     let tensor = value_to_tensor(value).await?;
-    if tensor.data.len() != 1 {
+    if !tensor::is_scalar_tensor(&tensor) {
         return Err(invalid("mvnrnd: n must be a positive scalar integer"));
     }
-    let value = tensor.data[0];
-    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 {
+    let value = tensor::tensor_value_f64(&tensor, 0);
+    if !value.is_finite()
+        || value <= 0.0
+        || value.fract() != 0.0
+        || value > usize::MAX as f64
+        || (usize::BITS == 64 && value == usize::MAX as f64)
+    {
         return Err(invalid("mvnrnd: n must be a positive scalar integer"));
     }
     Ok(value as usize)
@@ -405,6 +418,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::random;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn reset_rng() -> impl Drop {
         let guard = random::test_guard();
@@ -414,6 +428,14 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("integer tensor")
     }
 
     #[test]
@@ -428,7 +450,7 @@ mod tests {
         match out {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![5, 2]);
-                assert!(t.data.iter().all(|value| value.is_finite()));
+                assert!(t.materialize_f64().iter().all(|value| value.is_finite()));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -445,7 +467,7 @@ mod tests {
         .expect("mvnrnd");
         let expected = random::expected_normal_scaled_sequence(0.0, 1.0, 6);
         match out {
-            Value::Tensor(t) => assert_eq!(t.data, expected),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), expected),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -526,7 +548,9 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![3, 2]);
                 for row in 0..3 {
-                    assert!((t.data[row] - t.data[3 + row]).abs() < 1.0e-10);
+                    assert!(
+                        (t.materialize_f64()[row] - t.materialize_f64()[3 + row]).abs() < 1.0e-10
+                    );
                 }
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -563,5 +587,41 @@ mod tests {
         ]))
         .expect_err("zero n should fail");
         assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn mvnrnd_typed_count_is_exact_and_lossy_f64_is_rejected() {
+        assert_eq!(
+            block_on(parse_n(&Value::Int(runmat_builtins::IntValue::U16(3)))).unwrap(),
+            3
+        );
+        for value in [
+            Value::Int(runmat_builtins::IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(block_on(parse_n(&value)).is_err());
+        }
+    }
+
+    #[test]
+    fn mvnrnd_parsers_read_typed_integer_tensor_storage_exactly() {
+        let n = cleared_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]);
+        assert_eq!(block_on(parse_n(&Value::Tensor(n))).unwrap(), 4);
+
+        let mu = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2], f64::NAN);
+        assert_eq!(
+            parse_means(&mu).unwrap(),
+            vec![vec![1.0, 3.0], vec![2.0, 4.0]]
+        );
+
+        let sigma =
+            poisoned_int_tensor(IntegerStorage::U16(vec![4, 0, 0, 9]), vec![2, 2], f64::NAN);
+        let covariances = parse_covariances(&sigma, 2).unwrap();
+        assert_eq!(covariances.len(), 1);
+        assert_eq!(covariances[0][(0, 0)], 4.0);
+        assert_eq!(covariances[0][(1, 1)], 9.0);
+        assert_eq!(covariances[0][(0, 1)], 0.0);
+        assert_eq!(covariances[0][(1, 0)], 0.0);
     }
 }

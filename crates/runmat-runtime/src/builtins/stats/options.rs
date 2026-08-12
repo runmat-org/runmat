@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const STATSET: &str = "statset";
@@ -644,6 +645,18 @@ fn positive_integer_value(field: &str, value: &Value) -> BuiltinResult<Value> {
     if is_empty_value(value) {
         return Ok(value.clone());
     }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        let integer = integer
+            .try_to_usize()
+            .filter(|integer| *integer >= 1 && *integer <= MAX_OPTION_INTEGER)
+            .ok_or_else(|| {
+                statset_error(
+                    &STATSET_ERROR_INVALID_OPTION,
+                    format!("statset: {field} must be a positive integer"),
+                )
+            })?;
+        return Ok(Value::Num(integer as f64));
+    }
     let scalar = numeric_scalar(field, value)?;
     if scalar < 1.0 || scalar.fract() != 0.0 || scalar > MAX_OPTION_INTEGER as f64 {
         return Err(statset_error(
@@ -675,10 +688,9 @@ fn positive_numeric_value(field: &str, value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => positive_scalar_value(field, value),
         Value::Tensor(tensor) => {
-            if tensor
-                .data
-                .iter()
-                .all(|entry| entry.is_finite() && *entry > 0.0)
+            if tensor::tensor_values_f64(tensor)
+                .into_iter()
+                .all(|entry| entry.is_finite() && entry > 0.0)
             {
                 Ok(value.clone())
             } else {
@@ -699,16 +711,29 @@ fn bool_or_on_off_value(field: &str, value: &Value) -> BuiltinResult<Value> {
     if is_empty_value(value) {
         return Ok(value.clone());
     }
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(Value::Bool(false)),
+            Some(1) => Ok(Value::Bool(true)),
+            _ => Err(statset_error(
+                &STATSET_ERROR_INVALID_OPTION,
+                format!("statset: {field} must be logical or 'on'/'off'"),
+            )),
+        };
+    }
     match value {
         Value::Bool(flag) => Ok(Value::Bool(*flag)),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(Value::Bool(*n != 0.0)),
-        Value::Int(i) if i.to_f64() == 0.0 || i.to_f64() == 1.0 => {
-            Ok(Value::Bool(i.to_f64() != 0.0))
-        }
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(Value::Bool(tensor.data[0] != 0.0))
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let value = tensor::tensor_value_f64(tensor, 0);
+            if value == 0.0 || value == 1.0 {
+                Ok(Value::Bool(value != 0.0))
+            } else {
+                Err(statset_error(
+                    &STATSET_ERROR_INVALID_OPTION,
+                    format!("statset: {field} must be logical or 'on'/'off'"),
+                ))
+            }
         }
         _ => {
             let text = text_scalar(value)?;
@@ -725,9 +750,11 @@ fn bool_or_on_off_value(field: &str, value: &Value) -> BuiltinResult<Value> {
 }
 
 fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return Ok(integer.to_f64());
+    }
     let scalar = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
         Value::Bool(flag) => {
             if *flag {
                 1.0
@@ -735,7 +762,9 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         other => {
             return Err(statset_error(
                 &STATSET_ERROR_INVALID_OPTION,
@@ -783,7 +812,7 @@ fn lookup_struct_field<'a>(options: &'a StructValue, name: &str) -> Option<&'a V
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::StringArray(array) => array.data.is_empty(),
@@ -832,6 +861,7 @@ fn statget_error(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn struct_value(value: Value) -> StructValue {
         let Value::Struct(st) = value else {
@@ -843,6 +873,9 @@ mod tests {
     fn num_field(options: &StructValue, name: &str) -> f64 {
         match options.fields.get(name).unwrap() {
             Value::Num(value) => *value,
+            Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+                tensor::tensor_value_f64(tensor, 0)
+            }
             other => panic!("expected numeric field {name}, got {other:?}"),
         }
     }
@@ -869,6 +902,87 @@ mod tests {
         assert!(
             matches!(options.fields.get("Streams"), Some(Value::Cell(cell)) if cell.data.is_empty())
         );
+    }
+
+    #[test]
+    fn statset_reads_typed_integer_tensor_options_exactly() {
+        let max_iter =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("MaxIter");
+        let tol_fun =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("TolFun");
+        let deriv_step =
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![1, 2]).expect("DerivStep");
+        let use_parallel =
+            Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("UseParallel");
+
+        let options = struct_value(
+            block_on(statset_builtin(vec![
+                Value::from("MaxIter"),
+                Value::Tensor(max_iter),
+                Value::from("TolFun"),
+                Value::Tensor(tol_fun),
+                Value::from("DerivStep"),
+                Value::Tensor(deriv_step.clone()),
+                Value::from("UseParallel"),
+                Value::Tensor(use_parallel),
+            ]))
+            .expect("statset"),
+        );
+
+        assert_eq!(num_field(&options, "MaxIter"), 7.0);
+        assert_eq!(num_field(&options, "TolFun"), 2.0);
+        let Some(Value::Tensor(parsed_deriv_step)) = options.fields.get("DerivStep") else {
+            panic!("expected DerivStep tensor");
+        };
+        assert_eq!(parsed_deriv_step.shape, deriv_step.shape);
+        assert_eq!(
+            parsed_deriv_step.integer_storage(),
+            deriv_step.integer_storage()
+        );
+        assert_eq!(options.fields.get("UseParallel"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn statset_scalar_options_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let scalar = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            assert!(matches!(
+                bool_or_on_off_value("UseParallel", &Value::Tensor(scalar)),
+                Ok(Value::Bool(true))
+            ));
+        }
+    }
+
+    #[test]
+    fn statset_integer_counts_read_all_integer_storage_variants() {
+        for storage in [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ] {
+            let value = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            assert_eq!(
+                positive_integer_value("MaxIter", &Value::Tensor(value)).unwrap(),
+                Value::Num(7.0)
+            );
+        }
+        let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+        assert!(positive_integer_value("MaxIter", &Value::Tensor(wide)).is_err());
     }
 
     #[test]

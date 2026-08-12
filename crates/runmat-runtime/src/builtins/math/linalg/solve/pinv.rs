@@ -2,7 +2,7 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPinvOptions};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPinvOptions};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -179,6 +179,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => pinv_gpu(handle, tol).await,
         Value::ComplexTensor(t) => pinv_complex_value(t, tol),
@@ -206,10 +207,7 @@ async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Va
             .await
             .map_err(map_control_flow)?;
         let pinv = pinv_real_tensor(&gathered, tol)?;
-        if let Ok(uploaded) = provider.upload(&HostTensorView {
-            data: &pinv.data,
-            shape: &pinv.shape,
-        }) {
+        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &pinv) {
             return Ok(Value::GpuTensor(uploaded));
         }
         return Ok(tensor::tensor_into_value(pinv));
@@ -246,7 +244,8 @@ fn pinv_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Ten
         return Tensor::new(vec![0.0; cols * rows], vec![cols, rows])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    let dm = DMatrix::from_column_slice(rows, cols, &matrix.data);
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let dm = DMatrix::from_column_slice(rows, cols, &values);
     let pinv = pseudoinverse_real(&dm, tol)?;
     matrix_to_tensor(NAME, pinv)
 }
@@ -262,7 +261,7 @@ fn pinv_complex_tensor_impl(
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -338,7 +337,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, ResolveContext, Type};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -406,7 +405,23 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                approx_equal(&out.data, &[0.04, 0.08, 0.08, 0.16], 1e-12);
+                approx_equal(&out.materialize_f64(), &[0.04, 0.08, 0.08, 0.16], 1e-12);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pinv_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 0, 0, 4]), vec![2, 2]).unwrap();
+
+        let result = pinv_builtin(Value::Tensor(tensor), Vec::new()).expect("pinv");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 2]);
+                approx_equal(&out.materialize_f64(), &[0.5, 0.0, 0.0, 0.25], 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -420,7 +435,11 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                approx_equal(&out.data, &[1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 1e-12);
+                approx_equal(
+                    &out.materialize_f64(),
+                    &[1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                    1e-12,
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -434,7 +453,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                approx_equal(&out.data, &[1.0, 0.0, 0.0, 0.0], 1e-9);
+                approx_equal(&out.materialize_f64(), &[1.0, 0.0, 0.0, 0.0], 1e-9);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -458,7 +477,7 @@ pub(crate) mod tests {
                     (0.0, 0.0),
                     (0.23076923076923078, 0.15384615384615385),
                 ];
-                for (actual, expected) in out.data.iter().zip(expected.iter()) {
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual.0 - expected.0).abs() < 1e-12);
                     assert!((actual.1 - expected.1).abs() < 1e-12);
                 }
@@ -473,14 +492,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = pinv_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu pinv");
             let gathered = test_support::gather(result).expect("gather");
             let cpu = pinv_real_tensor(&tensor, None).expect("cpu pinv");
-            approx_equal(&gathered.data, &cpu.data, 1e-12);
+            approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 1e-12);
         });
     }
 
@@ -497,7 +516,7 @@ pub(crate) mod tests {
         let cpu = pinv_real_tensor(&tensor, None).expect("cpu pinv");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -509,10 +528,10 @@ pub(crate) mod tests {
 
         match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => {
-                approx_equal(&gathered.data, &cpu.data, 1e-10);
+                approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 1e-10);
             }
             runmat_accelerate_api::ProviderPrecision::F32 => {
-                approx_equal(&gathered.data, &cpu.data, 5e-5);
+                approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 5e-5);
             }
         }
     }

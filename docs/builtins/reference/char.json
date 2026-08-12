@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Conversion always runs on the CPU; GPU tensors are gathered to host memory before building the character array."
+    "notes": "Conversion runs on the CPU. Interactive resident numeric input is a mode-gated RunMat extension and gathers before producing host character data."
   },
   "fusion": {
     "elementwise": false,
@@ -30,7 +30,9 @@
   "description": "`char` converts inputs into a character array. Numeric inputs are interpreted as code points, and text inputs are padded as needed so output rows share width, following MATLAB and RunMat conversion semantics.",
   "behaviors": [
     "`char(x)` with no arguments returns a `0×0` character array.",
-    "Numeric arrays must be real integers. The output character array has the same shape (up to two dimensions) as the numeric input.",
+    "Real numeric values are truncated toward zero and clamped to the UTF-16 code-unit range 0 through 65535. All eight integer classes are read from exact native storage.",
+    "RunMat's character storage cannot yet represent isolated UTF-16 surrogate code units; those inputs produce an explicit error instead of silently changing the value.",
+    "Logical inputs and interactive resident numeric inputs are separately mode-gated RunMat extensions.",
     "String scalars and character vectors become individual rows. Rows are padded on the right with spaces to match the longest row.",
     "String arrays with one or two dimensions contribute one row per element using MATLAB's column-major ordering.",
     "Cell arrays must contain character vectors or string scalars. Each element becomes exactly one row in the result.",

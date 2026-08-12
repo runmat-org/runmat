@@ -2,7 +2,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -130,6 +130,17 @@ async fn nextpow2_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn nextpow2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        let provider = runmat_accelerate_api::provider_for_handle(&handle);
+        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+        let output = nextpow2_tensor(tensor)?;
+        if let Some(provider) = provider {
+            if let Ok(handle) = gpu_helpers::upload_tensor(provider, &output) {
+                return Ok(gpu_helpers::resident_gpu_value(handle));
+            }
+        }
+        return Ok(tensor::tensor_into_value(output));
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_nextpow2(&handle).await {
             return Ok(Value::GpuTensor(out));
@@ -146,12 +157,27 @@ fn nextpow2_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn nextpow2_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&x| nextpow2_scalar(x))
-        .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| nextpow2_error_with_detail(&NEXTPOW2_ERROR_INTERNAL, e))?;
+    let storage = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(nextpow2_scalar).collect())
+        }
+        NumericStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(nextpow2_scalar_f32).collect())
+        }
+        NumericStorage::I8(values) => NumericStorage::I8(nextpow2_signed_values(values)),
+        NumericStorage::I16(values) => NumericStorage::I16(nextpow2_signed_values(values)),
+        NumericStorage::I32(values) => NumericStorage::I32(nextpow2_signed_values(values)),
+        NumericStorage::I64(values) => NumericStorage::I64(nextpow2_signed_values(values)),
+        NumericStorage::U8(values) => NumericStorage::U8(nextpow2_unsigned_values(values)),
+        NumericStorage::U16(values) => NumericStorage::U16(nextpow2_unsigned_values(values)),
+        NumericStorage::U32(values) => NumericStorage::U32(nextpow2_unsigned_values(values)),
+        NumericStorage::U64(values) => NumericStorage::U64(nextpow2_unsigned_values(values)),
+    };
+    Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| nextpow2_error_with_detail(&NEXTPOW2_ERROR_INTERNAL, e))
 }
 
@@ -164,12 +190,80 @@ fn nextpow2_scalar(x: f64) -> f64 {
     }
 }
 
+fn nextpow2_scalar_f32(x: f32) -> f32 {
+    let absolute = x.abs();
+    if absolute == 0.0 {
+        0.0
+    } else {
+        absolute.log2().ceil()
+    }
+}
+
+trait NextPow2Unsigned: Copy {
+    fn into_u128(self) -> u128;
+    fn from_u128(value: u128) -> Self;
+}
+
+trait NextPow2Signed: Copy {
+    fn magnitude_u128(self) -> u128;
+    fn from_u128(value: u128) -> Self;
+}
+
+macro_rules! impl_nextpow2_unsigned {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl NextPow2Unsigned for $ty {
+                fn into_u128(self) -> u128 { self as u128 }
+                fn from_u128(value: u128) -> Self { value as $ty }
+            }
+        )+
+    };
+}
+
+macro_rules! impl_nextpow2_signed {
+    ($(($signed:ty, $unsigned:ty)),+ $(,)?) => {
+        $(
+            impl NextPow2Signed for $signed {
+                fn magnitude_u128(self) -> u128 {
+                    self.unsigned_abs() as $unsigned as u128
+                }
+                fn from_u128(value: u128) -> Self { value as $signed }
+            }
+        )+
+    };
+}
+
+impl_nextpow2_unsigned!(u8, u16, u32, u64);
+impl_nextpow2_signed!((i8, u8), (i16, u16), (i32, u32), (i64, u64));
+
+fn nextpow2_unsigned_values<T: NextPow2Unsigned>(values: Vec<T>) -> Vec<T> {
+    values
+        .into_iter()
+        .map(|value| T::from_u128(nextpow2_integer(value.into_u128())))
+        .collect()
+}
+
+fn nextpow2_signed_values<T: NextPow2Signed>(values: Vec<T>) -> Vec<T> {
+    values
+        .into_iter()
+        .map(|value| T::from_u128(nextpow2_integer(value.magnitude_u128())))
+        .collect()
+}
+
+fn nextpow2_integer(magnitude: u128) -> u128 {
+    if magnitude == 0 {
+        0
+    } else {
+        u128::BITS as u128 - (magnitude - 1).leading_zeros() as u128
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, ResolveContext, Type};
 
     #[test]
     fn nextpow2_descriptor_signatures_cover_core_forms() {
@@ -235,7 +329,122 @@ mod tests {
         let Value::Tensor(t) = value else {
             panic!("expected tensor")
         };
-        assert_eq!(t.data, vec![0.0, 0.0, 2.0, 4.0]);
+        assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 2.0, 4.0]);
+    }
+
+    #[test]
+    fn nextpow2_tensor_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 3, 9]), vec![4, 1])
+            .expect("typed integer tensor");
+
+        let value = block_on(super::nextpow2_builtin(Value::Tensor(tensor))).expect("nextpow2");
+        let Value::Tensor(t) = value else {
+            panic!("expected tensor")
+        };
+        assert_eq!(
+            t.integer_storage(),
+            Some(&IntegerStorage::I16(vec![0, 0, 2, 4]))
+        );
+    }
+
+    #[test]
+    fn nextpow2_preserves_all_integer_classes_and_handles_signed_minima_exactly() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![i8::MIN, -3, 0, 9]),
+                IntegerStorage::I8(vec![7, 2, 0, 4]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MIN, -3, 0, 9]),
+                IntegerStorage::I16(vec![15, 2, 0, 4]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, -3, 0, 9]),
+                IntegerStorage::I32(vec![31, 2, 0, 4]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, -3, 0, 9]),
+                IntegerStorage::I64(vec![63, 2, 0, 4]),
+            ),
+            (
+                IntegerStorage::U8(vec![0, 1, 3, u8::MAX]),
+                IntegerStorage::U8(vec![0, 0, 2, 8]),
+            ),
+            (
+                IntegerStorage::U16(vec![0, 1, 3, u16::MAX]),
+                IntegerStorage::U16(vec![0, 0, 2, 16]),
+            ),
+            (
+                IntegerStorage::U32(vec![0, 1, 3, u32::MAX]),
+                IntegerStorage::U32(vec![0, 0, 2, 32]),
+            ),
+            (
+                IntegerStorage::U64(vec![0, 1, 3, u64::MAX]),
+                IntegerStorage::U64(vec![0, 0, 2, 64]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let tensor = Tensor::new_integer(input, vec![1, 4]).unwrap();
+            let Value::Tensor(output) =
+                block_on(nextpow2_builtin(Value::Tensor(tensor))).expect("nextpow2")
+            else {
+                panic!("expected typed tensor");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn nextpow2_preserves_native_single_scalar_and_empty_storage() {
+        let tensor = Tensor::from_f32(vec![0.0, -3.0, 9.0], vec![1, 3]).unwrap();
+        let Value::Tensor(output) =
+            block_on(nextpow2_builtin(Value::Tensor(tensor))).expect("nextpow2")
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![0.0, 2.0, 4.0])
+        );
+
+        let scalar = Tensor::from_f32(vec![9.0], vec![1, 1]).unwrap();
+        let Value::Tensor(output) =
+            block_on(nextpow2_builtin(Value::Tensor(scalar))).expect("nextpow2")
+        else {
+            panic!("single scalar must retain tensor class");
+        };
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![4.0])
+        );
+
+        let empty = Tensor::from_f32(Vec::new(), vec![0, 3]).unwrap();
+        let Value::Tensor(output) =
+            block_on(nextpow2_builtin(Value::Tensor(empty))).expect("nextpow2")
+        else {
+            panic!("expected empty single tensor");
+        };
+        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
+    }
+
+    #[test]
+    fn nextpow2_integer_gpu_preserves_exact_class_and_residency() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![0, 3, u64::MAX]), vec![1, 3]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let result = block_on(nextpow2_builtin(Value::GpuTensor(handle))).expect("nextpow2");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let output = test_support::gather(result).expect("gather");
+            assert_eq!(
+                output.integer_storage(),
+                Some(&IntegerStorage::U64(vec![0, 2, 64]))
+            );
+        });
     }
 
     #[test]
@@ -251,7 +460,7 @@ mod tests {
             let gpu =
                 block_on(super::nextpow2_builtin(Value::GpuTensor(handle))).expect("gpu nextpow2");
             let t = test_support::gather(gpu).expect("gather");
-            assert_eq!(t.data, vec![0.0, 0.0, 2.0, 4.0]);
+            assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 2.0, 4.0]);
         });
     }
 

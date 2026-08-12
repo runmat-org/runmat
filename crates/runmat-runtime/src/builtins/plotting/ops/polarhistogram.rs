@@ -14,6 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -182,19 +183,18 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
     let parsed = ParsedPolarHistogram::from_args(args).await?;
-    let counts = parsed.counts;
-    let edges = parsed.edges;
+    let counts = tensor_utils::tensor_into_values_f64(parsed.counts);
+    let edges = tensor_utils::tensor_into_values_f64(parsed.edges);
 
     let defaults = BarStyleDefaults::new(POLAR_HIST_DEFAULT_COLOR, POLAR_HIST_BAR_WIDTH);
     let style = parse_bar_style_args(BUILTIN_NAME, &parsed.style_args, defaults)
         .map_err(map_invalid_argument)?;
     let explicit_display_name = style.label.clone();
-    let labels = histogram_labels_from_edges(&edges.data);
-    let render_values =
-        apply_histogram_normalization(&counts.data, &edges.data, &parsed.normalization);
+    let labels = histogram_labels_from_edges(&edges);
+    let render_values = apply_histogram_normalization(&counts, &edges, &parsed.normalization);
     let mut chart = BarChart::new(labels, render_values.clone())
         .map_err(|err| internal(format!("chart construction failed: {err}")))?;
-    chart.set_histogram_bin_edges(edges.data.clone());
+    chart.set_histogram_bin_edges(edges.clone());
     chart.set_polar_histogram(true);
     chart.set_polar_histogram_display_style(parsed.display_style);
     apply_bar_style(&mut chart, &style, POLAR_HIST_DEFAULT_LABEL);
@@ -244,10 +244,10 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         figure_handle,
         axes,
         plot_index,
-        edges.data.clone(),
-        counts.data.clone(),
+        edges.clone(),
+        counts.clone(),
         parsed.normalization.clone(),
-        polar_histogram_metadata(&edges.data, &style, parsed.data, parsed.display_style),
+        polar_histogram_metadata(&edges, &style, parsed.data, parsed.display_style),
     );
     if let Some(display_name) = explicit_display_name {
         crate::builtins::plotting::state::set_histogram_handle_display_name(
@@ -304,8 +304,12 @@ impl ParsedPolarHistogram {
                 .map_err(|err| invalid_argument(format!("cannot convert counts tensor: {err}")))?;
             let edges = Tensor::try_from(&edges_value)
                 .map_err(|err| invalid_argument(format!("cannot convert edge tensor: {err}")))?;
+            let normalized_values = normalized_data
+                .as_f64_slice()
+                .expect("normalized polar histogram data uses double storage")
+                .to_vec();
             return Ok(Self {
-                data: Some(normalized_data.data),
+                data: Some(normalized_values),
                 counts,
                 edges,
                 normalization: parsed.normalization,
@@ -478,20 +482,14 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
         _ => {
             let tensor = Tensor::try_from(value)
                 .map_err(|err| invalid_argument(format!("{name} must be numeric: {err}")))?;
-            Ok(tensor.data)
+            Ok(tensor_utils::tensor_into_values_f64(tensor))
         }
     }
 }
 
 fn tensor_from_vec(data: Vec<f64>) -> Tensor {
-    Tensor {
-        rows: data.len(),
-        cols: 1,
-        shape: vec![data.len()],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    }
+    let len = data.len();
+    Tensor::new(data, vec![len]).expect("polar histogram result")
 }
 
 fn validate_edges(edges: &[f64]) -> BuiltinResult<()> {
@@ -511,13 +509,15 @@ fn validate_edges(edges: &[f64]) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn normalize_theta_tensor(mut tensor: Tensor, histcounts_args: &[Value]) -> BuiltinResult<Tensor> {
+fn normalize_theta_tensor(tensor: Tensor, histcounts_args: &[Value]) -> BuiltinResult<Tensor> {
     let (start, end) = angular_range(histcounts_args)?;
     let period = end - start;
     if !period.is_finite() || period <= 0.0 {
         return Err(invalid_argument("angular bin range must be positive"));
     }
-    for value in tensor.data.iter_mut() {
+    let shape = tensor.shape.clone();
+    let mut values = tensor_utils::tensor_into_values_f64(tensor);
+    for value in &mut values {
         if value.is_finite() {
             *value = (*value - start).rem_euclid(period) + start;
             if *value >= end {
@@ -527,7 +527,8 @@ fn normalize_theta_tensor(mut tensor: Tensor, histcounts_args: &[Value]) -> Buil
             *value = f64::NAN;
         }
     }
-    Ok(tensor)
+    Tensor::new(values, shape)
+        .map_err(|err| internal(format!("failed to normalize theta storage: {err}")))
 }
 
 fn angular_range(histcounts_args: &[Value]) -> BuiltinResult<(f64, f64)> {
@@ -662,18 +663,24 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::NumericDType;
     use runmat_plot::plots::PlotElement;
 
     fn tensor(data: &[f64]) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![data.len()]).expect("polar histogram vector"))
+    }
+
+    #[test]
+    fn polarhistogram_numeric_vector_reads_typed_integer_storage_exactly() {
+        let edges = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-3, 0, 3]),
+            vec![1, 3],
+        )
+        .expect("typed edge vector");
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(edges), "BinEdges").expect("numeric vector"),
+            vec![-3.0, 0.0, 3.0]
+        );
     }
 
     #[test]
@@ -685,14 +692,9 @@ mod tests {
 
         let handle = futures::executor::block_on(polarhistogram_builtin(vec![
             tensor(&[0.0, 0.2, 1.0, 2.0]),
-            Value::Tensor(Tensor {
-                data: vec![0.0, 1.0, 2.0, 3.0],
-                integer_data: None,
-                shape: vec![1, 4],
-                rows: 1,
-                cols: 4,
-                dtype: NumericDType::F64,
-            }),
+            Value::Tensor(
+                Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).expect("polar histogram edges"),
+            ),
         ]))
         .expect("polarhistogram");
 
@@ -708,7 +710,10 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(counts.data, vec![2.0, 1.0, 1.0]);
+        assert_eq!(
+            counts.as_f64_slice().expect("double histogram counts"),
+            &[2.0, 1.0, 1.0]
+        );
     }
 
     #[test]
@@ -751,7 +756,16 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert!((counts.data.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        assert!(
+            (counts
+                .as_f64_slice()
+                .expect("double histogram counts")
+                .iter()
+                .sum::<f64>()
+                - 1.0)
+                .abs()
+                < 1e-12
+        );
     }
 
     #[test]
@@ -779,17 +793,21 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(counts.data, vec![3.0, 1.0]);
+        assert_eq!(
+            counts.as_f64_slice().expect("double histogram counts"),
+            &[3.0, 1.0]
+        );
 
         let data = Tensor::try_from(
             &get_builtin(vec![Value::Num(handle), Value::String("Data".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(data.data[0], 0.0);
-        assert_eq!(data.data[1], 0.0);
-        assert_eq!(data.data[2], 0.0);
-        assert!(data.data[3].is_nan());
-        assert!(data.data[4].is_nan());
+        let data = data.as_f64_slice().expect("double histogram data");
+        assert_eq!(data[0], 0.0);
+        assert_eq!(data[1], 0.0);
+        assert_eq!(data[2], 0.0);
+        assert!(data[3].is_nan());
+        assert!(data[4].is_nan());
     }
 
     #[test]
@@ -813,7 +831,10 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("BinCounts".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(counts.data, vec![4.0, 2.0]);
+        assert_eq!(
+            counts.as_f64_slice().expect("double histogram counts"),
+            &[4.0, 2.0]
+        );
         assert_eq!(
             get_builtin(vec![
                 Value::Num(handle),
@@ -826,7 +847,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Data".into())]).unwrap(),
         )
         .unwrap();
-        assert!(data.data.is_empty());
+        assert!(data.is_empty());
     }
 
     #[test]
@@ -895,7 +916,10 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(values.data, vec![2.0, 1.0]);
+        assert_eq!(
+            values.as_f64_slice().expect("double histogram values"),
+            &[2.0, 1.0]
+        );
         let bin_width =
             get_builtin(vec![Value::Num(handle), Value::String("BinWidth".into())]).unwrap();
         assert_eq!(bin_width, Value::Num(1.0));
@@ -903,7 +927,10 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("BinLimits".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(limits.data, vec![0.0, 3.0]);
+        assert_eq!(
+            limits.as_f64_slice().expect("double histogram limits"),
+            &[0.0, 3.0]
+        );
 
         let figure = clone_figure(current_figure_handle()).expect("figure");
         let PlotElement::Bar(chart) = figure.plots().next().unwrap() else {

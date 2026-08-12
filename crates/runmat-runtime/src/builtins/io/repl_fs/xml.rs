@@ -653,7 +653,7 @@ fn scalar_xml_text(value: &Value) -> BuiltinResult<String> {
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         Value::Num(number) => Ok(number.to_string()),
-        Value::Int(number) => Ok(number.to_i64().to_string()),
+        Value::Int(number) => Ok(number.decimal_string()),
         Value::Bool(flag) => Ok(flag.to_string()),
         _ => Err(compat_error(
             "xmlwrite",
@@ -697,6 +697,15 @@ mod tests {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         (provider_guard, repl_guard)
+    }
+
+    #[test]
+    fn xml_scalar_text_preserves_exact_uint64() {
+        assert_eq!(
+            scalar_xml_text(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)))
+                .expect("xml text"),
+            "18446744073709551615"
+        );
     }
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {

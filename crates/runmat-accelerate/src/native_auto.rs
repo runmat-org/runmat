@@ -17,9 +17,15 @@ use anyhow::{anyhow, Result};
 use futures::lock::Mutex as AsyncMutex;
 use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
-use runmat_accelerate_api::{AccelProvider, ApiDeviceInfo, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{
+    AccelProvider, ApiDeviceInfo, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+    ProviderPrecision,
+};
 use runmat_builtins::{builtin_functions, AccelTag, Tensor, Value};
-use runmat_runtime::builtins::common::spec::{builtin_residency_policy, ResidencyPolicy};
+use runmat_runtime::builtins::common::{
+    spec::{builtin_residency_policy, ResidencyPolicy},
+    tensor::tensor_element_len,
+};
 use runmat_runtime::gather_if_needed_async;
 use serde::{Deserialize, Serialize};
 
@@ -648,7 +654,7 @@ fn update_cpu_cost(slot: &mut f64, candidate: f64) {
 
 fn value_len(value: &Value) -> Option<usize> {
     match value {
-        Value::Tensor(t) => Some(t.data.len()),
+        Value::Tensor(t) => Some(tensor_element_len(t)),
         Value::GpuTensor(handle) => Some(handle.shape.iter().product()),
         Value::Num(_) | Value::Bool(_) | Value::Int(_) => Some(1),
         Value::Complex(_, _) => Some(1),
@@ -789,18 +795,33 @@ impl NativeAutoOffload {
         match value {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
-                if ensure_provider_supports_dtype(self.provider, t.dtype).is_err() {
+                // Exact integer buffers are a residency/transfer capability, not a
+                // float-kernel precision.  Try the provider's typed upload below;
+                // a provider that does not implement it simply leaves the value on
+                // the host rather than coercing it through f64.
+                if t.integer_storage().is_none()
+                    && ensure_provider_supports_dtype(self.provider, t.numeric_dtype()).is_err()
+                {
                     return Ok(value.clone());
                 }
-                if t.data.len() >= threshold && threshold > 0 {
+                let element_count = tensor_element_len(t);
+                if element_count >= threshold && threshold > 0 {
                     log_promotion(|| {
                         format!(
                             "Promoting tensor to GPU (len={}, threshold={})",
-                            t.data.len(),
-                            threshold
+                            element_count, threshold
                         )
                     });
-                    self.tensor_to_gpu(t)
+                    match self.tensor_to_gpu(t) {
+                        Ok(value) => Ok(value),
+                        Err(error) if t.integer_storage().is_some() => {
+                            debug!(
+                                "Auto-offload retaining integer tensor on host: provider has no exact integer upload ({error})"
+                            );
+                            Ok(value.clone())
+                        }
+                        Err(error) => Err(error),
+                    }
                 } else {
                     Ok(value.clone())
                 }
@@ -810,8 +831,29 @@ impl NativeAutoOffload {
     }
 
     fn tensor_to_gpu(&self, tensor: &Tensor) -> Result<Value> {
+        if let Some(storage) = tensor.integer_storage() {
+            let data = match storage {
+                runmat_builtins::IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+                runmat_builtins::IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+                runmat_builtins::IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+                runmat_builtins::IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+                runmat_builtins::IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+                runmat_builtins::IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+                runmat_builtins::IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+                runmat_builtins::IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+            };
+            let handle = self
+                .provider
+                .upload_integer(&HostIntegerTensorView {
+                    data,
+                    shape: &tensor.shape,
+                })
+                .map_err(|e| anyhow!(e.to_string()))?;
+            return Ok(Value::GpuTensor(handle));
+        }
+        let data = tensor.materialize_f64();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &data,
             shape: &tensor.shape,
         };
         let handle = self
@@ -1259,7 +1301,7 @@ fn max_or_min_reduction_call(args: &[Value]) -> bool {
 
 fn is_empty_placeholder_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
         Value::StringArray(sa) => sa.data.is_empty(),
         Value::CharArray(ca) => ca.data.is_empty(),
@@ -1355,6 +1397,7 @@ fn value_kind(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_accelerate_api::HostIntegerDataOwned;
 
     #[test]
     fn max_detection_handles_placeholders() {
@@ -1370,6 +1413,58 @@ mod tests {
             Value::Num(1.0)
         ]));
         assert!(!max_or_min_reduction_call(&[data.clone(), Value::Num(0.0)]));
+    }
+
+    #[test]
+    fn auto_promotion_uploads_native_integer_storage_without_f64_conversion() {
+        crate::simple_provider::register_inprocess_provider();
+        let provider = runmat_accelerate_api::provider().expect("in-process provider");
+        let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
+        let expected = runmat_builtins::IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]);
+        let tensor = Tensor::new_integer(expected.clone(), vec![1, 2]).expect("integer tensor");
+
+        let promoted = auto
+            .promote_tensor_if_large(&Value::Tensor(tensor), 1)
+            .expect("exact integer promotion");
+        let Value::GpuTensor(handle) = promoted else {
+            panic!("expected resident integer gpuArray");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&handle),
+            Some(runmat_accelerate_api::IntegerElementType::U64)
+        );
+        assert_eq!(
+            futures::executor::block_on(provider.download_integer(&handle))
+                .expect("exact integer download")
+                .data,
+            HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX])
+        );
+        provider.free(&handle).expect("free integer handle");
+    }
+
+    #[test]
+    fn native_auto_uses_integer_storage_for_lengths_and_empty_placeholders() {
+        let wide = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX, 7]),
+            vec![1, 2],
+        )
+        .expect("wide integer tensor");
+        assert_eq!(value_len(&Value::Tensor(wide.clone())), Some(2));
+        assert!(!is_empty_placeholder_value(&Value::Tensor(wide)));
+
+        let signed = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![i64::MIN, -1, i64::MAX]),
+            vec![1, 3],
+        )
+        .expect("signed integer tensor");
+        assert_eq!(value_len(&Value::Tensor(signed.clone())), Some(3));
+        assert!(!is_empty_placeholder_value(&Value::Tensor(signed)));
+
+        let empty =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(Vec::new()), vec![0, 0])
+                .expect("empty integer placeholder");
+        assert_eq!(value_len(&Value::Tensor(empty.clone())), Some(0));
+        assert!(is_empty_placeholder_value(&Value::Tensor(empty)));
     }
 }
 
@@ -1700,8 +1795,9 @@ fn compare_elemwise(
             return Ok(Some(gpu_time < cpu_time));
         }
     }
+    let template_data = template.materialize_f64();
     let view = HostTensorView {
-        data: template.data.as_slice(),
+        data: template_data.as_slice(),
         shape: template.shape.as_slice(),
     };
     let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
@@ -1769,8 +1865,9 @@ fn compare_reduction(
             return Ok(Some(gpu_time < cpu_time));
         }
     }
+    let template_data = template.materialize_f64();
     let view = HostTensorView {
-        data: template.data.as_slice(),
+        data: template_data.as_slice(),
         shape: template.shape.as_slice(),
     };
     let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
@@ -1849,12 +1946,14 @@ fn compare_matmul(
             return Ok(Some(gpu_time < cpu_time));
         }
     }
+    let data_a = ta.materialize_f64();
+    let data_b = tb.materialize_f64();
     let view_a = HostTensorView {
-        data: ta.data.as_slice(),
+        data: data_a.as_slice(),
         shape: ta.shape.as_slice(),
     };
     let view_b = HostTensorView {
-        data: tb.data.as_slice(),
+        data: data_b.as_slice(),
         shape: tb.shape.as_slice(),
     };
     let ha = provider

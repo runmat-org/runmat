@@ -10,7 +10,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Host-side compatibility builtin; GPU-resident inputs are gathered before execution."
+    "notes": "Host-only filesystem operation. Numeric and provider-resident path/control inputs are invalid text and are rejected before gather, provider access, or filesystem mutation."
   },
   "fusion": {
     "elementwise": false,
@@ -23,11 +23,12 @@
     "unit": "builtins::io::repl_fs::compat::tests",
     "integration": null
   },
-  "description": "Return filesystem attribute metadata for a path.",
+  "description": "Return filesystem attribute metadata for a textual path. Numeric and integer inputs are inapplicable. RunMat currently exposes only the subset representable by the active filesystem abstraction; complete MATLAB user/group/other permission, wildcard, recursion, and setter-output semantics remain implementation gaps.",
   "behaviors": [
+    "Accepts host string scalars, scalar string arrays, and character row vectors for the path and textual controls.",
     "Reads file metadata and returns status plus an attribute struct containing Name, hidden, directory, and user/group/other permission flags.",
     "Supports common writable flag mutation with +w and -w through the active filesystem provider.",
-    "Accepts read flags as no-op compatibility forms and rejects unsupported attribute flags explicitly."
+    "The current read-flag no-op and synthesized permission fields are implementation limitations, not claims of complete MATLAB compatibility."
   ],
   "examples": [],
   "faqs": [],

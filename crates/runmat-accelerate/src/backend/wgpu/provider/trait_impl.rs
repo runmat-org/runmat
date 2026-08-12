@@ -1,5 +1,8 @@
 use super::*;
 use runmat_accelerate_api::{
+    AccelIntegerDownloadFuture, HostIntegerTensorView, IntegerElementType,
+};
+use runmat_accelerate_api::{
     ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBitModulationRequest,
     ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult,
     ProviderCovarianceToCorrelationResult, ProviderCrossentropyRequest, ProviderCrossentropyResult,
@@ -59,6 +62,28 @@ impl AccelProvider for WgpuProvider {
     fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.zeros_exec(&prototype.shape)
     }
+
+    fn zeros_integer_like(
+        &self,
+        prototype: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry_raw(prototype)?;
+        let element_type = entry.integer_type.ok_or_else(|| {
+            anyhow::anyhow!("zeros_integer_like requires a native integer gpuArray prototype")
+        })?;
+        anyhow::ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "zeros_integer_like does not support complex integer gpuArray buffers"
+        );
+        let len = shape.iter().try_fold(1usize, |total, &dim| {
+            total
+                .checked_mul(dim)
+                .ok_or_else(|| anyhow::anyhow!("zeros_integer_like: tensor size overflow"))
+        })?;
+        integer::identity_integer_buffer(self, element_type, len, shape, false)
+    }
+
     fn precision(&self) -> ProviderPrecision {
         self.provider_precision_exec()
     }
@@ -286,7 +311,13 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
         dims_zero_based: &'a [usize],
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reduce_nd_mean_exec(a, dims_zero_based).await })
+        Box::pin(async move {
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_mean_dims_exec(dims_zero_based, "mean", a)
+            } else {
+                self.reduce_nd_mean_exec(a, dims_zero_based).await
+            }
+        })
     }
 
     fn reduce_moments_nd<'a>(
@@ -357,12 +388,58 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn elem_rem<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_arithmetic_exec(5, "elem_rem", a, b) })
+    }
+
+    fn elem_mod<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_arithmetic_exec(6, "elem_mod", a, b) })
+    }
+
     fn elem_pow<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if matches!(
+                self.get_entry_raw(b)?.integer_type,
+                Some(
+                    IntegerElementType::I8
+                        | IntegerElementType::I16
+                        | IntegerElementType::I32
+                        | IntegerElementType::I64
+                )
+            ) {
+                let exponent = self.download_integer_exec(b).await?;
+                let has_negative = match exponent.data {
+                    runmat_accelerate_api::HostIntegerDataOwned::I8(values) => {
+                        values.into_iter().any(|value| value < 0)
+                    }
+                    runmat_accelerate_api::HostIntegerDataOwned::I16(values) => {
+                        values.into_iter().any(|value| value < 0)
+                    }
+                    runmat_accelerate_api::HostIntegerDataOwned::I32(values) => {
+                        values.into_iter().any(|value| value < 0)
+                    }
+                    runmat_accelerate_api::HostIntegerDataOwned::I64(values) => {
+                        values.into_iter().any(|value| value < 0)
+                    }
+                    _ => false,
+                };
+                ensure!(
+                    !has_negative,
+                    "elem_pow: integer exponents must be nonnegative"
+                );
+            }
             self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Pow, a, b)
         })
     }
@@ -733,6 +810,30 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn unary_expm1<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(
+            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Expm1, a) },
+        )
+    }
+
+    fn activation_elu<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        alpha: f64,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elu_exec(a, alpha) })
+    }
+
+    fn activation_softmax_rows<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.softmax_rows_exec(a) })
+    }
+
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(
             async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log, a) },
@@ -946,6 +1047,16 @@ impl AccelProvider for WgpuProvider {
         self.cumsum_exec(input, dim, direction, nan_mode)
     }
 
+    fn integer_cumsum_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<GpuTensorHandle> {
+        let (values, _) = self.integer_cumulative_scan_exec(0, "cumsum", input, dim, direction)?;
+        Ok(values)
+    }
+
     fn trapz_dim(
         &self,
         input: &GpuTensorHandle,
@@ -974,6 +1085,16 @@ impl AccelProvider for WgpuProvider {
         self.cumprod_exec(input, dim, direction, nan_mode)
     }
 
+    fn integer_cumprod_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<GpuTensorHandle> {
+        let (values, _) = self.integer_cumulative_scan_exec(1, "cumprod", input, dim, direction)?;
+        Ok(values)
+    }
+
     fn cummin_scan(
         &self,
         input: &GpuTensorHandle,
@@ -984,6 +1105,20 @@ impl AccelProvider for WgpuProvider {
         self.cummin_exec(input, dim, direction, nan_mode)
     }
 
+    fn integer_cummin_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
+        let (values, indices) =
+            self.integer_cumulative_scan_exec(2, "cummin", input, dim, direction)?;
+        Ok(runmat_accelerate_api::ProviderCumminResult {
+            values,
+            indices: indices.expect("cummin integer scan returns indices"),
+        })
+    }
+
     fn cummax_scan(
         &self,
         input: &GpuTensorHandle,
@@ -992,6 +1127,20 @@ impl AccelProvider for WgpuProvider {
         nan_mode: ProviderNanMode,
     ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
         self.cummax_exec(input, dim, direction, nan_mode)
+    }
+
+    fn integer_cummax_scan(
+        &self,
+        input: &GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
+        let (values, indices) =
+            self.integer_cumulative_scan_exec(3, "cummax", input, dim, direction)?;
+        Ok(runmat_accelerate_api::ProviderCummaxResult {
+            values,
+            indices: indices.expect("cummax integer scan returns indices"),
+        })
     }
 
     fn circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> Result<GpuTensorHandle> {
@@ -1282,8 +1431,25 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_sum_prod_dim_exec(false, dim, "sum", a)
+            } else {
+                self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+            }
         })
+    }
+    fn reduce_integer_sum_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_sum_prod_global_exec(false, "sum", a) })
+    }
+    fn reduce_integer_sum_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_sum_prod_dim_exec(false, dim, "sum", a) })
     }
     fn reduce_nnz_dim<'a>(
         &'a self,
@@ -1304,8 +1470,56 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Prod)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_sum_prod_dim_exec(true, dim, "prod", a)
+            } else {
+                self.reduce_dim_sum_mean_exec(
+                    a,
+                    dim,
+                    crate::backend::wgpu::types::DimReduceOp::Prod,
+                )
+            }
         })
+    }
+    fn reduce_integer_prod_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_sum_prod_global_exec(true, "prod", a) })
+    }
+    fn reduce_integer_prod_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_sum_prod_dim_exec(true, dim, "prod", a) })
+    }
+    fn reduce_integer_mean_native<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_mean_global_exec("mean", a) })
+    }
+    fn reduce_integer_mean_native_dim<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dim: usize,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_mean_dim_exec(dim, "mean", a) })
+    }
+    fn reduce_integer_mean_native_dims<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        dims_zero_based: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.integer_reduce_mean_dims_exec(dims_zero_based, "mean", a) })
+    }
+    fn cast_to_integer<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        target: IntegerElementType,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.cast_to_integer_exec(a, target) })
     }
     fn reduce_mean_dim<'a>(
         &'a self,
@@ -1313,7 +1527,15 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Mean)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_mean_dim_exec(dim, "mean", a)
+            } else {
+                self.reduce_dim_sum_mean_exec(
+                    a,
+                    dim,
+                    crate::backend::wgpu::types::DimReduceOp::Mean,
+                )
+            }
         })
     }
     fn reduce_any_dim<'a>(
@@ -1369,7 +1591,11 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_sum_prod_global_exec(false, "sum", a)
+            } else {
+                self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
+            }
         })
     }
 
@@ -1387,7 +1613,11 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Prod)
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_sum_prod_global_exec(true, "prod", a)
+            } else {
+                self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Prod)
+            }
         })
     }
 
@@ -1395,7 +1625,13 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reduce_mean_global_exec(a) })
+        Box::pin(async move {
+            if self.get_entry_raw(a)?.integer_type.is_some() {
+                self.integer_reduce_mean_global_exec("mean", a)
+            } else {
+                self.reduce_mean_global_exec(a)
+            }
+        })
     }
     fn reduce_std<'a>(
         &'a self,
@@ -1628,6 +1864,12 @@ impl AccelProvider for WgpuProvider {
     }
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move { self.download_exec(h).await })
+    }
+    fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
+        self.upload_integer_exec(host)
+    }
+    fn download_integer<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
+        Box::pin(async move { self.download_integer_exec(h).await })
     }
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         self.free_exec(h)

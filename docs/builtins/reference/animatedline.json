@@ -16,7 +16,15 @@
     "reduction": false,
     "precisions": [
       "single",
-      "double"
+      "double",
+      "int8",
+      "int16",
+      "int32",
+      "int64",
+      "uint8",
+      "uint16",
+      "uint32",
+      "uint64"
     ],
     "broadcasting": "none",
     "notes": "`animatedline` is a graphics-state constructor. GPU-resident coordinate inputs are accepted through the plotting input path and gathered into the client-side animated-line state before incremental updates."
@@ -37,13 +45,15 @@
     "`animatedline()` creates an empty animated line on the current axes.",
     "`animatedline(x,y)` creates a 2-D animated line with initial points.",
     "`animatedline(x,y,z)` creates a 3-D animated line when the initial coordinate vectors are nonempty.",
+    "X, Y, and Z independently accept single, double, and all eight integer classes. Exact integer storage is read authoritatively before coordinates enter RunMat's client-side `f64` graphics domain.",
     "A leading axes handle or `Parent` name/value pair routes the animated line to explicit axes.",
-    "`MaximumNumPoints` limits retained points by dropping the oldest samples. The default is 1000000; `Inf` disables trimming.",
+    "`MaximumNumPoints` accepts every integer class as a positive scalar, or a positive integral single/double value. The default is 1000000; positive `Inf` disables trimming.",
+    "Integer `MaximumNumPoints` values are validated exactly before conversion to the host point-count type; zero, negative, fractional, nonfinite values other than positive `Inf`, and values beyond host limits reject.",
     "Returned handles report `Type` as `animatedline` and support line styling properties such as `Color`, `LineWidth`, `LineStyle`, marker properties for 2-D animated lines, `DisplayName`, and `Visible`."
   ],
   "options": [
     "`Parent` accepts an axes handle.",
-    "`MaximumNumPoints` accepts a positive numeric value or `Inf`.",
+    "`MaximumNumPoints` accepts a positive integral value in single, double, or any integer class, or positive `Inf`.",
     "Common line properties include `Color`, `LineWidth`, `LineStyle`, `DisplayName`, and `Visible`. Marker properties are supported for 2-D animated lines; 3-D animated lines reject marker metadata until RunMat's 3-D line renderer has marker support."
   ],
   "examples": [
@@ -96,7 +106,7 @@
   },
   "gpu_residency": "`animatedline` accepts GPU-resident coordinate inputs but stores animated state as host-side graphics data so subsequent `addpoints`, `get`, and `set` operations have MATLAB-compatible handle semantics.",
   "gpu_behavior": [
-    "Construction gathers GPU coordinate vectors into the animated-line state.",
+    "Construction gathers GPU coordinate vectors and resident numeric `MaximumNumPoints` scalars into client-side animated-line state. Integer coordinates cross one explicit floating graphics boundary, while integer point limits are validated exactly before host-size conversion.",
     "Rendering still uses RunMat's existing line and line3 rendering paths after points are stored."
   ]
 }

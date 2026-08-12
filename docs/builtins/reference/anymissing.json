@@ -10,7 +10,7 @@
   "description": "`anymissing(A)` is the scalar predicate companion to `ismissing`; it is true when any entry of `A` is missing.",
   "behaviors": [
     "Numeric `NaN`, missing strings, missing cells, structs with missing fields, and tables with any missing variable entry all return true.",
-    "Nonmissing numeric, logical, integer, and string values return false."
+    "All eight built-in integer classes are supported; because integers have no standard missing value, integer scalars and arrays return false."
   ],
   "examples": [
     {"description": "Test for any missing value", "input": "tf = anymissing([1 NaN 3])", "output": "tf = true"}

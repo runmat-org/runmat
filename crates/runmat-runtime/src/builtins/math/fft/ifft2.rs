@@ -2,8 +2,8 @@
 
 use super::common::{
     complex_tensor_to_real_value, download_provider_complex_tensor, gather_gpu_complex_tensor,
-    parse_2d_lengths_from_data, parse_length, parse_symflag, transform_axes_complex_tensor,
-    value_to_complex_tensor, TransformDirection,
+    parse_2d_lengths_from_data, parse_2d_lengths_from_tensor, parse_length, parse_symflag,
+    transform_axes_complex_tensor, value_to_complex_tensor, TransformDirection,
 };
 use super::ifft::ifft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -319,6 +319,7 @@ fn ifft2_error_with_message(
     builtin_path = "crate::builtins::math::fft::ifft2"
 )]
 async fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "ifft2")?;
     let ((len_rows, len_cols), symmetric) = parse_ifft2_arguments(&rest)?;
     match value {
         Value::GpuTensor(handle) => ifft2_gpu(handle, (len_rows, len_cols), symmetric).await,
@@ -534,7 +535,7 @@ fn split_symflag(args: &[Value]) -> BuiltinResult<(Option<bool>, &[Value])> {
 fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match value {
         Value::Tensor(tensor) => {
-            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME).map_err(|source| {
+            parse_2d_lengths_from_tensor(tensor, BUILTIN_NAME).map_err(|source| {
                 ifft2_error_with_detail(
                     &IFFT2_ERROR_INVALID_SIZE_VECTOR,
                     format!("size vector parse failed: {source}"),
@@ -548,12 +549,13 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
                     format!("logical size-vector conversion failed: {source}"),
                 )
             })?;
-            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME).map_err(|source| {
-                ifft2_error_with_detail(
-                    &IFFT2_ERROR_INVALID_SIZE_VECTOR,
-                    format!("size vector parse failed: {source}"),
-                )
-            })
+            parse_2d_lengths_from_data(&tensor::tensor_into_values_f64(tensor), BUILTIN_NAME)
+                .map_err(|source| {
+                    ifft2_error_with_detail(
+                        &IFFT2_ERROR_INVALID_SIZE_VECTOR,
+                        format!("size vector parse failed: {source}"),
+                    )
+                })
         }
         Value::Num(_) | Value::Int(_) => {
             let len = parse_length(value, BUILTIN_NAME).map_err(|source| {
@@ -611,7 +613,8 @@ pub(crate) mod tests {
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        builtin_function_by_name, IntValue, ResolveContext, Tensor as HostTensor, Type,
+        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Tensor as HostTensor,
+        Type,
     };
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
@@ -689,8 +692,12 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                for (idx, (re, im)) in out.data.iter().enumerate() {
-                    assert!(approx_eq((*re, *im), (tensor.data[idx], 0.0), 1e-12));
+                for (idx, (re, im)) in out.materialize_f64().iter().enumerate() {
+                    assert!(approx_eq(
+                        (*re, *im),
+                        (tensor.materialize_f64()[idx], 0.0),
+                        1e-12
+                    ));
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -710,7 +717,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                assert_eq!(out.data, tensor.data);
+                assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -728,8 +735,12 @@ pub(crate) mod tests {
         .expect("ifft2 nonsymmetric");
         let result = value_to_complex_tensor(value, "ifft2").expect("complex output");
         assert_eq!(result.shape, tensor.shape);
-        for (idx, (re, im)) in result.data.iter().enumerate() {
-            assert!(approx_eq((*re, *im), (tensor.data[idx], 0.0), 1e-12));
+        for (idx, (re, im)) in result.materialize_f64().iter().enumerate() {
+            assert!(approx_eq(
+                (*re, *im),
+                (tensor.materialize_f64()[idx], 0.0),
+                1e-12
+            ));
         }
     }
 
@@ -763,6 +774,21 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn ifft2_size_vector_reads_typed_integer_storage_exactly() {
+        let tensor = HostTensor::new((0..6).map(|v| v as f64).collect(), vec![2, 3]).unwrap();
+        let spectrum = fft2_of_tensor(&tensor);
+        let size = HostTensor::new_integer(IntegerStorage::U16(vec![4, 2]), vec![1, 2]).unwrap();
+
+        let value = ifft2_builtin(Value::ComplexTensor(spectrum), vec![Value::Tensor(size)])
+            .expect("ifft2");
+
+        match value {
+            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft2_treats_empty_lengths_as_defaults() {
@@ -778,8 +804,12 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                for (idx, (re, im)) in out.data.iter().enumerate() {
-                    assert!(approx_eq((*re, *im), (tensor.data[idx], 0.0), 1e-12));
+                for (idx, (re, im)) in out.materialize_f64().iter().enumerate() {
+                    assert!(approx_eq(
+                        (*re, *im),
+                        (tensor.materialize_f64()[idx], 0.0),
+                        1e-12
+                    ));
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -830,7 +860,7 @@ pub(crate) mod tests {
         .expect("ifft2");
         match value {
             Value::ComplexTensor(out) => {
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
                 assert_eq!(out.shape, vec![0, 0]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -845,7 +875,7 @@ pub(crate) mod tests {
             let spectrum = fft2_of_tensor(&tensor);
             let view = HostTensorView {
                 data: &spectrum
-                    .data
+                    .materialize_f64()
                     .iter()
                     .flat_map(|(re, im)| [*re, *im])
                     .collect::<Vec<_>>(),
@@ -870,7 +900,7 @@ pub(crate) mod tests {
             let g = value_to_host_complex(gpu);
             let c = value_to_host_complex(cpu);
             assert_eq!(g.shape, c.shape);
-            for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
+            for (lhs, rhs) in g.materialize_f64().iter().zip(c.materialize_f64().iter()) {
                 assert!(approx_eq(*lhs, *rhs, 1e-10), "{lhs:?} vs {rhs:?}");
             }
             provider.free(&raw).ok();
@@ -936,7 +966,7 @@ pub(crate) mod tests {
         let tensor = HostTensor::new((0..16).map(|v| v as f64).collect(), vec![4, 4]).unwrap();
         let spectrum = fft2_of_tensor(&tensor);
         let host_real_imag = spectrum
-            .data
+            .materialize_f64()
             .iter()
             .flat_map(|(re, im)| [*re, *im])
             .collect::<Vec<_>>();
@@ -967,7 +997,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (lhs, rhs) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
+        for (lhs, rhs) in gpu_ct
+            .materialize_f64()
+            .iter()
+            .zip(cpu_ct.materialize_f64().iter())
+        {
             assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
         }
         provider.free(&raw).ok();

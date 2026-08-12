@@ -1,6 +1,7 @@
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{Tensor, Value};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::{gather_tensor_from_gpu, gather_tensor_from_gpu_async};
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
@@ -35,7 +36,7 @@ impl NumericInput {
 
     pub fn len(&self) -> usize {
         match self {
-            Self::Host(tensor) => tensor.data.len(),
+            Self::Host(tensor) => tensor_utils::tensor_element_len(tensor),
             Self::Gpu(handle) => handle.shape.iter().product(),
         }
     }
@@ -56,19 +57,13 @@ impl NumericInput {
 }
 
 fn scalar_tensor(value: f64) -> Tensor {
-    Tensor {
-        data: vec![value],
-        integer_data: None,
-        shape: vec![1],
-        rows: 1,
-        cols: 1,
-        dtype: runmat_builtins::NumericDType::F64,
-    }
+    Tensor::new(vec![value], vec![1]).expect("scalar tensor shape")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn numeric_input_wraps_scalar_num() {
@@ -76,7 +71,17 @@ mod tests {
         else {
             panic!("expected host tensor")
         };
-        assert_eq!(tensor.data, vec![2.5]);
+        assert_eq!(tensor.materialize_f64(), vec![2.5]);
         assert_eq!(tensor.shape, vec![1]);
+    }
+
+    #[test]
+    fn numeric_input_len_reads_typed_integer_storage_without_mirror() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3]).expect("tensor");
+
+        let input = NumericInput::from_value(Value::Tensor(tensor), "plot").unwrap();
+
+        assert_eq!(input.len(), 3);
     }
 }

@@ -1,0 +1,19 @@
+{
+  "title": "fea.compare",
+  "category": "fea",
+  "keywords": ["fea", "compare", "results", "quality"],
+  "summary": "Compare two persisted RunMat FEA runs.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": null },
+  "description": "`fea.compare(baselineRunId, candidateRunId)` compares summary, status, quality, iteration, and timing evidence for two persisted RunMat FEA runs. This is a native RunMat API.",
+  "behaviors": [
+    "Exactly two text run identifiers are required; `fea.compare` does not accept Name, Value options.",
+    "Both run identifiers are resolved before the results-comparison operation executes.",
+    "Count and count-delta fields are structural signed integers. Timing deltas remain binary64 physical measurements.",
+    "Numeric and resident numeric inputs have no role and are rejected before artifact-store access."
+  ],
+  "examples": [{ "description": "Compare two persisted runs", "input": "comparison = fea.compare(\"run_baseline\", \"run_candidate\");" }],
+  "faqs": [{ "question": "Can comparison options follow the run identifiers?", "answer": "No. The current builtin accepts exactly two run identifiers and no options." }],
+  "links": [{ "label": "FEA operation reference", "url": "../../fea/operation-reference" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

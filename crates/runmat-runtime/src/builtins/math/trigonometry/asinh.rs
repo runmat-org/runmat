@@ -6,7 +6,11 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, Tensor, Value,
 };
@@ -35,7 +39,7 @@ const ASINH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Input scalar, array, char array, complex value, or gpuArray.",
+    description: "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions.",
 }];
 
 const ASINH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -58,7 +62,60 @@ const ASINH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "asinh: internal error",
 };
 
-const ASINH_ERRORS: [BuiltinErrorDescriptor; 2] = [ASINH_ERROR_INVALID_INPUT, ASINH_ERROR_INTERNAL];
+const ASINH_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASINH.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:asinh:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "asinh: too many output arguments",
+};
+const ASINH_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ASINH_ERROR_INVALID_INPUT,
+    ASINH_ERROR_INTERNAL,
+    ASINH_ERROR_TOO_MANY_OUTPUTS,
+];
+
+const ASINH_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "asinh-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "asinh with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AsinhIntegerInputExtension"),
+};
+const ASINH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "asinh-logical-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "asinh with logical input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AsinhLogicalInputExtension"),
+};
+const ASINH_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "asinh-character-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "asinh with character input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:AsinhCharacterInputExtension"),
+};
+const ASINH_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    ASINH_INTEGER_INPUT_EXTENSION,
+    ASINH_LOGICAL_INPUT_EXTENSION,
+    ASINH_CHARACTER_INPUT_EXTENSION,
+];
+const ASINH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "The documented data domain is single/double; RunMat mode additionally accepts every real integer class.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = asinh(integer_X)",
+        inputs: &ASINH_INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
+        notes: "Authoritative integer values enter an explicit binary64 inverse-hyperbolic-sine boundary. Resident integer input gathers exactly and the double result returns to the owning provider.",
+    }];
 
 pub const ASINH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ASINH_SIGNATURES,
@@ -129,9 +186,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "unary",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::trigonometry::asinh::ASINH_DESCRIPTOR),
+    extensions(ASINH_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::trigonometry::asinh::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::trigonometry::asinh"
 )]
 async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
+    super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
+    super::inverse_helpers::ensure_input_extensions(
+        &value,
+        BUILTIN_NAME,
+        &ASINH_INTEGER_INPUT_EXTENSION,
+        &ASINH_LOGICAL_INPUT_EXTENSION,
+        &ASINH_CHARACTER_INPUT_EXTENSION,
+    )?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "asinh")?;
     match value {
         Value::GpuTensor(handle) => asinh_gpu(handle).await,
         Value::Complex(re, im) => Ok(complex_asinh_scalar(re, im)),
@@ -143,13 +211,23 @@ async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn asinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
+    {
+        return super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
+            asinh_tensor(tensor).map(tensor::tensor_into_value)
+        })
+        .await;
+    }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_asinh(&handle).await {
             return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    asinh_tensor(tensor).map(tensor::tensor_into_value)
+    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
+        asinh_tensor(tensor).map(tensor::tensor_into_value)
+    })
+    .await
 }
 
 fn asinh_real(value: Value) -> BuiltinResult<Value> {
@@ -159,22 +237,22 @@ fn asinh_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn asinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&v| v.asinh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| asinh_error_with_detail(&ASINH_ERROR_INTERNAL, e))
+    super::inverse_helpers::map_real_tensor(tensor, BUILTIN_NAME, f64::asinh, f32::asinh)
 }
 
 fn asinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let mapped = ct
-        .data
-        .iter()
-        .map(|&(re, im)| {
-            let res = Complex64::new(re, im).asinh();
-            (res.re, res.im)
-        })
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| asinh_error_with_detail(&ASINH_ERROR_INTERNAL, e))?;
+    let tensor = super::inverse_helpers::map_complex_tensor(
+        ct,
+        BUILTIN_NAME,
+        |(real, imag)| {
+            let result = Complex64::new(real, imag).asinh();
+            (result.re, result.im)
+        },
+        |(real, imag)| {
+            let result = num_complex::Complex32::new(real, imag).asinh();
+            (result.re, result.im)
+        },
+    )?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -203,7 +281,61 @@ pub(crate) mod tests {
     use runmat_builtins::{LogicalArray, ResolveContext, Type};
 
     fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::asinh_builtin(value))
+    }
+
+    #[test]
+    fn asinh_extensions_and_output_arity_are_gated() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer = block_on(super::asinh_builtin(Value::Int(
+            runmat_builtins::IntValue::I8(1),
+        )))
+        .expect_err("integer input must be gated");
+        assert_eq!(
+            integer.identifier(),
+            ASINH_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        let logical = block_on(super::asinh_builtin(Value::Bool(true)))
+            .expect_err("logical input must be gated");
+        assert_eq!(
+            logical.identifier(),
+            ASINH_LOGICAL_INPUT_EXTENSION.error_identifier
+        );
+        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let character = block_on(super::asinh_builtin(Value::CharArray(chars)))
+            .expect_err("character input must be gated");
+        assert_eq!(
+            character.identifier(),
+            ASINH_CHARACTER_INPUT_EXTENSION.error_identifier
+        );
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let arity = block_on(super::asinh_builtin(Value::Num(0.0)))
+            .expect_err("excess outputs must reject");
+        assert_eq!(arity.identifier(), ASINH_ERROR_TOO_MANY_OUTPUTS.identifier);
+    }
+
+    #[test]
+    fn asinh_preserves_native_single_real_and_complex_storage() {
+        let real = Tensor::from_f32(vec![0.5, 2.0], vec![2, 1]).unwrap();
+        let Value::Tensor(real_output) = asinh_builtin(Value::Tensor(real)).expect("single asinh")
+        else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(
+            real_output.numeric_dtype(),
+            runmat_builtins::NumericDType::F32
+        );
+        let complex = ComplexTensor::from_f32(vec![(0.5, 0.25), (2.0, -1.0)], vec![2, 1]).unwrap();
+        let Value::ComplexTensor(complex_output) =
+            asinh_builtin(Value::ComplexTensor(complex)).expect("complex-single asinh")
+        else {
+            panic!("expected complex-single tensor");
+        };
+        assert_eq!(
+            complex_output.numeric_dtype(),
+            runmat_builtins::NumericDType::F32
+        );
     }
 
     fn error_message(err: &RuntimeError) -> String {
@@ -273,9 +405,31 @@ pub(crate) mod tests {
                     0.881373587019543,
                     1.8184464592320668,
                 ];
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn asinh_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+
+        match asinh_builtin(Value::Tensor(tensor)).expect("asinh") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [-1.0f64.asinh(), 0.0, 1.0f64.asinh()];
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -291,7 +445,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                for (actual, input) in t.data.iter().zip(inputs.iter()) {
+                for (actual, input) in t.materialize_f64().iter().zip(inputs.iter()) {
                     let expected = input.asinh();
                     assert!((actual.0 - expected.re).abs() < 1e-12);
                     assert!((actual.1 - expected.im).abs() < 1e-12);
@@ -310,7 +464,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected = [(('a' as u32) as f64).asinh(), (('z' as u32) as f64).asinh()];
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
             }
@@ -325,15 +479,19 @@ pub(crate) mod tests {
             let tensor =
                 Tensor::new(vec![0.0, 0.5, 1.0, 2.0], vec![2, 2]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = asinh_builtin(Value::GpuTensor(handle)).expect("asinh");
             let gathered = test_support::gather(result).expect("gather");
-            let expected = tensor.data.iter().map(|&v| v.asinh()).collect::<Vec<_>>();
+            let expected = tensor
+                .materialize_f64()
+                .iter()
+                .map(|&v| v.asinh())
+                .collect::<Vec<_>>();
             assert_eq!(gathered.shape, vec![2, 2]);
-            for (actual, exp) in gathered.data.iter().zip(expected.iter()) {
+            for (actual, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - exp).abs() < 1e-12);
             }
         });
@@ -354,7 +512,7 @@ pub(crate) mod tests {
                     1.0f64.asinh(),
                     1.0f64.asinh(),
                 ];
-                for (actual, exp) in t.data.iter().zip(expected.iter()) {
+                for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
             }
@@ -384,7 +542,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![-3.0, -1.0, 0.0, 1.0, 3.0], vec![5, 1]).unwrap();
         let cpu = asinh_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -400,7 +558,11 @@ pub(crate) mod tests {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };
-                for (actual, expected) in gathered.data.iter().zip(ct.data.iter()) {
+                for (actual, expected) in gathered
+                    .materialize_f64()
+                    .iter()
+                    .zip(ct.materialize_f64().iter())
+                {
                     assert!(
                         (actual - expected).abs() < tol,
                         "|{} - {}| >= {}",

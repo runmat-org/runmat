@@ -8,7 +8,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, SparseTensor, Tensor, Value,
+    NumericDType, NumericStorage, ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -36,7 +36,7 @@ const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Real numeric, logical, char, sparse, or gpuArray input.",
+    description: "Real single or double numeric input.",
 }];
 
 const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -48,7 +48,7 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor 
 const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.REALSQRT.INVALID_INPUT",
     identifier: Some("RunMat:realsqrt:InvalidInput"),
-    when: "Input cannot be interpreted as real numeric, logical, char, sparse, or gpuArray data.",
+    when: "Input is not real single or double numeric data.",
     message: "realsqrt: invalid input",
 };
 
@@ -113,7 +113,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Compute real square roots and reject values that require complex results.",
     keywords = "realsqrt,square root,real,elementwise,gpu",
     accel = "unary",
-    type_resolver(numeric_unary_type),
+    type_resolver(realsqrt_type),
     descriptor(crate::builtins::math::elementwise::realsqrt::REALSQRT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::realsqrt"
 )]
@@ -124,17 +124,34 @@ async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {
             &ERROR_INVALID_INPUT,
             "complex input is not supported",
         )),
-        Value::CharArray(chars) => realsqrt_char_array(chars),
         Value::SparseTensor(sparse) => realsqrt_sparse(sparse),
-        Value::String(_) | Value::StringArray(_) => Err(error_with_detail(
+        Value::Int(_)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::CharArray(_)
+        | Value::String(_)
+        | Value::StringArray(_) => Err(error_with_detail(
             &ERROR_INVALID_INPUT,
-            "expected real numeric input",
+            "expected real single or double input",
         )),
         other => realsqrt_real(other),
     }
 }
 
+fn realsqrt_type(args: &[Type], context: &ResolveContext) -> Type {
+    match args.first() {
+        Some(Type::Int | Type::Bool | Type::Logical { .. }) => Type::Unknown,
+        _ => numeric_unary_type(args, context),
+    }
+}
+
 async fn realsqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        return Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "integer gpuArray input is not supported",
+        ));
+    }
     if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
@@ -197,51 +214,79 @@ fn realsqrt_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn realsqrt_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    ensure_nonnegative(&tensor.data)?;
-    let dtype = tensor.dtype;
-    let data: Vec<f64> = tensor
-        .data
-        .iter()
-        .map(|&value| canonical_zero(value.sqrt()))
-        .collect();
-    let out = Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
         .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
-    Ok(tensor_into_realsqrt_value(tensor::coerce_tensor_dtype(
-        out, dtype,
-    )))
-}
-
-fn realsqrt_char_array(chars: CharArray) -> BuiltinResult<Value> {
-    let data: Vec<f64> = chars
-        .data
-        .iter()
-        .map(|&ch| canonical_zero((ch as u32 as f64).sqrt()))
-        .collect();
-    let out = Tensor::new(data, vec![chars.rows, chars.cols])
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            ensure_nonnegative(&values)?;
+            NumericStorage::F64(
+                values
+                    .into_iter()
+                    .map(|value| canonical_zero(value.sqrt()))
+                    .collect(),
+            )
+        }
+        NumericStorage::F32(values) => {
+            ensure_nonnegative_f32(&values)?;
+            NumericStorage::F32(
+                values
+                    .into_iter()
+                    .map(|value| canonical_zero_f32(value.sqrt()))
+                    .collect(),
+            )
+        }
+        _ => {
+            return Err(error_with_detail(
+                &ERROR_INVALID_INPUT,
+                "expected real single or double input",
+            ))
+        }
+    };
+    let out = Tensor::from_numeric_storage(output, shape)
         .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))?;
-    Ok(tensor::tensor_into_value(out))
+    Ok(tensor_into_realsqrt_value(out))
 }
 
 fn realsqrt_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
-    ensure_nonnegative(&sparse.values)?;
-    let values: Vec<f64> = sparse
-        .values
-        .iter()
-        .map(|&value| canonical_zero(value.sqrt()))
+    if sparse.integer_storage().is_some() || sparse.is_logical() {
+        return Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "expected real single or double input",
+        ));
+    }
+    let dtype = sparse.numeric_dtype();
+    let values = sparse.materialize_f64();
+    ensure_nonnegative(&values)?;
+    let values: Vec<f64> = values
+        .into_iter()
+        .map(|value| canonical_zero(value.sqrt()))
         .collect();
-    SparseTensor::new(
-        sparse.rows,
-        sparse.cols,
-        sparse.col_ptrs,
-        sparse.row_indices,
-        values,
-    )
-    .map(Value::SparseTensor)
-    .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))
+    let output = match dtype {
+        Some(NumericDType::F32) => SparseTensor::new_f32(
+            sparse.rows,
+            sparse.cols,
+            sparse.col_ptrs,
+            sparse.row_indices,
+            values.into_iter().map(|value| value as f32).collect(),
+        ),
+        Some(NumericDType::F64) => SparseTensor::new(
+            sparse.rows,
+            sparse.cols,
+            sparse.col_ptrs,
+            sparse.row_indices,
+            values,
+        ),
+        Some(_) | None => unreachable!("integer and logical sparse input rejected above"),
+    };
+    output
+        .map(Value::SparseTensor)
+        .map_err(|detail| error_with_detail(&ERROR_INTERNAL, detail))
 }
 
 fn tensor_into_realsqrt_value(tensor: Tensor) -> Value {
-    if tensor.dtype == runmat_builtins::NumericDType::F64 {
+    if tensor.numeric_dtype() == NumericDType::F64 {
         tensor::tensor_into_value(tensor)
     } else {
         Value::Tensor(tensor)
@@ -258,7 +303,25 @@ fn ensure_nonnegative(values: &[f64]) -> BuiltinResult<()> {
     Ok(())
 }
 
+fn ensure_nonnegative_f32(values: &[f32]) -> BuiltinResult<()> {
+    if values.iter().any(|&value| value < 0.0) {
+        return Err(error_with_detail(
+            &ERROR_DOMAIN,
+            "input contains negative values",
+        ));
+    }
+    Ok(())
+}
+
 fn canonical_zero(value: f64) -> f64 {
+    if value == 0.0 {
+        0.0
+    } else {
+        value
+    }
+}
+
+fn canonical_zero_f32(value: f32) -> f32 {
     if value == 0.0 {
         0.0
     } else {
@@ -286,9 +349,10 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_builtins::{
-        CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, ResolveContext,
-        SparseTensor, Type,
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
+        SparseTensor,
     };
 
     use crate::builtins::common::test_support;
@@ -304,7 +368,7 @@ mod tests {
 
     #[test]
     fn type_resolver_preserves_shape() {
-        let out = numeric_unary_type(
+        let out = realsqrt_type(
             &[Type::Tensor {
                 shape: Some(vec![Some(2), Some(3)]),
             }],
@@ -319,17 +383,26 @@ mod tests {
     }
 
     #[test]
-    fn scalar_nonnegative_values_return_real_roots() {
+    fn type_resolver_rejects_known_integer_and_logical_inputs() {
+        assert_eq!(
+            realsqrt_type(&[Type::Int], &ResolveContext::new(Vec::new())),
+            Type::Unknown
+        );
+        assert_eq!(
+            realsqrt_type(
+                &[Type::Logical {
+                    shape: Some(vec![Some(1), Some(2)]),
+                }],
+                &ResolveContext::new(Vec::new()),
+            ),
+            Type::Unknown
+        );
+    }
+
+    #[test]
+    fn double_scalar_nonnegative_value_returns_real_root() {
         match call(Value::Num(9.0)).unwrap() {
             Value::Num(value) => assert!((value - 3.0).abs() < 1.0e-12),
-            other => panic!("expected numeric scalar, got {other:?}"),
-        }
-        match call(Value::Int(IntValue::I32(16))).unwrap() {
-            Value::Num(value) => assert!((value - 4.0).abs() < 1.0e-12),
-            other => panic!("expected numeric scalar, got {other:?}"),
-        }
-        match call(Value::Bool(true)).unwrap() {
-            Value::Num(value) => assert!((value - 1.0).abs() < 1.0e-12),
             other => panic!("expected numeric scalar, got {other:?}"),
         }
     }
@@ -348,9 +421,9 @@ mod tests {
         .unwrap()
         {
             Value::Tensor(tensor) => {
-                assert!(tensor.data[0].is_nan());
-                assert!(tensor.data[1].is_infinite());
-                assert!(tensor.data[1].is_sign_positive());
+                assert!(tensor.materialize_f64()[0].is_nan());
+                assert!(tensor.materialize_f64()[1].is_infinite());
+                assert!(tensor.materialize_f64()[1].is_sign_positive());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -362,21 +435,40 @@ mod tests {
         match call(Value::Tensor(tensor)).unwrap() {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![0.0, 1.0, 2.0, 3.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
     #[test]
+    fn dense_typed_integer_tensor_is_rejected_by_class() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 4, 9]), vec![2, 2]).unwrap();
+
+        let err = call(Value::Tensor(tensor)).unwrap_err();
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn dense_negative_typed_integer_is_rejected_by_class_before_domain() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, -4]), vec![1, 2]).unwrap();
+
+        let err = call(Value::Tensor(tensor)).unwrap_err();
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
     fn single_tensor_preserves_dtype() {
-        let tensor = Tensor::new_with_dtype(vec![2.0, 9.0], vec![1, 2], NumericDType::F32).unwrap();
+        let tensor = Tensor::from_f32(vec![2.0, 9.0], vec![1, 2]).unwrap();
         match call(Value::Tensor(tensor)).unwrap() {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.dtype, NumericDType::F32);
-                assert_eq!(out.data[0], (2.0f32.sqrt()) as f64);
-                assert_eq!(out.data[1], 3.0);
+                assert_eq!(out.numeric_dtype(), NumericDType::F32);
+                assert_eq!(
+                    out.into_numeric_storage().unwrap(),
+                    NumericStorage::F32(vec![2.0f32.sqrt(), 3.0])
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -390,22 +482,19 @@ mod tests {
     }
 
     #[test]
-    fn logical_and_char_inputs_are_supported() {
+    fn integer_logical_and_char_inputs_are_rejected() {
+        let integer = call(Value::Int(IntValue::I32(16))).unwrap_err();
+        assert_eq!(integer.identifier(), ERROR_INVALID_INPUT.identifier);
+        let boolean = call(Value::Bool(true)).unwrap_err();
+        assert_eq!(boolean.identifier(), ERROR_INVALID_INPUT.identifier);
+
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
-        match call(Value::LogicalArray(logical)).unwrap() {
-            Value::Tensor(out) => assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0]),
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let logical = call(Value::LogicalArray(logical)).unwrap_err();
+        assert_eq!(logical.identifier(), ERROR_INVALID_INPUT.identifier);
 
         let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
-        match call(Value::CharArray(chars)).unwrap() {
-            Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
-                assert!((out.data[0] - (65.0f64).sqrt()).abs() < 1.0e-12);
-                assert!((out.data[1] - (90.0f64).sqrt()).abs() < 1.0e-12);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let chars = call(Value::CharArray(chars)).unwrap_err();
+        assert_eq!(chars.identifier(), ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
@@ -434,10 +523,47 @@ mod tests {
                 assert_eq!(out.cols, 2);
                 assert_eq!(out.col_ptrs, vec![0, 2, 3]);
                 assert_eq!(out.row_indices, vec![0, 2, 1]);
-                assert_eq!(out.values, vec![2.0, 3.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 3.0, 4.0]);
             }
             other => panic!("expected sparse tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sparse_single_inputs_preserve_native_single_storage() {
+        let sparse =
+            SparseTensor::new_f32(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![4.0, 9.0, 16.0])
+                .unwrap();
+        let Value::SparseTensor(output) = call(Value::SparseTensor(sparse)).unwrap() else {
+            panic!("expected sparse tensor");
+        };
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(output.as_f32_slice(), Some(&[2.0, 3.0, 4.0][..]));
+    }
+
+    #[test]
+    fn sparse_typed_integer_values_are_rejected_by_class() {
+        let sparse = SparseTensor::new_integer(
+            3,
+            2,
+            vec![0, 2, 3],
+            vec![0, 2, 1],
+            IntegerStorage::U16(vec![4, 9, 16]),
+        )
+        .unwrap();
+
+        let err = call(Value::SparseTensor(sparse)).unwrap_err();
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn sparse_negative_typed_integer_is_rejected_by_class_before_domain() {
+        let sparse =
+            SparseTensor::new_integer(2, 1, vec![0, 1], vec![1], IntegerStorage::I16(vec![-4]))
+                .unwrap();
+
+        let err = call(Value::SparseTensor(sparse)).unwrap_err();
+        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
@@ -453,14 +579,14 @@ mod tests {
             let tensor = Tensor::new(vec![0.0, 1.0, 4.0, 9.0], vec![4, 1]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .unwrap();
             let result = call(Value::GpuTensor(handle)).unwrap();
             let gathered = test_support::gather(result).unwrap();
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, vec![0.0, 1.0, 2.0, 3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0]);
         });
     }
 
@@ -470,7 +596,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, -4.0], vec![1, 2]).unwrap();
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &tensor.data,
+                    data: &tensor.materialize_f64(),
                     shape: &tensor.shape,
                 })
                 .unwrap();
@@ -484,6 +610,22 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = ComplexTensor::new(vec![(1.0, 0.0), (4.0, 2.0)], vec![1, 2]).unwrap();
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).unwrap();
+            let err = call(Value::GpuTensor(handle)).unwrap_err();
+            assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+        });
+    }
+
+    #[test]
+    fn integer_gpu_input_errors_before_provider_sqrt() {
+        test_support::with_test_provider(|provider| {
+            let values = [4u64, u64::MAX];
+            let shape = [1usize, 2usize];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &shape,
+                })
+                .expect("upload integer gpu tensor");
             let err = call(Value::GpuTensor(handle)).unwrap_err();
             assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
         });

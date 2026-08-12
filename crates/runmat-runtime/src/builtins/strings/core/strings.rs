@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, StringArray, Tensor, Value,
+    IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -368,7 +369,10 @@ fn parse_size_values(values: Vec<Value>) -> BuiltinResult<Option<Vec<usize>>> {
 
 fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Int(iv) => Ok(vec![validate_i64_dimension(iv.to_i64())?]),
+        Value::Int(iv) => iv
+            .try_to_usize()
+            .map(|dimension| vec![dimension])
+            .ok_or_else(|| strings_error(&STRINGS_ERROR_INVALID_SIZE)),
         Value::Num(n) => Ok(vec![parse_numeric_dimension(n)?]),
         Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
         Value::Tensor(t) => parse_size_tensor(&t),
@@ -379,20 +383,20 @@ fn parse_single_argument(value: Value) -> BuiltinResult<Vec<usize>> {
 
 fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(iv) => {
-            let raw = iv.to_i64();
-            validate_i64_dimension(raw)
-        }
+        Value::Int(iv) => parse_integer_dimension(iv),
         Value::Num(n) => parse_numeric_dimension(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            if !tensor::is_scalar_tensor(t) {
                 return Err(strings_error_with_message(
                     format!("{FN_NAME}: {SIZE_SCALAR_ERR}"),
                     &STRINGS_ERROR_INVALID_SIZE,
                 ));
             }
-            parse_numeric_dimension(t.data[0])
+            match t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                Some(value) => parse_integer_dimension(&value),
+                None => parse_numeric_dimension(tensor::tensor_value_f64(t, 0)),
+            }
         }
         Value::LogicalArray(arr) => {
             if arr.data.len() != 1 {
@@ -408,7 +412,8 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
-    if tensor.data.is_empty() {
+    let len = tensor.len();
+    if len == 0 {
         return Ok(vec![0, 0]);
     }
     if !is_vector_shape(&tensor.shape) {
@@ -417,10 +422,21 @@ fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
             &STRINGS_ERROR_INVALID_SIZE,
         ));
     }
-    tensor
-        .data
-        .iter()
-        .map(|&value| parse_numeric_dimension(value))
+    (0..len)
+        .map(|index| {
+            let value = tensor
+                .numeric_value_at(index)
+                .expect("tensor storage length matches shape");
+            match value {
+                NumericScalar::F64(value) => parse_numeric_dimension(value),
+                NumericScalar::F32(value) => parse_numeric_dimension(f64::from(value)),
+                value => parse_integer_dimension(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                ),
+            }
+        })
         .collect()
 }
 
@@ -452,13 +468,19 @@ fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(err_nonnegative());
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(strings_error_with_message(
             format!("{FN_NAME}: requested dimension exceeds platform limits"),
             &STRINGS_ERROR_SIZE_OVERFLOW,
         ));
     }
     Ok(rounded as usize)
+}
+
+fn parse_integer_dimension(value: &IntValue) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| strings_error(&STRINGS_ERROR_INVALID_SIZE))
 }
 
 fn normalize_dims(dims: Vec<usize>) -> Vec<usize> {
@@ -480,26 +502,13 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     }
 }
 
-fn validate_i64_dimension(raw: i64) -> BuiltinResult<usize> {
-    if raw < 0 {
-        return Err(err_nonnegative());
-    }
-    if (raw as u128) > (usize::MAX as u128) {
-        return Err(strings_error_with_message(
-            format!("{FN_NAME}: requested dimension exceeds platform limits"),
-            &STRINGS_ERROR_SIZE_OVERFLOW,
-        ));
-    }
-    Ok(raw as usize)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, NumericStorage, ResolveContext, Type};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strings_builtin(rest))
@@ -565,6 +574,75 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn strings_native_single_size_vector_reads_authoritative_storage() {
+        let dims = Tensor::from_numeric_storage(NumericStorage::F32(vec![2.0, 3.0]), vec![1, 2])
+            .expect("single dimensions");
+        let result = strings_builtin(vec![Value::Tensor(dims)]).expect("strings");
+        match result {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![2, 3]);
+                assert_eq!(array.data.len(), 6);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn strings_typed_integer_size_vector_preserves_large_uint64_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let dims =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).expect("dims");
+        let result = strings_builtin(vec![Value::Tensor(dims)]).expect("strings");
+        match result {
+            Value::StringArray(array) => {
+                assert_eq!(array.shape, vec![large as usize, 0]);
+                assert!(array.data.is_empty());
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn strings_typed_integer_scalar_tensor_parser_is_exact() {
+        let large = 9_007_199_254_740_993_u64;
+        let scalar =
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).expect("scalar");
+        assert_eq!(
+            parse_size_scalar(&Value::Tensor(scalar)).expect("parse scalar"),
+            large as usize
+        );
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("vector");
+        assert_eq!(
+            parse_size_tensor(&vector).expect("parse vector"),
+            vec![large as usize, 1]
+        );
+    }
+
+    #[test]
+    fn strings_typed_integer_tensor_dimensions_reject_negative_values() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_size_scalar(&Value::Tensor(scalar)).is_err());
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::I16(vec![2, -1]), vec![1, 2]).expect("vector");
+        assert!(parse_size_tensor(&vector).is_err());
+    }
+
+    #[test]
+    fn strings_numeric_dimensions_reject_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(parse_numeric_dimension(boundary).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -719,7 +797,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, tensor.shape);
-                assert_eq!(array.data.len(), tensor.data.len());
+                assert_eq!(array.data.len(), tensor.materialize_f64().len());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -773,7 +851,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let dims = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &dims.data,
+                data: &dims.materialize_f64(),
                 shape: &dims.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -794,7 +872,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -827,7 +905,7 @@ pub(crate) mod tests {
         );
         let dims = Tensor::new(vec![1.0, 4.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
-            data: &dims.data,
+            data: &dims.materialize_f64(),
             shape: &dims.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");

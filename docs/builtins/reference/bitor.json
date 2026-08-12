@@ -6,9 +6,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f32", "f64"],
+    "precisions": [],
     "broadcasting": "matlab",
-    "notes": "GPU inputs gather to host for integer bit operations."
+    "notes": "Documented gpuArray input is uint8, uint16, or uint32 and uses an exact gather-and-restore fallback."
   },
   "fusion": {
     "elementwise": false,
@@ -21,12 +21,14 @@
     "unit": "builtins::logical::bit::integer::tests",
     "integration": null
   },
-  "description": "`bitor(A, B)` applies bitwise OR to finite nonnegative integer-valued inputs using MATLAB-style implicit expansion.",
+  "description": "`bitor(A, B)` applies bitwise OR to same-class logical, integer, or finite nonnegative integer-valued double inputs using MATLAB-style implicit expansion. `bitor(A, B, assumedtype)` selects the signed or unsigned interpretation width for double inputs.",
   "behaviors": [
-    "Accepts double integer-valued inputs, logical inputs, integer scalar values, integer-class tensors, and gatherable gpuArray tensors.",
+    "Accepts double integer-valued inputs, logical inputs, and all eight built-in integer classes.",
     "Supports implicit expansion across compatible shapes.",
-    "For mixed unsigned integer inputs, returns the widest unsigned integer class involved; double and logical inputs return double-compatible numeric results.",
-    "Rejects fractional, negative double, infinite, NaN, complex, string, cell, and struct inputs."
+    "Inputs must have the same data type unless one is a scalar double; the result has that shared type or the nondouble integer type.",
+    "Logical inputs return logical output, integer inputs preserve their exact native class, and double inputs return double.",
+    "Signed integer inputs and signed assumed types use two's-complement bit patterns.",
+    "Rejects fractional, out-of-range, infinite, NaN, complex, mixed integer-class, string, cell, and struct inputs."
   ],
   "examples": [
     {
@@ -37,8 +39,8 @@
   ],
   "faqs": [
     {
-      "question": "Does `bitor` preserve integer class?",
-      "answer": "For unsigned integer operands, the result keeps the widest unsigned integer class involved, so mixed uint8/uint32 inputs return uint32 regardless of argument order."
+      "question": "Can `bitor` broadcast scalar masks?",
+      "answer": "Yes. Scalar masks expand across array inputs using MATLAB-compatible implicit expansion."
     }
   ],
   "links": [
@@ -55,6 +57,9 @@
     "label": "`crates/runmat-runtime/src/builtins/logical/bit/integer.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/bit/integer.rs"
   },
-  "gpu_residency": "GPU inputs are gathered for host execution.",
-  "gpu_behavior": ["RunMat currently executes integer bitwise functions on the host."]
+  "gpu_residency": "Documented uint8, uint16, and uint32 GPU inputs gather exactly for host execution and the result is restored to the owning provider.",
+  "gpu_behavior": [
+    "The documented GPU domain accepts two unsigned integer arrays, or one unsigned integer array and one scalar double; 64-bit integers and assumedtype are unsupported.",
+    "RunMat mode separately gates single input, broader resident dtypes, and resident assumedtype calls as extensions."
+  ]
 }

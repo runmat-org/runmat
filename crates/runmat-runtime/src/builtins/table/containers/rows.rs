@@ -23,12 +23,18 @@ pub(in crate::builtins::table) fn table_to_cell_array(
 pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) if tensor.cols() == 1 => {
+            if let Some(storage) = tensor.integer_storage() {
+                return storage
+                    .value_at(row)
+                    .map(Value::Int)
+                    .ok_or_else(|| invalid_index("table2cell: numeric row out of bounds"));
+            }
             Ok(Value::Num(tensor.get2(row, 0).map_err(invalid_index)?))
         }
         Value::Tensor(_) => select_rows(value, &[row]),
         Value::ComplexTensor(tensor) if tensor.cols == 1 => {
             let value = tensor
-                .data
+                .materialize_f64()
                 .get(row)
                 .copied()
                 .ok_or_else(|| invalid_index("table2cell: complex row out of bounds"))?;
@@ -72,4 +78,27 @@ pub(in crate::builtins::table) fn colon_colon_payload() -> Value {
         CellArray::new(vec![Value::from(":"), Value::from(":")], 1, 2)
             .expect("selector cell shape is valid"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntValue, IntegerStorage};
+
+    #[test]
+    fn row_value_preserves_exact_integer_scalar() {
+        let large = 9_007_199_254_740_993_u64;
+        let value = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large, u64::MAX]), vec![2, 1]).unwrap(),
+        );
+
+        assert_eq!(
+            row_value(&value, 0).unwrap(),
+            Value::Int(IntValue::U64(large))
+        );
+        assert_eq!(
+            row_value(&value, 1).unwrap(),
+            Value::Int(IntValue::U64(u64::MAX))
+        );
+    }
 }

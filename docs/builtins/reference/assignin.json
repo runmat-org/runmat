@@ -1,0 +1,96 @@
+{
+  "title": "assignin",
+  "category": "introspection",
+  "keywords": [
+    "assignin",
+    "workspace",
+    "base",
+    "caller",
+    "variable"
+  ],
+  "summary": "Assign an already evaluated value to a variable in the base or caller workspace.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Assignment is structural. A resident value retains its provider-owned representation; assignin does not launch a kernel or gather numeric data."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "dynamic_workspace_evalin_base_and_assignin_update_base_workspace",
+    "integration": "assignin_compiled_transfer_preserves_all_integer_classes_exactly"
+  },
+  "description": "`assignin(ws, var, val)` assigns the already evaluated value `val` to the variable named by `var` in the `base` or `caller` workspace. The function creates the variable when necessary and has no public output.",
+  "behaviors": [
+    "`ws` is a character vector or string scalar selecting the `base` or `caller` workspace. At the command prompt those workspaces are equivalent; inside a function, `caller` selects the workspace of the calling function.",
+    "`var` is a character vector or string scalar containing one valid variable name, not an indexed expression. A valid name starts with an English letter, continues with English letters, digits, or underscores, is not a language keyword, and contains at most `namelengthmax` characters.",
+    "`val` can have any data type and can be scalar or array valued. Expressions are evaluated in the function containing the call before the resulting value is assigned.",
+    "Integer values retain their exact class, shape, and authoritative storage. Wide `uint64` values are not converted through double.",
+    "Assignment is structural: resident values retain provider ownership without gather, re-upload, or numeric computation.",
+    "The public function has no output. Requesting an output raises `RunMat:assignin:TooManyOutputs`."
+  ],
+  "examples": [
+    {
+      "description": "Export an exact integer array to the base workspace",
+      "input": "function publishCounts(counts)\n    assignin(\"base\", \"counts\", uint64(counts))\nend"
+    },
+    {
+      "description": "Change a variable in the calling function",
+      "input": "function outer\n    age = 37;\n    updateCaller;\n    disp(age)\nend\n\nfunction updateCaller\n    assignin(\"caller\", \"age\", 42)\nend"
+    },
+    {
+      "description": "Assign an evaluated expression rather than source text",
+      "input": "function publishResult(A)\n    result = sum(A, \"native\");\n    assignin(\"base\", \"result\", result)\nend"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does assignin evaluate val in the destination workspace?",
+      "answer": "No. The expression producing val is evaluated in the function containing the assignin call, and the resulting value is then transferred to the selected workspace."
+    },
+    {
+      "question": "Can var contain indexing such as A(3)?",
+      "answer": "No. assignin assigns a whole workspace variable. Use evalin when destination-workspace indexed assignment is unavoidable."
+    },
+    {
+      "question": "Are integer arrays converted to double?",
+      "answer": "No. Assignment preserves exact integer class, shape, and values, including uint64 values above flintmax."
+    },
+    {
+      "question": "Does a GPU value move to the CPU?",
+      "answer": "No. RunMat transfers the value object structurally and retains its provider-owned resident representation."
+    },
+    {
+      "question": "What value does assignin return?",
+      "answer": "It has no public output. Assigning its call result is an error."
+    }
+  ],
+  "links": [
+    {
+      "label": "evalin",
+      "url": "./evalin"
+    },
+    {
+      "label": "isvarname",
+      "url": "./isvarname"
+    },
+    {
+      "label": "namelengthmax",
+      "url": "./namelengthmax"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/dynamic_workspace.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/dynamic_workspace.rs"
+  },
+  "gpu_behavior": [
+    "`assignin` performs no numerical operation. A `GpuTensor` is cloned into the selected workspace as the same provider-owned value, so class, shape, exact integer payload, and residency remain unchanged and no kernel or host transfer occurs."
+  ]
+}

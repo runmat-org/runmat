@@ -5,7 +5,8 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, NumericDType, SymbolicArray, Tensor, Value,
+    CharArray, ComplexTensor, LogicalArray, NumericStorage, SparseTensor, SymbolicArray, Tensor,
+    Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -201,7 +202,7 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::Int(i) => Ok(Value::Num(cast_f64_to_single(i.to_f64()))),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) => single_from_tensor(tensor),
-        Value::SparseTensor(_) => Err(conversion_error("sparse")),
+        Value::SparseTensor(sparse) => single_from_sparse_tensor(sparse),
         Value::Complex(re, im) => Ok(Value::Complex(
             cast_f64_to_single(re),
             cast_f64_to_single(im),
@@ -259,6 +260,23 @@ fn single_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     single_complex_tensor_to_host(tensor).map(Value::ComplexTensor)
 }
 
+fn single_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
+    let values = sparse
+        .materialize_f64()
+        .into_iter()
+        .map(|value| value as f32)
+        .collect();
+    SparseTensor::new_f32(
+        sparse.rows,
+        sparse.cols,
+        sparse.col_ptrs,
+        sparse.row_indices,
+        values,
+    )
+    .map(Value::SparseTensor)
+    .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
+}
+
 fn single_from_logical_array(array: LogicalArray) -> BuiltinResult<Value> {
     let tensor = tensor::logical_to_tensor(&array)
         .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
@@ -287,8 +305,13 @@ async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let converted = single_tensor_to_host(tensor)?;
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
+        let upload_data = converted
+            .clone()
+            .into_numeric_storage()
+            .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?
+            .materialize_f64();
         let view = HostTensorView {
-            data: &converted.data,
+            data: &upload_data,
             shape: &converted.shape,
         };
         match provider.upload(&view) {
@@ -303,28 +326,33 @@ async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(converted))
 }
 
-fn single_tensor_to_host(mut tensor: Tensor) -> BuiltinResult<Tensor> {
-    cast_slice_to_single(&mut tensor.data);
-    tensor.dtype = NumericDType::F32;
-    Ok(tensor)
+fn single_tensor_to_host(tensor: Tensor) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?;
+    let values = match storage {
+        NumericStorage::F32(values) => values,
+        NumericStorage::F64(values) => values.into_iter().map(|value| value as f32).collect(),
+        storage => storage
+            .materialize_f64()
+            .into_iter()
+            .map(|value| value as f32)
+            .collect(),
+    };
+    Tensor::from_numeric_storage(NumericStorage::F32(values), shape)
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
 }
 
-fn single_complex_tensor_to_host(mut tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
-    cast_complex_slice_to_single(&mut tensor.data);
-    Ok(tensor)
-}
-
-fn cast_slice_to_single(data: &mut [f64]) {
-    for value in data.iter_mut() {
-        *value = (*value as f32) as f64;
-    }
-}
-
-fn cast_complex_slice_to_single(data: &mut [(f64, f64)]) {
-    for (re, im) in data.iter_mut() {
-        *re = (*re as f32) as f64;
-        *im = (*im as f32) as f64;
-    }
+fn single_complex_tensor_to_host(tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
+    let shape = tensor.shape.clone();
+    let data = tensor
+        .materialize_f64()
+        .into_iter()
+        .map(|(real, imag)| (real as f32, imag as f32))
+        .collect();
+    ComplexTensor::from_f32(data, shape)
+        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
 }
 
 fn cast_f64_to_single(value: f64) -> f64 {
@@ -408,9 +436,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
         Value::Tensor(tensor) => {
+            let shape = tensor.shape.clone();
+            let upload_data = tensor
+                .into_numeric_storage()
+                .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?
+                .materialize_f64();
             let view = HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
+                data: &upload_data,
+                shape: &shape,
             };
             let handle = provider
                 .upload(&view)
@@ -457,7 +490,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, SymbolicArray, SymbolicExpr, Type};
+    use runmat_builtins::{
+        IntegerComplexStorage, IntegerStorage, ResolveContext, SymbolicArray, SymbolicExpr, Type,
+    };
 
     fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::single_builtin(value, rest))
@@ -538,7 +573,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data, vec![(1.25f32) as f64, (2.5f32) as f64]);
+                assert_eq!(
+                    tensor.materialize_f64(),
+                    vec![(1.25f32) as f64, (2.5f32) as f64]
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -574,14 +612,58 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                let expected: Vec<f64> = [1.25f32, 2.5, 3.75, 4.5]
-                    .into_iter()
-                    .map(|v| v as f64)
-                    .collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(
+                    t.into_numeric_storage().expect("single storage"),
+                    NumericStorage::F32(vec![1.25, 2.5, 3.75, 4.5])
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_tensor_reads_typed_integer_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+
+        let result = single_builtin(Value::Tensor(tensor), Vec::new()).expect("single");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(
+                    t.into_numeric_storage().expect("single storage"),
+                    NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0])
+                );
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_sparse_tensor_preserves_sparsity_and_converts_storage() {
+        let sparse = SparseTensor::new(
+            3,
+            2,
+            vec![0, 1, 2],
+            vec![1, 2],
+            vec![std::f64::consts::PI, -1.25],
+        )
+        .unwrap();
+        let result = single_builtin(Value::SparseTensor(sparse), Vec::new()).expect("single");
+        let Value::SparseTensor(output) = result else {
+            panic!("expected sparse tensor");
+        };
+        assert_eq!(output.shape(), vec![3, 2]);
+        assert_eq!(
+            output.numeric_dtype(),
+            Some(runmat_builtins::NumericDType::F32)
+        );
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(&[std::f64::consts::PI as f32, -1.25][..])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -600,7 +682,28 @@ pub(crate) mod tests {
                     ((1.234567f32) as f64, (-9.876543f32) as f64),
                     ((0.3333333f32) as f64, (0.6666667f32) as f64),
                 ];
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn single_complex_tensor_reads_typed_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, -2]),
+            IntegerStorage::I16(vec![3, -4]),
+        )
+        .expect("complex integer storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+
+        let result = single_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("single");
+        match result {
+            Value::ComplexTensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.integer_storage(), None);
+                assert_eq!(t.materialize_f64(), vec![(1.0, 3.0), (-2.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -614,7 +717,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![65.0, 90.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 90.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -635,7 +738,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -648,7 +751,7 @@ pub(crate) mod tests {
                         .map(|v| v as f64)
                         .collect();
                     assert_eq!(gathered.shape, vec![2, 2]);
-                    assert_eq!(gathered.data, expected);
+                    assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -671,7 +774,7 @@ pub(crate) mod tests {
                     .into_iter()
                     .map(|v| v as f64)
                     .collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -700,7 +803,7 @@ pub(crate) mod tests {
                         .map(|v| v as f64)
                         .collect();
                     assert_eq!(gathered.shape, vec![2, 2]);
-                    assert_eq!(gathered.data, expected);
+                    assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -723,7 +826,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, tensor.shape);
                 let expected: Vec<f64> = [1.5f32, 2.25f32].into_iter().map(|v| v as f64).collect();
-                assert_eq!(t.data, expected);
+                assert_eq!(t.materialize_f64(), expected);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -740,13 +843,13 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, tensor.shape);
                 // Sum should equal m exactly.
-                let sum: f64 = t.data.iter().copied().sum();
+                let sum: f64 = t.materialize_f64().iter().copied().sum();
                 assert!(
                     (sum - (m as f64)).abs() < 1e-9,
                     "sum expected {m}, got {sum}"
                 );
                 // All entries must be exactly 1.0
-                assert!(t.data.iter().all(|&v| v == 1.0));
+                assert!(t.materialize_f64().iter().all(|&v| v == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -763,14 +866,14 @@ pub(crate) mod tests {
         let cpu = single_tensor_to_host(tensor.clone()).expect("cpu conversion");
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(single_from_gpu(handle)).expect("gpu single");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_eq!(gathered.data, cpu.data);
+        assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -784,20 +887,20 @@ pub(crate) mod tests {
         let tensor = Tensor::ones(vec![m, 1]);
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(single_from_gpu(handle)).expect("gpu single");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, tensor.shape);
-        let sum: f64 = gathered.data.iter().copied().sum();
+        let sum: f64 = gathered.materialize_f64().iter().copied().sum();
         assert!(
             (sum - (m as f64)).abs() < 1e-9,
             "sum expected {} got {}",
             m,
             sum
         );
-        assert!(gathered.data.iter().all(|&v| v == 1.0));
+        assert!(gathered.materialize_f64().iter().all(|&v| v == 1.0));
     }
 }

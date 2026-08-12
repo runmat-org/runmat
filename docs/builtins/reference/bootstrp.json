@@ -6,9 +6,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["integer", "f32", "f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host before resampling and callback evaluation."
+    "notes": "Interactive gpuArray input is a RunMat-only extension. After compatibility admission, RunMat gathers exact host storage before resampling and callback evaluation; outputs remain host-resident."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
@@ -20,10 +20,12 @@
   "behaviors": [
     "Each row of `bootstat` contains one bootstrap replicate. Nonscalar `bootfun` outputs are flattened into one row per replicate.",
     "A single vector input is sampled along its first nonsingleton dimension; multiple nonscalar inputs are sampled by rows and must have matching row counts.",
-    "`bootfun` can be a function handle, string function name, or empty array. Empty `bootfun` skips callback evaluation and returns an empty `bootstat` with `bootsam` available as the second output.",
+    "`bootfun` can be a function handle or an empty array. Empty `bootfun` skips callback evaluation and returns an empty double `bootstat` with `bootsam` available as the second output; a text function name is a gated RunMat extension.",
     "`\"Weights\",w` samples rows proportionally to nonnegative weights with at least one positive value.",
     "`\"Options\",opts` accepts a statset-style options struct for compatibility. Parallel execution options are accepted but currently evaluated serially.",
-    "Numeric, logical, string, char, and cell data arrays are supported for sampling; `bootfun` must return numeric or logical values."
+    "Public numeric controls, data, and weights are single or double; logical, string, char, and cell sample data is also supported. Integer `nboot`, integer sample data, integer weights, logical `nboot`, and logical weights are independently gated RunMat extensions.",
+    "Integer sample data is indexed without floating conversion. Homogeneous numeric or logical callback output determines `bootstat` class, including native single and every integer class; `bootsam` is always double.",
+    "Interactive gpuArray input is independently gated and gathered only after compatibility admission."
   ],
   "examples": [
     { "description": "Bootstrap a mean", "input": "b = bootstrp(1000, @mean, x)" },
@@ -44,6 +46,14 @@
     {
       "question": "Does bootstrp run callbacks in parallel?",
       "answer": "No. RunMat accepts the Options name-value for MATLAB compatibility, but callback evaluation is currently serial."
+    },
+    {
+      "question": "Can bootstrp sample integer arrays?",
+      "answer": "In RunMat mode, yes: all eight integer classes are sampled exactly and the callback receives the same class. MATLAB-compatible mode rejects this extension because the public nongrouping numeric data domain is single or double."
+    },
+    {
+      "question": "What class does bootstat use?",
+      "answer": "The callback's homogeneous numeric or logical output class determines bootstat, while bootsam is double. Inconsistent callback output sizes or classes raise an error."
     }
   ],
   "links": [

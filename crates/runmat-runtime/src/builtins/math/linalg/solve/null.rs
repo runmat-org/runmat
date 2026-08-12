@@ -5,7 +5,7 @@ use std::mem::size_of;
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -222,6 +222,7 @@ enum NullMode {
 )]
 async fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let mode = parse_null_mode(&rest).map_err(argument_error)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => null_gpu(handle, mode).await,
         Value::ComplexTensor(tensor) => null_complex_value(tensor, mode),
@@ -271,10 +272,7 @@ async fn null_gpu(handle: GpuTensorHandle, mode: NullMode) -> BuiltinResult<Valu
     let basis = null_real_tensor(&gathered, mode)?;
 
     if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(uploaded) = provider.upload(&HostTensorView {
-            data: &basis.data,
-            shape: &basis.shape,
-        }) {
+        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &basis) {
             return Ok(Value::GpuTensor(uploaded));
         }
     }
@@ -317,7 +315,8 @@ fn null_real_orthonormal_tensor(matrix: &Tensor, tol: Option<f64>) -> BuiltinRes
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
 
-    let (basis, basis_cols) = real_orthonormal_basis_from_svd(&matrix.data, rows, cols, tol)?;
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let (basis, basis_cols) = real_orthonormal_basis_from_svd(&values, rows, cols, tol)?;
     Tensor::new(basis, vec![cols, basis_cols]).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
@@ -340,7 +339,7 @@ fn null_complex_orthonormal_tensor(
     }
 
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -355,16 +354,17 @@ fn null_complex_orthonormal_tensor(
 
 fn null_real_row_reduction_tensor(matrix: &Tensor) -> BuiltinResult<Tensor> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
-    let tolerance = default_real_tolerance(&matrix.data, rows, cols);
-    let (basis, basis_cols) = real_row_reduction_basis(matrix.data.clone(), rows, cols, tolerance)?;
+    let values = tensor::tensor_values_f64_cow(matrix);
+    let tolerance = default_real_tolerance(&values, rows, cols);
+    let (basis, basis_cols) = real_row_reduction_basis(values.into_owned(), rows, cols, tolerance)?;
     Tensor::new(basis, vec![cols, basis_cols]).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn null_complex_row_reduction_tensor(matrix: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
-    let tolerance = default_complex_tolerance(&matrix.data, rows, cols);
+    let tolerance = default_complex_tolerance(&matrix.materialize_f64(), rows, cols);
     let data: Vec<Complex64> = matrix
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -723,7 +723,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, ResolveContext, StringArray, Type};
+    use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, ResolveContext, StringArray, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -760,7 +761,8 @@ pub(crate) mod tests {
             for row in 0..rows {
                 let mut sum = 0.0;
                 for k in 0..inner {
-                    sum += a.data[row + k * rows] * z.data[k + col * z.shape[0]];
+                    sum += a.materialize_f64()[row + k * rows]
+                        * z.materialize_f64()[k + col * z.shape[0]];
                 }
                 assert!(
                     sum.abs() <= tol,
@@ -781,8 +783,8 @@ pub(crate) mod tests {
             for row in 0..rows {
                 let mut sum = Complex64::new(0.0, 0.0);
                 for k in 0..inner {
-                    let lhs = a.data[row + k * rows];
-                    let rhs = z.data[k + col * z.shape[0]];
+                    let lhs = a.materialize_f64()[row + k * rows];
+                    let rhs = z.materialize_f64()[k + col * z.shape[0]];
                     sum += Complex64::new(lhs.0, lhs.1) * Complex64::new(rhs.0, rhs.1);
                 }
                 assert!(
@@ -798,13 +800,18 @@ pub(crate) mod tests {
         let cols = z.shape[1];
         for col in 0..cols {
             let norm = (0..rows)
-                .map(|row| z.data[row + col * rows] * z.data[row + col * rows])
+                .map(|row| {
+                    z.materialize_f64()[row + col * rows] * z.materialize_f64()[row + col * rows]
+                })
                 .sum::<f64>()
                 .sqrt();
             assert!((norm - 1.0).abs() <= tol, "column norm {norm}");
             for other in 0..col {
                 let dot = (0..rows)
-                    .map(|row| z.data[row + col * rows] * z.data[row + other * rows])
+                    .map(|row| {
+                        z.materialize_f64()[row + col * rows]
+                            * z.materialize_f64()[row + other * rows]
+                    })
                     .sum::<f64>();
                 assert!(dot.abs() <= tol, "column dot {dot}");
             }
@@ -817,7 +824,7 @@ pub(crate) mod tests {
         for col in 0..cols {
             let norm = (0..rows)
                 .map(|row| {
-                    let value = z.data[row + col * rows];
+                    let value = z.materialize_f64()[row + col * rows];
                     value.0 * value.0 + value.1 * value.1
                 })
                 .sum::<f64>()
@@ -826,8 +833,8 @@ pub(crate) mod tests {
             for other in 0..col {
                 let dot = (0..rows)
                     .map(|row| {
-                        let lhs = z.data[row + other * rows];
-                        let rhs = z.data[row + col * rows];
+                        let lhs = z.materialize_f64()[row + other * rows];
+                        let rhs = z.materialize_f64()[row + col * rows];
                         Complex64::new(lhs.0, -lhs.1) * Complex64::new(rhs.0, rhs.1)
                     })
                     .sum::<Complex64>();
@@ -880,7 +887,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 0]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor basis, got {other:?}"),
         }
@@ -926,8 +933,8 @@ pub(crate) mod tests {
                 assert_eq!(out.shape, vec![2, 1]);
                 assert_az_zero(&tensor, &out, 1e-6);
                 assert_columns_orthonormal(&out, 1e-12);
-                assert!(out.data[0].abs() <= 1e-12);
-                assert!((out.data[1].abs() - 1.0).abs() <= 1e-12);
+                assert!(out.materialize_f64()[0].abs() <= 1e-12);
+                assert!((out.materialize_f64()[1].abs() - 1.0).abs() <= 1e-12);
             }
             other => panic!("expected tensor basis, got {other:?}"),
         }
@@ -943,7 +950,29 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 2]);
-                assert_close(&out.data, &[-2.0, 1.0, 0.0, -3.0, 0.0, 1.0], 1e-12);
+                assert_close(
+                    &out.materialize_f64(),
+                    &[-2.0, 1.0, 0.0, -3.0, 0.0, 1.0],
+                    1e-12,
+                );
+            }
+            other => panic!("expected tensor basis, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn null_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 2, 4]), vec![2, 2]).unwrap();
+        let chars = CharArray::new("r".chars().collect(), 1, 1).unwrap();
+
+        let result = null_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)])
+            .expect("null rref basis");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![2, 1]);
+                assert_close(&out.materialize_f64(), &[-2.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor basis, got {other:?}"),
         }
@@ -959,7 +988,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_close(&out.data, &[-2.0, 1.0], 1e-12);
+                assert_close(&out.materialize_f64(), &[-2.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor basis, got {other:?}"),
         }
@@ -973,7 +1002,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_close(&out.data, &[0.0, 1.0], 1e-12);
+                assert_close(&out.materialize_f64(), &[0.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor basis, got {other:?}"),
         }
@@ -1028,7 +1057,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_complex_close(&out.data, &[(-0.0, -1.0), (1.0, 0.0)], 1e-12);
+                assert_complex_close(&out.materialize_f64(), &[(-0.0, -1.0), (1.0, 0.0)], 1e-12);
             }
             other => panic!("expected complex tensor basis, got {other:?}"),
         }
@@ -1043,7 +1072,7 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 3]);
                 assert_close(
-                    &out.data,
+                    &out.materialize_f64(),
                     &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
                     1e-12,
                 );
@@ -1056,7 +1085,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![0, 0]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected 0x0 tensor basis, got {other:?}"),
         }
@@ -1095,7 +1124,7 @@ pub(crate) mod tests {
         match nonzero {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 0]);
-                assert!(out.data.is_empty());
+                assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected empty scalar null basis, got {other:?}"),
         }
@@ -1130,7 +1159,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1139,7 +1168,7 @@ pub(crate) mod tests {
             let cpu = null_real_tensor(&tensor, NullMode::Orthonormal { tolerance: None })
                 .expect("cpu null");
             assert_eq!(gathered.shape, cpu.shape);
-            assert_close(&gathered.data, &cpu.data, 1e-12);
+            assert_close(&gathered.materialize_f64(), &cpu.materialize_f64(), 1e-12);
         });
     }
 
@@ -1157,7 +1186,7 @@ pub(crate) mod tests {
             null_real_tensor(&tensor, NullMode::Orthonormal { tolerance: None }).expect("cpu null");
 
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -1166,7 +1195,7 @@ pub(crate) mod tests {
         let gpu_value = null_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu null");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
-        assert_close(&gathered.data, &cpu.data, 5e-5);
+        assert_close(&gathered.materialize_f64(), &cpu.materialize_f64(), 5e-5);
     }
 
     fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

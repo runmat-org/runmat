@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, NumericDType, Tensor, Value,
+    IntValue, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -173,8 +173,13 @@ async fn im2double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         }
         Value::Int(IntValue::U8(v)) => Ok(Value::Num(v as f64 / 255.0)),
         Value::Int(IntValue::U16(v)) => Ok(Value::Num(v as f64 / 65535.0)),
-        Value::Int(IntValue::U32(v)) => Ok(Value::Num(v as f64 / u32::MAX as f64)),
-        Value::Int(v) => Ok(Value::Num(v.to_f64())),
+        Value::Int(IntValue::I16(v)) => Ok(Value::Num(
+            f64::from(i32::from(v) - i32::from(i16::MIN)) / f64::from(u16::MAX),
+        )),
+        Value::Int(v) => Err(im2double_error_with_detail(
+            &IM2DOUBLE_ERROR_UNSUPPORTED_INPUT_TYPE,
+            format!("class {}", v.class_name()),
+        )),
         Value::Num(v) => Ok(Value::Num(v)),
         Value::Bool(v) => Ok(Value::Num(if v { 1.0 } else { 0.0 })),
         other => Err(im2double_error_with_detail(
@@ -185,26 +190,48 @@ async fn im2double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 }
 
 fn im2double_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let scale = common::dtype_max(tensor.dtype);
-    let data = if matches!(
-        tensor.dtype,
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32
-    ) {
-        tensor.data.iter().map(|&value| value / scale).collect()
-    } else {
-        tensor.data
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|err| im2double_error_with_detail(&IM2DOUBLE_ERROR_INTERNAL, err))?;
+    let data = match storage {
+        NumericStorage::F64(values) => values,
+        NumericStorage::F32(values) => values.into_iter().map(f64::from).collect(),
+        NumericStorage::I16(values) => values
+            .into_iter()
+            .map(|value| f64::from(i32::from(value) - i32::from(i16::MIN)) / f64::from(u16::MAX))
+            .collect(),
+        NumericStorage::U8(values) => values
+            .into_iter()
+            .map(|value| f64::from(value) / f64::from(u8::MAX))
+            .collect(),
+        NumericStorage::U16(values) => values
+            .into_iter()
+            .map(|value| f64::from(value) / f64::from(u16::MAX))
+            .collect(),
+        unsupported => {
+            return Err(im2double_error_with_detail(
+                &IM2DOUBLE_ERROR_UNSUPPORTED_INPUT_TYPE,
+                format!("unsupported image class {}", unsupported.class_name()),
+            ));
+        }
     };
-    common::tensor_with_dtype(data, tensor.shape, NumericDType::F64, NAME)
+    Tensor::from_numeric_storage(NumericStorage::F64(data), shape)
+        .map_err(|err| im2double_error_with_detail(&IM2DOUBLE_ERROR_INTERNAL, err))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::LogicalArray;
+    use runmat_builtins::{IntegerStorage, LogicalArray, NumericDType};
 
     fn call(value: Value) -> Value {
         block_on(im2double_builtin(value, Vec::new())).expect("im2double")
+    }
+
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
     }
 
     #[test]
@@ -214,10 +241,26 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(input)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::F64);
-        assert_eq!(out.data[0], 0.0);
-        assert!((out.data[1] - 128.0 / 255.0).abs() < 1e-12);
-        assert_eq!(out.data[2], 1.0);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        let values = values(&out);
+        assert_eq!(values[0], 0.0);
+        assert!((values[1] - 128.0 / 255.0).abs() < 1e-12);
+        assert_eq!(values[2], 1.0);
+    }
+
+    #[test]
+    fn im2double_reads_typed_integer_tensor_storage_exactly() {
+        let input = Tensor::new_integer(IntegerStorage::U8(vec![0, 128, 255]), vec![1, 3]).unwrap();
+
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
+        let values = values(&out);
+        assert_eq!(values[0], 0.0);
+        assert!((values[1] - 128.0 / 255.0).abs() < 1e-12);
+        assert_eq!(values[2], 1.0);
     }
 
     #[test]
@@ -226,22 +269,19 @@ mod tests {
     }
 
     #[test]
-    fn scales_uint32_scalar_and_tensor() {
-        assert_eq!(call(Value::Int(IntValue::U32(u32::MAX))), Value::Num(1.0));
-
-        let input = Tensor::new_with_dtype(
-            vec![0.0, 2147483648.0, u32::MAX as f64],
-            vec![1, 3],
-            NumericDType::U32,
-        )
-        .unwrap();
+    fn scales_int16_image_range() {
+        assert_eq!(call(Value::Int(IntValue::I16(i16::MIN))), Value::Num(0.0));
+        assert_eq!(call(Value::Int(IntValue::I16(i16::MAX))), Value::Num(1.0));
+        let input =
+            Tensor::new_integer(IntegerStorage::I16(vec![i16::MIN, 0, i16::MAX]), vec![1, 3])
+                .unwrap();
         let Value::Tensor(out) = call(Value::Tensor(input)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::F64);
-        assert_eq!(out.data[0], 0.0);
-        assert!((out.data[1] - 2147483648.0 / u32::MAX as f64).abs() < 1e-12);
-        assert_eq!(out.data[2], 1.0);
+        let values = values(&out);
+        assert_eq!(values[0], 0.0);
+        assert!((values[1] - 32768.0 / 65535.0).abs() < 1e-12);
+        assert_eq!(values[2], 1.0);
     }
 
     #[test]
@@ -252,9 +292,9 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(input)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert_eq!(out.shape, vec![2, 2]);
-        assert_eq!(out.data, vec![-0.25, 0.0, 0.5, 1.25]);
+        assert_eq!(values(&out), vec![-0.25, 0.0, 0.5, 1.25]);
     }
 
     #[test]
@@ -263,9 +303,34 @@ mod tests {
         let Value::Tensor(out) = call(Value::LogicalArray(logical)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert_eq!(out.shape, vec![2, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(values(&out), vec![1.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn rejects_unsupported_integer_classes() {
+        for (scalar, storage) in [
+            (IntValue::I8(0), IntegerStorage::I8(vec![0])),
+            (IntValue::I32(0), IntegerStorage::I32(vec![0])),
+            (IntValue::I64(0), IntegerStorage::I64(vec![0])),
+            (IntValue::U32(0), IntegerStorage::U32(vec![0])),
+            (IntValue::U64(0), IntegerStorage::U64(vec![0])),
+        ] {
+            let scalar_err =
+                block_on(im2double_builtin(Value::Int(scalar), Vec::new())).unwrap_err();
+            assert_eq!(
+                scalar_err.identifier(),
+                IM2DOUBLE_ERROR_UNSUPPORTED_INPUT_TYPE.identifier
+            );
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            let tensor_err =
+                block_on(im2double_builtin(Value::Tensor(tensor), Vec::new())).unwrap_err();
+            assert_eq!(
+                tensor_err.identifier(),
+                IM2DOUBLE_ERROR_UNSUPPORTED_INPUT_TYPE.identifier
+            );
+        }
     }
 
     #[test]

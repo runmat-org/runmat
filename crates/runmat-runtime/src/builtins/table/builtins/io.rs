@@ -1,5 +1,64 @@
 use super::*;
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+};
 use runmat_macros::runtime_builtin;
+
+pub(crate) const DETECT_IMPORT_OPTIONS_INTEGER_NUM_HEADER_LINES_EXTENSION:
+    BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "detectimportoptions-integer-num-header-lines",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "detectImportOptions with a typed-integer NumHeaderLines value is a RunMat extension",
+    error_identifier: Some(
+        "RunMat:compatibility:DetectImportOptionsIntegerNumHeaderLinesExtension",
+    ),
+};
+
+pub const DETECT_IMPORT_OPTIONS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [DETECT_IMPORT_OPTIONS_INTEGER_NUM_HEADER_LINES_EXTENSION];
+
+const DETECT_IMPORT_OPTIONS_INTEGER_LOCATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Range, DataRange, Sheet, ExpectedNumVariables, or VariableNamesLine",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Supported text/spreadsheet location and size controls are parsed exactly from authoritative integer storage and validated before conversion to host indices; numeric DataRange supports scalar rows and one 1-by-2 interval, textual cell references remain available for detected-option replay, and multiple numeric Nx2 intervals remain a general gap.",
+    }];
+const DETECT_IMPORT_OPTIONS_INTEGER_HEADER_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "NumHeaderLines",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The public R2026a datatype list is single/double; typed-integer values are admitted only in RunMat mode after an explicit extension gate.",
+    }];
+pub const DETECT_IMPORT_OPTIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "opts = detectImportOptions(filename, integer_location_controls...)",
+        inputs: &DETECT_IMPORT_OPTIONS_INTEGER_LOCATION_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The implemented text/spreadsheet subset preserves exact integer controls and returns host import metadata; JSON/XML/Word/HTML/archive families and concrete MATLAB options classes remain explicit general gaps.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "opts = detectImportOptions(filename, \"NumHeaderLines\", typed_integer)",
+        inputs: &DETECT_IMPORT_OPTIONS_INTEGER_HEADER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "RunMat mode parses this pre-existing extension exactly; compatibility mode rejects before file or provider access.",
+    },
+];
 
 #[runtime_builtin(
     name = "readtable",
@@ -84,12 +143,27 @@ pub(crate) async fn spreadsheet_import_options_builtin(args: Vec<Value>) -> Buil
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::struct_type),
     descriptor(crate::builtins::table::DETECT_IMPORT_OPTIONS_DESCRIPTOR),
+    extensions(crate::builtins::table::builtins::io::DETECT_IMPORT_OPTIONS_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::table::builtins::io::DETECT_IMPORT_OPTIONS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn detect_import_options_builtin(
     path: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if crate::value_contains_gpu(&path) || rest.iter().any(crate::value_contains_gpu) {
+        return Err(invalid_argument(
+            "detectImportOptions: resident arguments are not supported",
+        ));
+    }
+    if detect_option_has_typed_integer(&rest, "NumHeaderLines") {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DETECT_IMPORT_OPTIONS_INTEGER_NUM_HEADER_LINES_EXTENSION,
+            "detectImportOptions",
+        )?;
+    }
     let path_value = gather_if_needed_async(&path)
         .await
         .map_err(map_control_flow)?;
@@ -97,6 +171,28 @@ pub(crate) async fn detect_import_options_builtin(
     let options = ReadTableOptions::parse(&args)?;
     let resolved = resolve_path(&path_value)?;
     detect_import_options_from_file(&resolved, &options).await
+}
+
+fn detect_option_has_typed_integer(args: &[Value], sought: &str) -> bool {
+    if let Some(Value::Struct(options)) = args.first() {
+        if options
+            .fields
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case(sought) && is_typed_integer(value))
+        {
+            return true;
+        }
+    }
+    args.windows(2).any(|pair| {
+        scalar_text(&pair[0], "detectImportOptions option")
+            .is_ok_and(|name| name.eq_ignore_ascii_case(sought))
+            && is_typed_integer(&pair[1])
+    })
+}
+
+fn is_typed_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
 #[runtime_builtin(

@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StringArray, Value,
+    CellArray, CharArray, IntValue, StringArray, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -326,6 +327,8 @@ const PAD_ERRORS: [BuiltinErrorDescriptor; 8] = [
     PAD_ERROR_INTERNAL,
 ];
 
+const MAX_PAD_TARGET_LENGTH: usize = isize::MAX as usize;
+
 pub const PAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PAD_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -420,7 +423,7 @@ fn pad_string(text: String, options: PadOptions) -> BuiltinResult<Value> {
     let char_count = string_length(&text);
     let base_target = options.base_target(char_count);
     let target_len = element_target_length(&options, base_target, char_count);
-    let padded = apply_padding_owned(text, char_count, target_len, &options);
+    let padded = apply_padding_owned(text, char_count, target_len, &options)?;
     Ok(Value::String(padded))
 }
 
@@ -443,7 +446,7 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Va
         }
         let char_count = string_length(&text);
         let target_len = element_target_length(&options, base_target, char_count);
-        let new_text = apply_padding_owned(text, char_count, target_len, &options);
+        let new_text = apply_padding_owned(text, char_count, target_len, &options)?;
         padded.push(new_text);
     }
     let result = StringArray::new(padded, shape)
@@ -452,9 +455,19 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Va
 }
 
 fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     if rows == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut rows_text: Vec<String> = Vec::with_capacity(rows);
@@ -471,12 +484,18 @@ fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value>
     for row_text in rows_text.into_iter() {
         let char_count = string_length(&row_text);
         let target_len = element_target_length(&options, base_target, char_count);
-        let padded = apply_padding_owned(row_text, char_count, target_len, &options);
+        let padded = apply_padding_owned(row_text, char_count, target_len, &options)?;
         final_cols = final_cols.max(string_length(&padded));
         padded_rows.push(padded);
     }
 
-    let mut new_data: Vec<char> = Vec::with_capacity(rows * final_cols);
+    let total_chars = rows
+        .checked_mul(final_cols)
+        .ok_or_else(|| pad_error(&PAD_ERROR_LENGTH))?;
+    let mut new_data: Vec<char> = Vec::new();
+    new_data
+        .try_reserve_exact(total_chars)
+        .map_err(|_| pad_error(&PAD_ERROR_LENGTH))?;
     for row_text in padded_rows.into_iter() {
         let mut chars: Vec<char> = row_text.chars().collect();
         if chars.len() < final_cols {
@@ -557,7 +576,7 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
             continue;
         }
         let target_len = element_target_length(&options, base_target, item.char_count);
-        let padded = apply_padding_owned(item.text, item.char_count, target_len, &options);
+        let padded = apply_padding_owned(item.text, item.char_count, target_len, &options)?;
         match item.kind {
             CellKind::String => results.push(Value::String(padded)),
             CellKind::Char { rows } => {
@@ -643,24 +662,41 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<PadOptions> {
 
 fn parse_length(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
-        Value::Num(n) => {
-            if !n.is_finite() || *n < 0.0 {
-                return Err(pad_error(&PAD_ERROR_LENGTH));
+        Value::Num(n) => parse_numeric_length(*n).map(Some),
+        Value::Int(i) => i
+            .try_to_usize()
+            .filter(|length| *length <= MAX_PAD_TARGET_LENGTH)
+            .map(Some)
+            .ok_or_else(|| pad_error(&PAD_ERROR_LENGTH)),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(value) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                return parse_integer_length(&value).map(Some);
             }
-            if (n.fract()).abs() > f64::EPSILON {
-                return Err(pad_error(&PAD_ERROR_LENGTH));
-            }
-            Ok(Some(*n as usize))
+            parse_numeric_length(tensor::tensor_value_f64(t, 0)).map(Some)
         }
-        Value::Int(i) => {
-            let val = i.to_i64();
-            if val < 0 {
-                return Err(pad_error(&PAD_ERROR_LENGTH));
-            }
-            Ok(Some(val as usize))
-        }
+        Value::Tensor(_) => Err(pad_error(&PAD_ERROR_LENGTH)),
         _ => Ok(None),
     }
+}
+
+fn parse_integer_length(value: &IntValue) -> BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .filter(|length| *length <= MAX_PAD_TARGET_LENGTH)
+        .ok_or_else(|| pad_error(&PAD_ERROR_LENGTH))
+}
+
+fn parse_numeric_length(value: f64) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(pad_error(&PAD_ERROR_LENGTH));
+    }
+    if (value.fract()).abs() > f64::EPSILON {
+        return Err(pad_error(&PAD_ERROR_LENGTH));
+    }
+    if value >= MAX_PAD_TARGET_LENGTH as f64 {
+        return Err(pad_error(&PAD_ERROR_LENGTH));
+    }
+    Ok(value as usize)
 }
 
 fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<PadDirection>> {
@@ -743,9 +779,9 @@ fn apply_padding_owned(
     current_len: usize,
     target_len: usize,
     options: &PadOptions,
-) -> String {
+) -> BuiltinResult<String> {
     if current_len >= target_len {
-        return text;
+        return Ok(text);
     }
     let delta = target_len - current_len;
     let (left_pad, right_pad) = match options.direction {
@@ -756,7 +792,17 @@ fn apply_padding_owned(
             (left, delta - left)
         }
     };
-    let mut result = String::with_capacity(text.len() + delta * options.pad_char.len_utf8());
+    let pad_bytes = delta
+        .checked_mul(options.pad_char.len_utf8())
+        .ok_or_else(|| pad_error(&PAD_ERROR_LENGTH))?;
+    let capacity = text
+        .len()
+        .checked_add(pad_bytes)
+        .ok_or_else(|| pad_error(&PAD_ERROR_LENGTH))?;
+    let mut result = String::new();
+    result
+        .try_reserve_exact(capacity)
+        .map_err(|_| pad_error(&PAD_ERROR_LENGTH))?;
     for _ in 0..left_pad {
         result.push(options.pad_char);
     }
@@ -764,7 +810,7 @@ fn apply_padding_owned(
     for _ in 0..right_pad {
         result.push(options.pad_char);
     }
-    result
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -772,7 +818,7 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, ResolveContext, Tensor, Type};
 
     fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::pad_builtin(value, rest))
@@ -782,6 +828,15 @@ pub(crate) mod tests {
     #[test]
     fn pad_string_length_right() {
         let result = pad_builtin(Value::String("GPU".into()), vec![Value::Num(5.0)]).expect("pad");
+        assert_eq!(result, Value::String("GPU  ".into()));
+    }
+
+    #[test]
+    fn pad_length_reads_typed_integer_tensor_exactly() {
+        let length = Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("length");
+
+        let result =
+            pad_builtin(Value::String("GPU".into()), vec![Value::Tensor(length)]).expect("pad");
         assert_eq!(result, Value::String("GPU  ".into()));
     }
 
@@ -960,6 +1015,58 @@ pub(crate) mod tests {
     fn pad_errors_on_negative_length() {
         let err = pad_builtin(Value::String("data".into()), vec![Value::Num(-1.0)]).unwrap_err();
         assert_eq!(err.to_string(), PAD_ERROR_LENGTH.message);
+    }
+
+    #[test]
+    fn pad_length_rejects_negative_typed_integer_tensor() {
+        let length =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("length");
+
+        let err =
+            pad_builtin(Value::String("data".into()), vec![Value::Tensor(length)]).unwrap_err();
+        assert_eq!(err.to_string(), PAD_ERROR_LENGTH.message);
+    }
+
+    #[test]
+    fn pad_length_rejects_oversized_exact_integer_and_double_lengths() {
+        let length =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("length");
+        let err =
+            pad_builtin(Value::String("data".into()), vec![Value::Tensor(length)]).unwrap_err();
+        assert_eq!(err.to_string(), PAD_ERROR_LENGTH.message);
+
+        let err = pad_builtin(
+            Value::String("data".into()),
+            vec![Value::Int(IntValue::U64(u64::MAX))],
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), PAD_ERROR_LENGTH.message);
+
+        let err = pad_builtin(
+            Value::String("data".into()),
+            vec![Value::Num(MAX_PAD_TARGET_LENGTH as f64)],
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), PAD_ERROR_LENGTH.message);
+    }
+
+    #[test]
+    fn pad_length_rejects_nonscalar_typed_integer_tensor() {
+        let length =
+            Tensor::new_integer(IntegerStorage::I32(vec![2, 3]), vec![1, 2]).expect("length");
+
+        for args in [
+            vec![Value::Tensor(length.clone())],
+            vec![Value::Tensor(length.clone()), Value::String("left".into())],
+            vec![
+                Value::Tensor(length.clone()),
+                Value::String("left".into()),
+                Value::String("*".into()),
+            ],
+        ] {
+            let err = pad_builtin(Value::String("data".into()), args).unwrap_err();
+            assert_eq!(err.to_string(), PAD_ERROR_LENGTH.message);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

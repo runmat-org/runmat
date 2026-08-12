@@ -9,9 +9,12 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+use crate::builtins::common::{
+    spec::{
+        BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+        ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    },
+    tensor,
 };
 use crate::builtins::control::tf_model::{output_complex_column, validate_sample_time, SS_CLASS};
 use crate::builtins::control::type_resolvers::lqr_type;
@@ -307,7 +310,12 @@ impl RealMatrix {
                 )
             })?;
         let tensor = match gathered {
-            Value::Tensor(tensor) => tensor,
+            Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor).map_err(|err| {
+                lqr_error(
+                    &LQR_ERROR_INTERNAL,
+                    format!("failed to normalize {label}: {err}"),
+                )
+            })?,
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|err| {
                 lqr_error(
                     &LQR_ERROR_INTERNAL,
@@ -343,14 +351,15 @@ impl RealMatrix {
                 format!("{label} must be a 2-D matrix, got shape {:?}", tensor.shape),
             ));
         }
-        if tensor.data.iter().any(|value| !value.is_finite()) {
+        let values = tensor::tensor_values_f64_cow(&tensor);
+        if values.iter().any(|value| !value.is_finite()) {
             return Err(lqr_error(
                 &LQR_ERROR_UNSUPPORTED_INPUT,
                 format!("{label} must contain finite real values"),
             ));
         }
         Ok(Self {
-            matrix: DMatrix::from_column_slice(tensor.rows, tensor.cols, &tensor.data),
+            matrix: DMatrix::from_column_slice(tensor.rows, tensor.cols, &values),
         })
     }
 
@@ -835,6 +844,9 @@ fn scalar_property(object: &ObjectInstance, name: &'static str) -> BuiltinResult
     match object.properties.get(name) {
         Some(Value::Num(value)) => Ok(*value),
         Some(Value::Int(value)) => Ok(value.to_f64()),
+        Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         Some(other) => Err(lqr_error(
             &LQR_ERROR_INVALID_MODEL,
             format!("ss object property {name} must be a scalar, got {other:?}"),
@@ -902,10 +914,15 @@ fn lqr_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::ResolveContext;
+    use runmat_builtins::{IntegerStorage, ResolveContext};
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("tensor"))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     fn output_list(value: Value) -> Vec<Value> {
@@ -918,7 +935,7 @@ mod tests {
     fn matrix_from_value(value: &Value) -> DMatrix<f64> {
         match value {
             Value::Tensor(tensor) => {
-                DMatrix::from_column_slice(tensor.rows, tensor.cols, &tensor.data)
+                DMatrix::from_column_slice(tensor.rows, tensor.cols, &tensor.materialize_f64())
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -945,6 +962,27 @@ mod tests {
         assert!((s[(0, 0)] - 3.0_f64.sqrt()).abs() < 1.0e-8);
         assert!((s[(0, 1)] - 1.0).abs() < 1.0e-8);
         assert!((s[(1, 1)] - 3.0_f64.sqrt()).abs() < 1.0e-8);
+    }
+
+    #[test]
+    fn lqr_accepts_typed_integer_matrices_at_double_boundary() {
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = block_on(lqr_builtin(
+            integer_tensor(IntegerStorage::I16(vec![0, 0, 1, 0]), 2, 2),
+            vec![
+                integer_tensor(IntegerStorage::I16(vec![0, 1]), 2, 1),
+                integer_tensor(IntegerStorage::U16(vec![1, 0, 0, 1]), 2, 2),
+                integer_tensor(IntegerStorage::U8(vec![1]), 1, 1),
+            ],
+        ))
+        .expect("lqr");
+        let outputs = output_list(result);
+        let k = matrix_from_value(&outputs[0]);
+        let s = matrix_from_value(&outputs[1]);
+        assert_eq!(k.nrows(), 1);
+        assert_eq!(k.ncols(), 2);
+        assert!(k.iter().all(|value| value.is_finite()));
+        assert!(s.iter().all(|value| value.is_finite()));
     }
 
     #[test]
@@ -1025,12 +1063,35 @@ mod tests {
             Value::ComplexTensor(poles) => {
                 assert_eq!(poles.shape, vec![2, 1]);
                 assert!(poles
-                    .data
+                    .materialize_f64()
                     .iter()
                     .all(|(re, im)| (re * re + im * im).sqrt() < 1.0));
             }
             other => panic!("expected complex pole tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lqr_accepts_typed_integer_sample_time_property_on_state_space_object() {
+        let sample_time = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
+        let sys = block_on(crate::builtins::control::ss::ss_builtin(
+            tensor(vec![1.0, 0.0, 1.0, 1.0], 2, 2),
+            tensor(vec![0.0, 1.0], 2, 1),
+            tensor(vec![1.0, 0.0], 1, 2),
+            Value::Num(0.0),
+            vec![Value::Tensor(sample_time)],
+        ))
+        .expect("discrete ss");
+        let _guard = crate::output_count::push_output_count(Some(2));
+        let result = block_on(lqr_builtin(
+            sys,
+            vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
+        ))
+        .expect("lqr(discrete sys)");
+        let outputs = output_list(result);
+        let k = matrix_from_value(&outputs[0]);
+        assert_eq!(k.nrows(), 1);
+        assert_eq!(k.ncols(), 2);
     }
 
     #[test]

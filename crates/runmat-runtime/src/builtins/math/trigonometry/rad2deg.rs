@@ -120,6 +120,7 @@ fn rad2deg_error_with_detail(
     builtin_path = "crate::builtins::math::trigonometry::rad2deg"
 )]
 async fn rad2deg_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "rad2deg")?;
     match value {
         Value::GpuTensor(handle) => rad2deg_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(re * RAD_TO_DEG, im * RAD_TO_DEG)),
@@ -143,8 +144,7 @@ fn rad2deg_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn rad2deg_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
+    let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| value * RAD_TO_DEG)
         .collect::<Vec<_>>();
@@ -154,7 +154,7 @@ fn rad2deg_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn rad2deg_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| (re * RAD_TO_DEG, im * RAD_TO_DEG))
         .collect::<Vec<_>>();
@@ -232,9 +232,31 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 5]);
                 let expected = [0.0, 30.0, 45.0, 60.0, 90.0];
-                for (actual, expected) in tensor.data.iter().zip(expected) {
+                for (actual, expected) in tensor.materialize_f64().iter().zip(expected) {
                     assert!((actual - expected).abs() < 1e-12);
                 }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rad2deg_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![0, 1, 2]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+
+        match rad2deg_builtin(Value::Tensor(tensor)).expect("rad2deg") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [0.0, RAD_TO_DEG, 2.0 * RAD_TO_DEG];
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -258,8 +280,8 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_eq!(tensor.data[0], 0.0);
-                assert!((tensor.data[1] - RAD_TO_DEG).abs() < 1e-12);
+                assert_eq!(tensor.materialize_f64()[0], 0.0);
+                assert!((tensor.materialize_f64()[1] - RAD_TO_DEG).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

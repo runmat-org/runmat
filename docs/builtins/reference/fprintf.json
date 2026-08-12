@@ -36,10 +36,10 @@
   "description": "`fprintf` formats data using a printf-style template and writes the result to a file, `stdout`, or `stderr`. Format repetition, column-major traversal of array inputs, and supported conversion specifiers follow MATLAB semantics.",
   "behaviors": [
     "`fprintf(formatSpec, A, ...)` writes to standard output. The format repeats automatically until every element from the argument list has been consumed, traversing arrays in column-major order.",
-    "`fprintf(fid, formatSpec, A, ...)` writes to a file identifier returned by `fopen`. Identifiers `1`/`\"stdout\"` and `2`/`\"stderr\"` refer to the process streams. Identifiers must be finite, non-negative integers.",
+    "`fprintf(fid, formatSpec, A, ...)` writes to a double file identifier returned by `fopen`; numeric identifiers `1` and `2` select stdout and stderr. Typed integer, single, and resident identifiers are independently gated RunMat extensions. Host numeric format tensors (double, single, or integer) and provider-resident format vectors are separately gated before gathering; integer format tensors retain an additional integer-specific policy marker.",
     "The return value is the number of bytes written as a double scalar. Omitting the output argument discards it without affecting the write.",
     "Text arguments (character vectors, string scalars, string arrays, cell arrays of text) are expanded in column-major order, matching MATLAB's behaviour.",
-    "Numeric arrays (double, integer, logical, or gpuArray) are flattened column-first and substituted element-by-element into the format string. Star (`*`) width and precision arguments are also drawn from the flattened stream.",
+    "Numeric arrays (double, all eight integer classes, logical, or gpuArray) are traversed column-first. Integer `%d`, `%i`, `%u`, `%o`, `%x`, and `%X` conversion retains authoritative values, including wide `uint64`; a sole `%s` conversion maps valid integer character codes to text.",
     "The text encoding recorded by `fopen` is honoured. ASCII and Latin-1 encodings raise descriptive errors when characters cannot be represented. Binary/RAW encodings treat the output as UTF-8, mirroring MATLAB's default on modern systems.",
     "Arguments that reside on the GPU are gathered to the host before formatting. Formatting itself is always executed on the CPU."
   ],
@@ -76,7 +76,7 @@
     },
     {
       "question": "Can I use `'stdout'` or `'stderr'` instead of numeric identifiers?",
-      "answer": "Yes. The strings `'stdout'` and `'stderr'` (any case) map to identifiers `1` and `2` respectively, matching MATLAB."
+      "answer": "The numeric identifiers `1` and `2` are MATLAB-compatible. The case-insensitive strings `'stdout'` and `'stderr'` are an independently gated RunMat convenience rather than a documented R2026a form."
     },
     {
       "question": "What happens if the file was opened read-only?",

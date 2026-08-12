@@ -307,7 +307,7 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![1.0, 4.0, 6.0, 8.0, 11.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 6.0, 8.0, 11.0]);
             }
             other => panic!("unexpected output {other:?}"),
         }
@@ -346,7 +346,7 @@ pub(crate) mod tests {
         let outputs = eval.outputs_for_single().unwrap();
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
-            Value::Tensor(t) => assert!(t.data.is_empty()),
+            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
             Value::Num(n) => assert_eq!(*n, 0.0),
             other => panic!("unexpected output {other:?}"),
         }
@@ -459,7 +459,7 @@ pub(crate) mod tests {
                 match matrix {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape, vec![2, 2]);
-                        assert_eq!(t.data, vec![4.0, 6.0, 5.0, 7.0]);
+                        assert_eq!(t.materialize_f64(), vec![4.0, 6.0, 5.0, 7.0]);
                     }
                     other => panic!("expected tensor for token extents, got {other:?}"),
                 }
@@ -511,7 +511,7 @@ pub(crate) mod tests {
         let outputs = eval.outputs_for_single().unwrap();
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
-            Value::Tensor(t) => assert_eq!(t.data, vec![1.0, 2.0, 3.0, 4.0]),
+            Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]),
             other => panic!("expected tensor with match indices, got {other:?}"),
         }
     }

@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "GPU inputs are gathered to host. Encoding runs on CPU because it depends on class discovery and label matching."
+    "notes": "GPU input is a compatibility-gated RunMat extension. The owning provider gathers it to host before CPU encoding, and the result is a host double matrix."
   },
   "fusion": {
     "elementwise": false,
@@ -24,16 +24,18 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::stats::summary::encoding::tests",
+    "unit": "dummyvar_encodes_numeric_columns_and_missing, dummyvar_reads_typed_integer_labels_exactly, dummyvar_supports_all_integer_classes_in_extension_mode, dummyvar_rejects_wide_typed_levels_before_floating_conversion, dummyvar_integer_extension_rejects_before_computation_in_strict_mode, dummyvar_gpu_extension_rejects_before_provider_access",
     "integration": "crates/runmat-vm/tests/stats_ml.rs"
   },
   "description": "`dummyvar(group)` converts grouping variables into a numeric design matrix with one dummy column per level.",
   "behaviors": [
     "Numeric vector inputs use positive integer levels `1:max(group)`; `NaN` rows become `NaN` across that grouping variable's dummy columns.",
+    "The documented numeric input classes are single and double. Typed integer grouping values are a compatibility-gated RunMat extension supporting all eight signed and unsigned classes. RunMat validates sign and the bounded feasible output domain from exact integer storage before converting feasible levels, which are below the binary64 exact-integer boundary; wider levels reject with a controlled output-size error. The output remains double.",
     "Numeric row and column vectors are treated as one grouping variable; nonscalar numeric matrices treat each column as a separate grouping variable and concatenate the dummy columns for each variable.",
     "Cell arrays can hold multiple grouping variables when supplied as a row cell array; cell-string vectors are encoded by first appearance.",
     "Categorical inputs use the full category order, including categories not observed in the input values.",
-    "String, character-row, logical, and cell-string grouping variables are supported."
+    "String, character-row, logical, and cell-string grouping variables are supported by RunMat.",
+    "GPU grouping values are a separately gated RunMat extension and are rejected before provider access when compatibility extensions are disabled."
   ],
   "examples": [
     {

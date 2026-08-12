@@ -4,9 +4,13 @@ use glam::{Vec2, Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntValue, IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::{BoundingBox, Vertex};
@@ -18,12 +22,14 @@ use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
 use super::common::{
     numeric_vector, tensor_to_surface_grid_matlab_xy, value_as_f64, SurfaceDataInput,
 };
-use super::op_common::surface_inputs::{extract_meshgrid_axes_from_xy_matrices, AxisSource};
+use super::op_common::axes_target::{apply_axes_target, split_leading_axes_handle, AxesTarget};
+use super::op_common::surface_inputs::AxisSource;
 use super::style::{parse_color_value, value_as_string, LineStyleParseOptions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 
 use super::gpu_helpers::{axis_bounds, axis_bounds_async};
 use super::plotting_error;
@@ -36,6 +42,7 @@ use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "contour";
 const DEFAULT_LEVELS: usize = 10;
+const MAX_LEVEL_COUNT: usize = 1_000_000;
 
 const CONTOUR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "h",
@@ -134,14 +141,14 @@ const CONTOUR_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "X axis vector/meshgrid matrix matching Z rows.",
+        description: "X coordinate vector matching Z columns or meshgrid matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Y",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Y axis vector/meshgrid matrix matching Z columns.",
+        description: "Y coordinate vector matching Z rows or meshgrid matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Z",
@@ -158,14 +165,14 @@ const CONTOUR_INPUTS_X_Y_Z_LEVEL_COUNT: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "X axis vector/meshgrid matrix matching Z rows.",
+        description: "X coordinate vector matching Z columns or meshgrid matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Y",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Y axis vector/meshgrid matrix matching Z columns.",
+        description: "Y coordinate vector matching Z rows or meshgrid matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Z",
@@ -189,14 +196,14 @@ const CONTOUR_INPUTS_X_Y_Z_LEVEL_VALUES: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "X axis vector/meshgrid matrix matching Z rows.",
+        description: "X coordinate vector matching Z columns or meshgrid matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Y",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Y axis vector/meshgrid matrix matching Z columns.",
+        description: "Y coordinate vector matching Z rows or meshgrid matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Z",
@@ -220,14 +227,14 @@ const CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 5] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "X axis vector/meshgrid matrix matching Z rows.",
+        description: "X coordinate vector matching Z columns or meshgrid matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Y",
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Y axis vector/meshgrid matrix matching Z columns.",
+        description: "Y coordinate vector matching Z rows or meshgrid matrix matching Z.",
     },
     BuiltinParamDescriptor {
         name: "Z",
@@ -252,7 +259,25 @@ const CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 5] = [
     },
 ];
 
-const CONTOUR_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+const CONTOUR_INPUTS_TARGET_ARGS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes object.",
+    },
+    BuiltinParamDescriptor {
+        name: "args",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Any supported contour data, level, line-specification, and property arguments.",
+    },
+];
+
+const CONTOUR_SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
     BuiltinSignatureDescriptor {
         label: "h = contour(Z)",
         inputs: &CONTOUR_INPUTS_Z,
@@ -303,6 +328,11 @@ const CONTOUR_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
         inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS,
         outputs: &CONTOUR_OUTPUT_HANDLE,
     },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(ax, ...)",
+        inputs: &CONTOUR_INPUTS_TARGET_ARGS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
 ];
 
 pub const CONTOUR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -328,6 +358,118 @@ pub const CONTOUR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &CONTOUR_ERRORS,
 };
+
+pub(crate) const CONTOUR_INTEGER_LINE_COLOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "contour-integer-line-color",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "contour with a typed-integer RGB line color is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:ContourIntegerLineColorExtension"),
+    };
+
+pub const CONTOUR_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [CONTOUR_INTEGER_LINE_COLOR_EXTENSION];
+
+const fn documented_integer_input(
+    name: &'static str,
+    notes: &'static str,
+) -> BuiltinIntegerInputCapability {
+    BuiltinIntegerInputCapability {
+        name,
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes,
+    }
+}
+
+const INTEGER_Z_NOTES: &str = "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values.";
+const INTEGER_N_NOTES: &str = "A scalar integer selects the requested positive contour level count after exact platform and allocation-bound validation.";
+const INTEGER_V_NOTES: &str = "A documented integer level vector is validated for exact monotonic order before entering contour geometry.";
+const INTEGER_X_NOTES: &str = "The documented x-coordinate vector or meshgrid matrix accepts every built-in integer class and is validated exactly for meshgrid structure and strict monotonicity.";
+const INTEGER_Y_NOTES: &str = "The documented y-coordinate vector or meshgrid matrix accepts every built-in integer class and is validated exactly for meshgrid structure and strict monotonicity.";
+
+const INTEGER_Z_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [documented_integer_input("Z", INTEGER_Z_NOTES)];
+
+const INTEGER_Z_COUNT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    documented_integer_input("Z", INTEGER_Z_NOTES),
+    documented_integer_input("N", INTEGER_N_NOTES),
+];
+
+const INTEGER_Z_LEVELS_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    documented_integer_input("Z", INTEGER_Z_NOTES),
+    documented_integer_input("V", INTEGER_V_NOTES),
+];
+
+const INTEGER_X_Y_Z_INPUTS: [BuiltinIntegerInputCapability; 3] = [
+    documented_integer_input("X", INTEGER_X_NOTES),
+    documented_integer_input("Y", INTEGER_Y_NOTES),
+    documented_integer_input("Z", INTEGER_Z_NOTES),
+];
+
+const INTEGER_X_Y_Z_COUNT_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    documented_integer_input("X", INTEGER_X_NOTES),
+    documented_integer_input("Y", INTEGER_Y_NOTES),
+    documented_integer_input("Z", INTEGER_Z_NOTES),
+    documented_integer_input("N", INTEGER_N_NOTES),
+];
+
+const INTEGER_X_Y_Z_LEVELS_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    documented_integer_input("X", INTEGER_X_NOTES),
+    documented_integer_input("Y", INTEGER_Y_NOTES),
+    documented_integer_input("Z", INTEGER_Z_NOTES),
+    documented_integer_input("V", INTEGER_V_NOTES),
+];
+
+const INTEGER_LEVEL_LIST_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "LevelList",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented property accepts every built-in integer class as an exact monotonically increasing level vector.",
+    }];
+
+const INTEGER_LEVEL_STEP_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "LevelStep",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The documented property accepts every built-in integer class as a positive scalar spacing.",
+    }];
+
+const INTEGER_LINE_WIDTH_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "LineWidth",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "A positive scalar integer line width crosses the explicit graphics-property boundary after exact scalar validation.",
+    }];
+
+const INTEGER_LINE_COLOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "LineColor",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode admits an integer RGB triplet only when every exact component is 0 or 1; the public color contract does not explicitly advertise integer RGB classes.",
+    }];
+
+pub const CONTOUR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 10] = [
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(integer_Z)", inputs: &INTEGER_Z_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Authoritative integer heights are validated exactly and then cross the client contour-geometry boundary; resident integer grids gather through their owning provider rather than entering the floating WGPU path." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(integer_Z, integer_N)", inputs: &INTEGER_Z_COUNT_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Z follows the floating contour boundary while N remains exact through positive platform/allocation validation; the output is an opaque contour handle." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(integer_Z, integer_V)", inputs: &INTEGER_Z_LEVELS_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Exact integer level order is checked before levels and heights cross the client graphics boundary; resident integer inputs gather from the owning provider." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(integer_X, integer_Y, integer_Z)", inputs: &INTEGER_X_Y_Z_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Coordinate shape, meshgrid identity, and monotonicity are established from authoritative integer storage before X, Y, and Z enter client contour geometry." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(integer_X, integer_Y, integer_Z, integer_N)", inputs: &INTEGER_X_Y_Z_COUNT_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Coordinates and heights cross the graphics boundary only after exact validation; N is a bounded structural count." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(integer_X, integer_Y, integer_Z, integer_V)", inputs: &INTEGER_X_Y_Z_LEVELS_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Coordinate and level ordering are exact before the explicit client graphics conversion; all resident integer inputs gather." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(..., 'LevelList', integer_levels)", inputs: &INTEGER_LEVEL_LIST_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "LevelList uses authoritative integer order and then the same floating contour-level boundary as positional V." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(..., 'LevelStep', integer_step)", inputs: &INTEGER_LEVEL_STEP_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "LevelStep is read as one exact positive scalar and must remain finite at the f32 graphics-property boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(..., 'LineWidth', integer_width)", inputs: &INTEGER_LINE_WIDTH_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "LineWidth is read as one exact positive scalar and must remain finite at the f32 graphics-property boundary." },
+    BuiltinIntegerCapabilityDescriptor { form: "h = contour(..., 'LineColor', integer_rgb)", inputs: &INTEGER_LINE_COLOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The RunMat-only compatibility gate precedes provider gather; exact 0/1 component validation follows owning-provider gather but precedes f32 color conversion." },
+];
 
 pub(crate) fn contour_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -385,7 +527,6 @@ impl ContourLevelSpec {
                         format!("{name}: level vector must contain at least one value"),
                     ));
                 }
-                let mut last = None;
                 for &value in values {
                     if !value.is_finite() {
                         return Err(plotting_error(
@@ -393,17 +534,21 @@ impl ContourLevelSpec {
                             format!("{name}: level values must be finite"),
                         ));
                     }
-                    if let Some(prev) = last {
-                        if value <= prev {
-                            return Err(plotting_error(
-                                name,
-                                format!("{name}: level values must be strictly increasing"),
-                            ));
-                        }
-                    }
-                    last = Some(value);
                 }
-                Ok(values.iter().map(|&v| v as f32).collect())
+                let mut levels = Vec::with_capacity(values.len());
+                for &value in values {
+                    let converted = value as f32;
+                    if !converted.is_finite() {
+                        return Err(plotting_error(
+                            name,
+                            format!("{name}: level value is too large for contour geometry"),
+                        ));
+                    }
+                    levels.push(converted);
+                }
+                levels.sort_by(f32::total_cmp);
+                levels.dedup();
+                Ok(levels)
             }
             ContourLevelSpec::Step(step) => {
                 if *step <= 0.0 || !step.is_finite() {
@@ -415,6 +560,13 @@ impl ContourLevelSpec {
                 let mut levels = Vec::new();
                 let mut value = min_z;
                 let max = if max_z <= min_z { min_z + 1.0 } else { max_z };
+                let estimated = ((max - min_z) / *step).ceil();
+                if !estimated.is_finite() || estimated > MAX_LEVEL_COUNT as f32 {
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: LevelStep would generate too many contour levels"),
+                    ));
+                }
                 while value <= max {
                     levels.push(value);
                     value += *step;
@@ -463,7 +615,7 @@ pub(crate) fn parse_contour_args(
     if rest.is_empty() {
         return from_implicit_args(name, first, None, &[]);
     }
-    if is_option_token(&rest[0]) {
+    if value_as_string(&rest[0]).is_some() {
         return from_implicit_args(name, first, None, &rest);
     }
     if is_implicit_level_style_value(&rest[0], name)
@@ -484,13 +636,13 @@ pub(crate) fn parse_contour_args(
             None,
             &rest[2..],
         ),
-        3 => from_explicit_args(
+        _ if value_as_string(&rest[2]).is_some() => from_explicit_args(
             name,
             first,
             rest[0].clone(),
             rest[1].clone(),
-            Some(rest[2].clone()),
-            &rest[3..],
+            None,
+            &rest[2..],
         ),
         _ => from_explicit_args(
             name,
@@ -509,7 +661,7 @@ fn from_implicit_args(
     level_value: Option<Value>,
     options: &[Value],
 ) -> BuiltinResult<ContourArgs> {
-    let z_input = SurfaceDataInput::from_value(z_value, name)?;
+    let z_input = contour_surface_input(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
     if rows < 2 || cols < 2 {
         return Err(plotting_error(
@@ -557,26 +709,34 @@ fn from_explicit_args(
             Tensor::try_from(&y_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?
         }
     };
-    let z_input = SurfaceDataInput::from_value(z_value, name)?;
+    let mut z_input = contour_surface_input(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
-    let (x_axis, y_axis) = if x_tensor.rows == rows
+    let (x_axis, y_axis, transpose_z) = if x_tensor.rows == rows
         && x_tensor.cols == cols
         && y_tensor.rows == rows
         && y_tensor.cols == cols
     {
-        extract_meshgrid_axes_from_xy_matrices(&x_tensor, &y_tensor, rows, cols, name)?
+        extract_contour_meshgrid_axes(&x_tensor, &y_tensor, rows, cols, name)?
     } else {
-        let x_axis = numeric_vector(x_tensor);
-        let y_axis = numeric_vector(y_tensor);
+        let x_axis = validated_contour_axis_vector(&x_tensor, "X", name)?;
+        let y_axis = validated_contour_axis_vector(&y_tensor, "Y", name)?;
         if x_axis.len() < 2 || y_axis.len() < 2 {
             return Err(plotting_error(
                 name,
                 format!("{name}: axis vectors must contain at least two elements"),
             ));
         }
-        (x_axis, y_axis)
+        (x_axis, y_axis, false)
     };
-    if cols != x_axis.len() || rows != y_axis.len() {
+    if transpose_z {
+        z_input = transpose_contour_surface_input(z_input, rows, cols, name)?;
+    }
+    let (grid_rows, grid_cols) = if transpose_z {
+        (cols, rows)
+    } else {
+        (rows, cols)
+    };
+    if grid_cols != x_axis.len() || grid_rows != y_axis.len() {
         return Err(plotting_error(
             name,
             format!(
@@ -603,6 +763,303 @@ fn from_explicit_args(
     Ok(args)
 }
 
+fn contour_surface_input(value: Value, name: &'static str) -> BuiltinResult<SurfaceDataInput> {
+    let input = match value {
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(&handle).is_some() =>
+        {
+            SurfaceDataInput::Host(super::common::gather_tensor_from_gpu(handle, name)?)
+        }
+        other => SurfaceDataInput::from_value(other, name)?,
+    };
+    if let SurfaceDataInput::Host(tensor) = &input {
+        if !tensor_has_two_distinct_values(tensor) {
+            return Err(plotting_error(
+                name,
+                format!("{name}: Z must contain at least two different values"),
+            ));
+        }
+    }
+    Ok(input)
+}
+
+fn tensor_has_two_distinct_values(tensor: &Tensor) -> bool {
+    if tensor_utils::tensor_element_len(tensor) < 2 {
+        return false;
+    }
+    if let Some(storage) = tensor.integer_storage() {
+        return integer_storage_has_distinct_values(storage);
+    }
+    let values = tensor_utils::tensor_values_f64(tensor);
+    values
+        .get(1..)
+        .is_some_and(|rest| rest.iter().any(|value| *value != values[0]))
+}
+
+fn validated_contour_axis_vector(
+    tensor: &Tensor,
+    axis: &str,
+    name: &'static str,
+) -> BuiltinResult<Vec<f64>> {
+    if tensor.rows != 1 && tensor.cols != 1 {
+        return Err(plotting_error(
+            name,
+            format!("{name}: {axis} must be a vector or meshgrid matrix"),
+        ));
+    }
+    if !tensor_values_are_strictly_monotonic(tensor) {
+        return Err(plotting_error(
+            name,
+            format!("{name}: {axis} vector values must be strictly increasing or decreasing"),
+        ));
+    }
+    Ok(numeric_vector(tensor.clone()))
+}
+
+fn extract_contour_meshgrid_axes(
+    x: &Tensor,
+    y: &Tensor,
+    rows: usize,
+    cols: usize,
+    name: &'static str,
+) -> BuiltinResult<(Vec<f64>, Vec<f64>, bool)> {
+    if x.rows != rows || x.cols != cols || y.rows != rows || y.cols != cols {
+        return Err(plotting_error(
+            name,
+            format!("{name}: when X and Y are matrices, they must match the shape of Z"),
+        ));
+    }
+    let conventional = (0..cols).all(|col| {
+        let first = rows * col;
+        (1..rows).all(|row| tensor_elements_equal_exact(x, first, row + rows * col))
+    }) && (0..rows)
+        .all(|row| (1..cols).all(|col| tensor_elements_equal_exact(y, row, row + rows * col)));
+    let transposed = (0..rows)
+        .all(|row| (1..cols).all(|col| tensor_elements_equal_exact(x, row, row + rows * col)))
+        && (0..cols).all(|col| {
+            let first = rows * col;
+            (1..rows).all(|row| tensor_elements_equal_exact(y, first, row + rows * col))
+        });
+    let (x_indices, y_indices, transpose_z): (Vec<usize>, Vec<usize>, bool) = if conventional {
+        (
+            (0..cols).map(|col| rows * col).collect(),
+            (0..rows).collect(),
+            false,
+        )
+    } else if transposed {
+        (
+            (0..rows).collect(),
+            (0..cols).map(|col| rows * col).collect(),
+            true,
+        )
+    } else {
+        return Err(plotting_error(
+            name,
+            format!("{name}: matrix X/Y inputs must vary along opposite dimensions"),
+        ));
+    };
+    if !tensor_indices_are_strictly_monotonic(x, &x_indices)
+        || !tensor_indices_are_strictly_monotonic(y, &y_indices)
+    {
+        return Err(plotting_error(
+            name,
+            format!("{name}: meshgrid axes must be strictly increasing or decreasing"),
+        ));
+    }
+    Ok((
+        x_indices
+            .iter()
+            .map(|index| tensor_utils::tensor_value_f64(x, *index))
+            .collect(),
+        y_indices
+            .iter()
+            .map(|index| tensor_utils::tensor_value_f64(y, *index))
+            .collect(),
+        transpose_z,
+    ))
+}
+
+fn transpose_contour_surface_input(
+    input: SurfaceDataInput,
+    rows: usize,
+    cols: usize,
+    name: &'static str,
+) -> BuiltinResult<SurfaceDataInput> {
+    let tensor = input.into_tensor(name)?;
+    let indices: Vec<usize> = (0..rows)
+        .flat_map(|column| (0..cols).map(move |row| column + rows * row))
+        .collect();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|error| plotting_error(name, format!("{name}: {error}")))?
+        .reorder(&indices)
+        .map_err(|error| plotting_error(name, format!("{name}: {error}")))?;
+    let tensor = Tensor::from_numeric_storage(storage, vec![cols, rows])
+        .map_err(|error| plotting_error(name, format!("{name}: {error}")))?;
+    Ok(SurfaceDataInput::Host(tensor))
+}
+
+fn tensor_elements_equal_exact(tensor: &Tensor, lhs: usize, rhs: usize) -> bool {
+    match tensor.integer_storage() {
+        Some(storage) => storage.value_at(lhs) == storage.value_at(rhs),
+        None => {
+            tensor_utils::tensor_value_f64(tensor, lhs)
+                == tensor_utils::tensor_value_f64(tensor, rhs)
+        }
+    }
+}
+
+fn tensor_values_are_strictly_monotonic(tensor: &Tensor) -> bool {
+    match tensor.integer_storage() {
+        Some(storage) => integer_storage_is_strictly_monotonic(storage),
+        None => slice_is_strictly_monotonic(&tensor_utils::tensor_values_f64(tensor)),
+    }
+}
+
+fn tensor_indices_are_strictly_monotonic(tensor: &Tensor, indices: &[usize]) -> bool {
+    match tensor.integer_storage() {
+        Some(storage) => {
+            let values: Vec<IntValue> = indices
+                .iter()
+                .map(|index| storage.value_at(*index).expect("meshgrid index exists"))
+                .collect();
+            int_values_are_strictly_monotonic(&values)
+        }
+        None => {
+            let values: Vec<f64> = indices
+                .iter()
+                .map(|index| tensor_utils::tensor_value_f64(tensor, *index))
+                .collect();
+            slice_is_strictly_monotonic(&values)
+        }
+    }
+}
+
+fn slice_is_strictly_monotonic<T: PartialOrd>(values: &[T]) -> bool {
+    values.len() > 1
+        && (values.windows(2).all(|pair| pair[1] > pair[0])
+            || values.windows(2).all(|pair| pair[1] < pair[0]))
+}
+
+fn int_values_are_strictly_monotonic(values: &[IntValue]) -> bool {
+    values.len() > 1
+        && (values
+            .windows(2)
+            .all(|pair| int_value_less_than(&pair[0], &pair[1]))
+            || values
+                .windows(2)
+                .all(|pair| int_value_less_than(&pair[1], &pair[0])))
+}
+
+fn int_value_less_than(lhs: &IntValue, rhs: &IntValue) -> bool {
+    match (lhs, rhs) {
+        (IntValue::I8(a), IntValue::I8(b)) => a < b,
+        (IntValue::I16(a), IntValue::I16(b)) => a < b,
+        (IntValue::I32(a), IntValue::I32(b)) => a < b,
+        (IntValue::I64(a), IntValue::I64(b)) => a < b,
+        (IntValue::U8(a), IntValue::U8(b)) => a < b,
+        (IntValue::U16(a), IntValue::U16(b)) => a < b,
+        (IntValue::U32(a), IntValue::U32(b)) => a < b,
+        (IntValue::U64(a), IntValue::U64(b)) => a < b,
+        _ => false,
+    }
+}
+
+fn integer_storage_has_distinct_values(storage: &IntegerStorage) -> bool {
+    let Some(first) = storage.value_at(0) else {
+        return false;
+    };
+    (1..storage.len()).any(|index| storage.value_at(index).as_ref() != Some(&first))
+}
+
+fn integer_storage_all_equal(storage: &IntegerStorage) -> bool {
+    !integer_storage_has_distinct_values(storage)
+}
+
+fn integer_storage_strictly_increasing(storage: &IntegerStorage) -> bool {
+    let values = storage.exact_values();
+    values
+        .windows(2)
+        .all(|pair| int_value_less_than(&pair[0], &pair[1]))
+}
+
+fn integer_storage_is_strictly_monotonic(storage: &IntegerStorage) -> bool {
+    int_values_are_strictly_monotonic(&storage.exact_values())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        _ => false,
+    }
+}
+
+fn contour_property_scalar(
+    value: &Value,
+    name: &'static str,
+    property: &str,
+) -> BuiltinResult<f64> {
+    match value {
+        Value::Num(value) => Ok(*value),
+        Value::Int(value) => Ok(value.to_f64()),
+        Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
+        Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) == 1 => Ok(tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .map_or_else(
+                || tensor_utils::tensor_value_f64(tensor, 0),
+                |value| value.to_f64(),
+            )),
+        Value::GpuTensor(handle) => {
+            let tensor = super::common::gather_tensor_from_gpu(handle.clone(), name)?;
+            contour_property_scalar(&Value::Tensor(tensor), name, property)
+        }
+        _ => Err(plotting_error(
+            name,
+            format!("{name}: {property} must be a numeric scalar"),
+        )),
+    }
+}
+
+fn validate_integer_rgb(value: &Value, name: &'static str) -> BuiltinResult<()> {
+    let storage = match value {
+        Value::Tensor(tensor) => tensor.integer_storage(),
+        _ => None,
+    };
+    let Some(storage) = storage else {
+        return Ok(());
+    };
+    if storage.len() != 3
+        || storage
+            .exact_values()
+            .iter()
+            .any(|value| !integer_is_zero_or_one(value))
+    {
+        return Err(plotting_error(
+            name,
+            format!("{name}: integer LineColor must be a three-element RGB vector containing only 0 or 1"),
+        ));
+    }
+    Ok(())
+}
+
+fn integer_is_zero_or_one(value: &IntValue) -> bool {
+    value.is_zero()
+        || matches!(
+            value,
+            IntValue::I8(1)
+                | IntValue::I16(1)
+                | IntValue::I32(1)
+                | IntValue::I64(1)
+                | IntValue::U8(1)
+                | IntValue::U16(1)
+                | IntValue::U32(1)
+                | IntValue::U64(1)
+        )
+}
+
 pub(crate) fn default_level_count() -> usize {
     DEFAULT_LEVELS
 }
@@ -622,7 +1079,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Contour rendering terminates fusion graphs; gpuArray inputs may remain on device when shared plotting context is installed.",
+    notes: "Contour rendering terminates fusion graphs. Eligible floating Z grids may remain on-device with a shared plotting context; integer gpuArray inputs gather exactly through the owning provider before floating contour geometry.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::contour")]
@@ -645,11 +1102,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
     descriptor(crate::builtins::plotting::contour::CONTOUR_DESCRIPTOR),
+    extensions(crate::builtins::plotting::contour::CONTOUR_EXTENSIONS),
+    integer_capabilities(crate::builtins::plotting::contour::CONTOUR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::contour"
 )]
 pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let mut call =
-        Some(ContourCall::parse(BUILTIN_NAME, first, rest).map_err(map_contour_invalid_argument)?);
+    let parsed =
+        ContourCall::parse(BUILTIN_NAME, first, rest).map_err(map_contour_invalid_argument)?;
+    apply_axes_target(parsed.axes_target, BUILTIN_NAME).map_err(map_contour_invalid_argument)?;
+    let mut call = Some(parsed);
     let opts = PlotRenderOptions {
         title: "Contour Plot",
         x_label: "X",
@@ -691,15 +1152,30 @@ struct ContourCall {
     args: ContourArgs,
     color_map: ColorMap,
     base_z: f32,
+    axes_target: AxesTarget,
 }
 
 impl ContourCall {
     fn parse(name: &'static str, first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
+        let mut all = Vec::with_capacity(rest.len() + 1);
+        all.push(first);
+        all.extend(rest);
+        let (axes_target, mut all) = if all.first().is_some_and(is_typed_integer_value) {
+            (None, all)
+        } else {
+            split_leading_axes_handle(all, name)?
+        };
+        let first = all
+            .first()
+            .cloned()
+            .ok_or_else(|| plotting_error(name, format!("{name}: expected Z input")))?;
+        let rest = all.drain(1..).collect();
         let args = parse_contour_args(name, first, rest)?;
         Ok(Self {
             args,
             color_map: ColorMap::Parula,
             base_z: 0.0,
+            axes_target,
         })
     }
 
@@ -708,6 +1184,7 @@ impl ContourCall {
             args,
             color_map,
             base_z,
+            axes_target: _,
         } = self;
         let ContourArgs {
             name,
@@ -772,6 +1249,11 @@ impl ContourCall {
 pub(crate) fn parse_level_spec(value: Value, context: &str) -> BuiltinResult<ContourLevelSpec> {
     match value {
         Value::Tensor(tensor) => parse_tensor_levels(tensor, context),
+        Value::Int(value) => parse_integer_level_count(&value, context),
+        Value::GpuTensor(handle) => {
+            let tensor = super::common::gather_tensor_from_gpu(handle, BUILTIN_NAME)?;
+            parse_tensor_levels(tensor, context)
+        }
         other => {
             if let Some(count) = value_as_f64(&other) {
                 parse_scalar_level_count(count, context)
@@ -804,23 +1286,61 @@ fn parse_scalar_level_count(value: f64, context: &str) -> BuiltinResult<ContourL
             format!("{context}: level count must be positive"),
         ));
     }
+    if (rounded - value).abs() > f64::EPSILON {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count must be an integer"),
+        ));
+    }
+    if rounded > usize::MAX as f64
+        || (usize::BITS == 64 && rounded == usize::MAX as f64)
+        || rounded > MAX_LEVEL_COUNT as f64
+    {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count is too large"),
+        ));
+    }
     Ok(ContourLevelSpec::Count(rounded as usize))
 }
 
 fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLevelSpec> {
-    if tensor.data.is_empty() {
+    let len = tensor_utils::tensor_element_len(&tensor);
+    if len == 0 {
         return Err(plotting_error(
             context,
             format!("{context}: level vector must be non-empty"),
         ));
     }
-    if tensor.data.len() == 1 {
-        return parse_scalar_level_count(tensor.data[0], context);
+    if len == 1 {
+        if let Some(value) = tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+        {
+            return parse_integer_level_count(&value, context);
+        }
+        return parse_scalar_level_count(tensor_utils::tensor_value_f64(&tensor, 0), context);
     }
-    if tensor.data.iter().all(|value| *value == tensor.data[0]) {
-        return Ok(ContourLevelSpec::Values(vec![tensor.data[0]]));
+    if let Some(storage) = tensor.integer_storage() {
+        if len == 2 && integer_storage_all_equal(storage) {
+            return Ok(ContourLevelSpec::Values(vec![storage
+                .value_at(0)
+                .expect("level exists")
+                .to_f64()]));
+        }
+        if !integer_storage_strictly_increasing(storage) {
+            return Err(plotting_error(
+                context,
+                format!("{context}: level values must be strictly increasing"),
+            ));
+        }
+        return Ok(ContourLevelSpec::Values(storage.to_f64_vec()));
     }
-    for pair in tensor.data.windows(2) {
+    let data = tensor_utils::tensor_values_f64(&tensor);
+    if data.len() == 2 && data[0] == data[1] {
+        return Ok(ContourLevelSpec::Values(vec![data[0]]));
+    }
+    for pair in data.windows(2) {
         if pair[1] <= pair[0] {
             return Err(plotting_error(
                 context,
@@ -828,12 +1348,46 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLe
             ));
         }
     }
-    Ok(ContourLevelSpec::Values(tensor.data))
+    Ok(ContourLevelSpec::Values(data))
+}
+
+fn parse_integer_level_count(value: &IntValue, context: &str) -> BuiltinResult<ContourLevelSpec> {
+    let Some(count) = value.try_to_usize() else {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count must be positive"),
+        ));
+    };
+    if count == 0 {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count must be positive"),
+        ));
+    }
+    if count > MAX_LEVEL_COUNT {
+        return Err(plotting_error(
+            context,
+            format!("{context}: level count is too large"),
+        ));
+    }
+    Ok(ContourLevelSpec::Count(count))
 }
 
 pub(crate) fn apply_contour_options(
     args: &mut ContourArgs,
     options: &[Value],
+) -> BuiltinResult<()> {
+    apply_contour_options_with_integer_line_color_extension(
+        args,
+        options,
+        &CONTOUR_INTEGER_LINE_COLOR_EXTENSION,
+    )
+}
+
+pub(crate) fn apply_contour_options_with_integer_line_color_extension(
+    args: &mut ContourArgs,
+    options: &[Value],
+    integer_line_color_extension: &'static BuiltinExtensionDescriptor,
 ) -> BuiltinResult<()> {
     if options.is_empty() {
         return Ok(());
@@ -873,41 +1427,47 @@ pub(crate) fn apply_contour_options(
                 level_override_seen = true;
             }
             "levelstep" => {
-                let step = value_as_f64(&pair[1]).ok_or_else(|| {
-                    plotting_error(
-                        args.name,
-                        format!("{}: LevelStep must be numeric", args.name),
-                    )
-                })?;
+                let step = contour_property_scalar(&pair[1], args.name, "LevelStep")?;
                 if !step.is_finite() || step <= 0.0 {
                     return Err(plotting_error(
                         args.name,
                         format!("{}: LevelStep must be a positive, finite number", args.name),
                     ));
                 }
-                args.level_spec = ContourLevelSpec::Step(step as f32);
+                let step = step as f32;
+                if !step.is_finite() {
+                    return Err(plotting_error(
+                        args.name,
+                        format!("{}: LevelStep is too large for contour geometry", args.name),
+                    ));
+                }
+                args.level_spec = ContourLevelSpec::Step(step);
                 level_override_seen = true;
             }
             "linecolor" => {
-                args.line_color = parse_line_color_option(&opts, &pair[1])?;
+                args.line_color =
+                    parse_line_color_option(&opts, &pair[1], integer_line_color_extension)?;
             }
             "color" => {
-                args.line_color = parse_line_color_option(&opts, &pair[1])?;
+                args.line_color =
+                    parse_line_color_option(&opts, &pair[1], integer_line_color_extension)?;
             }
             "linewidth" => {
-                let width = value_as_f64(&pair[1]).ok_or_else(|| {
-                    plotting_error(
-                        args.name,
-                        format!("{}: LineWidth must be numeric", args.name),
-                    )
-                })?;
+                let width = contour_property_scalar(&pair[1], args.name, "LineWidth")?;
                 if !width.is_finite() || width <= 0.0 {
                     return Err(plotting_error(
                         args.name,
                         format!("{}: LineWidth must be a positive, finite number", args.name),
                     ));
                 }
-                args.line_width = width as f32;
+                let width = width as f32;
+                if !width.is_finite() {
+                    return Err(plotting_error(
+                        args.name,
+                        format!("{}: LineWidth is too large for graphics", args.name),
+                    ));
+                }
+                args.line_width = width;
             }
             "levellistmode" => {
                 let Some(mode) = value_as_string(&pair[1]) else {
@@ -1001,6 +1561,7 @@ fn apply_contour_linespec(args: &mut ContourArgs, token: &str) -> BuiltinResult<
 fn parse_line_color_option(
     opts: &LineStyleParseOptions,
     value: &Value,
+    integer_line_color_extension: &'static BuiltinExtensionDescriptor,
 ) -> BuiltinResult<ContourLineColor> {
     if let Some(text) = value_as_string(value) {
         let lower = text.trim().to_ascii_lowercase();
@@ -1013,17 +1574,32 @@ fn parse_line_color_option(
             }
         };
     }
+    if is_typed_integer_value(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            integer_line_color_extension,
+            opts.builtin_name,
+        )?;
+    }
+    let gathered;
+    let value = if let Value::GpuTensor(handle) = value {
+        gathered = Value::Tensor(super::common::gather_tensor_from_gpu(
+            handle.clone(),
+            opts.builtin_name,
+        )?);
+        &gathered
+    } else {
+        value
+    };
+    validate_integer_rgb(value, opts.builtin_name)?;
     let color = parse_color_value(opts, value)?;
     Ok(ContourLineColor::Color(color))
 }
 
-fn is_option_token(value: &Value) -> bool {
-    value_as_string(value)
-        .map(|s| is_contour_option_name(&s))
-        .unwrap_or(false)
-}
-
 fn is_implicit_level_style_value(value: &Value, context: &str) -> bool {
+    if let Value::GpuTensor(handle) = value {
+        return handle.shape.is_empty()
+            || handle.shape.iter().copied().filter(|dim| *dim > 1).count() <= 1;
+    }
     matches!(
         value,
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Tensor(_)
@@ -2006,8 +2582,8 @@ fn triangulate_band_triangle(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::NumericDType;
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -2019,14 +2595,46 @@ pub(crate) mod tests {
         if cols > 1 {
             shape.push(cols);
         }
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape,
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), shape).expect("contour test tensor")
+    }
+
+    fn all_integer_z_storages() -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![0, 1, 2, 3]),
+            IntegerStorage::I16(vec![0, 1, 2, 3]),
+            IntegerStorage::I32(vec![0, 1, 2, 3]),
+            IntegerStorage::I64(vec![0, 1, 2, 3]),
+            IntegerStorage::U8(vec![0, 1, 2, 3]),
+            IntegerStorage::U16(vec![0, 1, 2, 3]),
+            IntegerStorage::U32(vec![0, 1, 2, 3]),
+            IntegerStorage::U64(vec![0, 1, 2, 3]),
+        ]
+    }
+
+    fn all_integer_level_storages() -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![0, 1, 2]),
+            IntegerStorage::I16(vec![0, 1, 2]),
+            IntegerStorage::I32(vec![0, 1, 2]),
+            IntegerStorage::I64(vec![0, 1, 2]),
+            IntegerStorage::U8(vec![0, 1, 2]),
+            IntegerStorage::U16(vec![0, 1, 2]),
+            IntegerStorage::U32(vec![0, 1, 2]),
+            IntegerStorage::U64(vec![0, 1, 2]),
+        ]
+    }
+
+    fn all_integer_scalar_storages(value: u8) -> [IntegerStorage; 8] {
+        [
+            IntegerStorage::I8(vec![value as i8]),
+            IntegerStorage::I16(vec![value as i16]),
+            IntegerStorage::I32(vec![value as i32]),
+            IntegerStorage::I64(vec![value as i64]),
+            IntegerStorage::U8(vec![value]),
+            IntegerStorage::U16(vec![value as u16]),
+            IntegerStorage::U32(vec![value as u32]),
+            IntegerStorage::U64(vec![value as u64]),
+        ]
     }
 
     fn assert_contour_vertices_within_bounds(vertices: &[Vertex], x_axis: &[f64], y_axis: &[f64]) {
@@ -2079,6 +2687,33 @@ pub(crate) mod tests {
             ContourLevelSpec::Count(count) => assert_eq!(count, 12),
             other => panic!("expected scalar level count, found {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn linespec_and_properties_parse_without_positional_levels() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        parse_contour_args("contour", z.clone(), vec![Value::from("--")])
+            .expect("implicit LineSpec without levels");
+
+        let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        let y = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        parse_contour_args(
+            "contour",
+            x.clone(),
+            vec![y.clone(), z.clone(), Value::from("--")],
+        )
+        .expect("explicit LineSpec without levels");
+
+        let args = parse_contour_args(
+            "contour",
+            x,
+            vec![y, z, Value::from("LineWidth"), Value::Int(IntValue::U64(2))],
+        )
+        .expect("explicit integer LineWidth without levels");
+        assert!((args.line_width - 2.0).abs() < f32::EPSILON);
+        assert!(matches!(args.level_spec, ContourLevelSpec::Auto));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2193,6 +2828,51 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn transposed_integer_coordinate_matrices_transpose_z_exactly() {
+        setup_plot_tests();
+        let wide = 9_007_199_254_740_992_u64;
+        let x = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![wide, wide + 1, wide, wide + 1, wide, wide + 1]),
+                vec![2, 3],
+            )
+            .expect("transposed X"),
+        );
+        let y = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![10, 10, 20, 20, 30, 30]),
+                vec![2, 3],
+            )
+            .expect("transposed Y"),
+        );
+        let z = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![wide, wide + 1, wide + 2, wide + 3, wide + 4, wide + 5]),
+                vec![2, 3],
+            )
+            .expect("Z"),
+        );
+        let args = parse_contour_args("contour", x, vec![y, z]).expect("transposed axes");
+        assert_eq!(args.x_axis.len(), 2);
+        assert_eq!(args.y_axis, vec![10.0, 20.0, 30.0]);
+        let SurfaceDataInput::Host(z) = args.z_input else {
+            panic!("transposed Z must use exact client storage");
+        };
+        assert_eq!(z.shape, vec![3, 2]);
+        assert_eq!(
+            z.integer_storage(),
+            Some(&IntegerStorage::U64(vec![
+                wide,
+                wide + 2,
+                wide + 4,
+                wide + 1,
+                wide + 3,
+                wide + 5,
+            ]))
+        );
+    }
+
+    #[test]
     fn interpolate_edge_handles_descending_values() {
         let corners = [
             Vec2::new(0.0, 0.0),
@@ -2290,6 +2970,44 @@ pub(crate) mod tests {
             ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.0, 1.0, 2.0]),
             _ => panic!("expected explicit levels"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn scalar_level_count_reads_typed_integer_tensor_exactly() {
+        setup_plot_tests();
+        let exact = MAX_LEVEL_COUNT as u64;
+        let tensor = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![exact]),
+            vec![1, 1],
+        )
+        .expect("typed level count");
+
+        match parse_level_spec(Value::Tensor(tensor), "contour").unwrap() {
+            ContourLevelSpec::Count(count) => assert_eq!(count, exact as usize),
+            other => panic!("expected exact level count, got {other:?}"),
+        }
+
+        let negative = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative level count");
+        assert!(parse_level_spec(Value::Tensor(negative), "contour").is_err());
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_level_spec(Value::Num(boundary), "contour").is_err());
+        assert!(parse_level_spec(Value::Num(2.5), "contour").is_err());
+        let too_large = Tensor::new_integer(
+            IntegerStorage::U64(vec![MAX_LEVEL_COUNT as u64 + 1]),
+            vec![1, 1],
+        )
+        .expect("oversized level count");
+        assert!(parse_level_spec(Value::Tensor(too_large), "contour").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2460,6 +3178,330 @@ pub(crate) mod tests {
         assert!(labels.contains(&"h = contour(Z, V)"));
         assert!(labels.contains(&"h = contour(X, Y, Z)"));
         assert!(labels.contains(&"h = contour(X, Y, Z, V, Name, Value, ...)"));
+        assert!(labels.contains(&"h = contour(ax, ...)"));
+    }
+
+    #[test]
+    fn contour_integer_capabilities_cover_every_documented_role_and_all_classes() {
+        assert_eq!(CONTOUR_INTEGER_CAPABILITIES.len(), 10);
+        let forms: Vec<&str> = CONTOUR_INTEGER_CAPABILITIES
+            .iter()
+            .map(|capability| capability.form)
+            .collect();
+        for expected in [
+            "h = contour(integer_Z)",
+            "h = contour(integer_Z, integer_N)",
+            "h = contour(integer_Z, integer_V)",
+            "h = contour(integer_X, integer_Y, integer_Z)",
+            "h = contour(integer_X, integer_Y, integer_Z, integer_N)",
+            "h = contour(integer_X, integer_Y, integer_Z, integer_V)",
+            "h = contour(..., 'LevelList', integer_levels)",
+            "h = contour(..., 'LevelStep', integer_step)",
+            "h = contour(..., 'LineWidth', integer_width)",
+            "h = contour(..., 'LineColor', integer_rgb)",
+        ] {
+            assert!(forms.contains(&expected), "missing capability {expected}");
+        }
+        assert!(CONTOUR_INTEGER_CAPABILITIES
+            .iter()
+            .flat_map(|capability| capability.inputs)
+            .all(|input| input.classes.len() == 8));
+        assert_eq!(CONTOUR_EXTENSIONS.len(), 1);
+        assert_eq!(CONTOUR_EXTENSIONS[0].id, "contour-integer-line-color");
+    }
+
+    #[test]
+    fn contour_accepts_all_integer_z_level_and_scalar_property_classes() {
+        setup_plot_tests();
+        for storage in all_integer_z_storages() {
+            let expected = storage.clone();
+            let z = Tensor::new_integer(storage, vec![2, 2]).expect("integer Z");
+            let args = parse_contour_args("contour", Value::Tensor(z), Vec::new())
+                .expect("integer contour Z");
+            match args.z_input {
+                SurfaceDataInput::Host(tensor) => {
+                    assert_eq!(tensor.integer_storage(), Some(&expected));
+                }
+                SurfaceDataInput::Gpu(_) => panic!("host integer Z remained resident"),
+            }
+        }
+        for storage in all_integer_level_storages() {
+            let levels = Tensor::new_integer(storage, vec![1, 3]).expect("integer levels");
+            assert!(matches!(
+                parse_level_spec(Value::Tensor(levels), "contour").expect("integer levels"),
+                ContourLevelSpec::Values(values) if values == vec![0.0, 1.0, 2.0]
+            ));
+        }
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        for storage in all_integer_scalar_storages(2) {
+            let scalar =
+                Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar"));
+            assert!(matches!(
+                parse_level_spec(scalar.clone(), "contour").expect("integer count"),
+                ContourLevelSpec::Count(2)
+            ));
+            let args = parse_contour_args(
+                "contour",
+                z.clone(),
+                vec![Value::from("LevelStep"), scalar.clone()],
+            )
+            .expect("integer LevelStep");
+            assert!(matches!(args.level_spec, ContourLevelSpec::Step(step) if step == 2.0));
+            let args =
+                parse_contour_args("contour", z.clone(), vec![Value::from("LineWidth"), scalar])
+                    .expect("integer LineWidth");
+            assert_eq!(args.line_width, 2.0);
+        }
+    }
+
+    #[test]
+    fn contour_explicit_axes_validate_all_integer_classes_before_graphics_conversion() {
+        setup_plot_tests();
+        let cases = [
+            (
+                IntegerStorage::I8(vec![1, 2]),
+                IntegerStorage::I8(vec![3, 4]),
+            ),
+            (
+                IntegerStorage::I16(vec![1, 2]),
+                IntegerStorage::I16(vec![3, 4]),
+            ),
+            (
+                IntegerStorage::I32(vec![1, 2]),
+                IntegerStorage::I32(vec![3, 4]),
+            ),
+            (
+                IntegerStorage::I64(vec![1, 2]),
+                IntegerStorage::I64(vec![3, 4]),
+            ),
+            (
+                IntegerStorage::U8(vec![1, 2]),
+                IntegerStorage::U8(vec![3, 4]),
+            ),
+            (
+                IntegerStorage::U16(vec![1, 2]),
+                IntegerStorage::U16(vec![3, 4]),
+            ),
+            (
+                IntegerStorage::U32(vec![1, 2]),
+                IntegerStorage::U32(vec![3, 4]),
+            ),
+            (
+                IntegerStorage::U64(vec![1, 2]),
+                IntegerStorage::U64(vec![3, 4]),
+            ),
+        ];
+        for ((x_storage, y_storage), z_storage) in cases.into_iter().zip(all_integer_z_storages()) {
+            let x = Value::Tensor(Tensor::new_integer(x_storage, vec![1, 2]).expect("integer X"));
+            let y = Value::Tensor(Tensor::new_integer(y_storage, vec![2, 1]).expect("integer Y"));
+            let z = Value::Tensor(Tensor::new_integer(z_storage, vec![2, 2]).expect("integer Z"));
+            let args = parse_contour_args("contour", x, vec![y, z]).expect("integer X/Y/Z");
+            assert_eq!(args.x_axis, vec![1.0, 2.0]);
+            assert_eq!(args.y_axis, vec![3.0, 4.0]);
+        }
+    }
+
+    #[test]
+    fn contour_wide_integer_order_and_distinctness_are_checked_exactly() {
+        let wide = 9_007_199_254_740_992_u64;
+        let x = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![wide, wide + 1]), vec![1, 2])
+                .expect("wide X"),
+        );
+        let y = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![0, 1]), vec![2, 1]).expect("Y"),
+        );
+        let z = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![wide, wide + 1, wide + 2, wide + 3]),
+                vec![2, 2],
+            )
+            .expect("wide Z"),
+        );
+        parse_contour_args("contour", x, vec![y, z]).expect("exact wide coordinates");
+
+        let increasing = Tensor::new_integer(IntegerStorage::U64(vec![wide, wide + 1]), vec![1, 2])
+            .expect("wide levels");
+        assert!(matches!(
+            parse_level_spec(Value::Tensor(increasing), "contour").expect("exact level order"),
+            ContourLevelSpec::Values(values) if values.len() == 2
+        ));
+        let descending = Tensor::new_integer(IntegerStorage::U64(vec![wide + 1, wide]), vec![1, 2])
+            .expect("descending levels");
+        assert!(parse_level_spec(Value::Tensor(descending), "contour").is_err());
+        let equal_z =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide; 4]), vec![2, 2]).expect("equal Z");
+        assert!(parse_contour_args("contour", Value::Tensor(equal_z), Vec::new()).is_err());
+    }
+
+    #[test]
+    fn contour_integer_line_color_is_gated_before_the_graphics_boundary() {
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let rgb = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1, 0, 1]), vec![1, 3])
+                .expect("integer RGB"),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = parse_contour_args("contour", z, vec![Value::from("LineColor"), rgb])
+            .err()
+            .expect("integer RGB extension must be gated");
+        assert_eq!(
+            err.identifier(),
+            CONTOUR_INTEGER_LINE_COLOR_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn contour_runmat_mode_accepts_all_integer_line_color_classes_and_rejects_wide_channels() {
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let rgbs = [
+            IntegerStorage::I8(vec![1, 0, 1]),
+            IntegerStorage::I16(vec![1, 0, 1]),
+            IntegerStorage::I32(vec![1, 0, 1]),
+            IntegerStorage::I64(vec![1, 0, 1]),
+            IntegerStorage::U8(vec![1, 0, 1]),
+            IntegerStorage::U16(vec![1, 0, 1]),
+            IntegerStorage::U32(vec![1, 0, 1]),
+            IntegerStorage::U64(vec![1, 0, 1]),
+        ];
+        for storage in rgbs {
+            let rgb = Value::Tensor(Tensor::new_integer(storage, vec![1, 3]).expect("integer RGB"));
+            let args =
+                parse_contour_args("contour", z.clone(), vec![Value::from("LineColor"), rgb])
+                    .expect("integer RGB extension");
+            assert!(matches!(args.line_color, ContourLineColor::Color(_)));
+        }
+        let wide = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 0, 1]), vec![1, 3])
+                .expect("wide RGB"),
+        );
+        assert!(parse_contour_args("contour", z, vec![Value::from("LineColor"), wide]).is_err());
+    }
+
+    #[test]
+    fn contour_gathers_all_resident_integer_z_classes_before_floating_gpu_geometry() {
+        test_support::with_test_provider(|provider| {
+            for storage in all_integer_z_storages() {
+                let expected = storage.clone();
+                let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Z");
+                let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                    .expect("integer upload");
+                let args = parse_contour_args("contour", Value::GpuTensor(handle), Vec::new())
+                    .expect("resident integer contour");
+                match args.z_input {
+                    SurfaceDataInput::Host(tensor) => {
+                        assert_eq!(tensor.integer_storage(), Some(&expected));
+                    }
+                    SurfaceDataInput::Gpu(_) => {
+                        panic!("resident integer Z entered floating GPU geometry")
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn contour_gathers_resident_integer_axes_levels_and_properties_through_the_owner() {
+        test_support::with_test_provider(|provider| {
+            let upload = |storage: IntegerStorage, shape: Vec<usize>| {
+                let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+                Value::GpuTensor(
+                    crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                        .expect("integer upload"),
+                )
+            };
+            let x = upload(IntegerStorage::U64(vec![1, 2]), vec![1, 2]);
+            let y = upload(IntegerStorage::I64(vec![3, 4]), vec![2, 1]);
+            let z = upload(IntegerStorage::U32(vec![0, 1, 2, 3]), vec![2, 2]);
+            let explicit =
+                parse_contour_args("contour", x, vec![y, z]).expect("resident integer coordinates");
+            assert_eq!(explicit.x_axis, vec![1.0, 2.0]);
+            assert_eq!(explicit.y_axis, vec![3.0, 4.0]);
+            assert!(matches!(explicit.z_input, SurfaceDataInput::Host(_)));
+
+            let host_z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+            let count = upload(IntegerStorage::U64(vec![3]), vec![1, 1]);
+            assert!(matches!(
+                parse_contour_args("contour", host_z.clone(), vec![count])
+                    .expect("resident count")
+                    .level_spec,
+                ContourLevelSpec::Count(3)
+            ));
+            let levels = upload(IntegerStorage::I64(vec![-1, 0, 1]), vec![1, 3]);
+            assert!(matches!(
+                parse_contour_args(
+                    "contour",
+                    host_z.clone(),
+                    vec![Value::from("LevelList"), levels]
+                )
+                .expect("resident LevelList")
+                .level_spec,
+                ContourLevelSpec::Values(values) if values == vec![-1.0, 0.0, 1.0]
+            ));
+            let step = upload(IntegerStorage::U16(vec![1]), vec![1, 1]);
+            let width = upload(IntegerStorage::U8(vec![2]), vec![1, 1]);
+            let args = parse_contour_args(
+                "contour",
+                host_z.clone(),
+                vec![
+                    Value::from("LevelStep"),
+                    step,
+                    Value::from("LineWidth"),
+                    width,
+                ],
+            )
+            .expect("resident scalar properties");
+            assert!(matches!(args.level_spec, ContourLevelSpec::Step(1.0)));
+            assert_eq!(args.line_width, 2.0);
+
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let rgb = upload(IntegerStorage::U64(vec![1, 0, 1]), vec![1, 3]);
+            let args = parse_contour_args("contour", host_z, vec![Value::from("LineColor"), rgb])
+                .expect("resident integer RGB extension");
+            assert!(matches!(args.line_color, ContourLineColor::Color(_)));
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn contour_wgpu_gathers_all_resident_integer_z_classes_before_geometry() {
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        for storage in all_integer_z_storages() {
+            let expected = storage.clone();
+            let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Z");
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("integer upload");
+            let args = parse_contour_args("contour", Value::GpuTensor(handle), Vec::new())
+                .expect("resident integer contour");
+            match args.z_input {
+                SurfaceDataInput::Host(tensor) => {
+                    assert_eq!(tensor.integer_storage(), Some(&expected));
+                }
+                SurfaceDataInput::Gpu(_) => {
+                    panic!("resident integer Z entered floating WGPU geometry")
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn contour_accepts_leading_axes_handle_but_not_typed_integer_handle_aliases() {
+        setup_plot_tests();
+        let ax = crate::builtins::plotting::axes::axes_builtin(Vec::new()).expect("axes");
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let parsed =
+            ContourCall::parse("contour", Value::Num(ax), vec![z.clone()]).expect("leading axes");
+        assert!(parsed.axes_target.is_some());
+        assert!(
+            ContourCall::parse("contour", Value::Int(IntValue::I64(ax as i64)), vec![z]).is_err()
+        );
     }
 
     #[test]

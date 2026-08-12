@@ -8,6 +8,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::{
@@ -275,7 +276,7 @@ fn is_known_option(name: &str) -> bool {
 fn validate_option_value(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Bool(_) | Value::Num(_) | Value::Int(_) | Value::String(_) => Ok(()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => Ok(()),
         _ if text_scalar(value).is_some() => Ok(()),
         _ => Err(int_error(&INT_ERRORS[3])),
     }
@@ -515,6 +516,7 @@ fn int_error_with_detail(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     fn x() -> SymbolicExpr {
         SymbolicExpr::variable("x")
@@ -601,6 +603,22 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:int:InvalidOption"));
+    }
+
+    #[tokio::test]
+    async fn option_validation_reads_typed_integer_scalar_tensor() {
+        let expr = SymbolicExpr::function(SymbolicFunction::Cos, x());
+        let option_value =
+            Tensor::new_integer(IntegerStorage::I8(vec![1]), vec![1, 1]).expect("option value");
+
+        let err = int_builtin(
+            Value::Symbolic(expr),
+            vec![Value::String("Hold".into()), Value::Tensor(option_value)],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:int:InvalidOption"));
+        assert!(err.message().contains("option 'Hold' is not yet supported"));
     }
 
     #[tokio::test]

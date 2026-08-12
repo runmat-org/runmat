@@ -1,5 +1,6 @@
 use runmat_builtins::{Tensor, Value};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::dispatcher::gather_if_needed_async;
 use crate::RuntimeError;
 
@@ -45,7 +46,7 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
         Value::SymbolicArray(sa) => normalize_shape(&sa.shape),
-        Value::CharArray(ca) => vec![ca.rows, ca.cols],
+        Value::CharArray(ca) => ca.shape.clone(),
         Value::Cell(ca) => normalize_shape(&ca.shape),
         Value::ObjectArray(array) => normalize_shape(array.shape()),
         Value::GpuTensor(handle) => {
@@ -64,13 +65,13 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
 #[async_recursion::async_recursion(?Send)]
 pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
     let numel = match value {
-        Value::Tensor(t) => t.data.len(),
+        Value::Tensor(t) => tensor_utils::tensor_element_len(t),
         Value::SparseTensor(t) => t.rows.saturating_mul(t.cols),
-        Value::ComplexTensor(t) => t.data.len(),
+        Value::ComplexTensor(t) => tensor_utils::complex_tensor_element_len(t),
         Value::LogicalArray(la) => la.data.len(),
         Value::StringArray(sa) => sa.data.len(),
         Value::SymbolicArray(sa) => sa.data.len(),
-        Value::CharArray(ca) => ca.rows * ca.cols,
+        Value::CharArray(ca) => ca.data.len(),
         Value::Cell(ca) => ca.data.len(),
         Value::ObjectArray(array) => array.len(),
         Value::GpuTensor(handle) => {
@@ -111,6 +112,7 @@ pub fn dims_to_row_tensor(dims: &[usize]) -> Result<Tensor, String> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -147,9 +149,33 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn numel_reads_typed_integer_storage_length_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 7, 9]), vec![1, 3]).unwrap();
+
+        assert_eq!(block_on(value_numel(&Value::Tensor(tensor))).unwrap(), 3);
+    }
+
+    #[test]
+    fn numel_reads_typed_complex_integer_storage_length_exactly() {
+        let storage = runmat_builtins::IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 7]),
+            IntegerStorage::U64(vec![0, 0]),
+        )
+        .unwrap();
+        let tensor = runmat_builtins::ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+
+        assert_eq!(
+            block_on(value_numel(&Value::ComplexTensor(tensor))).unwrap(),
+            2
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn dims_to_row_tensor_converts() {
         let tensor = dims_to_row_tensor(&[2, 4, 6]).unwrap();
         assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.data, vec![2.0, 4.0, 6.0]);
+        assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
     }
 }

@@ -12,6 +12,7 @@ use super::style::{
     color_from_token, looks_like_option_name, parse_line_style_args, value_as_bool, value_as_f64,
     value_as_string, LineAppearance, LineStyleParseOptions,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
@@ -222,14 +223,10 @@ pub(crate) fn reference_line_builtin(
     if handles.len() == 1 {
         Ok(Value::Num(handles[0]))
     } else {
-        Ok(Value::Tensor(Tensor {
-            data: handles.clone(),
-            integer_data: None,
-            rows: 1,
-            cols: handles.len(),
-            shape: vec![1, handles.len()],
-            dtype: runmat_builtins::NumericDType::F64,
-        }))
+        Ok(Value::Tensor(
+            Tensor::new(handles.clone(), vec![1, handles.len()])
+                .expect("reference line handle row"),
+        ))
     }
 }
 
@@ -377,19 +374,20 @@ fn coordinates_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
     }
     let tensor =
         Tensor::try_from(value).map_err(|err| reference_line_error(builtin, err.to_string()))?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(reference_line_error(
             builtin,
             "coordinate vector cannot be empty",
         ));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    let values = tensor_utils::tensor_into_values_f64(tensor);
+    if values.iter().any(|value| !value.is_finite()) {
         return Err(reference_line_error(
             builtin,
             "coordinate values must be finite",
         ));
     }
-    Ok(tensor.data)
+    Ok(values)
 }
 
 fn reference_line_error(builtin: &'static str, msg: impl Into<String>) -> crate::RuntimeError {
@@ -416,6 +414,14 @@ mod tests {
 
     fn tensor(data: &[f64]) -> Tensor {
         Tensor::new_2d(data.to_vec(), 1, data.len()).unwrap()
+    }
+
+    fn integer_tensor(data: &[i16]) -> Tensor {
+        Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(data.to_vec()),
+            vec![1, data.len()],
+        )
+        .unwrap()
     }
 
     #[test]
@@ -475,7 +481,15 @@ mod tests {
         let _guard = setup();
         let handles = xline_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))]).unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
-        assert_eq!(tensor.data.len(), 3);
+        assert_eq!(tensor.materialize_f64().len(), 3);
+    }
+
+    #[test]
+    fn xline_reads_typed_integer_coordinates_exactly() {
+        let _guard = setup();
+        let handles = xline_builtin(vec![Value::Tensor(integer_tensor(&[1, 2, 3]))]).unwrap();
+        let tensor = Tensor::try_from(&handles).unwrap();
+        assert_eq!(tensor.materialize_f64().len(), 3);
     }
 
     #[test]

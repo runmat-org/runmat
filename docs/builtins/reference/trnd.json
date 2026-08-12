@@ -6,18 +6,19 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "elementwise",
-    "notes": "Sampling currently runs on the host RNG; GPU inputs are gathered to host."
+    "notes": "Sampling currently runs on the host RNG; GPU parameters use a gather-and-reupload fallback so output remains resident with matching floating precision."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
   "tested": { "unit": "builtins::stats::random::trnd::tests", "integration": null },
   "description": "`trnd(nu)` generates Student's t random numbers with `nu` degrees of freedom. Size arguments can be supplied as separate dimensions or as a size vector.",
   "behaviors": [
-    "`nu` must be a positive scalar or a positive array of degrees of freedom.",
+    "`nu` must be a positive scalar or a positive array of degrees of freedom. MATLAB-compatible calls use `single` or `double`; typed-integer degrees of freedom are available in `runmat` compatibility mode.",
     "Scalar `nu` broadcasts over the requested output size.",
     "Array `nu` requires the requested size to match the shape of `nu`.",
+    "MATLAB-compatible size controls use integer-valued doubles; typed-integer scalar or vector sizes are available in `runmat` compatibility mode.",
     "`nu = Inf` generates standard normal random numbers."
   ],
   "examples": [

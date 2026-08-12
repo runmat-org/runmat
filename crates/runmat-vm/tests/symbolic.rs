@@ -6,7 +6,7 @@ use runmat_builtins::Value;
 #[test]
 fn symbolic_vpa_source_workflow() {
     let vars = test_helpers::execute_source(
-        "old = digits(20); r = vpa(sym('1/3')); p = vpa(pi, 50); digits('default');",
+        "old = digits(20); r = vpa(sym('1/3')); p = vpa(pi, 50); digits(32);",
     )
     .unwrap();
 
@@ -143,7 +143,7 @@ fn symbolic_array_reports_matlab_compatible_shape_metadata() {
         .expect("Variable 'sz' should exist in bytecode");
 
     assert!(
-        matches!(&vars[sz_slot], Value::Tensor(t) if t.data == vec![1.0, 3.0]),
+        matches!(&vars[sz_slot], Value::Tensor(t) if t.materialize_f64() == vec![1.0, 3.0]),
         "size(A_pt) should be the row vector [1 3]"
     );
 

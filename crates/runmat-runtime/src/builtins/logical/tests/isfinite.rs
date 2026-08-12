@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Value,
+    ComplexTensor, LogicalArray, NumericScalar, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -170,27 +170,37 @@ fn isfinite_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn isfinite_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Value> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&x| if x.is_finite() { 1u8 } else { 0u8 })
-        .collect::<Vec<_>>();
-    logical_result(name, data, tensor.shape)
+    let shape = tensor.shape.clone();
+    let mut data = Vec::with_capacity(tensor::element_count(&shape));
+    for index in 0..tensor::element_count(&shape) {
+        let value = tensor
+            .numeric_value_at(index)
+            .ok_or_else(|| internal_error(name, format!("{name}: invalid numeric storage")))?;
+        data.push(u8::from(numeric_scalar_is_finite(value)));
+    }
+    logical_result(name, data, shape)
 }
 
 fn isfinite_complex_tensor(name: &str, tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let data = tensor
-        .data
-        .iter()
-        .map(|&(re, im)| {
-            if re.is_finite() && im.is_finite() {
-                1u8
-            } else {
-                0u8
-            }
-        })
-        .collect::<Vec<_>>();
-    logical_result(name, data, tensor.shape)
+    let shape = tensor.shape.clone();
+    let mut data = Vec::with_capacity(tensor::element_count(&shape));
+    for index in 0..tensor::element_count(&shape) {
+        let (real, imag) = tensor
+            .numeric_value_at(index)
+            .ok_or_else(|| internal_error(name, format!("{name}: invalid complex storage")))?;
+        data.push(u8::from(
+            numeric_scalar_is_finite(real) && numeric_scalar_is_finite(imag),
+        ));
+    }
+    logical_result(name, data, shape)
+}
+
+fn numeric_scalar_is_finite(value: NumericScalar) -> bool {
+    match value {
+        NumericScalar::F64(value) => value.is_finite(),
+        NumericScalar::F32(value) => value.is_finite(),
+        _ => true,
+    }
 }
 
 fn logical_full(name: &str, shape: Vec<usize>, value: bool) -> BuiltinResult<Value> {
@@ -239,7 +249,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerComplexStorage, IntegerStorage, ResolveContext, Type};
 
     #[test]
     fn isfinite_type_returns_logical() {
@@ -315,6 +325,21 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn isfinite_typed_integer_tensor_is_always_true() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+        let result = run_isfinite(Value::Tensor(tensor)).expect("isfinite");
+        match result {
+            Value::LogicalArray(mask) => {
+                assert_eq!(mask.shape, vec![2, 2]);
+                assert_eq!(mask.data, vec![1, 1, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn isfinite_complex_tensor_mask() {
         let tensor = ComplexTensor::new(
             vec![(0.0, 0.0), (f64::NAN, 0.0), (1.0, f64::INFINITY)],
@@ -326,6 +351,25 @@ pub(crate) mod tests {
             Value::LogicalArray(mask) => {
                 assert_eq!(mask.shape, vec![3, 1]);
                 assert_eq!(mask.data, vec![1, 0, 0]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn isfinite_typed_complex_integer_storage_is_always_true() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![0, 7]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+        let result = run_isfinite(Value::ComplexTensor(tensor)).expect("isfinite");
+        match result {
+            Value::LogicalArray(mask) => {
+                assert_eq!(mask.shape, vec![1, 2]);
+                assert_eq!(mask.data, vec![1, 1]);
             }
             other => panic!("expected logical array, got {other:?}"),
         }
@@ -411,15 +455,17 @@ pub(crate) mod tests {
     fn isfinite_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, f64::INFINITY, 3.0], vec![3, 1]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = run_isfinite(Value::GpuTensor(handle)).expect("isfinite");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 1.0]);
+            assert_eq!(
+                gathered
+                    .into_numeric_storage()
+                    .expect("gathered storage")
+                    .materialize_f64(),
+                vec![1.0, 0.0, 1.0]
+            );
         });
     }
 
@@ -433,18 +479,17 @@ pub(crate) mod tests {
         let tensor =
             Tensor::new(vec![1.0, f64::NAN, f64::INFINITY, 5.0], vec![4, 1]).expect("tensor");
         let cpu = isfinite_tensor("isfinite", tensor.clone()).expect("cpu path");
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .expect("upload");
+        let provider = runmat_accelerate_api::provider().unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let gpu = run_isfinite(Value::GpuTensor(handle)).expect("gpu path");
         let gathered = test_support::gather(gpu).expect("gather");
-        match (cpu, gathered) {
-            (Value::LogicalArray(expected), Tensor { data, shape, .. }) => {
+        let shape = gathered.shape.clone();
+        let data = gathered
+            .into_numeric_storage()
+            .expect("gathered storage")
+            .materialize_f64();
+        match cpu {
+            Value::LogicalArray(expected) => {
                 assert_eq!(shape, expected.shape);
                 let expected_f64: Vec<f64> = expected
                     .data
@@ -453,7 +498,7 @@ pub(crate) mod tests {
                     .collect();
                 assert_eq!(data, expected_f64);
             }
-            (Value::Bool(flag), Tensor { data, .. }) => {
+            Value::Bool(flag) => {
                 assert_eq!(data, vec![if flag { 1.0 } else { 0.0 }]);
             }
             other => panic!("unexpected results {other:?}"),

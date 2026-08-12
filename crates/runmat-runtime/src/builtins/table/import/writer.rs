@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::tensor;
 
 pub(in crate::builtins::table) async fn write_tabular_file(
     value: Value,
@@ -106,6 +107,7 @@ pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> String {
         Value::String(text) => text.clone(),
         Value::CharArray(array) if array.rows == 1 => array.data.iter().collect(),
         Value::Num(value) => format_key_number(*value),
+        Value::Int(value) => value.decimal_string(),
         Value::Bool(value) => {
             if *value {
                 "true".to_string()
@@ -113,7 +115,11 @@ pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> String {
                 "false".to_string()
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => format_key_number(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+            .map(|value| value.decimal_string())
+            .unwrap_or_else(|| format_key_number(tensor::tensor_value_f64(tensor, 0))),
         Value::StringArray(array) if array.data.len() == 1 => array.data[0].clone(),
         other => other.to_string(),
     }
@@ -135,4 +141,17 @@ pub(in crate::builtins::table) fn char_rows(array: &CharArray) -> Vec<String> {
         rows.push(array.data[start..start + array.cols].iter().collect());
     }
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn cell_to_text_preserves_exact_integer_scalar_storage() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+
+        assert_eq!(cell_to_text(&Value::Tensor(tensor)), "18446744073709551615");
+    }
 }

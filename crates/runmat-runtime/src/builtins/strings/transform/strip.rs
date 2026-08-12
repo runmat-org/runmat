@@ -348,12 +348,22 @@ async fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult
 }
 
 async fn strip_char_array(array: CharArray, args: &[Value]) -> BuiltinResult<Value> {
-    let CharArray { data, rows, cols } = array;
+    let CharArray {
+        data,
+        shape,
+        rows,
+        cols,
+    } = array;
     let expectation = PatternExpectation::with_len(rows);
     let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
 
     if rows == 0 {
-        return Ok(Value::CharArray(CharArray { data, rows, cols }));
+        return Ok(Value::CharArray(CharArray {
+            data,
+            shape,
+            rows,
+            cols,
+        }));
     }
 
     let mut stripped_rows: Vec<String> = Vec::with_capacity(rows);

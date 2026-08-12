@@ -27,17 +27,17 @@
     "unit": "builtins::io::display::tests",
     "vm": "crates/runmat-vm/tests/functions.rs"
   },
-  "description": "`display(X)` prints a MATLAB-style display block for `X`. When the callsite argument is a simple variable name, RunMat uses that name as the header. Expression and literal arguments use `ans` as the header. For classdef objects that define or inherit a registered `display` method, RunMat dispatches the object method first; otherwise it falls back to the generic formatter shared with `disp`.",
+  "description": "`display(X)` prints a MATLAB-style display block for `X`. When the callsite argument is a simple variable name, RunMat uses that name as the header; explicit expression arguments print only their value. For classdef objects, RunMat dispatches a registered `display` method first, then a registered `disp` method, before the generic formatter.",
   "behaviors": [
     "`display(X)` prints `X = ...` for simple variable arguments.",
-    "`display(expr)` prints `ans = ...` when the argument text is an expression, literal, or otherwise unavailable.",
+    "An explicit `display(expr)` call prints the expression value without an `ans =` header.",
     "Single-line values are printed on the same line as the header.",
     "Multi-line values such as matrices, structs, tables, datetime arrays, duration arrays, and N-D pages are printed below the header.",
-    "Objects and handle objects with a registered or inherited `display` method are dispatched through the class method surface before generic formatting.",
-    "`display` returns an empty numeric matrix placeholder internally and suppresses automatic output."
+    "Objects and handle objects dispatch a registered or inherited `display` method first, then an overloaded `disp` method, before generic formatting.",
+    "`display` exposes no output argument, and requesting one is an error."
   ],
   "limitations": [
-    "RunMat does not yet implement the full `matlab.mixin.CustomDisplay` override protocol. Class-specific output currently requires a registered or inherited `display` method.",
+    "RunMat does not yet implement the full `matlab.mixin.CustomDisplay` override protocol. Class-specific output currently requires a registered or inherited `display` or `disp` method.",
     "Object-array display customization remains bounded by RunMat's current object-array and classdef infrastructure.",
     "The generic fallback formatter is the same host-side formatter used by `disp`; unsupported object families fall back to their runtime summary string."
   ],
@@ -50,7 +50,7 @@
     {
       "description": "Display an expression",
       "input": "display(1 + 2)",
-      "output": "ans = 3"
+      "output": "3"
     },
     {
       "description": "Display a string",
@@ -65,7 +65,7 @@
     },
     {
       "question": "Does `display` support class-specific output?",
-      "answer": "Yes for classes with a registered `display` method. The full `matlab.mixin.CustomDisplay` protocol is not yet modeled."
+      "answer": "Yes. RunMat checks a registered `display` method first and then an overloaded `disp` method. The full `matlab.mixin.CustomDisplay` protocol is not yet modeled."
     },
     {
       "question": "Does `display` gather GPU arrays?",
@@ -94,7 +94,7 @@
     "label": "`crates/runmat-runtime/src/builtins/io/display.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/display.rs"
   },
-  "gpu_residency": "`display` is a sink. Provider-resident inputs are gathered to host memory for formatting and the returned placeholder is host-side.",
+  "gpu_residency": "`display` is a no-output sink. Provider-resident inputs are gathered to host memory for formatting.",
   "gpu_behavior": [
     "`display` performs no provider kernel dispatch and is excluded from fusion planning.",
     "Gather behavior is inherited from the same runtime gather path used by `disp`."

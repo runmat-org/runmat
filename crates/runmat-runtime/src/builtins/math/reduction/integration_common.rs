@@ -17,9 +17,18 @@ pub(crate) enum SpacingSpec {
 pub(crate) enum GpuIntegrationSpacing {
     Unit,
     Scalar(f64),
-    ScalarHandle(GpuTensorHandle),
-    Vector(GpuTensorHandle),
-    Tensor(GpuTensorHandle),
+    ScalarHandle {
+        handle: GpuTensorHandle,
+        owned: bool,
+    },
+    Vector {
+        handle: GpuTensorHandle,
+        owned: bool,
+    },
+    Tensor {
+        handle: GpuTensorHandle,
+        owned: bool,
+    },
 }
 
 impl GpuIntegrationSpacing {
@@ -27,12 +36,40 @@ impl GpuIntegrationSpacing {
         match self {
             GpuIntegrationSpacing::Unit => ProviderTrapezoidSpacing::Unit,
             GpuIntegrationSpacing::Scalar(value) => ProviderTrapezoidSpacing::Scalar(*value),
-            GpuIntegrationSpacing::ScalarHandle(handle) => {
+            GpuIntegrationSpacing::ScalarHandle { handle, .. } => {
                 ProviderTrapezoidSpacing::ScalarHandle(handle)
             }
-            GpuIntegrationSpacing::Vector(handle) => ProviderTrapezoidSpacing::Vector(handle),
-            GpuIntegrationSpacing::Tensor(handle) => ProviderTrapezoidSpacing::Tensor(handle),
+            GpuIntegrationSpacing::Vector { handle, .. } => {
+                ProviderTrapezoidSpacing::Vector(handle)
+            }
+            GpuIntegrationSpacing::Tensor { handle, .. } => {
+                ProviderTrapezoidSpacing::Tensor(handle)
+            }
         }
+    }
+
+    pub(crate) fn free_owned(
+        &self,
+        fallback_provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    ) -> anyhow::Result<()> {
+        let handle = match self {
+            GpuIntegrationSpacing::ScalarHandle {
+                handle,
+                owned: true,
+            }
+            | GpuIntegrationSpacing::Vector {
+                handle,
+                owned: true,
+            }
+            | GpuIntegrationSpacing::Tensor {
+                handle,
+                owned: true,
+            } => handle,
+            _ => return Ok(()),
+        };
+        runmat_accelerate_api::provider_for_handle(handle)
+            .unwrap_or(fallback_provider)
+            .free(handle)
     }
 }
 
@@ -87,18 +124,22 @@ pub(crate) fn dim_product(dims: &[usize]) -> usize {
 
 pub(crate) fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor_len(t) == 0,
         Value::LogicalArray(la) => la.data.is_empty(),
         _ => false,
     }
 }
 
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor.len()
+}
+
 pub(crate) fn is_scalar_like(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
-        Value::Tensor(t) => t.data.len() == 1,
+        Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(la) => la.data.len() == 1,
-        Value::ComplexTensor(t) => t.data.len() == 1,
+        Value::ComplexTensor(t) => tensor::is_scalar_complex_tensor(t),
         Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
         _ => false,
     }
@@ -107,7 +148,7 @@ pub(crate) fn is_scalar_like(value: &Value) -> bool {
 pub(crate) fn is_dimension_candidate(value: &Value) -> bool {
     is_empty_value(value)
         || matches!(value, Value::Int(_) | Value::Num(_))
-        || matches!(value, Value::Tensor(t) if t.data.len() == 1)
+        || matches!(value, Value::Tensor(t) if tensor::is_scalar_tensor(t))
 }
 
 pub(crate) fn parse_optional_dim(name: &str, value: &Value) -> BuiltinResult<Option<usize>> {
@@ -118,11 +159,9 @@ pub(crate) fn parse_optional_dim(name: &str, value: &Value) -> BuiltinResult<Opt
         Value::Int(_) | Value::Num(_) => tensor::parse_dimension(value, name)
             .map(Some)
             .map_err(|err| integration_error(name, err)),
-        Value::Tensor(t) if t.data.len() == 1 => {
-            tensor::parse_dimension(&Value::Num(t.data[0]), name)
-                .map(Some)
-                .map_err(|err| integration_error(name, err))
-        }
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::parse_dimension(value, name)
+            .map(Some)
+            .map_err(|err| integration_error(name, err)),
         other => Err(integration_error(
             name,
             format!("{name}: dimension must be a positive integer scalar, got {other:?}"),
@@ -171,7 +210,8 @@ pub(crate) fn spacing_from_value(
 
     if is_vector_shape(&tensor_shape) {
         let expected = padded_y_shape[dim - 1];
-        if tensor_value.data.len() != expected {
+        let values = real_tensor_values(&tensor_value);
+        if values.len() != expected {
             return Err(integration_error(
                 name,
                 format!(
@@ -180,7 +220,7 @@ pub(crate) fn spacing_from_value(
                 ),
             ));
         }
-        return Ok(SpacingSpec::Vector(tensor_value.data));
+        return Ok(SpacingSpec::Vector(values));
     }
 
     Err(integration_error(
@@ -195,6 +235,25 @@ pub(crate) fn spacing_from_gpu_or_host_value(
     y_shape: &[usize],
     dim: usize,
 ) -> BuiltinResult<GpuIntegrationSpacing> {
+    if value.is_none() {
+        return Ok(GpuIntegrationSpacing::Unit);
+    }
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        return Err(integration_error(
+            name,
+            format!("{name}: no acceleration provider"),
+        ));
+    };
+    spacing_from_gpu_or_host_value_for_provider(name, value, y_shape, dim, provider)
+}
+
+pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
+    name: &str,
+    value: Option<Value>,
+    y_shape: &[usize],
+    dim: usize,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+) -> BuiltinResult<GpuIntegrationSpacing> {
     let Some(value) = value else {
         return Ok(GpuIntegrationSpacing::Unit);
     };
@@ -203,6 +262,14 @@ pub(crate) fn spacing_from_gpu_or_host_value(
     }
 
     if let Value::GpuTensor(handle) = value {
+        if runmat_accelerate_api::provider_for_handle(&handle)
+            .is_none_or(|owner| !std::ptr::eq(owner, provider))
+        {
+            return Err(integration_error(
+                name,
+                format!("{name}: spacing belongs to a different acceleration provider"),
+            ));
+        }
         if runmat_accelerate_api::handle_storage(&handle) != GpuTensorStorage::Real {
             return Err(integration_error(
                 name,
@@ -212,10 +279,16 @@ pub(crate) fn spacing_from_gpu_or_host_value(
         let padded_y_shape = pad_shape_for_dim(y_shape, dim);
         let len = tensor::element_count(&handle.shape);
         if len == 1 {
-            return Ok(GpuIntegrationSpacing::ScalarHandle(handle));
+            return Ok(GpuIntegrationSpacing::ScalarHandle {
+                handle,
+                owned: false,
+            });
         }
         if shapes_equal_with_trailing_ones(&handle.shape, &padded_y_shape) {
-            return Ok(GpuIntegrationSpacing::Tensor(handle));
+            return Ok(GpuIntegrationSpacing::Tensor {
+                handle,
+                owned: false,
+            });
         }
         if is_vector_shape(&handle.shape) {
             let expected = padded_y_shape[dim - 1];
@@ -228,7 +301,10 @@ pub(crate) fn spacing_from_gpu_or_host_value(
                     ),
                 ));
             }
-            return Ok(GpuIntegrationSpacing::Vector(handle));
+            return Ok(GpuIntegrationSpacing::Vector {
+                handle,
+                owned: false,
+            });
         }
         return Err(integration_error(
             name,
@@ -240,12 +316,6 @@ pub(crate) fn spacing_from_gpu_or_host_value(
         SpacingSpec::Unit => Ok(GpuIntegrationSpacing::Unit),
         SpacingSpec::Scalar(value) => Ok(GpuIntegrationSpacing::Scalar(value)),
         SpacingSpec::Vector(values) => {
-            let Some(provider) = runmat_accelerate_api::provider() else {
-                return Err(integration_error(
-                    name,
-                    format!("{name}: no acceleration provider"),
-                ));
-            };
             let shape = vec![values.len(), 1];
             let handle = provider
                 .upload(&HostTensorView {
@@ -253,22 +323,23 @@ pub(crate) fn spacing_from_gpu_or_host_value(
                     shape: &shape,
                 })
                 .map_err(|err| integration_error(name, format!("{name}: {err}")))?;
-            Ok(GpuIntegrationSpacing::Vector(handle))
+            Ok(GpuIntegrationSpacing::Vector {
+                handle,
+                owned: true,
+            })
         }
         SpacingSpec::Tensor(tensor) => {
-            let Some(provider) = runmat_accelerate_api::provider() else {
-                return Err(integration_error(
-                    name,
-                    format!("{name}: no acceleration provider"),
-                ));
-            };
+            let data = real_tensor_values(&tensor);
             let handle = provider
                 .upload(&HostTensorView {
-                    data: &tensor.data,
+                    data: &data,
                     shape: &tensor.shape,
                 })
                 .map_err(|err| integration_error(name, format!("{name}: {err}")))?;
-            Ok(GpuIntegrationSpacing::Tensor(handle))
+            Ok(GpuIntegrationSpacing::Tensor {
+                handle,
+                owned: true,
+            })
         }
     }
 }
@@ -278,8 +349,21 @@ pub(crate) fn interval_width(spacing: &SpacingSpec, idx0: usize, idx1: usize, k:
         SpacingSpec::Unit => 1.0,
         SpacingSpec::Scalar(step) => *step,
         SpacingSpec::Vector(values) => values[k + 1] - values[k],
-        SpacingSpec::Tensor(tensor) => tensor.data[idx1] - tensor.data[idx0],
+        SpacingSpec::Tensor(tensor) => {
+            real_tensor_value_at(tensor, idx1) - real_tensor_value_at(tensor, idx0)
+        }
     }
+}
+
+pub(crate) fn real_tensor_values(tensor: &Tensor) -> Vec<f64> {
+    tensor::tensor_values_f64(tensor)
+}
+
+fn real_tensor_value_at(tensor: &Tensor, index: usize) -> f64 {
+    tensor
+        .numeric_value_at(index)
+        .expect("index within authoritative numeric storage")
+        .materialize_f64()
 }
 
 pub(crate) fn value_into_complex_tensor(name: &str, value: Value) -> BuiltinResult<ComplexTensor> {
@@ -302,8 +386,9 @@ pub(crate) fn promote_real_value_to_gpu(name: &str, value: Value) -> BuiltinResu
 
     match value {
         Value::Tensor(tensor) => {
+            let data = real_tensor_values(&tensor);
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &data,
                 shape: &tensor.shape,
             };
             match provider.upload(&view) {
@@ -331,8 +416,8 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, RuntimeError
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                Ok(Some(t.data[0]))
+            if tensor::is_scalar_tensor(t) {
+                Ok(Some(tensor::tensor_value_f64(t, 0)))
             } else {
                 Ok(None)
             }
@@ -353,10 +438,8 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, RuntimeError
 
 fn real_tensor_to_complex(name: &str, tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let shape = canonical_shape_tensor(tensor);
-    let data = tensor
-        .data
-        .iter()
-        .copied()
+    let data = real_tensor_values(tensor)
+        .into_iter()
         .map(|value| (value, 0.0))
         .collect();
     ComplexTensor::new(data, shape).map_err(|err| integration_error(name, format!("{name}: {err}")))
@@ -369,4 +452,73 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 fn shapes_equal_with_trailing_ones(lhs: &[usize], rhs: &[usize]) -> bool {
     let len = lhs.len().max(rhs.len());
     (0..len).all(|idx| lhs.get(idx).copied().unwrap_or(1) == rhs.get(idx).copied().unwrap_or(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
+
+    #[test]
+    fn optional_dim_parses_typed_integer_tensor_exactly() {
+        let dim = Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+            .expect("typed dim");
+
+        assert_eq!(
+            parse_optional_dim("trapz", &Value::Tensor(dim)).expect("typed dim"),
+            Some(9_007_199_254_740_993)
+        );
+    }
+
+    #[test]
+    fn optional_dim_rejects_negative_typed_integer_tensor() {
+        let dim =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative dim");
+
+        assert!(parse_optional_dim("trapz", &Value::Tensor(dim)).is_err());
+    }
+
+    #[test]
+    fn tensor_spacing_width_reads_typed_integer_storage_exactly() {
+        let spacing =
+            Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).expect("spacing");
+        let spec = SpacingSpec::Tensor(spacing);
+
+        assert_eq!(interval_width(&spec, 1, 2, 1), 2.0);
+    }
+
+    #[test]
+    fn scalar_spacing_reads_typed_integer_storage_exactly() {
+        let spacing =
+            Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("spacing");
+
+        let spec =
+            spacing_from_value("trapz", Some(Value::Tensor(spacing)), &[1, 4], 2).expect("spacing");
+
+        match spec {
+            SpacingSpec::Scalar(value) => assert_eq!(value, 3.0),
+            _ => panic!("expected scalar spacing"),
+        }
+    }
+
+    #[test]
+    fn scalar_like_reads_typed_complex_integer_storage_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![4]))
+                .expect("complex storage");
+        let scalar = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scalar");
+
+        assert!(is_scalar_like(&Value::ComplexTensor(scalar)));
+    }
+
+    #[test]
+    fn real_tensor_to_complex_reads_typed_integer_storage_exactly() {
+        let real =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2, 5]), vec![1, 2]).expect("real input");
+
+        let complex = value_into_complex_tensor("trapz", Value::Tensor(real)).expect("complex");
+
+        assert_eq!(complex.shape, vec![1, 2]);
+        assert_eq!(complex.materialize_f64(), vec![(-2.0, 0.0), (5.0, 0.0)]);
+    }
 }

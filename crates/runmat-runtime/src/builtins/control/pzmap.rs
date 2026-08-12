@@ -466,12 +466,18 @@ mod tests {
 
         let poles = tensor(&outputs[0]);
         assert_eq!(poles.shape, vec![1, 1]);
-        assert!((poles.data[0] + 4.0).abs() < 1.0e-8);
+        assert!((poles.materialize_f64()[0] + 4.0).abs() < 1.0e-8);
 
         let zeros = tensor(&outputs[1]);
         assert_eq!(zeros.shape, vec![2, 1]);
-        assert!(zeros.data.iter().any(|z| (*z + 1.0).abs() < 1.0e-8));
-        assert!(zeros.data.iter().any(|z| (*z + 2.0).abs() < 1.0e-8));
+        assert!(zeros
+            .materialize_f64()
+            .iter()
+            .any(|z| (*z + 1.0).abs() < 1.0e-8));
+        assert!(zeros
+            .materialize_f64()
+            .iter()
+            .any(|z| (*z + 2.0).abs() < 1.0e-8));
     }
 
     #[test]
@@ -486,9 +492,18 @@ mod tests {
             panic!("expected complex poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().all(|(re, _)| re.abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .all(|(re, _)| re.abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
         assert_eq!(tensor(&outputs[1]).shape, vec![0, 1]);
     }
 
@@ -536,7 +551,7 @@ mod tests {
         assert_eq!(args[8], Value::from("Color"));
         match (&args[4], &args[9]) {
             (Value::Tensor(pole_color), Value::Tensor(zero_color)) => {
-                assert_eq!(pole_color.data, zero_color.data);
+                assert_eq!(pole_color.materialize_f64(), zero_color.materialize_f64());
             }
             other => panic!("expected color tensors, got {other:?}"),
         }
@@ -565,7 +580,7 @@ mod tests {
             panic!("expected output list");
         };
         assert_eq!(outputs.len(), 2);
-        assert_eq!(tensor(&outputs[0]).data, vec![-1.0]);
+        assert_eq!(tensor(&outputs[0]).materialize_f64(), vec![-1.0]);
         assert_eq!(tensor(&outputs[1]).shape, vec![0, 1]);
     }
 

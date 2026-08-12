@@ -32,6 +32,7 @@
   "behaviors": [
     "`tree` must be a scalar RunMat `htmlTree` object or a cell array of `htmlTree` objects.",
     "`selector` must be a string scalar or character vector.",
+    "Numeric, logical, complex, and provider-resident inputs are not htmlTree or selector values and reject before any provider access.",
     "Supported selectors include element tags, `*`, `.class`, `#id`, `[attr]`, `[attr=value]`, `[attr~=value]`, `[attr|=value]`, `[attr^=value]`, `[attr$=value]`, `[attr*=value]`, descendant combinators, child combinators (`>`), adjacent-sibling combinators (`+`), general-sibling combinators (`~`), comma-separated groups, `:empty`, `:first-child`, `:first-of-type`, and `:not(...)` for these supported pseudo-classes.",
     "Attribute names are matched case-insensitively through the parser's lowercase attribute map. Attribute values, ids, and classes use CSS-style exact, whitespace-list, dash-prefix, prefix, suffix, or substring string matching according to the selector operator.",
     "Sibling matching follows element siblings and ignores intervening whitespace text nodes.",

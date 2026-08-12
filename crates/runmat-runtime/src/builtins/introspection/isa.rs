@@ -7,7 +7,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::isa_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::handle_is_logical;
+use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
 use runmat_builtins::{
     get_class, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
@@ -190,6 +190,7 @@ fn is_numeric(value: &Value) -> bool {
         | Value::ComplexTensor(_)
         | Value::Complex(_, _)
         | Value::Int(_) => true,
+        Value::SparseTensor(sparse) => !sparse.is_logical(),
         Value::GpuTensor(handle) => !handle_is_logical(handle),
         _ => false,
     }
@@ -197,19 +198,32 @@ fn is_numeric(value: &Value) -> bool {
 
 fn is_float(value: &Value) -> bool {
     match value {
-        Value::Num(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => true,
-        Value::GpuTensor(handle) => !handle_is_logical(handle),
+        Value::Num(_) | Value::Complex(_, _) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_none(),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_none(),
+        Value::SparseTensor(sparse) => !sparse.is_logical() && sparse.integer_storage().is_none(),
+        Value::GpuTensor(handle) => {
+            !handle_is_logical(handle) && handle_integer_type(handle).is_none()
+        }
         _ => false,
     }
 }
 
 fn is_integer(value: &Value) -> bool {
-    matches!(value, Value::Int(_))
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::ComplexTensor(tensor) => tensor.integer_storage().is_some(),
+        Value::SparseTensor(sparse) => sparse.integer_storage().is_some(),
+        Value::GpuTensor(handle) => handle_integer_type(handle).is_some(),
+        _ => false,
+    }
 }
 
 fn is_logical(value: &Value) -> bool {
     match value {
         Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::SparseTensor(sparse) => sparse.is_logical(),
         Value::GpuTensor(handle) => handle_is_logical(handle),
         _ => false,
     }
@@ -250,10 +264,13 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{
+        AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView,
+    };
     use runmat_builtins::{
-        CellArray, CharArray, ClassDef, HandleRef, IntValue, Listener, LogicalArray,
-        ObjectInstance, StringArray, StructValue, Tensor,
+        CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
+        IntegerStorage, Listener, LogicalArray, ObjectInstance, SparseTensor, StringArray,
+        StructValue, Tensor,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -295,6 +312,102 @@ pub(crate) mod tests {
 
         let float_result = isa_builtin(value, Value::from("float")).expect("isa");
         assert_eq!(float_result, Value::Bool(false));
+    }
+
+    #[test]
+    fn isa_integer_category_matches_exact_integer_arrays() {
+        let dense = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+                vec![1, 2],
+            )
+            .expect("uint64 tensor"),
+        );
+        assert_eq!(
+            isa_builtin(dense.clone(), Value::from("integer")).expect("isa"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            isa_builtin(dense.clone(), Value::from("float")).expect("isa"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            isa_builtin(dense, Value::from("uint64")).expect("isa"),
+            Value::Bool(true)
+        );
+
+        let sparse = Value::SparseTensor(
+            SparseTensor::new_integer(
+                2,
+                1,
+                vec![0, 1],
+                vec![1],
+                IntegerStorage::I64(vec![i64::MIN]),
+            )
+            .expect("int64 sparse"),
+        );
+        assert_eq!(
+            isa_builtin(sparse.clone(), Value::from("integer")).expect("isa"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            isa_builtin(sparse.clone(), Value::from("float")).expect("isa"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            isa_builtin(sparse, Value::from("int64")).expect("isa"),
+            Value::Bool(true)
+        );
+
+        let typed_complex = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::I16(vec![-1, i16::MAX]),
+                    IntegerStorage::I16(vec![2, i16::MIN]),
+                )
+                .expect("matching complex integer storage"),
+                vec![1, 2],
+            )
+            .expect("typed complex integer tensor"),
+        );
+        assert_eq!(
+            isa_builtin(typed_complex.clone(), Value::from("integer")).expect("isa"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            isa_builtin(typed_complex.clone(), Value::from("float")).expect("isa"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            isa_builtin(typed_complex, Value::from("int16")).expect("isa"),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn isa_float_category_excludes_only_integer_backed_numeric_arrays() {
+        let dense_float =
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("double tensor"));
+        assert_eq!(
+            isa_builtin(dense_float, Value::from("float")).expect("isa"),
+            Value::Bool(true)
+        );
+
+        let sparse_float = Value::SparseTensor(
+            SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![2.5]).expect("double sparse"),
+        );
+        assert_eq!(
+            isa_builtin(sparse_float, Value::from("float")).expect("isa"),
+            Value::Bool(true)
+        );
+
+        let complex_float = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).expect("double complex tensor"),
+        );
+        assert_eq!(
+            isa_builtin(complex_float, Value::from("float")).expect("isa"),
+            Value::Bool(true)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -352,7 +465,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -372,7 +485,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -384,6 +497,34 @@ pub(crate) mod tests {
             let numeric =
                 isa_builtin(logical_value, Value::from("numeric")).expect("isa numeric false");
             assert_eq!(numeric, Value::Bool(false));
+        });
+    }
+
+    #[test]
+    fn isa_gpu_integer_handles_match_integer_category() {
+        test_support::with_test_provider(|provider| {
+            let values = [u64::MAX, 9_007_199_254_740_993];
+            let shape = [1usize, 2usize];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &shape,
+                })
+                .expect("upload integer gpu tensor");
+            let gpu_value = Value::GpuTensor(handle);
+
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("numeric")).expect("isa numeric"),
+                Value::Bool(true)
+            );
+            assert_eq!(
+                isa_builtin(gpu_value.clone(), Value::from("integer")).expect("isa integer"),
+                Value::Bool(true)
+            );
+            assert_eq!(
+                isa_builtin(gpu_value, Value::from("float")).expect("isa float"),
+                Value::Bool(false)
+            );
         });
     }
 
@@ -508,7 +649,7 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("wgpu upload");

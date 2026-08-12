@@ -633,7 +633,7 @@ mod tests {
     use super::*;
     use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntegerStorage, NumericDType, Tensor};
+    use runmat_builtins::{CharArray, IntegerStorage, Tensor};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
@@ -647,14 +647,7 @@ mod tests {
     }
 
     fn tensor(data: &[f64], shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: shape.clone(),
-            rows: *shape.first().unwrap_or(&1),
-            cols: *shape.get(1).unwrap_or(&data.len()),
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), shape).expect("test tensor"))
     }
 
     fn write_sample(path: &Path) {
@@ -777,10 +770,9 @@ mod tests {
             vec![Value::String("Writable".into()), Value::Bool(true)],
         ))
         .expect("matfile writable");
-        let input = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
-                .expect("integer tensor"),
-        );
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
+            .expect("integer tensor");
+        let input = Value::Tensor(tensor);
 
         let object = block_on(matfile_subsasgn(
             object,

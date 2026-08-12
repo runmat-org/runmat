@@ -397,7 +397,7 @@ fn apply_options_struct(options: &mut Options, value: &Value) -> BuiltinResult<(
 
 fn is_empty_option_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => cell.data.is_empty(),
         Value::StringArray(array) => array.data.is_empty(),
@@ -495,13 +495,14 @@ fn single_row_embedding(rows: usize, dims: usize) -> BuiltinResult<EmbeddingResu
 }
 
 fn prepare_data(x: &Tensor) -> BuiltinResult<PreparedData> {
+    let values = tensor::tensor_values_f64_cow(x);
     let mut rows = Vec::new();
     let mut good_rows = Vec::new();
     for row in 0..x.rows {
         let mut out = Vec::with_capacity(x.cols);
         let mut complete = true;
         for col in 0..x.cols {
-            let value = x_value(x, row, col);
+            let value = matrix_value(values.as_ref(), x.rows, row, col);
             if value.is_infinite() {
                 return Err(invalid("tsne: X must not contain Inf values"));
             }
@@ -743,6 +744,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
     let rows = prepared.rows.len();
     let dims = options.num_dimensions;
     if let Some(initial) = &options.initial_y {
+        let values = tensor::tensor_values_f64_cow(initial);
         if initial.shape.len() > 2 || initial.cols != dims {
             return Err(invalid(format!(
                 "tsne: InitialY must have {} columns",
@@ -753,7 +755,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
         if initial.rows == prepared.original_rows {
             for col in 0..dims {
                 for &row in &prepared.good_rows {
-                    let value = x_value(initial, row, col);
+                    let value = matrix_value(values.as_ref(), initial.rows, row, col);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -763,7 +765,7 @@ fn initial_embedding(options: &Options, prepared: &PreparedData) -> BuiltinResul
         } else if initial.rows == rows {
             for col in 0..dims {
                 for row in 0..rows {
-                    let value = x_value(initial, row, col);
+                    let value = matrix_value(values.as_ref(), initial.rows, row, col);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -1014,8 +1016,8 @@ fn tied_ranks(values: &[f64]) -> Vec<f64> {
     ranks
 }
 
-fn x_value(x: &Tensor, row: usize, col: usize) -> f64 {
-    x.data[row + col * x.rows]
+fn matrix_value(values: &[f64], rows: usize, row: usize, col: usize) -> f64 {
+    values[row + col * rows]
 }
 
 fn integer_sqrt(value: usize) -> Option<usize> {
@@ -1081,7 +1083,9 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => Err(invalid(format!("tsne: {name} must be a numeric scalar"))),
     }
 }
@@ -1090,27 +1094,40 @@ fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(tensor.data[0] != 0.0)
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let raw = tensor::tensor_value_f64(tensor, 0);
+            if raw == 0.0 || raw == 1.0 {
+                Ok(raw != 0.0)
+            } else {
+                Err(invalid(format!("tsne: {name} must be logical scalar")))
+            }
         }
         _ => Err(invalid(format!("tsne: {name} must be logical scalar"))),
     }
 }
 
 fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.data.is_empty())
+    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builtins::common::random;
-    use runmat_builtins::StructValue;
+    use runmat_builtins::{IntegerStorage, StructValue};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn reset_rng() -> impl Drop {
@@ -1145,7 +1162,7 @@ mod tests {
                 match &outputs[0] {
                     Value::Tensor(y) => {
                         assert_eq!(y.shape, vec![4, 2]);
-                        assert!(y.data.iter().all(|value| value.is_finite()));
+                        assert!(y.materialize_f64().iter().all(|value| value.is_finite()));
                     }
                     other => panic!("expected tensor, got {other:?}"),
                 }
@@ -1225,6 +1242,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tsne_reads_typed_integer_data_initial_y_and_options_exactly() {
+        let _guard = reset_rng();
+        let value = tsne_builtin(
+            poisoned_int_tensor(
+                IntegerStorage::I16(vec![0, 1, 5, 6, 0, 1, 5, 6]),
+                vec![4, 2],
+            ),
+            vec![
+                Value::String("NumDimensions".into()),
+                cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                Value::String("NumPCAComponents".into()),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::String("Perplexity".into()),
+                cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+                Value::String("Standardize".into()),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::String("InitialY".into()),
+                poisoned_int_tensor(IntegerStorage::I16(vec![0; 8]), vec![4, 2]),
+                Value::String("Options".into()),
+                {
+                    let mut options = StructValue::new();
+                    options.insert(
+                        "MaxIter",
+                        cleared_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                    );
+                    Value::Struct(options)
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        match value {
+            Value::Tensor(y) => assert_eq!(y.shape, vec![4, 2]),
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn tsne_rejects_bad_initial_y_shape() {
         let err = tsne_builtin(
             tensor(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]),
@@ -1236,6 +1291,15 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.message.contains("InitialY"));
+    }
+
+    #[test]
+    fn tsne_empty_option_helpers_use_typed_integer_storage_len() {
+        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
+        let empty = Value::Tensor(empty);
+
+        assert!(is_empty_numeric(&empty));
+        assert!(is_empty_option_value(&empty));
     }
 
     #[tokio::test]

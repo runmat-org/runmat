@@ -81,6 +81,10 @@ impl CallableDescriptor {
         }
     }
 
+    fn is_at_prefixed_text(text: &str) -> bool {
+        text.trim().starts_with('@')
+    }
+
     fn qualified_identity_from_name(name: &str) -> CallableIdentity {
         if Self::is_well_formed_qualified_name(name) {
             let segments = name
@@ -240,6 +244,9 @@ impl CallableDescriptor {
     ) -> Self {
         match func_val {
             Value::String(text) => {
+                if Self::is_at_prefixed_text(&text) {
+                    return Self::feval_forward(Value::String(text), args, requested_outputs);
+                }
                 if let Some(name) = Self::parse_handle_name(&text) {
                     let (identity, fallback_policy) =
                         Self::resolve_named_target(&name, function_registry);
@@ -255,6 +262,9 @@ impl CallableDescriptor {
             }
             Value::CharArray(ca) if ca.rows == 1 => {
                 let text: String = ca.data.iter().collect();
+                if Self::is_at_prefixed_text(&text) {
+                    return Self::feval_forward(Value::CharArray(ca), args, requested_outputs);
+                }
                 if let Some(name) = Self::parse_handle_name(&text) {
                     let (identity, fallback_policy) =
                         Self::resolve_named_target(&name, function_registry);
@@ -269,6 +279,9 @@ impl CallableDescriptor {
                 Self::feval_forward(Value::CharArray(ca), args, requested_outputs)
             }
             Value::StringArray(sa) if sa.data.len() == 1 => {
+                if Self::is_at_prefixed_text(&sa.data[0]) {
+                    return Self::feval_forward(Value::StringArray(sa), args, requested_outputs);
+                }
                 if let Some(name) = Self::parse_handle_name(&sa.data[0]) {
                     let (identity, fallback_policy) =
                         Self::resolve_named_target(&name, function_registry);
@@ -1149,26 +1162,22 @@ mod tests {
     }
 
     #[test]
-    fn feval_at_handle_qualified_name_classifies_as_external_boundary() {
+    fn feval_at_prefixed_text_forwards_to_runtime_compatibility_gate() {
         let descriptor = CallableDescriptor::from_feval_value(
             Value::String("@pkg.remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
             &FunctionRegistry::default(),
         );
-        let CallableTarget::Resolved {
-            identity,
-            fallback_policy,
-        } = &descriptor.target
-        else {
-            panic!("expected resolved target");
-        };
-        assert!(matches!(identity, CallableIdentity::ExternalName(_)));
-        assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
+        assert!(matches!(
+            descriptor.target,
+            CallableTarget::FevalForward(Value::String(ref text)) if text == "@pkg.remote_inc"
+        ));
     }
 
     #[test]
     fn feval_at_handle_external_boundary_can_use_semantic_resolver() {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| (name == "pkg.remote_inc").then_some(7171))),
         );
@@ -1193,7 +1202,7 @@ mod tests {
     }
 
     #[test]
-    fn feval_string_array_at_handle_qualified_name_classifies_as_external_boundary() {
+    fn feval_string_array_at_prefixed_text_forwards_to_runtime_compatibility_gate() {
         let descriptor = CallableDescriptor::from_feval_value(
             Value::StringArray(
                 StringArray::new(vec!["@pkg.remote_inc".to_string()], vec![1, 1])
@@ -1203,19 +1212,15 @@ mod tests {
             1,
             &FunctionRegistry::default(),
         );
-        let CallableTarget::Resolved {
-            identity,
-            fallback_policy,
-        } = &descriptor.target
-        else {
-            panic!("expected resolved target");
-        };
-        assert!(matches!(identity, CallableIdentity::ExternalName(_)));
-        assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
+        assert!(matches!(
+            descriptor.target,
+            CallableTarget::FevalForward(Value::StringArray(_))
+        ));
     }
 
     #[test]
     fn feval_string_array_at_handle_can_use_semantic_resolver() {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| (name == "pkg.remote_inc").then_some(7272))),
         );

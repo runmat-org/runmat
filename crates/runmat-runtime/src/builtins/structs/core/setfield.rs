@@ -9,6 +9,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::introspection::dynamicprops;
 use crate::builtins::structs::type_resolvers::setfield_type;
 use crate::{
@@ -18,8 +19,8 @@ use crate::{
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance, StructValue,
-    Tensor, Value,
+    CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, NumericScalar, ObjectInstance,
+    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::convert::TryFrom;
@@ -739,15 +740,16 @@ fn assign_tensor_element(
     rhs: Value,
 ) -> BuiltinResult<()> {
     let resolved = resolve_indices(&Value::Tensor(tensor.clone()), selector)?;
-    let value = value_to_scalar(rhs)?;
+    let value = value_to_numeric_scalar(rhs)?;
     match resolved.len() {
         1 => {
             let idx = resolved[0];
-            if idx == 0 || idx > tensor.data.len() {
+            if idx == 0 || idx > tensor.len() {
                 return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
-            tensor.data[idx - 1] = value;
-            Ok(())
+            tensor
+                .set_numeric_assignment_at(idx - 1, value)
+                .map_err(setfield_flow)
         }
         2 => {
             let row = resolved[0];
@@ -757,10 +759,8 @@ fn assign_tensor_element(
             }
             let pos = (row - 1) + (col - 1) * tensor.rows();
             tensor
-                .data
-                .get_mut(pos)
-                .map(|slot| *slot = value)
-                .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))
+                .set_numeric_assignment_at(pos, value)
+                .map_err(setfield_flow)
         }
         _ => Err(setfield_flow(
             "setfield: indexing with more than two indices is not supported yet",
@@ -906,10 +906,12 @@ fn assign_complex_tensor_element(
     match resolved.len() {
         1 => {
             let idx = resolved[0];
-            if idx == 0 || idx > tensor.data.len() {
+            if idx == 0 || idx > tensor.len() {
                 return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
-            tensor.data[idx - 1] = (re, im);
+            tensor
+                .set_f64_assignment_at(idx - 1, re, im)
+                .map_err(setfield_flow)?;
             Ok(())
         }
         2 => {
@@ -919,10 +921,12 @@ fn assign_complex_tensor_element(
                 return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * tensor.rows;
-            if pos >= tensor.data.len() {
+            if pos >= tensor.len() {
                 return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
-            tensor.data[pos] = (re, im);
+            tensor
+                .set_f64_assignment_at(pos, re, im)
+                .map_err(setfield_flow)?;
             Ok(())
         }
         _ => Err(setfield_flow(
@@ -1149,10 +1153,26 @@ fn parse_index_text(text: &str) -> BuiltinResult<IndexComponent> {
 }
 
 fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
+    if let Value::Int(i) = value {
+        return i
+            .try_to_usize()
+            .filter(|index| *index >= 1)
+            .ok_or_else(|| setfield_flow("index must be >= 1"));
+    }
+    if let Value::Tensor(t) = value {
+        if tensor::is_scalar_tensor(t) {
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|index| *index >= 1)
+                    .ok_or_else(|| setfield_flow("index must be >= 1"));
+            }
+        }
+    }
     let number = match value {
-        Value::Int(i) => i.to_i64() as f64,
         Value::Num(n) => *n,
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             let repr = format!("{value:?}");
             return Err(setfield_flow(format!(
@@ -1170,7 +1190,7 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
     if number <= 0.0 {
         return Err(setfield_flow("index must be >= 1"));
     }
-    if number > usize::MAX as f64 {
+    if number > usize::MAX as f64 || (usize::BITS == 64 && number == usize::MAX as f64) {
         return Err(setfield_flow("index exceeds platform limits"));
     }
     Ok(number as usize)
@@ -1241,7 +1261,7 @@ fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> BuiltinResult
 
 fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> BuiltinResult<usize> {
     if dims == 1 {
-        let total = tensor.data.len();
+        let total = tensor.len();
         if total == 0 {
             return Err(setfield_flow(
                 "Index exceeds the number of array elements (0).",
@@ -1386,7 +1406,7 @@ fn complex_tensor_dimension_length(
     dim_idx: usize,
 ) -> BuiltinResult<usize> {
     if dims == 1 {
-        let total = tensor.data.len();
+        let total = tensor.materialize_f64().len();
         if total == 0 {
             return Err(setfield_flow(
                 "Index exceeds the number of array elements (0).",
@@ -1412,12 +1432,14 @@ fn complex_tensor_dimension_length(
     Ok(len)
 }
 
-fn value_to_scalar(value: Value) -> BuiltinResult<f64> {
+fn value_to_numeric_scalar(value: Value) -> BuiltinResult<NumericScalar> {
     match value {
-        Value::Num(n) => Ok(n),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Num(n) => Ok(NumericScalar::F64(n)),
+        Value::Int(i) => Ok(NumericScalar::from(i)),
+        Value::Bool(b) => Ok(NumericScalar::F64(if b { 1.0 } else { 0.0 })),
+        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => t
+            .numeric_value_at(0)
+            .ok_or_else(|| setfield_flow("setfield: invalid numeric tensor storage")),
         other => Err(setfield_flow(format!(
             "setfield: cannot assign {other:?} into a numeric tensor element"
         ))),
@@ -1428,8 +1450,17 @@ fn value_to_bool(value: Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(b),
         Value::Num(n) => Ok(n != 0.0),
-        Value::Int(i) => Ok(i.to_i64() != 0),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0] != 0.0),
+        Value::Int(i) => Ok(!i.is_zero()),
+        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => {
+            if let Some(storage) = t.integer_storage() {
+                Ok(!storage
+                    .value_at(0)
+                    .ok_or_else(|| setfield_flow("setfield: invalid integer tensor storage"))?
+                    .is_zero())
+            } else {
+                Ok(tensor::tensor_value_f64(&t, 0) != 0.0)
+            }
+        }
         other => Err(setfield_flow(format!(
             "setfield: cannot assign {other:?} into a logical array element"
         ))),
@@ -1446,7 +1477,8 @@ fn is_struct_array(cell: &CellArray) -> bool {
 pub(crate) mod tests {
     use super::*;
     use runmat_builtins::{
-        Access, CellArray, ClassDef, HandleRef, IntValue, ObjectInstance, PropertyDef, StructValue,
+        Access, CellArray, ClassDef, HandleRef, IntValue, IntegerStorage, LogicalArray,
+        ObjectInstance, PropertyDef, StructValue,
     };
     use runmat_gc::gc_allocate;
 
@@ -1544,6 +1576,141 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn setfield_index_selector_reads_typed_integer_storage_exactly() {
+        let mut a = StructValue::new();
+        a.fields
+            .insert("id".to_string(), Value::Int(IntValue::I32(1)));
+        let mut b = StructValue::new();
+        b.fields
+            .insert("id".to_string(), Value::Int(IntValue::I32(2)));
+        let array = CellArray::new_with_shape(vec![Value::Struct(a), Value::Struct(b)], vec![1, 2])
+            .unwrap();
+        let index_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
+        let indices = CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1])
+            .expect("index cell");
+
+        let updated = run_setfield(
+            Value::Cell(array),
+            vec![
+                Value::Cell(indices),
+                Value::from("id"),
+                Value::Int(IntValue::I32(42)),
+            ],
+        )
+        .expect("setfield");
+        match updated {
+            Value::Cell(cell) => match &cell.data[1] {
+                Value::Struct(st) => {
+                    assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(42))));
+                }
+                other => panic!("expected struct element, got {other:?}"),
+            },
+            other => panic!("expected cell array, got {other:?}"),
+        }
+
+        assert!(parse_positive_scalar(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_positive_scalar(&Value::Num(usize::MAX as f64 + 1.0)).is_err());
+    }
+
+    #[test]
+    fn setfield_scalar_assignment_reads_typed_integer_storage_exactly() {
+        let mut root = StructValue::new();
+        root.fields.insert(
+            "values".to_string(),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
+        );
+        root.fields.insert(
+            "mask".to_string(),
+            Value::LogicalArray(LogicalArray::new(vec![0, 0], vec![1, 2]).unwrap()),
+        );
+
+        let index_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
+        let index =
+            CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1]).unwrap();
+        let rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![77]), vec![1, 1]).expect("rhs tensor");
+        let updated = run_setfield(
+            Value::Struct(root),
+            vec![
+                Value::from("values"),
+                Value::Cell(index),
+                Value::Tensor(rhs),
+            ],
+        )
+        .expect("numeric setfield");
+
+        let logical_index =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("logical index");
+        let logical_index =
+            CellArray::new_with_shape(vec![Value::Tensor(logical_index)], vec![1, 1]).unwrap();
+        let logical_rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("logical rhs");
+        let updated = run_setfield(
+            updated,
+            vec![
+                Value::from("mask"),
+                Value::Cell(logical_index),
+                Value::Tensor(logical_rhs),
+            ],
+        )
+        .expect("logical setfield");
+
+        match updated {
+            Value::Struct(st) => {
+                match st.fields.get("values").expect("values") {
+                    Value::Tensor(tensor) => {
+                        assert_eq!(tensor.materialize_f64(), vec![10.0, 77.0])
+                    }
+                    other => panic!("expected tensor field, got {other:?}"),
+                }
+                match st.fields.get("mask").expect("mask") {
+                    Value::LogicalArray(array) => assert_eq!(array.data, vec![0, 1]),
+                    other => panic!("expected logical field, got {other:?}"),
+                }
+            }
+            other => panic!("expected struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn setfield_preserves_exact_integer_destination_storage() {
+        let large = 9_007_199_254_740_993_u64;
+        let mut root = StructValue::new();
+        root.fields.insert(
+            "wide".to_string(),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![large, large + 1]), vec![1, 2])
+                    .unwrap(),
+            ),
+        );
+        let index =
+            CellArray::new_with_shape(vec![Value::Int(IntValue::U8(2))], vec![1, 1]).unwrap();
+        let updated = run_setfield(
+            Value::Struct(root),
+            vec![
+                Value::from("wide"),
+                Value::Cell(index),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ],
+        )
+        .expect("exact integer setfield");
+
+        let Value::Struct(root) = updated else {
+            panic!("expected struct");
+        };
+        let Value::Tensor(tensor) = root.fields.get("wide").expect("wide field") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.numeric_value_at(0), Some(NumericScalar::U64(large)));
+        assert_eq!(
+            tensor.numeric_value_at(1),
+            Some(NumericScalar::U64(u64::MAX))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1860,7 +2027,7 @@ pub(crate) mod tests {
                 match values {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.shape, vec![2, 2]);
-                        assert_eq!(tensor.data[3], 99.0);
+                        assert_eq!(tensor.numeric_value_at(3), Some(NumericScalar::F64(99.0)));
                     }
                     other => panic!("expected tensor after gather, got {other:?}"),
                 }

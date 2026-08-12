@@ -1,4 +1,5 @@
 use super::*;
+use runmat_builtins::{IntValue, IntegerStorage, NumericScalar};
 
 #[derive(Clone, Default)]
 pub(in crate::builtins::table) struct ParquetReadOptions {
@@ -204,30 +205,54 @@ async fn read_parquet_table_impl(
                         builder.push_bool((!values.is_null(row)).then(|| values.value(row)));
                     }
                 }
-                DataType::Int8 => {
-                    push_numeric::<Int8Array>(array, builder, |a, i| a.value(i) as f64)?
-                }
-                DataType::Int16 => {
-                    push_numeric::<Int16Array>(array, builder, |a, i| a.value(i) as f64)?
-                }
-                DataType::Int32 => {
-                    push_numeric::<Int32Array>(array, builder, |a, i| a.value(i) as f64)?
-                }
-                DataType::Int64 => {
-                    push_numeric::<Int64Array>(array, builder, |a, i| a.value(i) as f64)?
-                }
-                DataType::UInt8 => {
-                    push_numeric::<UInt8Array>(array, builder, |a, i| a.value(i) as f64)?
-                }
-                DataType::UInt16 => {
-                    push_numeric::<UInt16Array>(array, builder, |a, i| a.value(i) as f64)?
-                }
-                DataType::UInt32 => {
-                    push_numeric::<UInt32Array>(array, builder, |a, i| a.value(i) as f64)?
-                }
-                DataType::UInt64 => {
-                    push_numeric::<UInt64Array>(array, builder, |a, i| a.value(i) as f64)?
-                }
+                DataType::Int8 => push_integer::<Int8Array>(
+                    array,
+                    builder,
+                    |a, i| IntValue::I8(a.value(i)),
+                    IntValue::I8(0),
+                )?,
+                DataType::Int16 => push_integer::<Int16Array>(
+                    array,
+                    builder,
+                    |a, i| IntValue::I16(a.value(i)),
+                    IntValue::I16(0),
+                )?,
+                DataType::Int32 => push_integer::<Int32Array>(
+                    array,
+                    builder,
+                    |a, i| IntValue::I32(a.value(i)),
+                    IntValue::I32(0),
+                )?,
+                DataType::Int64 => push_integer::<Int64Array>(
+                    array,
+                    builder,
+                    |a, i| IntValue::I64(a.value(i)),
+                    IntValue::I64(0),
+                )?,
+                DataType::UInt8 => push_integer::<UInt8Array>(
+                    array,
+                    builder,
+                    |a, i| IntValue::U8(a.value(i)),
+                    IntValue::U8(0),
+                )?,
+                DataType::UInt16 => push_integer::<UInt16Array>(
+                    array,
+                    builder,
+                    |a, i| IntValue::U16(a.value(i)),
+                    IntValue::U16(0),
+                )?,
+                DataType::UInt32 => push_integer::<UInt32Array>(
+                    array,
+                    builder,
+                    |a, i| IntValue::U32(a.value(i)),
+                    IntValue::U32(0),
+                )?,
+                DataType::UInt64 => push_integer::<UInt64Array>(
+                    array,
+                    builder,
+                    |a, i| IntValue::U64(a.value(i)),
+                    IntValue::U64(0),
+                )?,
                 DataType::Float32 => {
                     push_numeric::<Float32Array>(array, builder, |a, i| a.value(i) as f64)?
                 }
@@ -341,6 +366,29 @@ async fn read_parquet_table_impl(
             .ok_or_else(|| invalid_variable("parquetread: invalid numeric column"))?;
         for row in 0..values.len() {
             builder.push_number((!values.is_null(row)).then(|| value_at(values, row)));
+        }
+        Ok(())
+    }
+
+    fn push_integer<A>(
+        array: &dyn Array,
+        builder: &mut ParquetColumnBuilder,
+        value_at: impl Fn(&A, usize) -> IntValue,
+        missing: IntValue,
+    ) -> BuiltinResult<()>
+    where
+        A: Array + 'static,
+    {
+        let values = array
+            .as_any()
+            .downcast_ref::<A>()
+            .ok_or_else(|| invalid_variable("parquetread: invalid integer column"))?;
+        builder.ensure_integer(&missing);
+        for row in 0..values.len() {
+            builder.push_integer(
+                (!values.is_null(row)).then(|| value_at(values, row)),
+                &missing,
+            );
         }
         Ok(())
     }
@@ -486,6 +534,7 @@ async fn parquet_file_info_impl(path: &Path) -> BuiltinResult<Value> {
 #[derive(Clone)]
 enum ParquetColumnBuilder {
     Number { values: Vec<f64> },
+    Integer { storage: IntegerStorage },
     Logical { values: Vec<u8> },
     Text { values: Vec<String> },
     DateTime { values: Vec<f64> },
@@ -499,6 +548,27 @@ impl ParquetColumnBuilder {
 
     fn push_number(&mut self, value: Option<f64>) {
         self.push_as(ParquetColumnKind::Number, value.map(ParquetCell::Number));
+    }
+
+    fn push_integer(&mut self, value: Option<IntValue>, missing: &IntValue) {
+        self.ensure_integer(missing);
+        let value = value.unwrap_or_else(|| missing.clone());
+        match self {
+            Self::Integer { storage } => push_integer_value(storage, value),
+            _ => unreachable!("parquetread column kind changed within one Arrow array"),
+        }
+    }
+
+    fn ensure_integer(&mut self, prototype: &IntValue) {
+        match self {
+            Self::Empty => {
+                *self = Self::Integer {
+                    storage: empty_integer_storage_for(prototype),
+                };
+            }
+            Self::Integer { .. } => {}
+            _ => unreachable!("parquetread column kind changed within one Arrow array"),
+        }
     }
 
     fn push_bool(&mut self, value: Option<bool>) {
@@ -532,6 +602,9 @@ impl ParquetColumnBuilder {
                 None => values.push(f64::NAN),
                 _ => unreachable!("parquetread column kind changed within one Arrow array"),
             },
+            Self::Integer { .. } => {
+                unreachable!("parquetread integer columns use push_integer")
+            }
             Self::Logical { values, .. } => match cell {
                 Some(ParquetCell::Logical(value)) => values.push(u8::from(value)),
                 None => values.push(0),
@@ -555,6 +628,12 @@ impl ParquetColumnBuilder {
             Self::Number { values } => Tensor::new(values.clone(), vec![values.len(), 1])
                 .map(Value::Tensor)
                 .map_err(|err| invalid_variable(format!("parquetread: {err}"))),
+            Self::Integer { storage } => {
+                let len = storage.len();
+                Tensor::new_integer(storage, vec![len, 1])
+                    .map(Value::Tensor)
+                    .map_err(|err| invalid_variable(format!("parquetread: {err}")))
+            }
             Self::Logical { values } => LogicalArray::new(values.clone(), vec![values.len(), 1])
                 .map(Value::LogicalArray)
                 .map_err(|err| invalid_variable(format!("parquetread: {err}"))),
@@ -589,6 +668,33 @@ enum ParquetCell {
     Logical(bool),
     Text(String),
     DateTime(f64),
+}
+
+fn push_integer_value(storage: &mut IntegerStorage, value: IntValue) {
+    match (storage, value) {
+        (IntegerStorage::I8(values), IntValue::I8(value)) => values.push(value),
+        (IntegerStorage::I16(values), IntValue::I16(value)) => values.push(value),
+        (IntegerStorage::I32(values), IntValue::I32(value)) => values.push(value),
+        (IntegerStorage::I64(values), IntValue::I64(value)) => values.push(value),
+        (IntegerStorage::U8(values), IntValue::U8(value)) => values.push(value),
+        (IntegerStorage::U16(values), IntValue::U16(value)) => values.push(value),
+        (IntegerStorage::U32(values), IntValue::U32(value)) => values.push(value),
+        (IntegerStorage::U64(values), IntValue::U64(value)) => values.push(value),
+        _ => unreachable!("parquetread integer column changed storage class"),
+    }
+}
+
+fn empty_integer_storage_for(value: &IntValue) -> IntegerStorage {
+    match value {
+        IntValue::I8(_) => IntegerStorage::I8(Vec::new()),
+        IntValue::I16(_) => IntegerStorage::I16(Vec::new()),
+        IntValue::I32(_) => IntegerStorage::I32(Vec::new()),
+        IntValue::I64(_) => IntegerStorage::I64(Vec::new()),
+        IntValue::U8(_) => IntegerStorage::U8(Vec::new()),
+        IntValue::U16(_) => IntegerStorage::U16(Vec::new()),
+        IntValue::U32(_) => IntegerStorage::U32(Vec::new()),
+        IntValue::U64(_) => IntegerStorage::U64(Vec::new()),
+    }
 }
 
 fn selected_columns<'a>(
@@ -641,12 +747,48 @@ fn selected_row_groups(
 
 fn one_based_indices(value: &Value, context: &str) -> BuiltinResult<Vec<usize>> {
     match value {
+        Value::Int(integer) => integer
+            .try_to_usize()
+            .and_then(|index| index.checked_sub(1))
+            .map(|idx| vec![idx])
+            .ok_or_else(|| {
+                invalid_argument(format!(
+                    "parquetread: {context} entries must be positive integers"
+                ))
+            }),
         Value::Num(number) => one_based_index_from_number(*number, context).map(|idx| vec![idx]),
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|value| one_based_index_from_number(*value, context))
-            .collect(),
+        Value::Tensor(tensor) => {
+            let len = crate::builtins::common::tensor::tensor_element_len(tensor);
+            let mut out = Vec::with_capacity(len);
+            for idx in 0..len {
+                let value = tensor.numeric_value_at(idx).ok_or_else(|| {
+                    invalid_argument(format!(
+                        "parquetread: {context} entries must be positive integers"
+                    ))
+                })?;
+                match value {
+                    NumericScalar::F64(value) => {
+                        out.push(one_based_index_from_number(value, context)?)
+                    }
+                    NumericScalar::F32(value) => {
+                        out.push(one_based_index_from_number(f64::from(value), context)?)
+                    }
+                    value => {
+                        let Some(parsed) = value
+                            .into_int_value()
+                            .and_then(|value| value.try_to_usize())
+                        .and_then(|index| index.checked_sub(1))
+                        else {
+                            return Err(invalid_argument(format!(
+                                "parquetread: {context} entries must be positive integers"
+                            )));
+                        };
+                        out.push(parsed);
+                    }
+                }
+            }
+            Ok(out)
+        }
         other => Err(invalid_argument(format!(
             "parquetread: {context} must be a positive integer scalar or numeric vector, got {other:?}"
         ))),
@@ -657,6 +799,11 @@ fn one_based_index_from_number(value: f64, context: &str) -> BuiltinResult<usize
     if !value.is_finite() || value.fract() != 0.0 || value < 1.0 {
         return Err(invalid_argument(format!(
             "parquetread: {context} entries must be positive integers"
+        )));
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return Err(invalid_argument(format!(
+            "parquetread: {context} entries exceed platform limits"
         )));
     }
     Ok(value as usize - 1)
@@ -672,4 +819,70 @@ fn millis_since_unix_to_datenum(millis: f64) -> f64 {
 
 fn seconds_since_unix_to_datenum(seconds: f64) -> f64 {
     719_529.0 + seconds / 86_400.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(values.iter().map(|&value| value as i8).collect()),
+            IntegerStorage::I16(values.iter().map(|&value| value as i16).collect()),
+            IntegerStorage::I32(values.iter().map(|&value| value as i32).collect()),
+            IntegerStorage::I64(values.iter().map(|&value| value as i64).collect()),
+            IntegerStorage::U8(values.iter().map(|&value| value as u8).collect()),
+            IntegerStorage::U16(values.iter().map(|&value| value as u16).collect()),
+            IntegerStorage::U32(values.iter().map(|&value| value as u32).collect()),
+            IntegerStorage::U64(values.to_vec()),
+        ]
+    }
+
+    #[test]
+    fn parquet_one_based_indices_read_typed_integer_storage_exactly() {
+        let exact = (1_u64 << 53) + 1;
+        let row_groups =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).expect("groups");
+
+        let parsed = one_based_indices(&Value::Tensor(row_groups), "RowGroups");
+        if usize::BITS == 64 {
+            assert_eq!(parsed.unwrap(), vec![exact as usize - 1]);
+        } else {
+            assert!(parsed.is_err());
+        }
+
+        let invalid =
+            Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("groups");
+        assert!(one_based_indices(&Value::Tensor(invalid), "RowGroups").is_err());
+    }
+
+    #[test]
+    fn parquet_index_parser_ignores_poisoned_mirrors_for_every_integer_class() {
+        for storage in integer_storages(&[1, 2]) {
+            let indices = Tensor::new_integer(storage, vec![1, 2]).unwrap();
+            assert_eq!(
+                one_based_indices(&Value::Tensor(indices), "RowGroups").unwrap(),
+                vec![0, 1]
+            );
+        }
+    }
+
+    #[test]
+    fn parquet_one_based_indices_reject_unrepresentable_double_bounds() {
+        let boundary = one_based_indices(&Value::Num(usize::MAX as f64), "RowGroups");
+        if usize::BITS == 64 {
+            assert!(boundary.is_err());
+        } else {
+            assert_eq!(boundary.unwrap(), vec![usize::MAX - 1]);
+        }
+        assert!(one_based_indices(&Value::Num((usize::MAX as f64) + 1.0), "RowGroups").is_err());
+
+        let vector = Tensor::new(vec![1.0, usize::MAX as f64], vec![1, 2]).expect("groups");
+        let parsed = one_based_indices(&Value::Tensor(vector), "RowGroups");
+        if usize::BITS == 64 {
+            assert!(parsed.is_err());
+        } else {
+            assert_eq!(parsed.unwrap(), vec![0, usize::MAX - 1]);
+        }
+    }
 }

@@ -2,7 +2,7 @@
 title: "Datasets API"
 category: "Filesystem"
 section: "13.1"
-last_updated: "May 28, 2026"
+last_updated: "August 9, 2026"
 ---
 
 # Datasets API
@@ -36,6 +36,10 @@ This creates a `training.data` directory with two arrays:
 - `samples`, a `1000000 x 64` matrix.
 - `labels`, a `1000000 x 1` vector.
 
+The `dtype` field accepts `f64`, `f32`, and every built-in integer class: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`. Full and sliced reads preserve that declared class exactly. Writes and fills preserve exact values when the source class matches the declared dtype; unlike numeric classes are converted once through the declared dtype's ordinary numeric cast contract before storage. Complex numeric arrays are not currently supported.
+
+The `shape` and optional `chunk` fields accept scalar or vector dimensions in all eight integer classes, plus exactly integral `single` or `double` values within platform bounds. RunMat parses typed dimensions directly from authoritative integer storage, checks total shape multiplication before allocation, and rejects negative, fractional, out-of-range, or overflowing shape dimensions. Explicit chunk dimensions must be strictly positive and have the same rank as the array shape.
+
 The dataset can be opened later from the same path:
 
 ```matlab
@@ -62,6 +66,8 @@ Slice entries use one-based MATLAB indexing:
 | `":"` | The full dimension. |
 | `17` | One element in that dimension. |
 | `[start end]` | Inclusive range. |
+
+Scalar indices, inclusive range endpoints, array shapes, and resize shapes accept all eight built-in integer classes as well as exactly integral floating values within platform bounds.
 
 The right-hand value must match the shape selected by the slice. A write to `{ [1 4096], ":" }` for a `1000000 x 64` array expects a `4096 x 64` value.
 
@@ -91,6 +97,8 @@ source = Dataset.get_attr(ds, "source", "unknown");
 ```
 
 Each metadata update advances the dataset version. `Dataset.version(ds)` returns the current manifest version token.
+
+Scalar attributes accept all eight built-in integer classes and are written to the JSON manifest as exact integer numbers without an `f64` intermediary. Because JSON numbers do not encode narrow integer dtypes, `Dataset.attrs` and stored-value `Dataset.get_attr` results use canonical `int64` scalars whenever the value fits and `uint64` otherwise; the mathematical value remains exact. When a key is absent, an explicitly supplied integer default is returned directly and therefore preserves its original class.
 
 ## Choosing Chunks
 
@@ -122,6 +130,8 @@ DataTransaction.set_attr(tx, "lastBatch", 3);
 
 commit(tx);
 ```
+
+Transaction writes, fills, resizes, and array creation accept the same eight integer classes for values, slices, shapes, and chunk shapes as their direct dataset counterparts. Native integer payloads and exact structural controls remain queued without an `f64` mirror and are converted, validated, and serialized only when the transaction commits. `DataTransaction.set_attr` and integer scalar fields passed to `DataTransaction.set_attrs` are persisted as exact JSON integers, including `int64` and `uint64` values outside the exactly representable `f64` range.
 
 At commit time, RunMat checks that the dataset has not changed since the transaction began. If another writer committed first, the commit fails with a manifest conflict instead of overwriting newer state.
 
@@ -176,6 +186,8 @@ Path-level operations manage whole datasets.
 
 `data.import` and `data.export` currently support RunMat's `"data"` format.
 
+These namespace functions use exactly the positional signatures shown above; they do not reserve trailing name-value arguments. Their path and format arguments are textual rather than numeric, while copying, moving, importing, and exporting a dataset preserves its stored integer payload bytes and declared dtype. Dataset lifecycle work is filesystem-provider I/O and does not dispatch through an acceleration provider.
+
 ## Common Methods
 
 | Method | Use |
@@ -187,12 +199,22 @@ Path-level operations manage whole datasets.
 | `Dataset.has_array(ds, name)` | Check whether an array exists. |
 | `Dataset.array(ds, name)` | Return an array handle. |
 | `Dataset.attrs(ds)` | Return dataset attributes. |
+| `Dataset.get_attr(ds, key, defaultValue)` | Return one attribute or the optional unchanged default. |
 | `Dataset.set_attr(ds, key, value)` | Set one attribute. |
+| `Dataset.set_attrs(ds, attrs)` | Set multiple attributes. |
 | `Dataset.refresh(ds)` | Reopen the handle from current storage state. |
 | `DataArray.shape(arr)` | Return array shape. |
 | `DataArray.chunk_shape(arr)` | Return chunk shape. |
 | `DataArray.read(arr, sliceSpec)` | Read a full array or slice. |
 | `DataArray.write(arr, sliceSpec, values)` | Write a full array or slice. |
+| `DataArray.resize(arr, newShape)` | Replace the array with zero-filled storage of the declared dtype and new shape. |
+| `DataArray.fill(arr, value)` | Fill the complete array with one scalar converted to the declared dtype. |
+| `DataTransaction.create_array(tx, arrayName, meta)` | Stage creation of an array whose metadata can use typed integer shape and chunk dimensions. |
+| `DataTransaction.write(tx, arrayName, sliceSpec, values)` | Stage a full or sliced write. |
+| `DataTransaction.resize(tx, arrayName, newShape)` | Stage a resize using exact typed integer dimensions. |
+| `DataTransaction.fill(tx, arrayName, value, sliceSpec)` | Stage a full or sliced scalar fill. |
+| `DataTransaction.set_attr(tx, key, value)` | Stage one dataset attribute update. |
+| `DataTransaction.set_attrs(tx, attrs)` | Stage multiple dataset attribute updates. |
 | `DataTransaction.commit(tx)` | Apply staged transaction changes. |
 | `DataTransaction.abort(tx)` | Discard staged transaction changes. |
 

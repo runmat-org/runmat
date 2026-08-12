@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    ComplexStorage, ComplexTensor, IntValue, IntegerComplexStorage, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -21,6 +21,7 @@ use crate::builtins::common::{
     linalg::{diagonal_rcond, singular_value_rcond},
     tensor,
 };
+use crate::builtins::math::elementwise::conj::conjugate_integer_imaginary_storage;
 use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -288,7 +289,9 @@ pub fn linsolve_host_real_for_provider(
     options: &ProviderLinsolveOptions,
 ) -> BuiltinResult<(Tensor, f64)> {
     let opts = SolveOptions::from(options);
-    solve_real(lhs.clone(), rhs.clone(), &opts)
+    let lhs = tensor::integer_tensor_to_f64(lhs.clone()).map_err(builtin_error)?;
+    let rhs = tensor::integer_tensor_to_f64(rhs.clone()).map_err(builtin_error)?;
+    solve_real(lhs, rhs, &opts)
 }
 
 /// Result wrapper that exposes both primary and secondary outputs.
@@ -371,6 +374,8 @@ fn options_from_rest(rest: &[Value]) -> BuiltinResult<SolveOptions> {
 /// Public helper for the VM multi-output surface.
 pub async fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> BuiltinResult<LinsolveEval> {
     let options = options_from_rest(rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&lhs, NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&rhs, NAME)?;
     evaluate(lhs, rhs, options).await
 }
 
@@ -482,7 +487,10 @@ fn parse_bool_field(name: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data[0] != 0.0),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(match scalar_tensor_integer(t) {
+            Some(value) => !value.is_zero(),
+            None => tensor::tensor_value_f64(t, 0) != 0.0,
+        }),
         Value::LogicalArray(arr) if arr.len() == 1 => Ok(arr.data[0] != 0),
         other => Err(argument_error(format!(
             "linsolve: option '{name}' must be logical or numeric, got {other:?}"
@@ -494,11 +502,20 @@ fn parse_scalar_f64(name: &str, value: &Value) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(match scalar_tensor_integer(t) {
+            Some(value) => value.to_f64(),
+            None => tensor::tensor_value_f64(t, 0),
+        }),
         other => Err(argument_error(format!(
             "linsolve: option '{name}' must be a scalar numeric value, got {other:?}"
         ))),
     }
+}
+
+fn scalar_tensor_integer(tensor: &Tensor) -> Option<IntValue> {
+    tensor
+        .integer_storage()
+        .and_then(|storage| storage.value_at(0))
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -559,6 +576,7 @@ async fn coerce_numeric_pair(lhs: Value, rhs: Value) -> BuiltinResult<NumericPai
 async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
     match value {
         Value::Tensor(tensor) => {
+            let tensor = tensor::integer_tensor_to_f64(tensor).map_err(builtin_error)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
@@ -592,6 +610,7 @@ async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(map_control_flow)?;
+            let tensor = tensor::integer_tensor_to_f64(tensor).map_err(builtin_error)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
@@ -672,8 +691,11 @@ fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<GpuTensorHandle> {
+    // The current provider view is floating; materialize that transfer
+    // boundary from authoritative host storage without consulting a mirror.
+    let values = tensor::tensor_values_f64_cow(tensor);
     let view = HostTensorView {
-        data: &tensor.data,
+        data: values.as_ref(),
         shape: &tensor.shape,
     };
     provider
@@ -768,14 +790,15 @@ fn solve_complex(
 
 fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
     let n = lhs.rows();
-    let nrhs = rhs.data.len() / n;
-    let mut solution = rhs.data.clone();
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let mut solution = tensor::tensor_values_f64(rhs);
+    let nrhs = solution.len() / n;
     let mut min_diag = f64::INFINITY;
     let mut max_diag = 0.0_f64;
 
     for col in 0..nrhs {
         for i in 0..n {
-            let diag = lhs.data[i + i * n];
+            let diag = lhs_values[i + i * n];
             let diag_abs = diag.abs();
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
@@ -786,7 +809,7 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
             }
             let mut accum = 0.0;
             for j in 0..i {
-                accum += lhs.data[i + j * n] * solution[j + col * n];
+                accum += lhs_values[i + j * n] * solution[j + col * n];
             }
             let rhs_value = solution[i + col * n] - accum;
             solution[i + col * n] = rhs_value / diag;
@@ -794,22 +817,22 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = Tensor::new(solution, rhs.shape.clone())
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let tensor = real_solution_tensor(solution, rhs.shape.clone(), real_solution_dtype(lhs, rhs))?;
     Ok((tensor, rcond))
 }
 
 fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
     let n = lhs.rows();
-    let nrhs = rhs.data.len() / n;
-    let mut solution = rhs.data.clone();
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let mut solution = tensor::tensor_values_f64(rhs);
+    let nrhs = solution.len() / n;
     let mut min_diag = f64::INFINITY;
     let mut max_diag = 0.0_f64;
 
     for col in 0..nrhs {
         for row_rev in 0..n {
             let i = n - 1 - row_rev;
-            let diag = lhs.data[i + i * n];
+            let diag = lhs_values[i + i * n];
             let diag_abs = diag.abs();
             min_diag = min_diag.min(diag_abs);
             max_diag = max_diag.max(diag_abs);
@@ -820,7 +843,7 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
             }
             let mut accum = 0.0;
             for j in (i + 1)..n {
-                accum += lhs.data[i + j * n] * solution[j + col * n];
+                accum += lhs_values[i + j * n] * solution[j + col * n];
             }
             let rhs_value = solution[i + col * n] - accum;
             solution[i + col * n] = rhs_value / diag;
@@ -828,8 +851,7 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = Tensor::new(solution, rhs.shape.clone())
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    let tensor = real_solution_tensor(solution, rhs.shape.clone(), real_solution_dtype(lhs, rhs))?;
     Ok((tensor, rcond))
 }
 
@@ -838,14 +860,14 @@ fn forward_substitution_complex(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
     let n = lhs.rows;
-    let nrhs = rhs.data.len() / n;
+    let nrhs = rhs.materialize_f64().len() / n;
     let lhs_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let mut solution: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -886,14 +908,14 @@ fn backward_substitution_complex(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
     let n = lhs.rows;
-    let nrhs = rhs.data.len() / n;
+    let nrhs = rhs.materialize_f64().len() / n;
     let lhs_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let mut solution: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -931,15 +953,17 @@ fn backward_substitution_complex(
 }
 
 fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64)> {
-    let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), &lhs.data);
-    let b = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), &rhs.data);
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let rhs_values = tensor::tensor_values_f64_cow(rhs);
+    let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), lhs_values.as_ref());
+    let b = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), rhs_values.as_ref());
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows(), lhs.cols());
     let solution = svd
         .solve(&b, tol)
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
-    let tensor = matrix_real_to_tensor(solution)?;
+    let tensor = matrix_real_to_tensor(solution, real_solution_dtype(lhs, rhs))?;
     Ok((tensor, rcond))
 }
 
@@ -948,12 +972,12 @@ fn solve_general_complex(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
     let a_data: Vec<Complex64> = lhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let b_data: Vec<Complex64> = rhs
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
@@ -974,10 +998,11 @@ fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tens
         return Ok(rhs);
     }
     if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
-        return Tensor::new(rhs.data, vec![expected_rows, 1])
+        return rhs
+            .reshape(vec![expected_rows, 1])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    if rhs.data.is_empty() && expected_rows == 0 {
+    if tensor::tensor_element_len(&rhs) == 0 && expected_rows == 0 {
         return Ok(rhs);
     }
     Err(builtin_error("Matrix dimensions must agree."))
@@ -988,10 +1013,10 @@ fn normalize_rhs_complex(rhs: ComplexTensor, expected_rows: usize) -> BuiltinRes
         return Ok(rhs);
     }
     if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
-        return ComplexTensor::new(rhs.data, vec![expected_rows, 1])
+        return ComplexTensor::new(rhs.materialize_f64(), vec![expected_rows, 1])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    if rhs.data.is_empty() && expected_rows == 0 {
+    if rhs.materialize_f64().is_empty() && expected_rows == 0 {
         return Ok(rhs);
     }
     Err(builtin_error("Matrix dimensions must agree."))
@@ -1017,11 +1042,37 @@ fn compute_svd_tolerance(singular_values: &[f64], rows: usize, cols: usize) -> f
     f64::EPSILON * max_dim * max_sv.max(1.0)
 }
 
-fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
+fn matrix_real_to_tensor(matrix: DMatrix<f64>, dtype: NumericDType) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    real_solution_tensor(matrix.as_slice().to_vec(), vec![rows, cols], dtype)
+}
+
+fn real_solution_dtype(lhs: &Tensor, rhs: &Tensor) -> NumericDType {
+    if lhs.numeric_dtype() == NumericDType::F32 && rhs.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
+}
+
+fn real_solution_tensor(
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+) -> BuiltinResult<Tensor> {
+    let tensor = match dtype {
+        NumericDType::F32 => Tensor::from_f32(
+            values.into_iter().map(|value| value as f32).collect(),
+            shape,
+        ),
+        NumericDType::F64 => Tensor::new(values, shape),
+        _ => Err(format!(
+            "linsolve: unsupported real solution class {}",
+            dtype.class_name()
+        )),
+    };
+    tensor.map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<ComplexTensor> {
@@ -1032,7 +1083,8 @@ fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<Complex
 }
 
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
-    let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
     ComplexTensor::new(data, tensor.shape.clone())
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
@@ -1067,22 +1119,32 @@ fn ensure_square(rows: usize, cols: usize) -> BuiltinResult<()> {
 fn transpose_tensor(tensor: &Tensor) -> Tensor {
     let rows = tensor.rows();
     let cols = tensor.cols();
-    let mut data = vec![0.0; tensor.data.len()];
+    let mut indices = vec![0usize; tensor::tensor_element_len(tensor)];
     for r in 0..rows {
         for c in 0..cols {
-            data[c + r * cols] = tensor.data[r + c * rows];
+            indices[c + r * cols] = r + c * rows;
         }
     }
-    Tensor::new(data, vec![cols, rows]).expect("transpose_tensor valid")
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .expect("validated tensor storage");
+    Tensor::from_numeric_storage(
+        storage
+            .gather(&indices)
+            .expect("transpose indices in bounds"),
+        vec![cols, rows],
+    )
+    .expect("transpose tensor shape matches storage")
 }
 
 fn transpose_complex(tensor: &ComplexTensor) -> ComplexTensor {
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let mut data = vec![(0.0, 0.0); tensor.data.len()];
+    let mut data = vec![(0.0, 0.0); tensor.materialize_f64().len()];
     for r in 0..rows {
         for c in 0..cols {
-            data[c + r * cols] = tensor.data[r + c * rows];
+            data[c + r * cols] = tensor.materialize_f64()[r + c * rows];
         }
     }
     ComplexTensor::new(data, vec![cols, rows]).expect("transpose_complex valid")
@@ -1093,9 +1155,30 @@ fn conjugate_in_place(_tensor: &mut Tensor) {
 }
 
 fn conjugate_complex_in_place(tensor: &mut ComplexTensor) {
-    for value in &mut tensor.data {
-        value.1 = -value.1;
-    }
+    let shape = tensor.shape.clone();
+    let storage = match tensor.clone().into_complex_storage() {
+        ComplexStorage::F64(mut values) => {
+            for value in &mut values {
+                value.1 = -value.1;
+            }
+            ComplexStorage::F64(values)
+        }
+        ComplexStorage::F32(mut values) => {
+            for value in &mut values {
+                value.1 = -value.1;
+            }
+            ComplexStorage::F32(values)
+        }
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
+            IntegerComplexStorage::new(
+                storage.real,
+                conjugate_integer_imaginary_storage(storage.imag),
+            )
+            .expect("complex integer component classes remain matched"),
+        ),
+    };
+    *tensor = ComplexTensor::from_complex_storage(storage, shape)
+        .expect("conjugated complex storage retains shape");
 }
 
 #[cfg(test)]
@@ -1103,7 +1186,9 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{CharArray, ResolveContext, StructValue, Type};
+    use runmat_builtins::{
+        CharArray, IntegerStorage, NumericStorage, ResolveContext, StructValue, Type,
+    };
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -1215,8 +1300,183 @@ pub(crate) mod tests {
             linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
         let t = test_support::gather(result).expect("gather");
         assert_eq!(t.shape, vec![2, 1]);
-        approx_eq(t.data[0], 1.0);
-        approx_eq(t.data[1], 2.0);
+        approx_eq(t.materialize_f64()[0], 1.0);
+        approx_eq(t.materialize_f64()[1], 2.0);
+    }
+
+    #[test]
+    fn linsolve_cpu_preserves_native_single_for_general_and_triangular_solutions() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+
+        let a = Tensor::from_f32(vec![2.0, 1.0, 1.0, 2.0], vec![2, 2]).unwrap();
+        let b = Tensor::from_f32(vec![4.0, 5.0], vec![2, 1]).unwrap();
+        let result =
+            linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
+        let tensor = test_support::gather(result).expect("gather");
+        assert_eq!(
+            tensor.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0])
+        );
+
+        let lower = Tensor::from_f32(vec![2.0, 1.0, 0.0, 3.0], vec![2, 2]).unwrap();
+        let rhs = Tensor::from_f32(vec![2.0, 7.0], vec![2, 1]).unwrap();
+        let mut options = StructValue::new();
+        options.fields.insert("LT".to_string(), Value::Bool(true));
+        let result = linsolve_builtin(
+            Value::Tensor(lower),
+            Value::Tensor(rhs),
+            vec![Value::Struct(options)],
+        )
+        .expect("lower triangular linsolve");
+        let tensor = test_support::gather(result).expect("gather");
+        assert_eq!(
+            tensor.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.0, 2.0])
+        );
+    }
+
+    #[test]
+    fn linsolve_reads_typed_integer_tensor_storage_exactly() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+        let a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+            .expect("integer lhs");
+        let b =
+            Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1]).expect("integer rhs");
+
+        let result =
+            linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
+        let tensor = test_support::gather(result).expect("gather");
+        assert_eq!(tensor.shape, vec![2, 1]);
+        approx_eq(tensor.materialize_f64()[0], 1.0);
+        approx_eq(tensor.materialize_f64()[1], 2.0);
+    }
+
+    #[test]
+    fn linsolve_complex_promotion_reads_typed_integer_storage_exactly() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+
+        let real_lhs = Tensor::new_integer(IntegerStorage::I64(vec![1, 0, 0, 1]), vec![2, 2])
+            .expect("integer lhs");
+        let complex_rhs = ComplexTensor::new(vec![(3.0, 4.0), (5.0, -6.0)], vec![2, 1]).unwrap();
+        let result = linsolve_builtin(
+            Value::Tensor(real_lhs),
+            Value::ComplexTensor(complex_rhs),
+            Vec::new(),
+        )
+        .expect("linsolve");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor output");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        approx_eq(out.materialize_f64()[0].0, 3.0);
+        approx_eq(out.materialize_f64()[0].1, 4.0);
+        approx_eq(out.materialize_f64()[1].0, 5.0);
+        approx_eq(out.materialize_f64()[1].1, -6.0);
+
+        let complex_lhs = ComplexTensor::new(
+            vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let real_rhs =
+            Tensor::new_integer(IntegerStorage::U64(vec![7, 11]), vec![2, 1]).expect("integer rhs");
+        let result = linsolve_builtin(
+            Value::ComplexTensor(complex_lhs),
+            Value::Tensor(real_rhs),
+            Vec::new(),
+        )
+        .expect("linsolve");
+        let Value::ComplexTensor(out) = result else {
+            panic!("expected complex tensor output");
+        };
+        assert_eq!(out.shape, vec![2, 1]);
+        approx_eq(out.materialize_f64()[0].0, 7.0);
+        approx_eq(out.materialize_f64()[0].1, 0.0);
+        approx_eq(out.materialize_f64()[1].0, 11.0);
+        approx_eq(out.materialize_f64()[1].1, 0.0);
+    }
+
+    #[test]
+    fn linsolve_provider_host_helper_reads_typed_integer_storage_exactly() {
+        let a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+            .expect("integer lhs");
+        let b =
+            Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1]).expect("integer rhs");
+
+        let (solution, _rcond) =
+            linsolve_host_real_for_provider(&a, &b, &ProviderLinsolveOptions::default())
+                .expect("provider helper");
+        assert_eq!(solution.shape, vec![2, 1]);
+        approx_eq(solution.materialize_f64()[0], 1.0);
+        approx_eq(solution.materialize_f64()[1], 2.0);
+    }
+
+    #[test]
+    fn linsolve_general_real_reads_typed_integer_storage_exactly() {
+        let a = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 1, 0, 0, 1]), vec![3, 2])
+            .expect("integer lhs");
+        let b = Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).expect("rhs");
+
+        let (solution, _rcond) =
+            linsolve_host_real_for_provider(&a, &b, &ProviderLinsolveOptions::default())
+                .expect("provider helper");
+
+        assert_eq!(solution.shape, vec![2, 1]);
+        approx_eq(solution.materialize_f64()[0], 7.0 / 5.0);
+        approx_eq(solution.materialize_f64()[1], -2.0 / 5.0);
+        assert!(solution.integer_storage().is_none());
+    }
+
+    #[test]
+    fn linsolve_transa_reads_typed_integer_storage_exactly() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+        let a = Tensor::new_integer(
+            IntegerStorage::I16(vec![3, 1, 0, 0, 4, 2, 0, 0, 5]),
+            vec![3, 3],
+        )
+        .expect("integer lhs");
+        let b = Tensor::new_integer(IntegerStorage::I16(vec![5, 14, 23]), vec![3, 1])
+            .expect("integer rhs");
+        let mut opts = StructValue::new();
+        opts.fields.insert("LT".to_string(), Value::Bool(true));
+        opts.fields.insert(
+            "TRANSA".to_string(),
+            Value::CharArray(CharArray::new_row("T")),
+        );
+
+        let result = linsolve_builtin(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            vec![Value::Struct(opts)],
+        )
+        .expect("linsolve");
+        let tensor = test_support::gather(result).expect("gather");
+
+        assert_eq!(tensor.shape, vec![3, 1]);
+        let expected_a = Tensor::new(
+            vec![3.0, 1.0, 0.0, 0.0, 4.0, 2.0, 0.0, 0.0, 5.0],
+            vec![3, 3],
+        )
+        .expect("expected lhs");
+        let expected_b = Tensor::new(vec![5.0, 14.0, 23.0], vec![3, 1]).expect("expected rhs");
+        let expected_a_transposed = transpose_tensor(&expected_a);
+        let (expected_tensor, _) = host_linsolve_real(
+            &expected_a_transposed,
+            &expected_b,
+            ProviderLinsolveOptions::default(),
+        );
+        for (actual, expected) in tensor
+            .materialize_f64()
+            .iter()
+            .zip(expected_tensor.materialize_f64().iter())
+        {
+            approx_eq(*actual, *expected);
+        }
+        assert!(tensor.integer_storage().is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1240,9 +1500,9 @@ pub(crate) mod tests {
         .expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
         assert_eq!(tensor.shape, vec![3, 1]);
-        approx_eq(tensor.data[0], 3.0);
-        approx_eq(tensor.data[1], 2.0);
-        approx_eq(tensor.data[2], 1.0);
+        approx_eq(tensor.materialize_f64()[0], 3.0);
+        approx_eq(tensor.materialize_f64()[1], 2.0);
+        approx_eq(tensor.materialize_f64()[2], 1.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1276,7 +1536,11 @@ pub(crate) mod tests {
         let (expected_tensor, _) =
             host_linsolve_real(&a_transposed, &b, ProviderLinsolveOptions::default());
 
-        for (actual, expected) in tensor.data.iter().zip(expected_tensor.data.iter()) {
+        for (actual, expected) in tensor
+            .materialize_f64()
+            .iter()
+            .zip(expected_tensor.materialize_f64().iter())
+        {
             approx_eq(*actual, *expected);
         }
     }
@@ -1301,17 +1565,17 @@ pub(crate) mod tests {
         };
 
         let mat_a: Vec<Complex64> = a
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect();
         let mat_b: Vec<Complex64> = b
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect();
         let mat_x: Vec<Complex64> = out
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect();
@@ -1360,7 +1624,11 @@ pub(crate) mod tests {
         };
 
         assert_eq!(out.shape, expected.shape);
-        for ((out_re, out_im), (exp_re, exp_im)) in out.data.iter().zip(expected.data.iter()) {
+        for ((out_re, out_im), (exp_re, exp_im)) in out
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert!(
                 (out_re - exp_re).abs() < 1e-10,
                 "out_re={out_re} exp_re={exp_re}"
@@ -1394,6 +1662,32 @@ pub(crate) mod tests {
             "unexpected error message: {err}"
         );
         assert_eq!(err.identifier(), LINSOLVE_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn linsolve_options_read_integer_tensor_storage() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
+        let a = Tensor::new(vec![2.0, 0.0, 1.0, 3.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![2.0, 7.0], vec![2, 1]).unwrap();
+        let upper = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        let rcond = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
+        let mut opts = StructValue::new();
+        opts.fields.insert("UT".to_string(), Value::Tensor(upper));
+        opts.fields
+            .insert("RCOND".to_string(), Value::Tensor(rcond));
+        let result = linsolve_builtin(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            vec![Value::Struct(opts)],
+        )
+        .expect("linsolve");
+        let Value::Tensor(out) = result else {
+            panic!("expected tensor output");
+        };
+        approx_eq(out.materialize_f64()[0], -1.0 / 6.0);
+        approx_eq(out.materialize_f64()[1], 7.0 / 3.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1446,15 +1740,15 @@ pub(crate) mod tests {
             other => panic!("unexpected solution value {other:?}"),
         };
         assert_eq!(solution_tensor.shape, vec![2, 1]);
-        approx_eq(solution_tensor.data[0], 1.0);
-        approx_eq(solution_tensor.data[1], 2.0);
+        approx_eq(solution_tensor.materialize_f64()[0], 1.0);
+        approx_eq(solution_tensor.materialize_f64()[1], 2.0);
 
         let rcond_value = match eval.reciprocal_condition() {
             Value::Num(r) => r,
             Value::GpuTensor(handle) => {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle.clone())).expect("gather rcond");
-                gathered.data[0]
+                gathered.materialize_f64()[0]
             }
             other => panic!("unexpected rcond value {other:?}"),
         };
@@ -1477,11 +1771,11 @@ pub(crate) mod tests {
             let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
 
             let view_a = HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let ha = provider.upload(&view_a).expect("upload A");
@@ -1498,7 +1792,11 @@ pub(crate) mod tests {
             let _ = provider.free(&hb);
 
             assert_eq!(gathered.shape, cpu_tensor.shape);
-            for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            for (gpu, cpu) in gathered
+                .materialize_f64()
+                .iter()
+                .zip(cpu_tensor.materialize_f64().iter())
+            {
                 assert!((gpu - cpu).abs() < 1e-12);
             }
         });
@@ -1521,6 +1819,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn provider_upload_path_reads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let a = Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 1, 2]), vec![2, 2])
+                .expect("integer lhs");
+            let b = Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1])
+                .expect("integer rhs");
+
+            let result = linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new())
+                .expect("host provider linsolve");
+            let tensor = test_support::gather(result).expect("gather");
+            assert_eq!(tensor.shape, vec![2, 1]);
+            approx_eq(tensor.materialize_f64()[0], 1.0);
+            approx_eq(tensor.materialize_f64()[1], 2.0);
+
+            let telemetry = provider.telemetry_snapshot();
+            assert!(telemetry.linsolve.count >= 1);
+            assert!(fallback_count(&telemetry, "linsolve:host_reupload") >= 1);
+        });
+    }
+
+    #[test]
     fn provider_telemetry_records_gpu_host_reupload_path() {
         test_support::with_test_provider(|provider| {
             provider.reset_telemetry();
@@ -1528,13 +1848,13 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
             let ha = provider
                 .upload(&HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .expect("upload A");
             let hb = provider
                 .upload(&HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .expect("upload B");
@@ -1565,13 +1885,13 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![6.0], vec![1, 1]).unwrap();
             let ha = provider
                 .upload(&HostTensorView {
-                    data: &a.data,
+                    data: &a.materialize_f64(),
                     shape: &a.shape,
                 })
                 .expect("upload A");
             let hb = provider
                 .upload(&HostTensorView {
-                    data: &b.data,
+                    data: &b.materialize_f64(),
                     shape: &b.shape,
                 })
                 .expect("upload B");
@@ -1583,7 +1903,7 @@ pub(crate) mod tests {
             )
             .expect("fallback linsolve");
             let gathered = test_support::gather(result).expect("gather fallback");
-            assert_eq!(gathered.data, vec![3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![3.0]);
 
             let telemetry = provider.telemetry_snapshot();
             assert_eq!(telemetry.linsolve.count, 0);
@@ -1621,13 +1941,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -1648,7 +1968,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4);
         }
 
@@ -1685,13 +2009,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -1707,7 +2031,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -1737,13 +2065,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -1810,13 +2138,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -1841,7 +2169,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -1877,13 +2209,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -1904,7 +2236,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -1951,13 +2287,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -1987,7 +2323,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
         assert!(
@@ -2036,13 +2376,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2071,7 +2411,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2110,13 +2454,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2139,7 +2483,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2179,13 +2527,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2211,7 +2559,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2251,13 +2603,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2283,7 +2635,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2327,13 +2683,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2362,7 +2718,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
 
@@ -2398,13 +2758,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2427,7 +2787,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-5);
         }
 
@@ -2469,13 +2833,13 @@ pub(crate) mod tests {
 
         let ha = provider
             .upload(&HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             })
             .expect("upload B");
@@ -2502,7 +2866,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < 1e-5);
         }
 
@@ -2537,11 +2905,11 @@ pub(crate) mod tests {
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
 
         let view_a = HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -2557,7 +2925,11 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (gpu, cpu) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((gpu - cpu).abs() < tol);
         }
     }

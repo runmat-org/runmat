@@ -16,13 +16,15 @@ pub(crate) fn matmul_real(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 
     let rows = a.rows();
     let cols = b.cols();
+    let a_values = tensor::tensor_values_f64_cow(a);
+    let b_values = tensor::tensor_values_f64_cow(b);
     let mut data = vec![0.0; rows * cols];
 
     for j in 0..cols {
         for i in 0..rows {
             let mut sum = 0.0;
             for k in 0..a.cols() {
-                sum += a.data[i + k * rows] * b.data[k + j * b.rows()];
+                sum += a_values[i + k * rows] * b_values[k + j * b.rows()];
             }
             data[i + j * rows] = sum;
         }
@@ -33,20 +35,22 @@ pub(crate) fn matmul_real(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 
 /// Multiply a real tensor by a real scalar.
 pub(crate) fn scalar_mul_real(a: &Tensor, scalar: f64) -> Tensor {
-    let data: Vec<f64> = a.data.iter().map(|x| x * scalar).collect();
+    let values = tensor::tensor_values_f64_cow(a);
+    let data: Vec<f64> = values.iter().map(|x| x * scalar).collect();
     Tensor::new(data, a.shape.clone()).expect("scalar_mul_real: invalid tensor")
 }
 
 /// Multiply a real tensor by a complex scalar, producing a complex tensor.
 pub(crate) fn scalar_mul_complex(a: &Tensor, cr: f64, ci: f64) -> ComplexTensor {
-    let data: Vec<(f64, f64)> = a.data.iter().map(|&x| (x * cr, x * ci)).collect();
+    let values = tensor::tensor_values_f64_cow(a);
+    let data: Vec<(f64, f64)> = values.iter().map(|&x| (x * cr, x * ci)).collect();
     ComplexTensor::new(data, a.shape.clone()).expect("scalar_mul_complex: invalid tensor")
 }
 
 /// Multiply a complex tensor by a complex scalar.
 pub(crate) fn scalar_mul_complex_tensor(a: &ComplexTensor, cr: f64, ci: f64) -> ComplexTensor {
     let data: Vec<(f64, f64)> = a
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(ar, ai)| (ar * cr - ai * ci, ar * ci + ai * cr))
         .collect();
@@ -73,8 +77,8 @@ pub(crate) fn matmul_complex(
             let mut acc_re = 0.0;
             let mut acc_im = 0.0;
             for k in 0..kdim {
-                let (ar, ai) = a.data[i + k * rows];
-                let (br, bi) = b.data[k + j * b.rows];
+                let (ar, ai) = a.materialize_f64()[i + k * rows];
+                let (br, bi) = b.materialize_f64()[k + j * b.rows];
                 acc_re += ar * br - ai * bi;
                 acc_im += ar * bi + ai * br;
             }
@@ -98,14 +102,15 @@ pub(crate) fn matmul_complex_real(a: &ComplexTensor, b: &Tensor) -> Result<Compl
     let rows = a.rows;
     let cols = b.cols();
     let kdim = a.cols;
+    let b_values = tensor::tensor_values_f64_cow(b);
     let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); rows * cols];
     for j in 0..cols {
         for i in 0..rows {
             let mut acc_re = 0.0;
             let mut acc_im = 0.0;
             for k in 0..kdim {
-                let (ar, ai) = a.data[i + k * rows];
-                let br = b.data[k + j * b.rows()];
+                let (ar, ai) = a.materialize_f64()[i + k * rows];
+                let br = b_values[k + j * b.rows()];
                 acc_re += ar * br;
                 acc_im += ai * br;
             }
@@ -129,14 +134,15 @@ pub(crate) fn matmul_real_complex(a: &Tensor, b: &ComplexTensor) -> Result<Compl
     let rows = a.rows();
     let cols = b.cols;
     let kdim = a.cols();
+    let a_values = tensor::tensor_values_f64_cow(a);
     let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); rows * cols];
     for j in 0..cols {
         for i in 0..rows {
             let mut acc_re = 0.0;
             let mut acc_im = 0.0;
             for k in 0..kdim {
-                let ar = a.data[i + k * rows];
-                let (br, bi) = b.data[k + j * b.rows];
+                let ar = a_values[i + k * rows];
+                let (br, bi) = b.materialize_f64()[k + j * b.rows];
                 acc_re += ar * br;
                 acc_im += ar * bi;
             }
@@ -172,7 +178,7 @@ pub(crate) fn parse_tolerance_arg(name: &str, args: &[Value]) -> Result<Option<f
             let raw = match &args[0] {
                 Value::Num(n) => *n,
                 Value::Int(i) => i.to_f64(),
-                Value::Tensor(t) if tensor::is_scalar_tensor(t) => t.data[0],
+                Value::Tensor(t) if tensor::is_scalar_tensor(t) => scalar_tensor_f64(t),
                 Value::Bool(b) => {
                     if *b {
                         1.0
@@ -203,6 +209,10 @@ pub(crate) fn parse_tolerance_arg(name: &str, args: &[Value]) -> Result<Option<f
         }
         _ => Err(format!("{name}: too many input arguments")),
     }
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    tensor::tensor_value_f64(tensor, 0)
 }
 
 /// MATLAB-compatible default tolerance used by `pinv`, `rank`, and related routines.
@@ -257,5 +267,87 @@ pub(crate) fn singular_value_rcond(singular_values: &[f64]) -> f64 {
         0.0
     } else {
         min_sv / max_sv
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn parse_tolerance_arg_reads_typed_integer_tensor_storage() {
+        let tol =
+            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tolerance");
+        assert_eq!(
+            parse_tolerance_arg("rank", &[Value::Tensor(tol)]).expect("tolerance"),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn parse_tolerance_arg_rejects_negative_typed_integer_storage() {
+        let tol = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("typed tolerance");
+        let err = parse_tolerance_arg("pinv", &[Value::Tensor(tol)])
+            .expect_err("negative typed tolerance must reject");
+        assert!(err.contains("tolerance must be >= 0"), "{err}");
+    }
+
+    #[test]
+    fn scalar_mul_real_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 5]), vec![3, 1])
+            .expect("typed tensor");
+
+        let out = scalar_mul_real(&tensor, 4.0);
+
+        assert_eq!(out.materialize_f64(), vec![8.0, 12.0, 20.0]);
+        assert!(out.integer_storage().is_none());
+    }
+
+    #[test]
+    fn scalar_mul_complex_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-2, 3]), vec![2, 1])
+            .expect("typed tensor");
+
+        let out = scalar_mul_complex(&tensor, 2.0, -0.5);
+
+        assert_eq!(out.materialize_f64(), vec![(-4.0, 1.0), (6.0, -1.5)]);
+    }
+
+    #[test]
+    fn matmul_real_reads_typed_integer_storage_exactly() {
+        let lhs =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![2, 2]).expect("lhs");
+        let rhs =
+            Tensor::new_integer(IntegerStorage::I16(vec![5, 6, 7, 8]), vec![2, 2]).expect("rhs");
+
+        let out = matmul_real(&lhs, &rhs).expect("matmul");
+
+        assert_eq!(out.materialize_f64(), vec![23.0, 34.0, 31.0, 46.0]);
+        assert!(out.integer_storage().is_none());
+    }
+
+    #[test]
+    fn matmul_mixed_real_complex_reads_typed_integer_storage_exactly() {
+        let real =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).expect("real");
+        let complex = ComplexTensor::new(
+            vec![(1.0, 1.0), (2.0, 0.0), (0.0, 1.0), (3.0, -1.0)],
+            vec![2, 2],
+        )
+        .expect("complex");
+
+        let left = matmul_real_complex(&real, &complex).expect("real complex");
+        let right = matmul_complex_real(&complex, &real).expect("complex real");
+
+        assert_eq!(
+            left.materialize_f64(),
+            vec![(7.0, 1.0), (10.0, 2.0), (9.0, -2.0), (12.0, -2.0)]
+        );
+        assert_eq!(
+            right.materialize_f64(),
+            vec![(1.0, 3.0), (8.0, -2.0), (3.0, 7.0), (18.0, -4.0)]
+        );
     }
 }

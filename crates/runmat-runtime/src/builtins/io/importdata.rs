@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "importdata";
@@ -558,10 +559,18 @@ fn parse_delimiter_arg(value: &Value) -> BuiltinResult<String> {
 }
 
 fn parse_header_lines(value: &Value) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            importdata_error_with(
+                &IMPORTDATA_ERROR_ARGUMENT,
+                "importdata: headerlinesIn must be a nonnegative integer scalar",
+            )
+        });
+    }
+
     let raw = match value {
         Value::Num(n) => *n,
-        Value::Int(i) => i.to_i64() as f64,
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             return Err(importdata_error_with(
                 &IMPORTDATA_ERROR_ARGUMENT,
@@ -575,7 +584,20 @@ fn parse_header_lines(value: &Value) -> BuiltinResult<usize> {
             "importdata: headerlinesIn must be a nonnegative integer scalar",
         ));
     }
-    Ok(raw as usize)
+    if raw > usize::MAX.saturating_sub(1) as f64 {
+        return Err(importdata_error_with(
+            &IMPORTDATA_ERROR_ARGUMENT,
+            "importdata: headerlinesIn is too large",
+        ));
+    }
+    let parsed = raw.round() as usize;
+    if parsed as f64 != raw || parsed == usize::MAX {
+        return Err(importdata_error_with(
+            &IMPORTDATA_ERROR_ARGUMENT,
+            "importdata: headerlinesIn is too large",
+        ));
+    }
+    Ok(parsed)
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
@@ -687,11 +709,11 @@ mod tests {
             .unwrap_or_else(|| panic!("missing {name}"))
     }
 
-    fn tensor_data(value: &Value) -> (&[f64], &[usize]) {
+    fn tensor_data(value: &Value) -> (Vec<f64>, Vec<usize>) {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        (&tensor.data, &tensor.shape)
+        (tensor.materialize_f64(), tensor.shape.clone())
     }
 
     fn cell_text(value: &Value, row: usize, col: usize) -> String {
@@ -745,6 +767,47 @@ mod tests {
         assert_eq!(shape, &[2, 2]);
         assert_eq!(data, &[1.0, 3.0, 2.0, 4.0]);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn importdata_headerlines_reads_typed_integer_storage_exactly() {
+        let header_lines =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2]), vec![1, 1])
+                .expect("header lines");
+        assert_eq!(
+            parse_header_lines(&Value::Tensor(header_lines)).expect("header lines"),
+            2
+        );
+
+        let negative =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("negative header lines");
+        assert!(parse_header_lines(&Value::Tensor(negative)).is_err());
+
+        assert_eq!(
+            parse_header_lines(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX))).ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(parse_header_lines(&Value::Num(1.0e300)).is_err());
+    }
+
+    #[test]
+    fn importdata_headerlines_typed_integer_tensors_ignore_poisoned_f64_mirrors() {
+        let classes = [
+            runmat_builtins::IntegerStorage::I8(vec![2]),
+            runmat_builtins::IntegerStorage::I16(vec![2]),
+            runmat_builtins::IntegerStorage::I32(vec![2]),
+            runmat_builtins::IntegerStorage::I64(vec![2]),
+            runmat_builtins::IntegerStorage::U8(vec![2]),
+            runmat_builtins::IntegerStorage::U16(vec![2]),
+            runmat_builtins::IntegerStorage::U32(vec![2]),
+            runmat_builtins::IntegerStorage::U64(vec![2]),
+        ];
+
+        for storage in classes {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("header lines");
+            assert_eq!(parse_header_lines(&Value::Tensor(tensor)).unwrap(), 2);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

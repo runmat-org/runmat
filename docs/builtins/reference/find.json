@@ -1,139 +1,48 @@
 {
   "title": "find",
   "category": "array/indexing",
-  "keywords": [
-    "find",
-    "nonzero",
-    "indices",
-    "row",
-    "column",
-    "gpu"
-  ],
-  "summary": "Locate nonzero indices and values in MATLAB and RunMat.",
+  "keywords": ["find", "nonzero", "indices", "row", "column", "gpu", "integer"],
+  "summary": "Locate nonzero indices and values with exact integer and GPU-aware semantics.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": [
-      "f32",
-      "f64"
-    ],
+    "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "WGPU provider executes find directly on the device; other providers fall back to the host and re-upload results to preserve residency."
+    "notes": "An f64 provider can execute find natively. Inputs resident in an f32 provider use a gather, host-compute, and re-upload fallback through the input handle's owning provider so double index outputs cannot round above 2^24 while outputs remain resident; resident logical and integer inputs use the same fallback to preserve their output classes and authoritative values."
   },
-  "fusion": {
-    "elementwise": false,
-    "reduction": false,
-    "max_inputs": 1,
-    "constants": "inline"
-  },
+  "fusion": {"elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline"},
   "requires_feature": null,
-  "tested": {
-    "unit": "builtins::array::indexing::find::tests",
-    "integration": "builtins::array::indexing::find::tests::find_gpu_roundtrip"
-  },
-  "description": "`find(X)` returns indices of nonzero elements in `X`. With one output it returns 1-based linear indices; with multiple outputs it returns row/column subscripts (and optionally values). Count limits and search-direction options follow MATLAB semantics.",
+  "tested": {"unit": "builtins::array::indexing::find::tests"},
+  "description": "`find(X)` returns the 1-based indices of nonzero elements in column-major order. The documented input classes are single, double, all eight integer classes, logical, and char, including complex numeric arrays. With three outputs, `v` preserves the selected value class and authoritative integer values.",
   "behaviors": [
-    "`find(X)` scans in column-major order and returns a column vector of linear indices.",
-    "`find(X, K)` limits the result to the first `K` matches; `K = 0` yields an empty result.",
-    "`find(X, K, 'first')` (default) scans from the start, while `'last'` scans from the end.",
-    "`find(X, 'last')` is equivalent to `find(X, 1, 'last')` and returns the final nonzero index.",
-    "`[row, col] = find(X)` returns per-element row and column subscripts for 2-D or N-D inputs (higher dimensions are flattened into the column index, matching MATLAB semantics).",
-    "`[row, col, val] = find(X)` also returns the corresponding values; complex inputs preserve their complex values.",
-    "Logical, char, integer, and double inputs are all supported. Empty inputs return empty outputs with MATLAB-compatible shapes."
+    "For one output, a row-vector input produces a row vector of indices; every other nonspecial input produces a column vector.",
+    "`find([])` and `find(0)` use MATLAB's empty-matrix convention and return `[]`; other empty or all-zero row vectors return `1×0`, and other empty results return `0×1`.",
+    "`find(X,K)` requires a positive integer scalar K. Typed K values are converted exactly and zero, negative, fractional, nonfinite, or out-of-platform-range values reject before X is traversed.",
+    "`find(X,K,'first')` scans from the start. `find(X,K,'last')` selects the last K matches but returns them in ascending linear-index order.",
+    "`[row,col,v] = find(X)` returns column vectors. For N-D X, col linearizes the trailing dimensions.",
+    "Integer and complex-integer inputs use authoritative storage for zero testing and preserve exact v values above flintmax. Logical v remains logical and single v remains single.",
+    "Typed-integer sparse storage is a gated RunMat extension because MATLAB sparse value storage is single, double, or logical.",
+    "`find(X,direction)` without K is a gated RunMat convenience extension; the documented MATLAB form is `find(X,K,direction)`."
   ],
   "examples": [
-    {
-      "description": "Finding linear indices of nonzero elements",
-      "input": "A = [0 4 0; 7 0 9];\nk = find(A)",
-      "output": "k =\n     2\n     4\n     6"
-    },
-    {
-      "description": "Limiting the number of matches",
-      "input": "A = [0 3 5 0 8];\nfirst_two = find(A, 2)",
-      "output": "first_two =\n     2\n     3"
-    },
-    {
-      "description": "Locating the last nonzero element",
-      "input": "A = [1 0 0 6 0 2];\nlast_index = find(A, 'last')",
-      "output": "last_index =\n     6"
-    },
-    {
-      "description": "Retrieving row and column subscripts",
-      "input": "A = [0 4 0; 7 0 9];\n[rows, cols] = find(A)",
-      "output": "rows =\n     2\n     1\n     2\n\ncols =\n     1\n     2\n     3"
-    },
-    {
-      "description": "Capturing values alongside indices (including complex inputs)",
-      "input": "Z = [0 1+2i; 0 0; 3-4i 0];\n[r, c, v] = find(Z)",
-      "output": "r =\n     1\n     3\n\nc =\n     1\n     1\n\nv =\n   1.0000 + 2.0000i\n   3.0000 - 4.0000i"
-    }
+    {"description": "Find linear indices", "input": "A = [0 4 0; 7 0 9];\nk = find(A)", "output": "k =\n     2\n     4\n     6"},
+    {"description": "Find the final two matches", "input": "A = [1 0 2 3 0];\nk = find(A,2,'last')", "output": "k =\n     3\n     4"},
+    {"description": "Preserve integer values", "input": "A = uint64([0 9007199254740993]);\n[r,c,v] = find(A)", "output": "r = 1\nc = 2\nv = uint64(9007199254740993)"}
   ],
   "faqs": [
-    {
-      "question": "What elements does `find` consider nonzero?",
-      "answer": "Any element whose real or imaginary component is nonzero. For logical inputs, `true` maps to 1 and is considered nonzero; `false` is ignored."
-    },
-    {
-      "question": "How are higher-dimensional arrays handled when requesting row/column outputs?",
-      "answer": "`find` treats the first dimension as rows and flattens the remaining dimensions into the column index, matching MATLAB's column-major storage."
-    },
-    {
-      "question": "What happens when I request more matches than exist?",
-      "answer": "`find` returns all available nonzero elements—no error is raised. For example, `find(A, 10)` simply returns every nonzero in `A` if it has fewer than 10."
-    },
-    {
-      "question": "Does `find` support char arrays and integers?",
-      "answer": "Yes. Characters are converted to their numeric code points during the test for nonzero values; integers are promoted to double precision for the result vectors."
-    },
-    {
-      "question": "Can I run `find` entirely on the GPU today?",
-      "answer": "Not yet. The runtime gathers GPU inputs, computes on the host, and re-uploads results. Providers can implement the optional `find` hook to make the entire path GPU-native in the future."
-    },
-    {
-      "question": "What shapes do empty results take?",
-      "answer": "When no element matches, the returned arrays are `0×1` column vectors, just like MATLAB."
-    },
-    {
-      "question": "How does `find` interact with fusion or auto-offload?",
-      "answer": "`find` is a control-flow style operation, so it does not participate in fusion. Auto-offload still keeps data resident on the GPU where possible by uploading results after the host computation."
-    },
-    {
-      "question": "Does `find` preserve complex values in the third output?",
-      "answer": "Yes. When you request the value output, complex inputs return a complex column vector that matches MATLAB's behaviour."
-    },
-    {
-      "question": "Can I combine `find` with `gpuArray` explicitly?",
-      "answer": "Absolutely. If you call `find(gpuArray(X))`, the runtime ensures outputs stay on the GPU so later GPU-aware builtins can consume them without additional transfers."
-    },
-    {
-      "question": "Is there a way to obtain subscripts for every dimension?",
-      "answer": "Use `find` to get linear indices and then call `ind2sub(size(X), ...)` if you need explicit per-dimension subscripts for N-D arrays."
-    }
+    {"question": "What counts as nonzero?", "answer": "A real value is nonzero when it is not exact zero. A complex value is nonzero when either component is nonzero. NaN and infinities are nonzero."},
+    {"question": "Are index outputs integers?", "answer": "No. MATLAB-compatible k, row, and col outputs are double. RunMat rejects an index that cannot be represented exactly as binary64 instead of silently rounding it."},
+    {"question": "What happens on an f32 GPU provider?", "answer": "RunMat gathers and computes the result on the host so double indices remain exact, then re-uploads the outputs through the input handle's owning provider to preserve gpuArray residency and device ownership. An f64 provider can execute the operation natively."},
+    {"question": "Does the third output preserve integer values?", "answer": "Yes. v preserves all eight integer classes and reads authoritative storage, so values above flintmax are not passed through an f64 mirror."},
+    {"question": "Why can strict compatibility reject find(X,'last')?", "answer": "MATLAB documents direction only after K. Enable RunMat extensions to use the direction-only convenience form, or write `find(X,1,'last')`."}
   ],
   "links": [
-    {
-      "label": "ind2sub",
-      "url": "./ind2sub"
-    },
-    {
-      "label": "sub2ind",
-      "url": "./sub2ind"
-    },
-    {
-      "label": "logical",
-      "url": "./logical"
-    },
-    {
-      "label": "gpuArray",
-      "url": "./gpuarray"
-    }
+    {"label": "ind2sub", "url": "./ind2sub"},
+    {"label": "sub2ind", "url": "./sub2ind"},
+    {"label": "logical", "url": "./logical"},
+    {"label": "gpuArray", "url": "./gpuarray"}
   ],
-  "source": {
-    "label": "`crates/runmat-runtime/src/builtins/array/indexing/find.rs`",
-    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/find.rs"
-  },
-  "gpu_residency": "Usually you do **not** need to move data with `gpuArray` manually. If a provider backs `find` directly, the entire operation stays on the GPU. Otherwise, RunMat gathers once, computes on the host, and then uploads results back to the active provider so subsequent kernels remain device-resident. This means GPU pipelines continue seamlessly without additional `gather`/`gpuArray` calls from user code.",
-  "gpu_behavior": [
-    "When the input already resides on the GPU (i.e., a `gpuArray`), RunMat gathers it if the active provider does not implement a dedicated `find` kernel, performs the computation on the host, and then uploads the results back to the provider. This preserves residency so downstream fused kernels can continue on the device without an explicit `gather`. Providers may implement a custom hook in the future to run `find` entirely on the GPU; until then, the automatic gather/upload path maintains correctness with a small one-off cost."
-  ]
+  "source": {"label": "`crates/runmat-runtime/src/builtins/array/indexing/find.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/indexing/find.rs"},
+  "gpu_residency": "F64 real inputs use the owning provider's hook when available. F32, logical, and integer resident inputs take a correctness-first host fallback because index outputs must be exact doubles and v must preserve its input class; fallback outputs are re-uploaded through that same owner so they remain resident on the input device.",
+  "gpu_behavior": ["Provider execution is limited to cases where the owning provider can produce exact double indices. Other resident inputs gather through their owning provider without using an integer f64 mirror, compute on the host, and restore outputs through that same provider even when another provider is active."]
 }

@@ -149,6 +149,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
 async fn trace_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     match value {
         Value::GpuTensor(handle) => trace_gpu(handle).await,
         Value::ComplexTensor(ct) => trace_complex_tensor(ct),
@@ -188,7 +189,7 @@ fn trace_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mut sum_im = 0.0;
     for idx in 0..diag_len {
         let linear = idx + idx * rows;
-        let (re, im) = ct.data[linear];
+        let (re, im) = ct.materialize_f64()[linear];
         sum_re += re;
         sum_im += im;
     }
@@ -256,7 +257,7 @@ fn trace_tensor_sum(tensor: &Tensor) -> f64 {
     let mut sum = 0.0;
     for idx in 0..diag_len {
         let linear = idx + idx * rows;
-        sum += tensor.data[linear];
+        sum += tensor::tensor_value_f64(tensor, linear);
     }
     sum
 }
@@ -284,7 +285,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::dispatcher::download_handle_async;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -328,6 +329,14 @@ pub(crate) mod tests {
     #[test]
     fn trace_rectangular_matrix() {
         let tensor = Tensor::new(vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0], vec![3, 2]).unwrap();
+        let result = trace_builtin(Value::Tensor(tensor)).expect("trace");
+        assert_eq!(result, Value::Num(10.0));
+    }
+
+    #[test]
+    fn trace_reads_typed_integer_diagonal_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![4, 1, 5, 2, 6, 3]), vec![3, 2])
+            .expect("tensor");
         let result = trace_builtin(Value::Tensor(tensor)).expect("trace");
         assert_eq!(result, Value::Num(10.0));
     }
@@ -394,7 +403,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).expect("tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -419,7 +428,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(Vec::new(), vec![0, 3]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -492,7 +501,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 8.0, 3.0, 6.0], vec![3, 2]).unwrap();
         let cpu = trace_numeric(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -503,13 +512,13 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         let expected = match cpu {
             Value::Num(n) => n,
-            Value::Tensor(t) if !t.data.is_empty() => t.data[0],
+            Value::Tensor(t) if !t.materialize_f64().is_empty() => t.materialize_f64()[0],
             Value::Tensor(_) => 0.0,
             other => panic!("unexpected cpu comparison value {other:?}"),
         };
         assert_eq!(gathered.shape, vec![1, 1]);
         let actual = gathered
-            .data
+            .materialize_f64()
             .first()
             .copied()
             .expect("gathered tensor should contain one element");

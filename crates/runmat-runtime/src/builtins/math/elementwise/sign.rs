@@ -4,7 +4,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, IntegerStorage, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -126,11 +126,15 @@ fn sign_error_with_detail(
 async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => sign_gpu(handle).await,
+        Value::Int(value) => Ok(Value::Int(sign_integer_scalar(value))),
         Value::Complex(re, im) => {
             let (re_out, im_out) = sign_complex(re, im);
             Ok(Value::Complex(re_out, im_out))
         }
-        Value::ComplexTensor(ct) => sign_complex_tensor(ct),
+        Value::ComplexTensor(ct) => {
+            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "sign")?;
+            sign_complex_tensor(ct)
+        }
         Value::CharArray(ca) => sign_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(sign_error_with_detail(
             &SIGN_ERROR_INVALID_INPUT,
@@ -205,9 +209,70 @@ fn sign_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sign_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&x| sign_real_scalar(x)).collect();
-    Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(sign_real_scalar).collect())
+        }
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| sign_real_scalar(f64::from(value)) as f32)
+                .collect(),
+        ),
+        integer => NumericStorage::from_integer_storage(sign_integer_storage(
+            &integer
+                .into_integer_storage()
+                .expect("integer NumericStorage variant"),
+        )),
+    };
+    Tensor::from_numeric_storage(output, shape)
         .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))
+}
+
+fn sign_integer_scalar(value: IntValue) -> IntValue {
+    match value {
+        IntValue::I8(value) => IntValue::I8(value.signum()),
+        IntValue::I16(value) => IntValue::I16(value.signum()),
+        IntValue::I32(value) => IntValue::I32(value.signum()),
+        IntValue::I64(value) => IntValue::I64(value.signum()),
+        IntValue::U8(value) => IntValue::U8(u8::from(value != 0)),
+        IntValue::U16(value) => IntValue::U16(u16::from(value != 0)),
+        IntValue::U32(value) => IntValue::U32(u32::from(value != 0)),
+        IntValue::U64(value) => IntValue::U64(u64::from(value != 0)),
+    }
+}
+
+fn sign_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
+    match storage {
+        IntegerStorage::I8(values) => {
+            IntegerStorage::I8(values.iter().map(|value| value.signum()).collect())
+        }
+        IntegerStorage::I16(values) => {
+            IntegerStorage::I16(values.iter().map(|value| value.signum()).collect())
+        }
+        IntegerStorage::I32(values) => {
+            IntegerStorage::I32(values.iter().map(|value| value.signum()).collect())
+        }
+        IntegerStorage::I64(values) => {
+            IntegerStorage::I64(values.iter().map(|value| value.signum()).collect())
+        }
+        IntegerStorage::U8(values) => {
+            IntegerStorage::U8(values.iter().map(|value| u8::from(*value != 0)).collect())
+        }
+        IntegerStorage::U16(values) => {
+            IntegerStorage::U16(values.iter().map(|value| u16::from(*value != 0)).collect())
+        }
+        IntegerStorage::U32(values) => {
+            IntegerStorage::U32(values.iter().map(|value| u32::from(*value != 0)).collect())
+        }
+        IntegerStorage::U64(values) => {
+            IntegerStorage::U64(values.iter().map(|value| u64::from(*value != 0)).collect())
+        }
+    }
 }
 
 fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -223,7 +288,7 @@ fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
 
 fn sign_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| sign_complex(re, im))
         .collect::<Vec<_>>();
@@ -286,6 +351,17 @@ pub(crate) mod tests {
 
     fn sign_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sign_builtin(value))
+    }
+
+    #[test]
+    fn sign_preserves_native_single_storage() {
+        let input = Tensor::from_f32(vec![-2.0, 0.0, 3.0, f32::NAN], vec![1, 4]).unwrap();
+        let output = sign_tensor(input).unwrap();
+        let NumericStorage::F32(values) = output.into_numeric_storage().unwrap() else {
+            panic!("expected single storage");
+        };
+        assert_eq!(&values[..3], &[-1.0, 0.0, 1.0]);
+        assert!(values[3].is_nan());
     }
 
     fn assert_complex_close(got: (f64, f64), want: (f64, f64), tol: f64) {
@@ -361,7 +437,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![-1.0, 0.0, 0.0, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![-1.0, 0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -388,8 +464,8 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data[0], (0.0, 0.0));
-                let (re, im) = out.data[1];
+                assert_eq!(out.materialize_f64()[0], (0.0, 0.0));
+                let (re, im) = out.materialize_f64()[1];
                 assert!((re - 0.7071067811865475).abs() < 1e-12);
                 assert!((im + 0.7071067811865475).abs() < 1e-12);
             }
@@ -405,7 +481,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 6]);
-                assert!(out.data.iter().all(|&v| (v - 1.0).abs() < 1e-12));
+                assert!(out
+                    .materialize_f64()
+                    .iter()
+                    .all(|&v| (v - 1.0).abs() < 1e-12));
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -419,7 +498,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec![0.0, 1.0, 0.0, 1.0]);
+                assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -430,9 +509,51 @@ pub(crate) mod tests {
     fn sign_int_values() {
         let value = Value::Int(IntValue::I32(-7));
         let result = sign_builtin(value).unwrap();
-        match result {
-            Value::Num(v) => assert_eq!(v, -1.0),
-            other => panic!("expected scalar result, got {other:?}"),
+        assert_eq!(result, Value::Int(IntValue::I32(-1)));
+    }
+
+    #[test]
+    fn sign_preserves_all_typed_integer_array_classes() {
+        let cases = [
+            (
+                IntegerStorage::I8(vec![i8::MIN, 0, i8::MAX]),
+                IntegerStorage::I8(vec![-1, 0, 1]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MIN, 0, i16::MAX]),
+                IntegerStorage::I16(vec![-1, 0, 1]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MIN, 0, i32::MAX]),
+                IntegerStorage::I32(vec![-1, 0, 1]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MIN, 0, i64::MAX]),
+                IntegerStorage::I64(vec![-1, 0, 1]),
+            ),
+            (
+                IntegerStorage::U8(vec![0, 1, u8::MAX]),
+                IntegerStorage::U8(vec![0, 1, 1]),
+            ),
+            (
+                IntegerStorage::U16(vec![0, 1, u16::MAX]),
+                IntegerStorage::U16(vec![0, 1, 1]),
+            ),
+            (
+                IntegerStorage::U32(vec![0, 1, u32::MAX]),
+                IntegerStorage::U32(vec![0, 1, 1]),
+            ),
+            (
+                IntegerStorage::U64(vec![0, 1, u64::MAX]),
+                IntegerStorage::U64(vec![0, 1, 1]),
+            ),
+        ];
+        for (input, expected) in cases {
+            let input = Tensor::new_integer(input, vec![1, expected.len()]).expect("tensor");
+            let Value::Tensor(result) = sign_builtin(Value::Tensor(input)).expect("sign") else {
+                panic!("expected tensor");
+            };
+            assert_eq!(result.integer_storage(), Some(&expected));
         }
     }
 
@@ -456,10 +577,10 @@ pub(crate) mod tests {
         let result = sign_builtin(Value::Tensor(tensor)).unwrap();
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.data[0], 1.0);
-                assert_eq!(out.data[1], -1.0);
-                assert_eq!(out.data[2], 0.0);
-                assert!(out.data[3].is_nan());
+                assert_eq!(out.materialize_f64()[0], 1.0);
+                assert_eq!(out.materialize_f64()[1], -1.0);
+                assert_eq!(out.materialize_f64()[2], 0.0);
+                assert!(out.materialize_f64()[3].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -495,14 +616,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![-3.0, -0.5, 0.0, 2.5], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = sign_builtin(Value::GpuTensor(handle)).expect("sign");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![-1.0, -1.0, 0.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![-1.0, -1.0, 0.0, 1.0]);
         });
     }
 
@@ -533,7 +654,11 @@ pub(crate) mod tests {
                 other => panic!("expected complex tensor, got {other:?}"),
             };
             assert_eq!(actual.shape, expected.shape);
-            for (got, want) in actual.data.iter().zip(expected.data.iter()) {
+            for (got, want) in actual
+                .materialize_f64()
+                .iter()
+                .zip(expected.materialize_f64().iter())
+            {
                 assert_complex_close(*got, *want, 1e-12);
             }
         });
@@ -588,7 +713,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![-3.0, 0.0, 4.0, f64::NAN], vec![2, 2]).unwrap();
         let cpu = sign_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -600,7 +725,7 @@ pub(crate) mod tests {
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                for (a, b) in gt.data.iter().zip(ct.data.iter()) {
+                for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                     if a.is_nan() && b.is_nan() {
                         continue;
                     }
@@ -666,7 +791,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (got, want) in actual.data.iter().zip(expected.data.iter()) {
+        for (got, want) in actual
+            .materialize_f64()
+            .iter()
+            .zip(expected.materialize_f64().iter())
+        {
             assert_complex_close(*got, *want, tol);
         }
     }

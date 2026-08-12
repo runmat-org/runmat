@@ -445,17 +445,14 @@ async fn build_chart(
             "histogram2: cannot convert YBinEdges tensor: {err}"
         ))
     })?;
-    let values = apply_normalization_2d(
-        &raw_counts,
-        &x_edges.data,
-        &y_edges.data,
-        &options.normalization,
-    )?;
+    let x_edges = tensor::tensor_into_values_f64(x_edges);
+    let y_edges = tensor::tensor_into_values_f64(y_edges);
+    let values = apply_normalization_2d(&raw_counts, &x_edges, &y_edges, &options.normalization)?;
 
     let surface = build_surface_from_values(
         &values,
-        &x_edges.data,
-        &y_edges.data,
+        &x_edges,
+        &y_edges,
         options.display_style,
         options.show_empty_bins,
         options.face_alpha,
@@ -465,8 +462,8 @@ async fn build_chart(
     Ok(Histogram2Chart {
         values,
         raw_counts,
-        x_bin_edges: x_edges.data,
-        y_bin_edges: y_edges.data,
+        x_bin_edges: x_edges,
+        y_bin_edges: y_edges,
         surface,
     })
 }
@@ -506,7 +503,7 @@ pub(crate) fn build_surface_from_values(
     }
     let x_bins = x_edges.len() - 1;
     let y_bins = y_edges.len() - 1;
-    if values.data.len() != x_bins * y_bins {
+    if tensor::tensor_element_len(values) != x_bins * y_bins {
         return Err(internal(
             "histogram2: Values shape does not match bin edges",
         ));
@@ -516,7 +513,7 @@ pub(crate) fn build_surface_from_values(
     let mut z_grid = vec![vec![0.0; y_bins]; x_bins];
     for (ix, row) in z_grid.iter_mut().enumerate().take(x_bins) {
         for (iy, cell) in row.iter_mut().enumerate().take(y_bins) {
-            let mut value = values.data[ix + iy * x_bins];
+            let mut value = tensor::tensor_value_f64(values, ix + iy * x_bins);
             if !show_empty_bins && value == 0.0 {
                 value = f64::NAN;
             }
@@ -600,12 +597,14 @@ pub(crate) fn apply_normalization_2d(
     validate_normalization(norm)?;
     let x_bins = x_edges.len().saturating_sub(1);
     let y_bins = y_edges.len().saturating_sub(1);
-    let counts = &raw_counts.data;
+    let counts = raw_counts
+        .as_f64_slice()
+        .ok_or_else(|| internal("histogram2: raw bin counts must be double"))?;
     let total: f64 = counts.iter().sum();
     let x_widths: Vec<f64> = x_edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
     let y_widths: Vec<f64> = y_edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
     let values = match norm {
-        "count" => counts.clone(),
+        "count" => counts.to_vec(),
         "probability" => {
             if total > 0.0 {
                 counts.iter().map(|&c| c / total).collect()
@@ -695,10 +694,19 @@ pub(crate) fn validate_face_alpha(value: f64) -> BuiltinResult<()> {
 }
 
 pub(crate) fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(invalid(format!("histogram2: {name} must be 0 or 1"))),
+        };
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::Num(value) => numeric_bool(*value, name),
-        Value::Int(value) => numeric_bool(value.to_f64(), name),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            numeric_bool(tensor::tensor_value_f64(tensor, 0), name)
+        }
         _ => {
             if let Some(text) = tensor::value_to_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
@@ -728,7 +736,9 @@ pub(crate) fn option_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(value.to_f64()),
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => Err(invalid(format!("histogram2: {name} must be a scalar"))),
     }
 }
@@ -771,6 +781,68 @@ mod tests {
         Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
     }
 
+    fn int_matrix(values: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(values),
+            vec![rows, cols],
+        )
+        .expect("integer matrix")
+    }
+
+    fn double_values(tensor: &Tensor) -> &[f64] {
+        tensor.as_f64_slice().expect("expected double tensor")
+    }
+
+    #[test]
+    fn histogram2_option_scalar_reads_typed_integer_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+
+        assert_eq!(
+            option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn histogram2_boolean_option_reads_all_integer_storage_classes_exactly() {
+        let storages = [
+            runmat_builtins::IntegerStorage::I8(vec![1]),
+            runmat_builtins::IntegerStorage::I16(vec![1]),
+            runmat_builtins::IntegerStorage::I32(vec![1]),
+            runmat_builtins::IntegerStorage::I64(vec![1]),
+            runmat_builtins::IntegerStorage::U8(vec![1]),
+            runmat_builtins::IntegerStorage::U16(vec![1]),
+            runmat_builtins::IntegerStorage::U32(vec![1]),
+            runmat_builtins::IntegerStorage::U64(vec![1]),
+        ];
+
+        for storage in storages {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("logical");
+            assert!(option_bool(&Value::Tensor(tensor), "ShowEmptyBins").expect("logical"));
+        }
+    }
+
+    #[test]
+    fn histogram2_surface_values_read_typed_integer_storage_exactly() {
+        let surface = build_surface_from_values(
+            &int_matrix(vec![1, 2, 3, 4], 2, 2),
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0, 2.0],
+            Histogram2DisplayStyle::Bar3,
+            true,
+            1.0,
+            None,
+            None,
+        )
+        .expect("surface");
+
+        assert_eq!(
+            surface.z_data.as_ref().unwrap(),
+            &vec![vec![1.0, 3.0], vec![2.0, 4.0]]
+        );
+    }
+
     #[test]
     fn histogram2_counts_edges_and_registers_chart_state() {
         let _guard = lock_plot_registry();
@@ -789,7 +861,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(values.shape, vec![2, 2]);
-        assert_eq!(values.data, vec![2.0, 0.0, 0.0, 2.0]);
+        assert_eq!(double_values(&values), &[2.0, 0.0, 0.0, 2.0]);
 
         let figure = clone_figure(current_figure_handle()).unwrap();
         let plot = figure.plots().next().unwrap();
@@ -830,7 +902,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(values.data, vec![0.5, 0.0, 0.0, 0.5]);
+        assert_eq!(double_values(&values), &[0.5, 0.0, 0.0, 0.5]);
         assert!(matches!(
             get_builtin(vec![Value::Num(handle), Value::String("DisplayStyle".into())]).unwrap(),
             Value::String(style) if style == "tile"
@@ -872,7 +944,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(values.data, vec![0.5, 0.5, 0.5, 1.0]);
+        assert_eq!(double_values(&values), &[0.5, 0.5, 0.5, 1.0]);
         let figure = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Surface(surface) = figure.plots().next().unwrap() else {
             panic!("expected surface plot");

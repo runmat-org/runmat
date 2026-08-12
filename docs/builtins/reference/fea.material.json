@@ -1,0 +1,19 @@
+{
+  "title": "fea.material",
+  "category": "fea",
+  "keywords": ["fea", "material", "mechanical", "thermal", "electrical"],
+  "summary": "Create typed RunMat FEA material data.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": null },
+  "description": "`fea.material(id, Name, Value, ...)` creates mechanical material data with optional thermal, acoustic, electrical, and plastic models.",
+  "behaviors": [
+    "The material id is exact text and the optional name defaults to that id.",
+    "Finite real numeric material fields accept all eight built-in integer classes and remain exact until one host-only binary64 model-storage conversion, so sufficiently wide integers can round.",
+    "Mechanical, thermal, acoustic, electrical, plastic, and electrical frequency-response numeric fields share this boundary.",
+    "Required fields, nested model shape, finiteness, and unknown fields are validated before the material object is returned; resident numeric fields are rejected."
+  ],
+  "examples": [{ "description": "Create a structural material", "input": "steel = fea.material(\"steel\", \"YoungsModulusPa\", int64(200000000000), \"PoissonRatio\", 0.30);" }],
+  "faqs": [{ "question": "Are material properties stored in their input integer class?", "answer": "No. Integers remain exact through argument parsing and then enter the analysis model's binary64 physical-property fields once." }],
+  "links": [{ "label": "FEA models", "url": "../../fea/models" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

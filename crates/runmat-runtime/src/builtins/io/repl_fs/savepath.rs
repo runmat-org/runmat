@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::io::repl_fs::tensor_char_codes_to_string;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_filesystem as vfs;
@@ -426,24 +427,7 @@ fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
         return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
     }
 
-    let mut text = String::with_capacity(tensor.data.len());
-    for &code in &tensor.data {
-        if !code.is_finite() {
-            return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
-        }
-        let rounded = code.round();
-        if (code - rounded).abs() > 1e-6 {
-            return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
-        }
-        let int_code = rounded as i64;
-        if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
-        }
-        let ch = char::from_u32(int_code as u32)
-            .ok_or_else(|| savepath_error(&SAVEPATH_ERROR_ARG_TYPE))?;
-        text.push(ch);
-    }
-    Ok(text)
+    tensor_char_codes_to_string(tensor).ok_or_else(|| savepath_error(&SAVEPATH_ERROR_ARG_TYPE))
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -779,7 +763,7 @@ pub(crate) mod tests {
             let ascii: Vec<f64> = text.chars().map(|ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(ascii.clone(), vec![1, ascii.len()]).expect("tensor");
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -815,7 +799,7 @@ pub(crate) mod tests {
         let ascii: Vec<f64> = text.chars().map(|ch| ch as u32 as f64).collect();
         let tensor = Tensor::new(ascii.clone(), vec![1, ascii.len()]).expect("tensor");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

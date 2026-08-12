@@ -36,12 +36,12 @@
     "reshape": "builtins::acceleration::gpu::gpuarray::tests::gpu_array_applies_size_arguments",
     "wgpu": "builtins::acceleration::gpu::gpuarray::tests::gpu_array_wgpu_roundtrip"
   },
-  "description": "`gpuArray(X)` moves data to the active GPU and returns a `gpuArray` handle for accelerated execution. Type controls, size forms, and `'like'` prototype behavior follow MATLAB semantics.",
+  "description": "`gpuArray(X)` moves data to the active GPU and returns a `gpuArray` handle for accelerated execution. RunMat mode additionally supports explicit dtype, size, and `'like'` construction extensions.",
   "behaviors": [
     "Accepts numeric tensors, complex tensors, logical arrays, booleans, character vectors, and existing gpuArray handles. Other input types raise descriptive errors so callers can gather or convert first.",
-    "Optional leading size arguments (`gpuArray(data, m, n, ...)` or `gpuArray(data, [m n ...])`) reshape the uploaded value. The element count must match the requested size.",
-    "Class strings such as `'single'`, `'double'`, `'int32'`, `'uint8'`, and `'logical'` convert real data before upload, matching MATLAB casting semantics (round-to-nearest with saturation for integers, `NaN`→0 for integer classes, and errors when converting `NaN` to logical). Complex inputs can be uploaded as double or single precision.",
-    "`'like', prototype` infers the dtype (and logical state) from `prototype`. Explicit class strings override the inference when both are supplied.",
+    "In `runmat` compatibility mode, optional leading size arguments reshape the uploaded value while preserving element count.",
+    "In `runmat` compatibility mode, class strings convert real data before upload and complex inputs can select double or single precision.",
+    "In `runmat` compatibility mode, `'like', prototype` infers dtype and logical state from the prototype.",
     "`\"gpuArray\"` strings are accepted as no-ops so call-sites that forward arguments from constructors such as `zeros(..., 'gpuArray')` remain compatible.",
     "Inputs that are already gpuArray handles pass through by default. When a class change is requested, RunMat gathers the data, performs the conversion, uploads a fresh buffer, and frees the old handle.",
     "When no acceleration provider is registered, the builtin raises `gpuArray: no acceleration provider registered`."
@@ -113,7 +113,7 @@
     "label": "crates/runmat-runtime/src/builtins/acceleration/gpu/gpuarray.rs",
     "url": "crates/runmat-runtime/src/builtins/acceleration/gpu/gpuarray.rs"
   },
-  "gpu_residency": "RunMat’s auto-offload planner transparently moves and keeps tensors on the GPU when it predicts a benefit. You typically call `gpuArray` to honour MATLAB scripts that opt-in explicitly, to enforce residency before a long computation, or when you need MATLAB-style dtype conversion alongside the upload. The builtin never forces a host copy once the handle has been created.",
+  "gpu_residency": "RunMat’s auto-offload planner transparently moves and keeps tensors on the GPU when it predicts a benefit. MATLAB-compatible scripts use `gpuArray(X)` for explicit upload; dtype, size, and `'like'` construction forms are RunMat-only extensions.",
   "gpu_behavior": [
     "`gpuArray` itself runs on the CPU. For host inputs it prepares a `HostTensorView` and forwards it to the provider’s `upload` hook. Complex tensors are uploaded as interleaved real/imaginary buffers and marked with complex storage metadata so `gather` reconstructs a host `ComplexTensor`. For gpuArray inputs that require dtype conversion, the builtin gathers the existing buffer, casts the result on the host, uploads a replacement, and frees the original handle. Providers that do not yet implement `upload` should report an informative error; the builtin surface mirrors MATLAB’s message by prefixing it with `gpuArray:`."
   ]

@@ -120,6 +120,15 @@ pub enum ElementType {
     U16 = 9,
     U32 = 10,
     U64 = 11,
+    ComplexF32 = 12,
+    ComplexI8 = 13,
+    ComplexI16 = 14,
+    ComplexI32 = 15,
+    ComplexI64 = 16,
+    ComplexU8 = 17,
+    ComplexU16 = 18,
+    ComplexU32 = 19,
+    ComplexU64 = 20,
 }
 
 impl ElementType {
@@ -129,6 +138,10 @@ impl ElementType {
             Self::I16 | Self::U16 => 2,
             Self::F32 | Self::I32 | Self::U32 => 4,
             Self::F64 | Self::I64 | Self::U64 => 8,
+            Self::ComplexI8 | Self::ComplexU8 => 2,
+            Self::ComplexF32 | Self::ComplexI32 | Self::ComplexU32 => 8,
+            Self::ComplexI16 | Self::ComplexU16 => 4,
+            Self::ComplexI64 | Self::ComplexU64 => 16,
             Self::ComplexF64 => 16,
         }
     }

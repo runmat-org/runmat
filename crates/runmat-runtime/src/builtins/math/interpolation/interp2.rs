@@ -571,18 +571,22 @@ async fn axis_from_value(
     if let Ok(t) = tensor_value {
         if is_vector_shape(&t.shape) {
             let expected = if is_x { cols } else { rows };
-            if t.data.len() != expected {
+            if t.len() != expected {
                 return Err(interp2_invalid_argument(
                     "axis vector length must match Z dimensions",
                 ));
             }
-            return Ok(t.data);
+            return Ok(tensor::tensor_into_values_f64(t));
         }
         if t.rows == rows && t.cols == cols {
             return if is_x {
-                Ok((0..cols).map(|col| t.data[col * rows]).collect())
+                Ok((0..cols)
+                    .map(|col| tensor::tensor_value_f64(&t, col * rows))
+                    .collect())
             } else {
-                Ok((0..rows).map(|row| t.data[row]).collect())
+                Ok((0..rows)
+                    .map(|row| tensor::tensor_value_f64(&t, row))
+                    .collect())
             };
         }
     }
@@ -679,7 +683,7 @@ fn eval_nearest(parsed: &ParsedInterp2, xq: f64, yq: f64) -> f64 {
 }
 
 fn z_at(z: &Tensor, row: usize, col: usize) -> f64 {
-    z.data[row + col * z.rows]
+    tensor::tensor_value_f64(z, row + col * z.rows)
 }
 
 fn nearest_index(axis: &[f64], q: f64, extrap: &Extrapolation) -> Option<usize> {
@@ -708,9 +712,15 @@ fn nearest_index(axis: &[f64], q: f64, extrap: &Extrapolation) -> Option<usize> 
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     #[test]
@@ -736,6 +746,38 @@ mod tests {
             Value::String("nearest".to_string()),
         ]))
         .expect("interp2");
+        assert_eq!(value, Value::Num(2.0));
+    }
+
+    #[test]
+    fn interp2_vector_axes_read_typed_integer_storage_exactly() {
+        let value = block_on(interp2_builtin(vec![
+            integer_tensor(IntegerStorage::I16(vec![10, 20]), vec![1, 2]),
+            integer_tensor(IntegerStorage::I16(vec![100, 200]), vec![1, 2]),
+            integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
+            Value::Num(18.0),
+            Value::Num(120.0),
+            Value::String("nearest".to_string()),
+        ]))
+        .expect("interp2");
+
+        assert_eq!(value, Value::Num(2.0));
+    }
+
+    #[test]
+    fn interp2_full_grid_axes_read_typed_integer_storage_exactly() {
+        let x_grid = integer_tensor(IntegerStorage::I16(vec![10, 10, 20, 20]), vec![2, 2]);
+        let y_grid = integer_tensor(IntegerStorage::I16(vec![100, 200, 100, 200]), vec![2, 2]);
+        let value = block_on(interp2_builtin(vec![
+            x_grid,
+            y_grid,
+            integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
+            Value::Num(18.0),
+            Value::Num(120.0),
+            Value::String("nearest".to_string()),
+        ]))
+        .expect("interp2");
+
         assert_eq!(value, Value::Num(2.0));
     }
 

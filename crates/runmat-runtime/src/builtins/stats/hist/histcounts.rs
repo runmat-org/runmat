@@ -2,11 +2,14 @@
 
 use std::cmp::Ordering;
 
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -199,6 +202,35 @@ pub const HISTCOUNTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &HISTCOUNTS_ERRORS,
 };
 
+const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Host data accepts all eight integer classes; interactive GPU data accepts integer classes through 32 bits and rejects int64/uint64 before gather.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "bins_and_numeric_controls",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed integer bin counts, explicit edges, widths, and limits are parsed according to each control's scalar/vector contract.",
+    },
+];
+
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "[N, edges] = histcounts(X, bins/name-value controls)",
+        inputs: &INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GpuRestricted,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer observations enter the documented double histogram domain and counts/edges are double; integer NumBins parsing remains exact and 64-bit integer gpuArray data is unsupported.",
+    }];
+
 fn builtin_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -256,6 +288,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     type_resolver(histcounts_type),
     descriptor(crate::builtins::stats::hist::histcounts::HISTCOUNTS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::stats::hist::histcounts::INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
 async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -289,6 +322,14 @@ async fn histcounts_gpu(
     handle: GpuTensorHandle,
     options: &HistcountsOptions,
 ) -> BuiltinResult<HistcountsEvaluation> {
+    if matches!(
+        runmat_accelerate_api::handle_integer_type(&handle),
+        Some(IntegerElementType::I64 | IntegerElementType::U64)
+    ) {
+        return Err(builtin_error(
+            "histcounts: 64-bit integer gpuArray inputs are not supported",
+        ));
+    }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     histcounts_from_tensor(tensor, options)
 }
@@ -308,8 +349,12 @@ fn histcounts_from_tensor(
     let mut values = Vec::new();
     let mut min_val: Option<f64> = None;
     let mut max_val: Option<f64> = None;
+    // Numeric histogram edges and normalization are defined in a floating
+    // computation domain. Keep this conversion explicit: automatic binning of
+    // wide integer inputs intentionally has double-precision granularity.
+    let samples = tensor::tensor_values_f64_cow(&tensor);
 
-    for &sample in &tensor.data {
+    for &sample in samples.iter() {
         if sample.is_nan() {
             continue;
         }
@@ -1008,39 +1053,28 @@ fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
             Ok(BinArgument::NumBins(n))
         }
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                let scalar_value = tensor.data[0];
-                if !scalar_value.is_finite() || scalar_value <= 0.0 {
-                    return Err(builtin_error(
-                        "histcounts: NumBins must be a positive finite scalar",
-                    ));
-                }
-                let rounded = scalar_value.round();
-                if (scalar_value - rounded).abs() > f64::EPSILON {
-                    return Err(builtin_error("histcounts: NumBins must be an integer"));
-                }
-                Ok(BinArgument::NumBins(rounded as usize))
+            if tensor::is_scalar_tensor(tensor) {
+                Ok(BinArgument::NumBins(positive_usize(
+                    value,
+                    "histcounts",
+                    "NumBins",
+                )?))
             } else {
-                let edges = tensor.data.clone();
+                let edges = tensor::tensor_values_f64(tensor);
                 Ok(BinArgument::Edges(edges))
             }
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
-            if tensor.data.len() == 1 {
-                let n = tensor.data[0];
-                if n <= 0.0 || !n.is_finite() {
-                    return Err(builtin_error(
-                        "histcounts: NumBins must be a positive finite scalar",
-                    ));
-                }
-                let rounded = n.round();
-                if (n - rounded).abs() > f64::EPSILON {
-                    return Err(builtin_error("histcounts: NumBins must be an integer"));
-                }
-                Ok(BinArgument::NumBins(rounded as usize))
+            if logical.data.len() == 1 {
+                Ok(BinArgument::NumBins(positive_usize_from_f64(
+                    f64::from(logical.data[0]),
+                    "histcounts",
+                    "NumBins",
+                )?))
             } else {
-                Ok(BinArgument::Edges(tensor.data))
+                Ok(BinArgument::Edges(
+                    logical.data.iter().copied().map(f64::from).collect(),
+                ))
             }
         }
         Value::GpuTensor(_) => Err(builtin_error(
@@ -1068,11 +1102,23 @@ fn is_option_key(value: &Value) -> bool {
 fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| builtin_error(format!("{name}: {option} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
+    if let Some(value) = tensor::scalar_integer_value(value) {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0 && *value < usize::MAX)
+            .ok_or_else(|| {
+                builtin_error(format!("{name}: {option} must be a positive finite scalar"))
+            });
+    }
     let scalar = scalar_value(value, name, option)?;
+    positive_usize_from_f64(scalar, name, option)
+}
+
+fn positive_usize_from_f64(scalar: f64, name: &str, option: &str) -> BuiltinResult<usize> {
     if scalar <= 0.0 || !scalar.is_finite() {
         return Err(builtin_error(format!(
             "{name}: {option} must be a positive finite scalar"
@@ -1082,6 +1128,11 @@ fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usiz
     if (scalar - rounded).abs() > f64::EPSILON {
         return Err(builtin_error(format!(
             "{name}: {option} must be an integer"
+        )));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(builtin_error(format!(
+            "{name}: {option} is outside the supported range"
         )));
     }
     Ok(rounded as usize)
@@ -1106,10 +1157,10 @@ fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if !tensor::is_scalar_tensor(tensor) {
                 return Err(builtin_error(format!("{name}: {option} must be a scalar")));
             }
-            Ok(tensor.data[0])
+            Ok(tensor::tensor_value_f64(tensor, 0))
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
@@ -1157,14 +1208,20 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+    use runmat_builtins::{
+        IntValue, IntegerStorage, NumericStorage, ResolveContext, Tensor, Type, Value,
+    };
 
     fn values_from_tensor(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             Value::Num(n) => vec![n],
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
     }
 
     #[test]
@@ -1230,6 +1287,119 @@ pub(crate) mod tests {
         let (counts_val, edges_val) = eval.into_pair();
         assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
         assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn histcounts_data_reads_typed_integer_storage_exactly() {
+        let eval = block_on(evaluate(
+            integer_tensor(IntegerStorage::I16(vec![1, 2, 2, 4, 5, 7]), vec![6, 1]),
+            &[Value::Int(IntValue::I32(3))],
+        ))
+        .expect("histcounts");
+        let (counts_val, edges_val) = eval.into_pair();
+        assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
+        assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
+    }
+
+    #[test]
+    fn histcounts_accepts_every_host_integer_class_and_returns_double_outputs() {
+        let storages = vec![
+            IntegerStorage::I8(vec![1, 2, 3]),
+            IntegerStorage::I16(vec![1, 2, 3]),
+            IntegerStorage::I32(vec![1, 2, 3]),
+            IntegerStorage::I64(vec![1, 2, 3]),
+            IntegerStorage::U8(vec![1, 2, 3]),
+            IntegerStorage::U16(vec![1, 2, 3]),
+            IntegerStorage::U32(vec![1, 2, 3]),
+            IntegerStorage::U64(vec![1, 2, 3]),
+        ];
+        for storage in storages {
+            let eval = block_on(evaluate(
+                integer_tensor(storage, vec![3, 1]),
+                &[Value::Tensor(
+                    Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("edges"),
+                )],
+            ))
+            .expect("histcounts");
+            let (counts, edges) = eval.into_pair();
+            for (value, expected) in [(counts, vec![1.0, 2.0]), (edges, vec![0.0, 2.0, 4.0])] {
+                let Value::Tensor(tensor) = value else {
+                    panic!("expected double tensor");
+                };
+                assert_eq!(tensor.materialize_f64(), expected);
+                assert!(matches!(
+                    tensor.into_numeric_storage().unwrap(),
+                    NumericStorage::F64(_)
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn histcounts_numbins_preserves_typed_integers_and_rejects_lossy_f64() {
+        assert_eq!(
+            positive_usize(&Value::Int(IntValue::U16(3)), "histcounts", "NumBins").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_usize(
+                &integer_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+                "histcounts",
+                "NumBins",
+            )
+            .unwrap(),
+            4
+        );
+        assert_eq!(
+            positive_usize(
+                &integer_tensor(IntegerStorage::U16(vec![9]), vec![1, 1]),
+                "histcounts",
+                "NumBins",
+            )
+            .unwrap(),
+            9
+        );
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            integer_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+            integer_tensor(IntegerStorage::U64(vec![usize::MAX as u64]), vec![1, 1]),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+        ] {
+            assert!(positive_usize(&value, "histcounts", "NumBins").is_err());
+        }
+    }
+
+    #[test]
+    fn histcounts_numeric_vectors_read_typed_integer_storage_exactly() {
+        assert_eq!(
+            numeric_vector(
+                &integer_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3]),
+                "histcounts",
+                "BinEdges",
+            )
+            .unwrap(),
+            vec![1.0, 3.0, 5.0]
+        );
+        match classify_bin_argument(&integer_tensor(
+            IntegerStorage::U16(vec![2, 4, 6]),
+            vec![1, 3],
+        ))
+        .unwrap()
+        {
+            BinArgument::Edges(edges) => assert_eq!(edges, vec![2.0, 4.0, 6.0]),
+            other => panic!("expected edge vector, got {other:?}"),
+        }
+        assert_eq!(
+            scalar_value(
+                &integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                "histcounts",
+                "BinWidth",
+            )
+            .unwrap(),
+            2.0
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1393,11 +1563,7 @@ pub(crate) mod tests {
     fn histcounts_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let eval = block_on(evaluate(
                 Value::GpuTensor(handle),
                 &[Value::Tensor(
@@ -1411,6 +1577,52 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn histcounts_rejects_64_bit_integer_gpu_inputs_before_gather() {
+        test_support::with_test_provider(|provider| {
+            for storage in [
+                IntegerStorage::I64(vec![1, 2, 3]),
+                IntegerStorage::U64(vec![1, 2, 3]),
+            ] {
+                let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                let error = block_on(evaluate(Value::GpuTensor(handle), &[]))
+                    .err()
+                    .expect("64-bit integer gpuArray should be rejected");
+                assert!(error
+                    .message()
+                    .contains("64-bit integer gpuArray inputs are not supported"));
+            }
+        });
+    }
+
+    #[test]
+    fn histcounts_accepts_supported_integer_gpu_classes() {
+        test_support::with_test_provider(|provider| {
+            for storage in [
+                IntegerStorage::I8(vec![1, 2, 3]),
+                IntegerStorage::I16(vec![1, 2, 3]),
+                IntegerStorage::I32(vec![1, 2, 3]),
+                IntegerStorage::U8(vec![1, 2, 3]),
+                IntegerStorage::U16(vec![1, 2, 3]),
+                IntegerStorage::U32(vec![1, 2, 3]),
+            ] {
+                let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
+                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+                let eval = block_on(evaluate(
+                    Value::GpuTensor(handle),
+                    &[Value::Tensor(
+                        Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("edges"),
+                    )],
+                ))
+                .expect("supported integer gpuArray");
+                let (counts, edges) = eval.into_pair();
+                assert_eq!(values_from_tensor(counts), vec![1.0, 2.0]);
+                assert_eq!(values_from_tensor(edges), vec![0.0, 2.0, 4.0]);
+            }
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
@@ -1420,11 +1632,7 @@ pub(crate) mod tests {
         );
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("upload");
+        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let eval = block_on(evaluate(
             Value::GpuTensor(handle),
             &[Value::Tensor(

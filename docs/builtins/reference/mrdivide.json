@@ -34,7 +34,7 @@
   "description": "`X = A / B` (or `mrdivide(A, B)`) solves `X * B = A`. Square/nonsingular, rectangular, and rank-deficient solve paths follow MATLAB right-division semantics.",
   "behaviors": [
     "Scalars divide exactly: `A / s` scales `A` by `1/s`, while `s / B` requires `B` to be scalar.",
-    "Logical and integer inputs are promoted to double precision before solving.",
+    "Logical matrix inputs are promoted to double precision. Integer participation is limited to the documented scalar-right form: same-class integer operands or an integer array with a scalar double use exact element-wise division and preserve the integer class; integer matrix solving is rejected.",
     "Purely real operands produce real outputs; any complex operand promotes the computation (and result) to complex arithmetic.",
     "Inputs must be effectively two-dimensional; trailing singleton dimensions are allowed.",
     "The number of columns must agree (`size(A, 2) == size(B, 2)`), otherwise RunMat raises the MATLAB error `\"Matrix dimensions must agree.\"`",
@@ -77,7 +77,7 @@
     },
     {
       "question": "How are logical or integer arrays handled?",
-      "answer": "They are promoted to double precision (`true → 1`, `false → 0`) before solving, matching MATLAB semantics."
+      "answer": "Logical matrices are promoted to double. Integer inputs are accepted only when the right operand is scalar, where `A / B` is equivalent to `A ./ B`, preserves the integer class, and retains resident output on the source provider."
     },
     {
       "question": "How does RunMat handle NaN or Inf values?",

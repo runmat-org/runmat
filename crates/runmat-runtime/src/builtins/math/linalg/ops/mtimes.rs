@@ -1,10 +1,10 @@
 //! MATLAB-compatible `mtimes` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    Tensor, Value,
+    IntegerStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{linalg, tensor};
+use crate::builtins::common::{gpu_helpers, linalg, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::linalg::type_resolvers::matmul_type;
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
@@ -92,7 +92,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Calls the provider `matmul` hook when available; otherwise gathers inputs and executes the CPU fallback.",
+    notes: "Calls the provider `matmul` hook for supported floating matrix products; integer scalar products gather through exact typed storage, apply saturating class-preserving multiplication, and restore GPU residency when an input was resident.",
 };
 
 fn mtimes_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -157,17 +157,54 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
 async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
+        || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
+    {
+        return Err(mtimes_invalid_input(
+            "complex integer arithmetic is not supported",
+        ));
+    }
     mtimes_eval(&lhs, &rhs).await
 }
 
 pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     if contains_integer(lhs) || contains_integer(rhs) {
-        return mtimes_cpu(lhs.clone(), rhs.clone()).await;
+        return mtimes_integer_eval(lhs, rhs).await;
     }
     if let Some(result) = try_gpu_matmul(lhs, rhs).await? {
         return Ok(result);
     }
     mtimes_cpu(lhs.clone(), rhs.clone()).await
+}
+
+async fn mtimes_integer_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
+    let retain_gpu_residency =
+        matches!(lhs, Value::GpuTensor(_)) || matches!(rhs, Value::GpuTensor(_));
+    let lhs = crate::dispatcher::gather_if_needed_async(lhs)
+        .await
+        .map_err(map_control_flow)?;
+    let rhs = crate::dispatcher::gather_if_needed_async(rhs)
+        .await
+        .map_err(map_control_flow)?;
+    let result = mtimes_cpu(lhs, rhs).await?;
+    if !retain_gpu_residency {
+        return Ok(result);
+    }
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| mtimes_internal_error("mtimes: acceleration provider is unavailable"))?;
+    let tensor = match result {
+        Value::Tensor(tensor) => tensor,
+        Value::Int(value) => Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+            .map_err(mtimes_internal_error)?,
+        other => {
+            return Err(mtimes_internal_error(format!(
+                "mtimes: integer scalar multiplication returned unsupported value {other:?}"
+            )))
+        }
+    };
+    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+        .map_err(|error| mtimes_internal_error(format!("mtimes: {error}")))?;
+    Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
 async fn try_gpu_matmul(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
@@ -255,7 +292,7 @@ async fn real_scalar_value(
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data.first().copied()),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(Some(tensor::tensor_value_f64(t, 0))),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(Some(if logical.data[0] != 0 { 1.0 } else { 0.0 }))
         }
@@ -270,7 +307,7 @@ async fn real_scalar_value(
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
-    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
+    handle.shape.iter().copied().product::<usize>() == 1
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -416,12 +453,7 @@ fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
 ) -> BuiltinResult<GpuTensorHandle> {
-    let view = HostTensorView {
-        data: &tensor.data,
-        shape: &tensor.shape,
-    };
-    let handle = provider
-        .upload(&view)
+    let handle = gpu_helpers::upload_tensor(provider, tensor)
         .map_err(|e| mtimes_internal_error(format!("mtimes: {e}")))?;
     Ok(handle)
 }
@@ -441,6 +473,7 @@ fn contains_integer(value: &Value) -> bool {
     match value {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
+        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
         _ => false,
     }
 }
@@ -450,6 +483,7 @@ fn mtimes_scalar(value: &Value) -> bool {
         Value::Int(_) | Value::Num(_) | Value::Bool(_) => true,
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
+        Value::GpuTensor(handle) => is_scalar_handle(handle),
         _ => false,
     }
 }
@@ -484,10 +518,69 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::IntegerElementType;
     use runmat_builtins::{IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
+    }
+
+    fn integer_scalar_mtimes_cases() -> Vec<(IntegerStorage, IntValue, IntegerStorage)> {
+        vec![
+            (
+                IntegerStorage::I8(vec![i8::MAX, i8::MIN, 2]),
+                IntValue::I8(2),
+                IntegerStorage::I8(vec![i8::MAX, i8::MIN, 4]),
+            ),
+            (
+                IntegerStorage::I16(vec![i16::MAX, i16::MIN, 2]),
+                IntValue::I16(2),
+                IntegerStorage::I16(vec![i16::MAX, i16::MIN, 4]),
+            ),
+            (
+                IntegerStorage::I32(vec![i32::MAX, i32::MIN, 2]),
+                IntValue::I32(2),
+                IntegerStorage::I32(vec![i32::MAX, i32::MIN, 4]),
+            ),
+            (
+                IntegerStorage::I64(vec![i64::MAX, i64::MIN, 2]),
+                IntValue::I64(2),
+                IntegerStorage::I64(vec![i64::MAX, i64::MIN, 4]),
+            ),
+            (
+                IntegerStorage::U8(vec![u8::MAX, 2, 0]),
+                IntValue::U8(2),
+                IntegerStorage::U8(vec![u8::MAX, 4, 0]),
+            ),
+            (
+                IntegerStorage::U16(vec![u16::MAX, 2, 0]),
+                IntValue::U16(2),
+                IntegerStorage::U16(vec![u16::MAX, 4, 0]),
+            ),
+            (
+                IntegerStorage::U32(vec![u32::MAX, 2, 0]),
+                IntValue::U32(2),
+                IntegerStorage::U32(vec![u32::MAX, 4, 0]),
+            ),
+            (
+                IntegerStorage::U64(vec![u64::MAX, (1_u64 << 53) + 1, 0]),
+                IntValue::U64(2),
+                IntegerStorage::U64(vec![u64::MAX, (1_u64 << 54) + 2, 0]),
+            ),
+        ]
+    }
+
+    fn integer_element_type(storage: &IntegerStorage) -> IntegerElementType {
+        match storage {
+            IntegerStorage::I8(_) => IntegerElementType::I8,
+            IntegerStorage::I16(_) => IntegerElementType::I16,
+            IntegerStorage::I32(_) => IntegerElementType::I32,
+            IntegerStorage::I64(_) => IntegerElementType::I64,
+            IntegerStorage::U8(_) => IntegerElementType::U8,
+            IntegerStorage::U16(_) => IntegerElementType::U16,
+            IntegerStorage::U32(_) => IntegerElementType::U32,
+            IntegerStorage::U64(_) => IntegerElementType::U64,
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -499,7 +592,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![58.0, 139.0, 64.0, 154.0]);
+                assert_eq!(t.materialize_f64(), vec![58.0, 139.0, 64.0, 154.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -554,7 +647,7 @@ pub(crate) mod tests {
         let result = mtimes_builtin(Value::Num(0.5), Value::Tensor(a)).expect("mtimes");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![0.5, 1.0, 1.5, 2.0]);
+                assert_eq!(t.materialize_f64(), vec![0.5, 1.0, 1.5, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -567,7 +660,7 @@ pub(crate) mod tests {
         let result = mtimes_builtin(Value::Tensor(a), Value::Num(3.0)).expect("mtimes");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.data, vec![3.0, 6.0, 9.0, 12.0]);
+                assert_eq!(t.materialize_f64(), vec![3.0, 6.0, 9.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -595,7 +688,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![2.0, 3.0, 4.0, 5.0]);
+                assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -615,7 +708,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, ct.shape);
                 assert_eq!(
-                    t.data,
+                    t.materialize_f64(),
                     vec![(3.0, 1.0), (-1.0, -7.0), (11.0, 1.0), (-1.0, -15.0)]
                 );
             }
@@ -652,12 +745,64 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn integer_mtimes_rejects_two_nonscalar_operands() {
+    fn same_class_integer_array_scalar_mtimes_is_exact_in_both_orders() {
+        for (array, scalar, expected) in integer_scalar_mtimes_cases() {
+            let array =
+                Value::Tensor(Tensor::new_integer(array, vec![1, 3]).expect("integer array"));
+            for (lhs, rhs) in [
+                (array.clone(), Value::Int(scalar.clone())),
+                (
+                    Value::Tensor(
+                        Tensor::new_integer(
+                            IntegerStorage::from_scalar(scalar.clone()),
+                            vec![1, 1],
+                        )
+                        .expect("integer scalar tensor"),
+                    ),
+                    array.clone(),
+                ),
+            ] {
+                let result = mtimes_builtin(lhs, rhs).expect("same-class integer scalar mtimes");
+                assert_eq!(
+                    result,
+                    Value::Tensor(
+                        Tensor::new_integer(expected.clone(), vec![1, 3]).expect("integer result")
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn integer_scalar_mtimes_rejects_nonscalar_floating_partner() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = mtimes_builtin(Value::Int(IntValue::I32(2)), Value::Tensor(a))
-            .expect_err("integer matrix product must reject");
+            .expect_err("nonscalar floating partner must reject");
         assert_eq!(err.identifier(), MTIMES_ERROR_INVALID_INPUT.identifier);
-        assert!(err.message().contains("scalar double or logical"));
+        assert!(err
+            .message()
+            .contains("integer arrays can only be combined with scalar double values"));
+    }
+
+    #[test]
+    fn integer_mtimes_rejects_matrix_products_and_mixed_integer_classes() {
+        let lhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).expect("lhs"),
+        );
+        let rhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![5, 6, 7, 8]), vec![2, 2]).expect("rhs"),
+        );
+        let error = mtimes_builtin(lhs, rhs).expect_err("integer matrix product must reject");
+        assert_eq!(error.identifier(), MTIMES_ERROR_INVALID_INPUT.identifier);
+        assert!(error.message().contains("other input must be scalar"));
+
+        let lhs = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("lhs"),
+        );
+        let error = mtimes_builtin(lhs, Value::Int(IntValue::U16(2)))
+            .expect_err("mixed integer classes must reject");
+        assert_eq!(error.identifier(), MTIMES_ERROR_INVALID_INPUT.identifier);
+        assert!(error.message().contains("same integer class"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -666,7 +811,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &matrix.data,
+                data: &matrix.materialize_f64(),
                 shape: &matrix.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -679,8 +824,132 @@ pub(crate) mod tests {
                 other => panic!("expected gpu tensor, got {other:?}"),
             };
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![2.0, 4.0, 6.0, 8.0]);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
         });
+    }
+
+    #[test]
+    fn gpu_nonscalar_floating_partner_rejects_typed_integer_scalar() {
+        test_support::with_test_provider(|provider| {
+            let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &matrix.materialize_f64(),
+                shape: &matrix.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let scalar =
+                Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("scalar");
+
+            let error = mtimes_builtin(Value::Tensor(scalar), Value::GpuTensor(handle))
+                .expect_err("nonscalar floating GPU partner must reject");
+            assert_eq!(error.identifier(), MTIMES_ERROR_INVALID_INPUT.identifier);
+            assert!(error
+                .message()
+                .contains("integer arrays can only be combined with scalar double values"));
+        });
+    }
+
+    #[test]
+    fn resident_integer_scalar_mtimes_preserves_all_classes_and_residency() {
+        test_support::with_test_provider(|provider| {
+            for (array, scalar, expected) in integer_scalar_mtimes_cases() {
+                let array = Tensor::new_integer(array, vec![1, 3]).expect("resident integer array");
+                let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+                let result =
+                    mtimes_builtin(Value::GpuTensor(array_handle), Value::Int(scalar.clone()))
+                        .expect("resident integer array times host scalar");
+                let Value::GpuTensor(result_handle) = &result else {
+                    panic!("expected resident integer result, got {result:?}");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(result_handle),
+                    Some(integer_element_type(&expected))
+                );
+                let gathered = test_support::gather(result).expect("gather integer result");
+                assert_eq!(gathered.integer_storage(), Some(&expected));
+
+                let scalar_tensor =
+                    Tensor::new_integer(IntegerStorage::from_scalar(scalar), vec![1, 1])
+                        .expect("resident scalar");
+                let scalar_handle =
+                    gpu_helpers::upload_tensor(provider, &scalar_tensor).expect("upload scalar");
+                let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+                let result = mtimes_builtin(
+                    Value::GpuTensor(scalar_handle),
+                    Value::GpuTensor(array_handle),
+                )
+                .expect("resident scalar times resident integer array");
+                let Value::GpuTensor(result_handle) = &result else {
+                    panic!("expected resident integer result, got {result:?}");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(result_handle),
+                    Some(integer_element_type(&expected))
+                );
+                let gathered = test_support::gather(result).expect("gather integer result");
+                assert_eq!(gathered.integer_storage(), Some(&expected));
+            }
+
+            let scalar =
+                Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1, 1]).expect("scalar");
+            let scalar_handle = gpu_helpers::upload_tensor(provider, &scalar).expect("upload");
+            let array =
+                Tensor::new_integer(IntegerStorage::U16(vec![3, 4]), vec![1, 2]).expect("array");
+            let result = mtimes_builtin(Value::GpuTensor(scalar_handle), Value::Tensor(array))
+                .expect("singleton-N-D resident scalar mtimes");
+            let gathered = test_support::gather(result).expect("gather integer result");
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U16(vec![6, 8]))
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn wgpu_integer_scalar_mtimes_preserves_all_classes_and_residency() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        for (array, scalar, expected) in integer_scalar_mtimes_cases() {
+            let array = Tensor::new_integer(array, vec![1, 3]).expect("wgpu integer array");
+            let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+            let result = mtimes_builtin(Value::GpuTensor(array_handle), Value::Int(scalar.clone()))
+                .expect("wgpu integer scalar mtimes");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident integer result, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(result_handle),
+                Some(integer_element_type(&expected))
+            );
+            let gathered = test_support::gather(result).expect("gather wgpu integer result");
+            assert_eq!(gathered.integer_storage(), Some(&expected));
+
+            let scalar = Tensor::new_integer(IntegerStorage::from_scalar(scalar), vec![1, 1])
+                .expect("scalar");
+            let scalar_handle = gpu_helpers::upload_tensor(provider, &scalar).expect("upload");
+            let array_handle = gpu_helpers::upload_tensor(provider, &array).expect("upload");
+            let result = mtimes_builtin(
+                Value::GpuTensor(scalar_handle),
+                Value::GpuTensor(array_handle),
+            )
+            .expect("wgpu scalar times integer array");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident integer result, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(result_handle),
+                Some(integer_element_type(&expected))
+            );
+            let gathered = test_support::gather(result).expect("gather wgpu integer result");
+            assert_eq!(gathered.integer_storage(), Some(&expected));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -690,11 +959,11 @@ pub(crate) mod tests {
             let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let b = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
             let view_a = runmat_accelerate_api::HostTensorView {
-                data: &a.data,
+                data: &a.materialize_f64(),
                 shape: &a.shape,
             };
             let view_b = runmat_accelerate_api::HostTensorView {
-                data: &b.data,
+                data: &b.materialize_f64(),
                 shape: &b.shape,
             };
             let ha = provider.upload(&view_a).expect("upload A");
@@ -703,7 +972,7 @@ pub(crate) mod tests {
                 mtimes_builtin(Value::GpuTensor(ha), Value::GpuTensor(hb)).expect("mtimes");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![26.0, 38.0, 30.0, 44.0]);
+            assert_eq!(gathered.materialize_f64(), vec![26.0, 38.0, 30.0, 44.0]);
         });
     }
 
@@ -724,11 +993,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_a = runmat_accelerate_api::HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = runmat_accelerate_api::HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload A");
@@ -738,7 +1007,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather gpu");
 
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
     fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

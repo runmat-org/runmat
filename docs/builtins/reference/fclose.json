@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs entirely on the CPU. Arguments residing on the GPU are gathered automatically; file handles live on the host."
+    "notes": "Runs entirely on the CPU because file handles live in the host registry. Resident numeric identifiers are accepted only in RunMat extension mode and are gathered after compatibility preflight."
   },
   "fusion": {
     "elementwise": false,
@@ -27,12 +27,12 @@
     "unit": "builtins::io::filetext::fclose::tests",
     "integration": "builtins::io::filetext::fclose::tests::fclose_all_closes_everything"
   },
-  "description": "`fclose` closes files previously opened with `fopen`. Pass a file identifier, a vector of identifiers, or `'all'` (or no arguments) to close handles. Status and optional message outputs, including invalid-identifier behavior, follow MATLAB semantics.",
+  "description": "`fclose` closes files previously opened with `fopen`. MATLAB-compatible mode accepts one scalar double file identifier or the character vector `'all'` and returns at most one double status. RunMat's collection, typed-integer, logical, string, resident, no-input, and diagnostic-message forms are separately gated extensions.",
   "behaviors": [
     "`status = fclose(fid)` closes the file represented by the numeric identifier `fid`. The status is `0` on success and `-1` if the identifier is invalid.",
-    "`status = fclose([fid1 fid2 ...])` closes a vector of identifiers. If any identifier is invalid, status is `-1` and `message` explains the failure.",
-    "`status = fclose('all')` (or `fclose()` with no arguments) closes every open file except the standard streams (0, 1, 2).",
-    "`[status, message] = fclose(...)` returns the diagnostic message. On success, `message` is an empty character vector.",
+    "`status = fclose('all')` closes every open file except the standard streams (0, 1, 2). The documented keyword is a character vector.",
+    "The file identifier must be a finite, integer-valued scalar double in MATLAB-compatible mode. RunMat validates the complete request before performing a close.",
+    "Typed integer identifiers, identifier collections, logical identifiers, string-scalar `'all'`, resident identifiers, `fclose()` with no input, and `[status, message]` are available only when their RunMat extensions are enabled.",
     "Identifiers 0, 1, and 2 refer to standard input, output, and error. `fclose` treats them as already-open handles and simply returns success.",
     "RunMat keeps file metadata in a registry shared with `fopen`, ensuring MATLAB-compatible behaviour across subsequent I/O builtins."
   ],
@@ -49,33 +49,18 @@
     },
     {
       "description": "Handle invalid file identifiers gracefully",
-      "input": "[status, message] = fclose(9999);\nif status == -1\n    fprintf('Close failed: %s\\n', message);\nend",
-      "output": "status = -1;\nmessage = 'Invalid file identifier. Use fopen to generate a valid file ID.'"
-    },
-    {
-      "description": "Close multiple file identifiers together",
-      "input": "fids = fopen('all');\nstatus = fclose(fids)",
-      "output": "status = 0"
-    },
-    {
-      "description": "Detect failures with the second output",
-      "input": "[fid, msg] = fopen('data.bin', 'r');\nassert(fid ~= -1, msg);\nfclose(fid);\n[status, message] = fclose(fid);  % closes again, returns -1 and an error string",
-      "output": "status = -1;\nmessage = 'Invalid file identifier. Use fopen to generate a valid file ID.'"
-    },
-    {
-      "description": "Close files using the no-argument form",
-      "input": "% Equivalent to fclose('all')\nstatus = fclose()",
-      "output": "status = 0"
+      "input": "status = fclose(9999);\nif status == -1\n    fprintf('Close failed\\n');\nend",
+      "output": "status = -1"
     }
   ],
   "faqs": [
     {
       "question": "What values can I pass to `fclose`?",
-      "answer": "Pass a numeric file identifier (scalar or array) returned by `fopen`, or the keyword `'all'`. Calling `fclose()` with no arguments is equivalent to `fclose('all')`."
+      "answer": "For MATLAB-compatible code, pass one scalar double identifier returned by `fopen`, or the character vector `'all'`. Other accepted RunMat forms are explicit extensions."
     },
     {
       "question": "What does the status code mean?",
-      "answer": "`0` indicates that every requested identifier was successfully processed. `-1` means that at least one identifier was invalid; the optional second output contains the diagnostic message."
+      "answer": "`0` indicates success and `-1` indicates failure. MATLAB-compatible mode exposes that single status output; RunMat's diagnostic second output is extension-gated."
     },
     {
       "question": "Does `fclose` close standard input/output?",
@@ -141,6 +126,6 @@
     "url": "crates/runmat-runtime/src/builtins/io/filetext/fclose.rs"
   },
   "gpu_behavior": [
-    "`fclose` does not perform GPU computation. If the argument resides on a GPU array (for example, `'all'` stored in a `gpuArray`), RunMat gathers the value to host memory before dispatching the host-only close logic."
+    "`fclose` does not perform GPU computation. A resident numeric identifier is rejected before provider lookup in MATLAB-compatible mode. With the resident-fileID extension enabled, RunMat gathers it through its owning provider and then dispatches the host-only close logic."
   ]
 }

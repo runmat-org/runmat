@@ -10,6 +10,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type, documents_from_object, text_analytics_error, tokenized_document_language,
@@ -580,7 +581,7 @@ fn numeric_vector(value: &Value, column_name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![int_value_to_f64(value)]),
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
         Value::Cell(cell) => cell
             .data
             .iter()
@@ -596,7 +597,9 @@ fn numeric_scalar(value: &Value, column_name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(int_value_to_f64(value)),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         other => Err(sentiment_error(format!(
             "vaderSentimentScores: {column_name} entries must be numeric scalars, got {other:?}"
         ))),
@@ -783,10 +786,38 @@ static DEFAULT_NEGATIONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, StructValue};
+    use runmat_builtins::{CellArray, IntegerStorage, StructValue};
+
+    fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(vader_sentiment_scores_builtin(args))
+    }
+
+    #[test]
+    fn numeric_scalar_reads_typed_integer_storage_exactly() {
+        assert_eq!(
+            numeric_scalar(
+                &poisoned_integer_scalar(IntegerStorage::I16(vec![-3])),
+                "Positive"
+            )
+            .expect("numeric"),
+            -3.0
+        );
+    }
+
+    #[test]
+    fn numeric_vector_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7, 11]), vec![1, 2])
+            .expect("integer tensor");
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(tensor), "SentimentScore").expect("numeric"),
+            vec![7.0, 11.0]
+        );
     }
 
     fn documents(docs: Vec<Vec<&str>>) -> Value {
@@ -824,7 +855,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        tensor.data
+        tensor.materialize_f64()
     }
 
     fn outputs(value: Value) -> Vec<Value> {

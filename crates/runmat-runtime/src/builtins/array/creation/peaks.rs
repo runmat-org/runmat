@@ -27,7 +27,7 @@ use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, ResolveContext, Tensor, Type, Value,
+    IntValue, LiteralValue, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -316,6 +316,9 @@ fn peaks_literal_n(ctx: &ResolveContext) -> Option<usize> {
             if rounded < 0.0 || (rounded - value).abs() > 1e-9 {
                 return None;
             }
+            if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+                return None;
+            }
             Some(rounded as usize)
         }
         Some(LiteralValue::Bool(value)) => Some(usize::from(*value)),
@@ -475,10 +478,7 @@ async fn peaks_from_xy(
         // Provider absent or failed: gather to host and continue.
         let x_tensor = gpu_helpers::gather_tensor_async(x_handle).await?;
         let y_tensor = gpu_helpers::gather_tensor_async(y_handle).await?;
-        validate_xy_shapes(&x_tensor, &y_tensor)?;
-        let (rows, cols) = matrix_shape(&x_tensor)?;
-        let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
-        return build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count);
+        return peaks_from_host_tensors(x_tensor, y_tensor, out_count);
     }
 
     // Mixed-residency: at least one input is a GpuTensor but not both (the
@@ -488,19 +488,28 @@ async fn peaks_from_xy(
     if matches!(x_val, Value::GpuTensor(_)) || matches!(y_val, Value::GpuTensor(_)) {
         let x_tensor = gather_tensor_or_gpu(x_val).await?;
         let y_tensor = gather_tensor_or_gpu(y_val).await?;
-        validate_xy_shapes(&x_tensor, &y_tensor)?;
-        let (rows, cols) = matrix_shape(&x_tensor)?;
-        let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
-        return build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count);
+        return peaks_from_host_tensors(x_tensor, y_tensor, out_count);
     }
 
     // Host path.
     let x_tensor = gather_tensor(x_val).await?;
     let y_tensor = gather_tensor(y_val).await?;
+    peaks_from_host_tensors(x_tensor, y_tensor, out_count)
+}
+
+fn peaks_from_host_tensors(
+    x_tensor: Tensor,
+    y_tensor: Tensor,
+    out_count: Option<usize>,
+) -> crate::BuiltinResult<Value> {
     validate_xy_shapes(&x_tensor, &y_tensor)?;
     let (rows, cols) = matrix_shape(&x_tensor)?;
-    let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
-    build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count)
+    // The peaks formula and its host outputs are defined in the f64 sample
+    // domain. Typed inputs cross that boundary exactly once, after validation.
+    let x_data = tensor::tensor_into_values_f64(x_tensor);
+    let y_data = tensor::tensor_into_values_f64(y_tensor);
+    let z_mat = compute_z(&x_data, &y_data, rows, cols);
+    build_output(x_data, y_data, z_mat, rows, cols, out_count)
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +616,31 @@ fn make_tensor(data: Vec<f64>, shape: Vec<usize>) -> crate::BuiltinResult<Value>
 // ---------------------------------------------------------------------------
 
 async fn parse_scalar_n(value: &Value) -> crate::BuiltinResult<usize> {
+    if let Value::GpuTensor(handle) = value {
+        let tensor = gpu_helpers::gather_tensor_async(handle)
+            .await
+            .map_err(|e| builtin_error(format!("peaks: {e}")))?;
+        return parse_scalar_n_host(&Value::Tensor(tensor)).await;
+    }
+    parse_scalar_n_host(value).await
+}
+
+async fn parse_scalar_n_host(value: &Value) -> crate::BuiltinResult<usize> {
+    if let Value::Int(value) = value {
+        return parse_integer_n(value);
+    }
+    if let Value::Tensor(tensor) = value {
+        if !tensor::is_scalar_tensor(tensor) {
+            return Err(builtin_error("peaks: n must be a numeric scalar"));
+        }
+        if let Some(storage) = tensor.integer_storage() {
+            return parse_integer_n(
+                &storage
+                    .value_at(0)
+                    .expect("scalar integer storage has one element"),
+            );
+        }
+    }
     let Some(raw) = tensor::scalar_f64_from_value_async(value)
         .await
         .map_err(|e| builtin_error(format!("peaks: {e}")))?
@@ -623,10 +657,16 @@ async fn parse_scalar_n(value: &Value) -> crate::BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(builtin_error("peaks: n must be non-negative"));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(builtin_error("peaks: n is too large for this platform"));
     }
     Ok(rounded as usize)
+}
+
+fn parse_integer_n(value: &IntValue) -> crate::BuiltinResult<usize> {
+    value
+        .try_to_usize()
+        .ok_or_else(|| builtin_error("peaks: n is outside the supported platform range"))
 }
 
 async fn gather_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
@@ -676,6 +716,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{handle_precision, provider_for_handle, ProviderPrecision};
+    use runmat_builtins::IntegerStorage;
 
     fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::peaks_builtin(rest))
@@ -714,7 +755,36 @@ mod tests {
     fn peaks_zero_is_empty() {
         let gathered = gather_result(peaks_builtin(vec![Value::Num(0.0)]).expect("peaks"));
         assert_eq!(gathered.shape, vec![0, 0]);
-        assert!(gathered.data.is_empty());
+        assert!(gathered.materialize_f64().is_empty());
+    }
+
+    #[test]
+    fn peaks_parses_all_integer_classes_without_f64_rounding() {
+        let values = [
+            IntegerStorage::I8(vec![3]),
+            IntegerStorage::I16(vec![3]),
+            IntegerStorage::I32(vec![3]),
+            IntegerStorage::I64(vec![3]),
+            IntegerStorage::U8(vec![3]),
+            IntegerStorage::U16(vec![3]),
+            IntegerStorage::U32(vec![3]),
+            IntegerStorage::U64(vec![3]),
+        ];
+        for storage in values {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed scalar");
+            assert!(matches!(
+                block_on(parse_scalar_n(&Value::Tensor(tensor))),
+                Ok(3)
+            ));
+        }
+
+        let exact = 9_007_199_254_740_993_u64;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
+            .expect("typed scalar");
+        assert!(matches!(
+            block_on(parse_scalar_n(&Value::Tensor(tensor))),
+            Ok(value) if value == exact as usize
+        ));
     }
 
     #[test]
@@ -727,7 +797,7 @@ mod tests {
         let tol = value_tolerance(&value);
         let gathered = gather_result(value);
         assert_eq!(gathered.shape, vec![1, 1]);
-        let got = gathered.data[0];
+        let got = gathered.materialize_f64()[0];
         assert!((got - expected).abs() < tol);
     }
 
@@ -757,11 +827,29 @@ mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 for i in 0..4 {
-                    let expected = peaks_at(x.data[i], y.data[i]);
-                    assert!((t.data[i] - expected).abs() < 1e-12);
+                    let expected = peaks_at(x.materialize_f64()[i], y.materialize_f64()[i]);
+                    assert!((t.materialize_f64()[i] - expected).abs() < 1e-12);
                 }
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn peaks_xy_reads_typed_integer_coordinates_from_authoritative_storage() {
+        let x = Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 0, 1]), vec![2, 2]).unwrap();
+        let y = Tensor::new_integer(IntegerStorage::I16(vec![0, 0, 1, 1]), vec![2, 2]).unwrap();
+
+        let value = peaks_builtin(vec![Value::Tensor(x), Value::Tensor(y)]).expect("peaks");
+        let Value::Tensor(tensor) = value else {
+            panic!("expected tensor");
+        };
+        for (index, (&x, &y)) in [0.0, 1.0, 0.0, 1.0]
+            .iter()
+            .zip([0.0, 0.0, 1.0, 1.0].iter())
+            .enumerate()
+        {
+            assert!((tensor.materialize_f64()[index] - peaks_at(x, y)).abs() < 1.0e-12);
         }
     }
 
@@ -799,6 +887,11 @@ mod tests {
     fn peaks_n_too_large_errors() {
         // 2e19 exceeds usize::MAX on all common platforms; must error cleanly.
         let err = peaks_builtin(vec![Value::Num(2e19)]).unwrap_err();
+        assert!(
+            err.to_string().contains("too large"),
+            "unexpected error: {err}"
+        );
+        let err = peaks_builtin(vec![Value::Num(usize::MAX as f64)]).unwrap_err();
         assert!(
             err.to_string().contains("too large"),
             "unexpected error: {err}"
@@ -931,7 +1024,7 @@ mod tests {
                 let t = gather_handle(handle);
 
                 assert_eq!(t.shape, vec![n, n], "shape mismatch for n={n}");
-                for (i, (&gv, &cv)) in t.data.iter().zip(z_ref.iter()).enumerate() {
+                for (i, (&gv, &cv)) in t.materialize_f64().iter().zip(z_ref.iter()).enumerate() {
                     let err = (gv - cv).abs();
                     assert!(
                         err <= tol,
@@ -950,7 +1043,7 @@ mod tests {
             let handle = provider.peaks(0).expect("peaks(0)");
             let t = gather_handle(handle);
             assert_eq!(t.shape, vec![0, 0]);
-            assert!(t.data.is_empty());
+            assert!(t.materialize_f64().is_empty());
         }
 
         /// peaks_xy shader matches host at coordinates spanning the interesting
@@ -995,7 +1088,7 @@ mod tests {
             let t = gather_handle(z_handle);
 
             assert_eq!(t.shape, shape.to_vec());
-            for (i, (&gv, &cv)) in t.data.iter().zip(z_ref.iter()).enumerate() {
+            for (i, (&gv, &cv)) in t.materialize_f64().iter().zip(z_ref.iter()).enumerate() {
                 let err = (gv - cv).abs();
                 assert!(
                     err <= tol,
@@ -1028,7 +1121,7 @@ mod tests {
                 .peaks_xy(&x_handle, &y_handle)
                 .expect("peaks_xy empty");
             let t = gather_handle(z_handle);
-            assert!(t.data.is_empty());
+            assert!(t.materialize_f64().is_empty());
         }
 
         /// End-to-end: peaks_builtin(n) dispatches to GPU and returns a GpuTensor

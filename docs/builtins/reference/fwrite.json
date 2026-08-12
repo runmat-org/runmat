@@ -37,12 +37,12 @@
   "description": "`fwrite` writes binary data to a file identifier obtained from `fopen`. Precision strings, skip values, machine-format overrides, and column-major emission order follow MATLAB semantics. It accepts numeric, logical, and character inputs and returns the count of values written.",
   "behaviors": [
     "`count = fwrite(fid, A)` converts `A` to unsigned 8-bit integers and writes one byte per element.",
-    "`count = fwrite(fid, A, precision)` converts `A` to the requested precision before writing. Supported precisions are `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`. Shorthand aliases such as `uchar`, `byte`, and `real*8` are also recognised.",
+    "`count = fwrite(fid, A, precision)` converts `A` to the requested precision before writing. All eight integer input classes retain authoritative values through encoding, including exact `int64` and `uint64` values above the binary64 exact-integer boundary.",
     "`count = fwrite(fid, A, precision, skip)` skips `skip` bytes after writing each element. RunMat applies the skip with a file seek, which produces sparse regions when the target position moves beyond the current end.",
     "`count = fwrite(fid, A, precision, skip, machinefmt)` overrides the byte ordering used for the conversion. Supported machine formats are `'native'`, `'ieee-le'`, and `'ieee-be'`. When omitted, the builtin honours the format recorded by `fopen`.",
     "Column-major ordering matches MATLAB semantics: tensors and character arrays write their first column completely before advancing to the next column. Scalars and vectors behave as 1-by-N matrices.",
     "The return value `count` is the number of elements written, not the number of bytes. A zero-length input produces `count == 0`.",
-    "RunMat executes `fwrite` entirely on the host. When the data resides on a GPU (`gpuArray`), RunMat gathers the tensor to host memory before writing; providers do not currently implement device-side file I/O."
+    "RunMat executes `fwrite` entirely on the host. Typed integer identifiers and skips, logical/single/resident controls, fread-style `source=>output` precision, and direct `gpuArray` data are independently gated RunMat extensions checked before gather or I/O."
   ],
   "examples": [
     {
@@ -79,7 +79,7 @@
   "faqs": [
     {
       "question": "What precisions does `fwrite` support?",
-      "answer": "RunMat recognises the commonly used MATLAB precisions: `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`, along with their documented aliases (`real*8`, `uchar`, etc.). The `precision => output` forms are accepted when both sides match; differing output classes are not implemented yet."
+      "answer": "RunMat recognises the commonly used MATLAB precisions: `double`, `single`, `uint8`, `int8`, `uint16`, `int16`, `uint32`, `int32`, `uint64`, `int64`, and `char`, along with several documented aliases. In `runmat` mode, matching `source=>output` forms are an explicitly gated convenience; R2026a documents that grammar for `fread`, not `fwrite`."
     },
     {
       "question": "How are values converted before writing?",
@@ -156,8 +156,8 @@
     "label": "`crates/runmat-runtime/src/builtins/io/filetext/fwrite.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite.rs"
   },
-  "gpu_residency": "You rarely need to move data with `gpuArray` purely for `fwrite`. RunMat keeps tensors on the GPU while compute stays in fused expressions, but explicit file I/O always happens on the host. If your data already lives on the device, `fwrite` performs an automatic gather, writes the bytes, and leaves residency unchanged for the rest of the program. You can still call `gpuArray` manually when porting MATLAB code verbatim—the builtin will gather it for you automatically.",
+  "gpu_residency": "RunMat keeps tensors on the GPU while compute stays in fused expressions, but explicit file I/O always happens on the host. In `runmat` compatibility mode, direct `gpuArray` data input performs an automatic gather, writes the bytes, and leaves the original value's residency unchanged for the rest of the program.",
   "gpu_behavior": [
-    "`fwrite` never launches GPU kernels. If any input value (file identifier, data, or optional arguments) is backed by a GPU tensor, RunMat gathers the value to host memory before performing the write. This mirrors MATLAB's own behaviour when working with `gpuArray` objects: data is moved to the CPU for I/O. When a provider is available, the gather occurs via the provider's `download` path; otherwise the builtin emits an informative error."
+    "`fwrite` never launches GPU kernels. In `runmat` compatibility mode, direct GPU data input is accepted as a RunMat extension and gathered to host memory before the write. When a provider is available, the gather occurs via the provider's `download` path; otherwise the builtin emits an informative error."
   ]
 }

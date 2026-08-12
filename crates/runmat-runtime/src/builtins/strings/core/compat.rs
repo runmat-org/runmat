@@ -2,14 +2,20 @@
 
 use encoding_rs::{Encoding, UTF_8};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, Tensor, Type, Value,
+    CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast as matlab_broadcast;
 use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
@@ -21,6 +27,14 @@ const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Output value.",
+}];
+
+const OUT_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "One converted output for each corresponding input.",
 }];
 
 const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -37,6 +51,14 @@ const IN_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Input value.",
+}];
+
+const IN_INTEGER_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of elements.",
 }];
 
 const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -130,7 +152,42 @@ macro_rules! descriptor_by_outputs {
 }
 
 descriptor!(NEWLINE_DESCRIPTOR, "s = newline", &NO_INPUTS, &OUT_ANY);
-descriptor!(BLANKS_DESCRIPTOR, "s = blanks(n)", &IN_VALUE, &OUT_ANY);
+descriptor!(
+    BLANKS_DESCRIPTOR,
+    "s = blanks(n)",
+    &IN_INTEGER_SCALAR,
+    &OUT_ANY
+);
+
+const BLANKS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "blanks-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "blanks with a GPU-resident length is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:BlanksGpuInputExtension"),
+};
+
+const BLANKS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [BLANKS_GPU_INPUT_EXTENSION];
+
+const BLANKS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "n accepts single, double, and every built-in integer class as an integer-valued scalar; negative values are treated as zero.",
+    }];
+
+pub const BLANKS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "chr = blanks(n)",
+        inputs: &BLANKS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "n determines only the length of the returned 1-by-n character row. Values too large for the host allocation domain reject; interactive GPU input is not documented.",
+    }];
 descriptor!(
     IS_STRING_SCALAR_DESCRIPTOR,
     "tf = isStringScalar(value)",
@@ -141,20 +198,65 @@ descriptor_by_outputs!(
     CONVERT_STRINGS_TO_CHARS_DESCRIPTOR,
     "[out1, ...] = convertStringsToChars(value1, ...)",
     &IN_TEXT_REST,
-    &OUT_ANY
+    &OUT_VARIADIC
 );
-descriptor!(
+descriptor_by_outputs!(
     CONVERT_CHARS_TO_STRINGS_DESCRIPTOR,
-    "out = convertCharsToStrings(value)",
-    &IN_VALUE,
-    &OUT_ANY
+    "[out1, ...] = convertCharsToStrings(value1, ...)",
+    &IN_TEXT_REST,
+    &OUT_VARIADIC
 );
-descriptor!(
+descriptor_by_outputs!(
     CONVERT_CONTAINED_STRINGS_TO_CHARS_DESCRIPTOR,
-    "out = convertContainedStringsToChars(value)",
-    &IN_VALUE,
-    &OUT_ANY
+    "[out1, ...] = convertContainedStringsToChars(value1, ...)",
+    &IN_TEXT_REST,
+    &OUT_VARIADIC
 );
+
+const CONVERT_PASSTHROUGH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "value",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Every non-target datatype is returned unaltered, so integer class, shape, value, and provider ownership remain exact.",
+    }];
+
+pub const CONVERT_STRINGS_TO_CHARS_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "[out1, ...] = convertStringsToChars(value1, ...)",
+    inputs: &CONVERT_PASSTHROUGH_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::Multiple,
+    notes: "Only top-level string inputs convert. Integer scalars, arrays, cells, structs, and resident handles pass through without gather or floating materialization.",
+}];
+
+pub const CONVERT_CHARS_TO_STRINGS_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "[out1, ...] = convertCharsToStrings(value1, ...)",
+    inputs: &CONVERT_PASSTHROUGH_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::Multiple,
+    notes: "Only character arrays and cell arrays consisting entirely of character vectors convert. Every integer-containing non-cellstr value passes through identically without provider access.",
+}];
+
+pub const CONVERT_CONTAINED_STRINGS_TO_CHARS_INTEGER_CAPABILITIES:
+    [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
+    form: "[out1, ...] = convertContainedStringsToChars(value1, ...)",
+    inputs: &CONVERT_PASSTHROUGH_INTEGER_INPUTS,
+    computation_domain: BuiltinIntegerComputationDomain::Structural,
+    output_class: BuiltinIntegerOutputClassRule::PreserveInput,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
+    backend: BuiltinIntegerBackendRule::HostAndGpu,
+    overload: BuiltinIntegerOverloadKind::Multiple,
+    notes: "Top-level integer values and integer members nested at any cell/struct depth remain exact. Top-level and contained string values convert; resident numeric handles are preserved without gather.",
+}];
 descriptor!(
     STRNCMPI_DESCRIPTOR,
     "tf = strncmpi(A, B, N)",
@@ -221,12 +323,121 @@ descriptor!(
     &IN_TEXT,
     &OUT_ANY
 );
-descriptor!(
-    DIGITS_PATTERN_DESCRIPTOR,
-    "pat = digitsPattern(N)",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
+const DIGITS_PATTERN_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "N",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Exact nonnegative number of Unicode digit characters to match.",
+}];
+const DIGITS_PATTERN_RANGE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "minCharacters",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Minimum nonnegative number of Unicode digit characters to match.",
+    },
+    BuiltinParamDescriptor {
+        name: "maxCharacters",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Maximum nonnegative count, or positive infinity for no upper bound.",
+    },
+];
+const DIGITS_PATTERN_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "pat = digitsPattern",
+        inputs: &[],
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pat = digitsPattern(N)",
+        inputs: &DIGITS_PATTERN_N_INPUTS,
+        outputs: &OUT_ANY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pat = digitsPattern(minCharacters, maxCharacters)",
+        inputs: &DIGITS_PATTERN_RANGE_INPUTS,
+        outputs: &OUT_ANY,
+    },
+];
+const DIGITS_PATTERN_ERROR_ARGUMENT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIGITS_PATTERN.ARGUMENT_COUNT",
+    identifier: Some("RunMat:digitsPattern:ArgumentCount"),
+    when: "More than two count arguments are supplied.",
+    message: "digitsPattern: expected zero, one, or two input arguments",
+};
+const DIGITS_PATTERN_ERROR_INVALID_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIGITS_PATTERN.INVALID_COUNT",
+    identifier: Some("RunMat:digitsPattern:InvalidCount"),
+    when: "A count is not a host nonnegative numeric integer scalar or positive infinity in the maximum position.",
+    message: "digitsPattern: invalid character count",
+};
+const DIGITS_PATTERN_ERROR_INVALID_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIGITS_PATTERN.INVALID_RANGE",
+    identifier: Some("RunMat:digitsPattern:InvalidRange"),
+    when: "minCharacters exceeds maxCharacters.",
+    message: "digitsPattern: minCharacters must not exceed maxCharacters",
+};
+const DIGITS_PATTERN_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DIGITS_PATTERN_ERROR_ARGUMENT_COUNT,
+    DIGITS_PATTERN_ERROR_INVALID_COUNT,
+    DIGITS_PATTERN_ERROR_INVALID_RANGE,
+];
+pub const DIGITS_PATTERN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DIGITS_PATTERN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DIGITS_PATTERN_ERRORS,
+};
+const DIGITS_PATTERN_INTEGER_N_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "N",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Every built-in integer class plus integer-valued host single or double can specify the exact nonnegative digit count.",
+    }];
+const DIGITS_PATTERN_INTEGER_RANGE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "minCharacters",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The inclusive lower bound is read exactly from every integer class.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "maxCharacters",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The inclusive upper bound is read exactly from every integer class; positive host floating infinity separately denotes an unbounded maximum.",
+    },
+];
+pub const DIGITS_PATTERN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pat = digitsPattern(integer_N)",
+        inputs: &DIGITS_PATTERN_INTEGER_N_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "N controls only the exact Unicode-digit repetition bound of the returned host pattern object.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "pat = digitsPattern(integer_minCharacters, integer_maxCharacters)",
+        inputs: &DIGITS_PATTERN_INTEGER_RANGE_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The inclusive bounds are structural controls, min must not exceed max, and the returned pattern greedily matches toward max.",
+    },
+];
 descriptor!(
     LETTERS_PATTERN_DESCRIPTOR,
     "pat = lettersPattern(N)",
@@ -304,14 +515,30 @@ fn newline_builtin() -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(string_type),
     descriptor(crate::builtins::strings::core::compat::BLANKS_DESCRIPTOR),
+    extensions(BLANKS_EXTENSIONS),
+    integer_capabilities(crate::builtins::strings::core::compat::BLANKS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn blanks_builtin(n: Value) -> BuiltinResult<Value> {
+    if matches!(n, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BLANKS_GPU_INPUT_EXTENSION,
+            "blanks",
+        )?;
+    }
     let n = gather_if_needed_async(&n)
         .await
         .map_err(map_flow("blanks"))?;
-    let n = parse_nonnegative_usize(&n, "blanks")?;
-    Ok(Value::CharArray(CharArray::new_row(&" ".repeat(n))))
+    let n = parse_blanks_length(&n)?;
+    let mut spaces = String::new();
+    spaces.try_reserve_exact(n).map_err(|_| {
+        compat_error(
+            "blanks",
+            "blanks: requested character array is too large".to_string(),
+        )
+    })?;
+    spaces.extend(std::iter::repeat_n(' ', n));
+    Ok(Value::CharArray(CharArray::new_row(&spaces)))
 }
 
 #[runtime_builtin(
@@ -340,29 +567,13 @@ fn is_string_scalar_builtin(value: Value) -> BuiltinResult<Value> {
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::CONVERT_STRINGS_TO_CHARS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::compat::CONVERT_STRINGS_TO_CHARS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn convert_strings_to_chars_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let mut inputs = Vec::with_capacity(rest.len() + 1);
-    inputs.push(value);
-    inputs.extend(rest);
-
-    let mut outputs = Vec::with_capacity(inputs.len());
-    for value in inputs {
-        let value = gather_if_needed_async(&value)
-            .await
-            .map_err(map_flow("convertStringsToChars"))?;
-        outputs.push(convert_strings_to_chars(value, false)?);
-    }
-
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(n) => Ok(crate::output_count::output_list_with_padding(n, outputs)),
-        None => Ok(outputs
-            .into_iter()
-            .next()
-            .unwrap_or(Value::String(String::new()))),
-    }
+    convert_variadic(value, rest, convert_strings_to_chars)
 }
 
 #[runtime_builtin(
@@ -373,13 +584,13 @@ async fn convert_strings_to_chars_builtin(value: Value, rest: Vec<Value>) -> Bui
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::CONVERT_CHARS_TO_STRINGS_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::compat::CONVERT_CHARS_TO_STRINGS_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn convert_chars_to_strings_builtin(value: Value) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_flow("convertCharsToStrings"))?;
-    convert_chars_to_strings(value)
+async fn convert_chars_to_strings_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    convert_variadic(value, rest, convert_chars_to_strings)
 }
 
 #[runtime_builtin(
@@ -392,13 +603,33 @@ async fn convert_chars_to_strings_builtin(value: Value) -> BuiltinResult<Value> 
     descriptor(
         crate::builtins::strings::core::compat::CONVERT_CONTAINED_STRINGS_TO_CHARS_DESCRIPTOR
     ),
+    integer_capabilities(crate::builtins::strings::core::compat::CONVERT_CONTAINED_STRINGS_TO_CHARS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn convert_contained_strings_to_chars_builtin(value: Value) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_flow("convertContainedStringsToChars"))?;
-    convert_strings_to_chars(value, true)
+async fn convert_contained_strings_to_chars_builtin(
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    convert_variadic(value, rest, convert_contained_strings_to_chars)
+}
+
+fn convert_variadic(
+    value: Value,
+    rest: Vec<Value>,
+    convert: fn(Value) -> BuiltinResult<Value>,
+) -> BuiltinResult<Value> {
+    let outputs = std::iter::once(value)
+        .chain(rest)
+        .map(convert)
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(n) => Ok(crate::output_count::output_list_with_padding(n, outputs)),
+        None => Ok(outputs
+            .into_iter()
+            .next()
+            .unwrap_or(Value::String(String::new()))),
+    }
 }
 
 #[runtime_builtin(
@@ -699,10 +930,84 @@ async fn regexp_pattern_builtin(text: Value) -> BuiltinResult<Value> {
     accel = "metadata",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::core::compat::DIGITS_PATTERN_DESCRIPTOR),
+    integer_capabilities(
+        crate::builtins::strings::core::compat::DIGITS_PATTERN_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn digits_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    bounded_pattern(rest, "\\d", "digitsPattern").await
+    if rest.len() > 2 {
+        return Err(digits_pattern_error(
+            &DIGITS_PATTERN_ERROR_ARGUMENT_COUNT,
+            DIGITS_PATTERN_ERROR_ARGUMENT_COUNT.message,
+        ));
+    }
+    if rest.iter().any(|value| {
+        matches!(
+            value,
+            Value::Bool(_) | Value::LogicalArray(_) | Value::GpuTensor(_)
+        )
+    }) {
+        return Err(digits_pattern_error(
+            &DIGITS_PATTERN_ERROR_INVALID_COUNT,
+            "digitsPattern: counts must be host nonnegative numeric integer scalars",
+        ));
+    }
+    let regex = match rest.as_slice() {
+        [] => "\\d+".to_string(),
+        [count] => {
+            let count = parse_digits_pattern_count(count)?;
+            format!("\\d{{{count}}}")
+        }
+        [minimum, maximum] => {
+            let minimum = parse_digits_pattern_count(minimum)?;
+            if is_positive_infinity_scalar(maximum) {
+                format!("\\d{{{minimum},}}")
+            } else {
+                let maximum = parse_digits_pattern_count(maximum)?;
+                if minimum > maximum {
+                    return Err(digits_pattern_error(
+                        &DIGITS_PATTERN_ERROR_INVALID_RANGE,
+                        DIGITS_PATTERN_ERROR_INVALID_RANGE.message,
+                    ));
+                }
+                format!("\\d{{{minimum},{maximum}}}")
+            }
+        }
+        _ => unreachable!("argument count was validated"),
+    };
+    Ok(pattern_object(&regex))
+}
+
+fn parse_digits_pattern_count(value: &Value) -> BuiltinResult<usize> {
+    parse_nonnegative_usize(value, "digitsPattern").map_err(|error| {
+        digits_pattern_error(
+            &DIGITS_PATTERN_ERROR_INVALID_COUNT,
+            error.message().to_owned(),
+        )
+    })
+}
+
+fn digits_pattern_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("digitsPattern");
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn is_positive_infinity_scalar(value: &Value) -> bool {
+    match value {
+        Value::Num(value) => value.is_infinite() && value.is_sign_positive(),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            matches!(tensor.numeric_value_at(0), Some(NumericScalar::F64(value)) if value.is_infinite() && value.is_sign_positive())
+                || matches!(tensor.numeric_value_at(0), Some(NumericScalar::F32(value)) if value.is_infinite() && value.is_sign_positive())
+        }
+        _ => false,
+    }
 }
 
 #[runtime_builtin(
@@ -904,12 +1209,7 @@ pub(crate) fn broadcast_flat_index(
     if source_shape.iter().product::<usize>() <= 1 {
         return 0;
     }
-    let mut extended = Vec::with_capacity(shape.len());
-    extended.extend(std::iter::repeat_n(
-        1,
-        shape.len().saturating_sub(source_shape.len()),
-    ));
-    extended.extend_from_slice(source_shape);
+    let extended = matlab_broadcast::align_shape(source_shape, shape.len());
     let strides = matlab_broadcast::compute_strides(&extended);
     matlab_broadcast::broadcast_index(linear, shape, &extended, &strides)
 }
@@ -923,10 +1223,16 @@ fn missing_to_none(text: String) -> Option<String> {
 }
 
 fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize> {
-    let number = match value {
-        Value::Num(n) => *n,
-        Value::Int(i) => i.to_i64() as f64,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+    let index = match value {
+        Value::Num(n) => nonnegative_platform_usize(*n),
+        Value::Int(i) => i.try_to_usize(),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                storage.value_at(0).and_then(|value| value.try_to_usize())
+            } else {
+                nonnegative_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
+            }
+        }
         _ => {
             return Err(compat_error(
                 fn_name,
@@ -934,42 +1240,112 @@ fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize>
             ))
         }
     };
-    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 || number > usize::MAX as f64 {
-        return Err(compat_error(
+    index.ok_or_else(|| {
+        compat_error(
             fn_name,
             format!("{fn_name}: expected a nonnegative integer scalar"),
-        ));
-    }
-    Ok(number as usize)
+        )
+    })
 }
 
-fn convert_strings_to_chars(value: Value, contained_only: bool) -> BuiltinResult<Value> {
-    match value {
-        Value::String(text) => Ok(Value::CharArray(CharArray::new_row(&text))),
-        Value::StringArray(array) if array.data.len() == 1 && !contained_only => {
-            Ok(Value::CharArray(CharArray::new_row(&array.data[0])))
+fn parse_blanks_length(value: &Value) -> BuiltinResult<usize> {
+    let parsed = match value {
+        Value::Num(n) if n.is_finite() && n.fract() == 0.0 && *n <= 0.0 => Some(0),
+        Value::Num(n) => nonnegative_platform_usize(*n),
+        Value::Int(value) => zero_clamped_integer_usize(value),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                storage
+                    .value_at(0)
+                    .and_then(|value| zero_clamped_integer_usize(&value))
+            } else {
+                let value = tensor_utils::tensor_value_f64(tensor, 0);
+                if value.is_finite() && value.fract() == 0.0 && value <= 0.0 {
+                    Some(0)
+                } else {
+                    nonnegative_platform_usize(value)
+                }
+            }
         }
-        Value::StringArray(array) if !contained_only => {
+        _ => None,
+    };
+    parsed.ok_or_else(|| {
+        compat_error(
+            "blanks",
+            "blanks: expected an integer-valued numeric scalar".to_string(),
+        )
+    })
+}
+
+fn zero_clamped_integer_usize(value: &IntValue) -> Option<usize> {
+    match value {
+        IntValue::I8(value) => Some(if *value <= 0 { 0 } else { *value as usize }),
+        IntValue::I16(value) => Some(if *value <= 0 { 0 } else { *value as usize }),
+        IntValue::I32(value) => {
+            if *value <= 0 {
+                Some(0)
+            } else {
+                usize::try_from(*value).ok()
+            }
+        }
+        IntValue::I64(value) => {
+            if *value <= 0 {
+                Some(0)
+            } else {
+                usize::try_from(*value).ok()
+            }
+        }
+        IntValue::U8(value) => Some(*value as usize),
+        IntValue::U16(value) => Some(*value as usize),
+        IntValue::U32(value) => usize::try_from(*value).ok(),
+        IntValue::U64(value) => usize::try_from(*value).ok(),
+    }
+}
+
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
+}
+
+fn convert_strings_to_chars(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::String(text) => Ok(Value::CharArray(string_scalar_to_chars(&text))),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Value::CharArray(string_scalar_to_chars(&array.data[0])))
+        }
+        Value::StringArray(array) => {
             let values = array
                 .data
                 .into_iter()
-                .map(|text| Value::CharArray(CharArray::new_row(&text)))
+                .map(|text| Value::CharArray(string_scalar_to_chars(&text)))
                 .collect();
             make_cell_with_shape(values, array.shape)
                 .map_err(|e| compat_error("convertStringsToChars", e))
         }
+        other => Ok(other),
+    }
+}
+
+fn convert_contained_strings_to_chars(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::String(_) | Value::StringArray(_) => convert_strings_to_chars(value),
         Value::Cell(cell) => {
             let values = cell
                 .data
                 .into_iter()
-                .map(|value| convert_strings_to_chars(value, true))
+                .map(convert_contained_member_to_chars)
                 .collect::<BuiltinResult<Vec<_>>>()?;
             make_cell_with_shape(values, cell.shape)
                 .map_err(|e| compat_error("convertContainedStringsToChars", e))
         }
         Value::Struct(mut st) => {
             for value in st.fields.values_mut() {
-                *value = convert_strings_to_chars(value.clone(), true)?;
+                *value = convert_contained_member_to_chars(value.clone())?;
             }
             Ok(Value::Struct(st))
         }
@@ -977,31 +1353,61 @@ fn convert_strings_to_chars(value: Value, contained_only: bool) -> BuiltinResult
     }
 }
 
+fn string_scalar_to_chars(text: &str) -> CharArray {
+    if text.is_empty() || crate::builtins::strings::common::is_missing_string(text) {
+        CharArray::new(Vec::new(), 0, 0).expect("valid empty character array")
+    } else {
+        CharArray::new_row(text)
+    }
+}
+
+fn convert_contained_member_to_chars(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::String(_) | Value::StringArray(_) => convert_strings_to_chars(value),
+        Value::Cell(_) | Value::Struct(_) => convert_contained_strings_to_chars(value),
+        other => Ok(other),
+    }
+}
+
 fn convert_chars_to_strings(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::CharArray(array) => {
-            let data = (0..array.rows)
-                .map(|row| {
-                    char_row_to_string_slice(&array.data, array.cols, row)
-                        .trim_end()
-                        .to_string()
-                })
-                .collect::<Vec<_>>();
-            StringArray::new(data, vec![array.rows, 1])
-                .map(Value::StringArray)
-                .map_err(|e| compat_error("convertCharsToStrings", e))
+            let mut text = String::with_capacity(array.data.len());
+            for col in 0..array.cols {
+                for row in 0..array.rows {
+                    text.push(array.data[row * array.cols + col]);
+                }
+            }
+            Ok(Value::String(text))
         }
         Value::Cell(cell) => {
-            let values = cell
+            if !cell.data.iter().all(is_character_vector) {
+                return Ok(Value::Cell(cell));
+            }
+            let data = cell
                 .data
                 .into_iter()
-                .map(convert_chars_to_strings)
+                .map(|value| match value {
+                    Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
+                    Value::CharArray(array) => {
+                        Ok(char_row_to_string_slice(&array.data, array.cols, 0))
+                    }
+                    _ => Err(compat_error(
+                        "convertCharsToStrings",
+                        "convertCharsToStrings: invalid cellstr element",
+                    )),
+                })
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            make_cell_with_shape(values, cell.shape)
+            StringArray::new(data, cell.shape)
+                .map(Value::StringArray)
                 .map_err(|e| compat_error("convertCharsToStrings", e))
         }
         other => Ok(other),
     }
+}
+
+fn is_character_vector(value: &Value) -> bool {
+    matches!(value, Value::CharArray(array) if array.rows <= 1)
 }
 
 fn prefix_eq_ignore_case(a: &str, b: &str, n: usize) -> bool {
@@ -1219,7 +1625,7 @@ fn parse_numeric_matrix(text: &str, fn_name: &str) -> BuiltinResult<Value> {
 fn mat2str_value(value: &Value, precision: Option<usize>) -> String {
     match value {
         Value::Num(n) => format_number(*n, precision),
-        Value::Int(i) => i.to_i64().to_string(),
+        Value::Int(i) => i.decimal_string(),
         Value::Bool(b) => {
             if *b {
                 "true".into()
@@ -1234,9 +1640,7 @@ fn mat2str_value(value: &Value, precision: Option<usize>) -> String {
                 char_row_to_string_slice(&array.data, array.cols, 0).replace('\'', "''")
             )
         }
-        Value::Tensor(tensor) => {
-            matrix_to_string(&tensor.data, tensor.rows(), tensor.cols(), precision)
-        }
+        Value::Tensor(tensor) => tensor_to_matrix_string(tensor, precision),
         Value::LogicalArray(array) => {
             let rows = array.shape.first().copied().unwrap_or(array.data.len());
             let cols = array.shape.get(1).copied().unwrap_or(1);
@@ -1252,6 +1656,30 @@ fn mat2str_value(value: &Value, precision: Option<usize>) -> String {
 }
 
 fn matrix_to_string(data: &[f64], rows: usize, cols: usize, precision: Option<usize>) -> String {
+    matrix_to_string_with(rows, cols, |index| format_number(data[index], precision))
+}
+
+fn tensor_to_matrix_string(tensor: &Tensor, precision: Option<usize>) -> String {
+    matrix_to_string_with(tensor.rows(), tensor.cols(), |index| {
+        let value = tensor
+            .numeric_value_at(index)
+            .expect("validated tensor storage index");
+        match value {
+            NumericScalar::F64(value) => format_number(value, precision),
+            NumericScalar::F32(value) => format_number(f64::from(value), precision),
+            integer => integer
+                .into_int_value()
+                .expect("non-floating numeric scalar is integer")
+                .decimal_string(),
+        }
+    })
+}
+
+fn matrix_to_string_with(
+    rows: usize,
+    cols: usize,
+    mut format_value: impl FnMut(usize) -> String,
+) -> String {
     let mut out = String::from("[");
     for row in 0..rows {
         if row > 0 {
@@ -1261,7 +1689,7 @@ fn matrix_to_string(data: &[f64], rows: usize, cols: usize, precision: Option<us
             if col > 0 {
                 out.push(' ');
             }
-            out.push_str(&format_number(data[row + col * rows], precision));
+            out.push_str(&format_value(row + col * rows));
         }
     }
     out.push(']');
@@ -1283,12 +1711,26 @@ fn format_number(value: f64, precision: Option<usize>) -> String {
 
 fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
     match value {
-        Value::Tensor(tensor) => tensor
-            .data
-            .iter()
-            .map(|n| byte_from_f64(*n, fn_name))
+        Value::Tensor(tensor) => (0..tensor.len())
+            .map(|index| {
+                let value = tensor.numeric_value_at(index).ok_or_else(|| {
+                    compat_error(
+                        fn_name,
+                        format!("{fn_name}: numeric storage is inconsistent"),
+                    )
+                })?;
+                match value {
+                    NumericScalar::F64(value) => byte_from_f64(value, fn_name),
+                    NumericScalar::F32(value) => byte_from_f64(f64::from(value), fn_name),
+                    integer => Ok(byte_from_intvalue(
+                        &integer
+                            .into_int_value()
+                            .expect("non-floating numeric scalar is integer"),
+                    )),
+                }
+            })
             .collect(),
-        Value::Int(i) => Ok(vec![i.to_i64().clamp(0, 255) as u8]),
+        Value::Int(i) => Ok(vec![byte_from_intvalue(i)]),
         Value::Num(n) => Ok(vec![byte_from_f64(*n, fn_name)?]),
         Value::CharArray(array) => {
             Ok(char_row_to_string_slice(&array.data, array.cols, 0).into_bytes())
@@ -1299,6 +1741,13 @@ fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
             format!("{fn_name}: expected bytes or text, got {other:?}"),
         )),
     }
+}
+
+fn byte_from_intvalue(value: &IntValue) -> u8 {
+    value
+        .try_to_u64()
+        .map(|value| value.min(255) as u8)
+        .unwrap_or(0)
 }
 
 fn byte_from_f64(value: f64, fn_name: &str) -> BuiltinResult<u8> {
@@ -1587,13 +2036,14 @@ fn byte_index_after_n_chars(text: &str, count: usize) -> Option<usize> {
 
 fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Num(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 => Ok(vec![*n as usize, 1]),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(vec![scan_size_dim(tensor.data[0])?, 1])
+        Value::Num(n) => Ok(vec![scan_size_dim(*n)?, 1]),
+        Value::Int(value) => Ok(vec![value.try_to_usize().ok_or_else(scan_size_error)?, 1]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(vec![scan_tensor_size_dim(tensor, 0)?, 1])
         }
-        Value::Tensor(tensor) if tensor.data.len() == 2 => Ok(vec![
-            scan_size_dim(tensor.data[0])?,
-            scan_size_dim(tensor.data[1])?,
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 2 => Ok(vec![
+            scan_tensor_size_dim(tensor, 0)?,
+            scan_tensor_size_dim(tensor, 1)?,
         ]),
         other => Err(compat_error(
             "sscanf",
@@ -1602,17 +2052,34 @@ fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     }
 }
 
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor.len()
+}
+
+fn scan_tensor_size_dim(tensor: &Tensor, index: usize) -> BuiltinResult<usize> {
+    match tensor.numeric_value_at(index).ok_or_else(scan_size_error)? {
+        NumericScalar::F64(value) => scan_size_dim(value),
+        NumericScalar::F32(value) => scan_size_dim(f64::from(value)),
+        integer => integer
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .try_to_usize()
+            .ok_or_else(scan_size_error),
+    }
+}
+
+fn scan_size_error() -> crate::RuntimeError {
+    compat_error(
+        "sscanf",
+        "sscanf: size dimensions must be nonnegative integers",
+    )
+}
+
 fn scan_size_dim(value: f64) -> BuiltinResult<usize> {
     if value.is_infinite() && value.is_sign_positive() {
         return Ok(usize::MAX / 2);
     }
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
-        return Err(compat_error(
-            "sscanf",
-            "sscanf: size dimensions must be nonnegative integers",
-        ));
-    }
-    Ok(value as usize)
+    nonnegative_platform_usize(value).ok_or_else(scan_size_error)
 }
 
 async fn bounded_pattern(
@@ -1635,7 +2102,110 @@ async fn bounded_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::NumericDType;
+    use crate::builtins::common::test_support;
+    use runmat_builtins::{CellArray, IntValue, IntegerStorage, NumericDType};
+
+    #[test]
+    fn text_broadcast_helpers_append_trailing_singletons() {
+        assert_eq!(
+            broadcast_shape(&[2, 1], &[2, 1, 3], "test").unwrap(),
+            vec![2, 1, 3]
+        );
+        assert!(broadcast_shape(&[2, 3], &[1, 2, 3], "test").is_err());
+        assert_eq!(
+            (0..6)
+                .map(|linear| broadcast_flat_index(linear, &[2, 1, 3], &[2, 1]))
+                .collect::<Vec<_>>(),
+            vec![0, 1, 0, 1, 0, 1]
+        );
+    }
+
+    #[test]
+    fn mat2str_preserves_exact_uint64_scalar_text() {
+        assert_eq!(
+            mat2str_value(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)), None),
+            "18446744073709551615"
+        );
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .expect("typed integer matrix");
+        assert_eq!(
+            mat2str_value(&Value::Tensor(tensor), None),
+            "[18446744073709551615 9007199254740993]"
+        );
+    }
+
+    #[test]
+    fn bounded_count_parsers_preserve_typed_integer_values() {
+        assert_eq!(
+            parse_nonnegative_usize(&Value::Int(IntValue::U64(7)), "digitsPattern").unwrap(),
+            7
+        );
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1])
+            .expect("typed scalar tensor");
+        assert_eq!(
+            parse_nonnegative_usize(&Value::Tensor(tensor), "digitsPattern").unwrap(),
+            9
+        );
+        let pattern =
+            block(digits_pattern_builtin(vec![Value::Int(IntValue::U8(3))])).expect("typed count");
+        assert_eq!(pattern_regex(&pattern, "test").unwrap(), r"\d{3}");
+
+        for value in [
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+            Value::Int(IntValue::I8(-1)),
+        ] {
+            assert!(parse_nonnegative_usize(&value, "digitsPattern").is_err());
+        }
+    }
+
+    #[test]
+    fn sscanf_size_parsing_preserves_typed_integer_dimensions() {
+        assert_eq!(
+            scan_size_from_value(&Value::Int(IntValue::U16(4))).unwrap(),
+            vec![4, 1]
+        );
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
+            .expect("typed size vector");
+        assert_eq!(
+            scan_size_from_value(&Value::Tensor(tensor)).unwrap(),
+            vec![2, 3]
+        );
+        let single = Tensor::from_f32(vec![5.0, 6.0], vec![1, 2]).expect("single size vector");
+        assert_eq!(
+            scan_size_from_value(&Value::Tensor(single)).unwrap(),
+            vec![5, 6]
+        );
+        assert_eq!(
+            scan_size_from_value(&Value::Num(f64::INFINITY)).unwrap(),
+            vec![usize::MAX / 2, 1]
+        );
+
+        for value in [
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64 + 1.0),
+            Value::Int(IntValue::I16(-1)),
+        ] {
+            assert!(scan_size_from_value(&value).is_err());
+        }
+    }
+
+    #[test]
+    fn native2unicode_reads_typed_integer_byte_storage_exactly() {
+        let bytes = Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![1, 2]).unwrap();
+        assert_eq!(
+            block(native2unicode_builtin(Value::Tensor(bytes), Vec::new())).unwrap(),
+            Value::String("hi".into())
+        );
+        let single = Tensor::from_f32(vec![111.0, 107.0], vec![1, 2]).expect("single bytes");
+        assert_eq!(
+            block(native2unicode_builtin(Value::Tensor(single), Vec::new())).unwrap(),
+            Value::String("ok".into())
+        );
+    }
 
     fn block(
         value: impl std::future::Future<Output = BuiltinResult<Value>>,
@@ -1654,6 +2224,74 @@ mod tests {
             is_string_scalar_builtin(Value::String("x".into())).unwrap(),
             Value::Bool(true)
         );
+    }
+
+    #[test]
+    fn blanks_accepts_every_integer_class_and_clamps_negative_lengths() {
+        for value in [
+            IntValue::I8(3),
+            IntValue::I16(3),
+            IntValue::I32(3),
+            IntValue::I64(3),
+            IntValue::U8(3),
+            IntValue::U16(3),
+            IntValue::U32(3),
+            IntValue::U64(3),
+        ] {
+            assert_eq!(
+                block(blanks_builtin(Value::Int(value))).expect("integer length"),
+                Value::CharArray(CharArray::new_row("   "))
+            );
+        }
+        for value in [
+            Value::Num(-3.0),
+            Value::Int(IntValue::I8(-3)),
+            Value::Int(IntValue::I16(-3)),
+            Value::Int(IntValue::I32(-3)),
+            Value::Int(IntValue::I64(-3)),
+        ] {
+            assert_eq!(
+                block(blanks_builtin(value)).expect("negative length"),
+                Value::CharArray(CharArray::new_row(""))
+            );
+        }
+        let single = Tensor::from_f32(vec![3.0], vec![1, 1]).expect("single scalar");
+        assert_eq!(
+            block(blanks_builtin(Value::Tensor(single))).expect("single length"),
+            Value::CharArray(CharArray::new_row("   "))
+        );
+        assert!(block(blanks_builtin(Value::Num(1.5))).is_err());
+        assert!(block(blanks_builtin(Value::Int(IntValue::U64(u64::MAX)))).is_err());
+    }
+
+    #[test]
+    fn blanks_gpu_input_follows_compatibility_mode() {
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U16(&[3]),
+                    shape: &[1, 1],
+                })
+                .expect("upload integer length");
+            {
+                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block(blanks_builtin(Value::GpuTensor(handle.clone())))
+                    .expect_err("strict mode rejects resident length");
+                assert_eq!(
+                    error.identifier(),
+                    BLANKS_GPU_INPUT_EXTENSION.error_identifier
+                );
+            }
+            {
+                let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+                assert_eq!(
+                    block(blanks_builtin(Value::GpuTensor(handle))).expect("RunMat extension"),
+                    Value::CharArray(CharArray::new_row("   "))
+                );
+            }
+        });
     }
 
     #[test]
@@ -1693,12 +2331,31 @@ mod tests {
             Value::OutputList(outputs) if outputs.len() == 2
         ));
         drop(_guard);
-        assert_eq!(
-            block(convert_chars_to_strings_builtin(Value::CharArray(
-                CharArray::new_row("abc")
-            )))
+        let _guard = crate::output_count::push_output_count(Some(2));
+        assert!(matches!(
+            block(convert_chars_to_strings_builtin(
+                Value::CharArray(CharArray::new_row("a")),
+                vec![Value::CharArray(CharArray::new_row("b"))],
+            ))
             .unwrap(),
-            Value::StringArray(StringArray::new(vec!["abc".into()], vec![1, 1]).unwrap())
+            Value::OutputList(outputs) if outputs == vec![Value::String("a".into()), Value::String("b".into())]
+        ));
+        assert!(matches!(
+            block(convert_contained_strings_to_chars_builtin(
+                Value::String("a".into()),
+                vec![Value::String("b".into())],
+            ))
+            .unwrap(),
+            Value::OutputList(outputs) if outputs == vec![Value::CharArray(CharArray::new_row("a")), Value::CharArray(CharArray::new_row("b"))]
+        ));
+        drop(_guard);
+        assert_eq!(
+            block(convert_chars_to_strings_builtin(
+                Value::CharArray(CharArray::new_row("abc")),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::String("abc".into())
         );
         assert_eq!(
             block(str2num_builtin(Value::String("1 2; 3 4".into()))).unwrap(),
@@ -1712,6 +2369,172 @@ mod tests {
             .unwrap(),
             Value::String("[1 2;3 4]".into())
         );
+    }
+
+    #[test]
+    fn integer_conversion_passthrough_is_exact_for_every_class() {
+        for int in [
+            IntValue::I8(i8::MIN),
+            IntValue::I16(i16::MIN),
+            IntValue::I32(i32::MIN),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(u8::MAX),
+            IntValue::U16(u16::MAX),
+            IntValue::U32(u32::MAX),
+            IntValue::U64(u64::MAX),
+        ] {
+            let value = Value::Int(int);
+            assert_eq!(
+                block(convert_strings_to_chars_builtin(value.clone(), Vec::new())).unwrap(),
+                value
+            );
+            assert_eq!(
+                block(convert_chars_to_strings_builtin(value.clone(), Vec::new())).unwrap(),
+                value
+            );
+            assert_eq!(
+                block(convert_contained_strings_to_chars_builtin(
+                    value.clone(),
+                    Vec::new()
+                ))
+                .unwrap(),
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn integer_conversion_passthrough_preserves_provider_ownership_without_gather() {
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[u64::MAX]),
+                    shape: &[1, 1],
+                })
+                .expect("upload integer");
+            for output in [
+                block(convert_strings_to_chars_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Vec::new(),
+                ))
+                .unwrap(),
+                block(convert_chars_to_strings_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Vec::new(),
+                ))
+                .unwrap(),
+                block(convert_contained_strings_to_chars_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    Vec::new(),
+                ))
+                .unwrap(),
+            ] {
+                let Value::GpuTensor(returned) = output else {
+                    panic!("expected unchanged resident integer handle");
+                };
+                assert_eq!(returned.buffer_id, handle.buffer_id);
+                assert_eq!(returned.device_id, handle.device_id);
+                assert_eq!(returned.shape, handle.shape);
+            }
+        });
+    }
+
+    #[test]
+    fn conversion_scope_and_container_shapes_match_their_contracts() {
+        let matrix = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+        assert_eq!(
+            block(convert_chars_to_strings_builtin(
+                Value::CharArray(matrix),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::String("acbd".into())
+        );
+
+        let cellstr = CellArray::new(
+            vec![
+                Value::CharArray(CharArray::new_row("a")),
+                Value::CharArray(CharArray::new_row("b")),
+            ],
+            1,
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            block(convert_chars_to_strings_builtin(
+                Value::Cell(cellstr),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap())
+        );
+
+        let mixed = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::String("keep".into()),
+                    Value::Int(IntValue::U64(u64::MAX)),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            block(convert_strings_to_chars_builtin(mixed.clone(), Vec::new())).unwrap(),
+            mixed
+        );
+
+        assert_eq!(
+            block(convert_contained_strings_to_chars_builtin(
+                Value::String("top-level".into()),
+                Vec::new(),
+            ))
+            .unwrap(),
+            Value::CharArray(CharArray::new_row("top-level"))
+        );
+        for text in ["", "<missing>"] {
+            assert_eq!(
+                block(convert_strings_to_chars_builtin(
+                    Value::String(text.into()),
+                    Vec::new()
+                ))
+                .unwrap(),
+                Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap())
+            );
+        }
+        let converted = block(convert_contained_strings_to_chars_builtin(
+            mixed,
+            Vec::new(),
+        ))
+        .unwrap();
+        let Value::Cell(cell) = converted else {
+            panic!("expected cell");
+        };
+        assert_eq!(
+            cell.data,
+            vec![
+                Value::CharArray(CharArray::new_row("keep")),
+                Value::Int(IntValue::U64(u64::MAX))
+            ]
+        );
+
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let nested = Value::Cell(CellArray::new(vec![resident.clone()], 1, 1).unwrap());
+        let Value::Cell(preserved) = block(convert_contained_strings_to_chars_builtin(
+            nested,
+            Vec::new(),
+        ))
+        .unwrap() else {
+            panic!("expected cell");
+        };
+        assert_eq!(preserved.data, vec![resident]);
     }
 
     #[test]
@@ -1747,8 +2570,24 @@ mod tests {
 
     #[test]
     fn pattern_constructors_store_regex() {
+        assert_eq!(
+            pattern_regex(&block(digits_pattern_builtin(Vec::new())).unwrap(), "test").unwrap(),
+            r"\d+"
+        );
         let value = block(digits_pattern_builtin(vec![Value::Num(2.0)])).unwrap();
         assert_eq!(pattern_regex(&value, "test").unwrap(), "\\d{2}");
+        let bounded = block(digits_pattern_builtin(vec![
+            Value::Int(IntValue::U8(2)),
+            Value::Int(IntValue::U16(4)),
+        ]))
+        .unwrap();
+        assert_eq!(pattern_regex(&bounded, "test").unwrap(), r"\d{2,4}");
+        let unbounded = block(digits_pattern_builtin(vec![
+            Value::Int(IntValue::I8(3)),
+            Value::Num(f64::INFINITY),
+        ]))
+        .unwrap();
+        assert_eq!(pattern_regex(&unbounded, "test").unwrap(), r"\d{3,}");
         assert_eq!(
             pattern_regex(&block(letters_pattern_builtin(Vec::new())).unwrap(), "test").unwrap(),
             r"\p{Alphabetic}+"
@@ -1781,6 +2620,81 @@ mod tests {
             .unwrap(),
             r"$"
         );
+    }
+
+    #[test]
+    fn digits_pattern_validates_range_controls_and_argument_count() {
+        let zero = block(digits_pattern_builtin(vec![Value::Int(IntValue::U64(0))])).unwrap();
+        assert_eq!(pattern_regex(&zero, "test").unwrap(), r"\d{0}");
+        for args in [
+            vec![Value::Num(-1.0)],
+            vec![Value::Num(1.5)],
+            vec![Value::Num(1.0), Value::Num(f64::NEG_INFINITY)],
+            vec![Value::Bool(true)],
+        ] {
+            let error = block(digits_pattern_builtin(args)).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                DIGITS_PATTERN_ERROR_INVALID_COUNT.identifier
+            );
+        }
+        let range_error = block(digits_pattern_builtin(vec![
+            Value::Num(4.0),
+            Value::Num(3.0),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            range_error.identifier(),
+            DIGITS_PATTERN_ERROR_INVALID_RANGE.identifier
+        );
+        let arity_error = block(digits_pattern_builtin(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            arity_error.identifier(),
+            DIGITS_PATTERN_ERROR_ARGUMENT_COUNT.identifier
+        );
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let resident_error = block(digits_pattern_builtin(vec![resident])).unwrap_err();
+        assert_eq!(
+            resident_error.identifier(),
+            DIGITS_PATTERN_ERROR_INVALID_COUNT.identifier
+        );
+    }
+
+    #[test]
+    fn digits_pattern_range_reads_all_integer_classes_exactly() {
+        for (minimum, maximum) in [
+            (IntValue::I8(2), IntValue::I8(4)),
+            (IntValue::I16(2), IntValue::I16(4)),
+            (IntValue::I32(2), IntValue::I32(4)),
+            (IntValue::I64(2), IntValue::I64(4)),
+            (IntValue::U8(2), IntValue::U8(4)),
+            (IntValue::U16(2), IntValue::U16(4)),
+            (IntValue::U32(2), IntValue::U32(4)),
+            (IntValue::U64(2), IntValue::U64(4)),
+        ] {
+            let pattern = block(digits_pattern_builtin(vec![
+                Value::Int(minimum),
+                Value::Int(maximum),
+            ]))
+            .unwrap();
+            assert_eq!(pattern_regex(&pattern, "test").unwrap(), r"\d{2,4}");
+        }
+    }
+
+    #[test]
+    fn digits_pattern_descriptor_declares_all_public_forms() {
+        assert_eq!(DIGITS_PATTERN_DESCRIPTOR.signatures.len(), 3);
+        assert_eq!(DIGITS_PATTERN_DESCRIPTOR.errors.len(), 3);
+        assert_eq!(DIGITS_PATTERN_INTEGER_CAPABILITIES.len(), 2);
     }
 
     #[test]

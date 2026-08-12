@@ -1,10 +1,14 @@
-//! MATLAB-compatible `filewrite` builtin for RunMat.
+//! RunMat-native `filewrite` builtin.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
@@ -14,6 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::OpenOptions;
 
@@ -45,6 +50,36 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "filewrite";
+
+const FILEWRITE_NATIVE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "filewrite-runmat-native",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "filewrite is a RunMat-native file-writing API with no MATLAB builtin counterpart",
+    error_identifier: Some("RunMat:compatibility:FilewriteNativeExtension"),
+};
+
+pub const FILEWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FILEWRITE_NATIVE_EXTENSION];
+
+const FILEWRITE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "data",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "All eight integer classes are read from authoritative storage and each value must lie in the inclusive byte range 0..255.",
+    }];
+
+pub const FILEWRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "count = filewrite(filename, integer_data, ...)",
+        inputs: &FILEWRITE_INTEGER_DATA_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The complete filewrite surface is a gated RunMat-native extension; integer data is validated exactly before encoding and host I/O, resident data gathers to the host, and the byte count is a host double scalar.",
+    }];
 
 const FILEWRITE_OUTPUT_COUNT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "count",
@@ -311,6 +346,8 @@ impl Default for FilewriteOptions {
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::filewrite_type),
     descriptor(crate::builtins::io::filetext::filewrite::FILEWRITE_DESCRIPTOR),
+    extensions(crate::builtins::io::filetext::filewrite::FILEWRITE_EXTENSIONS),
+    integer_capabilities(crate::builtins::io::filetext::filewrite::FILEWRITE_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::io::filetext::filewrite"
 )]
 async fn filewrite_builtin(
@@ -318,6 +355,10 @@ async fn filewrite_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    crate::compatibility::ensure_builtin_extension_enabled(
+        &FILEWRITE_NATIVE_EXTENSION,
+        BUILTIN_NAME,
+    )?;
     let path = gather_if_needed_async(&path)
         .await
         .map_err(map_control_flow)?;
@@ -581,9 +622,28 @@ fn string_array_to_text(sa: &StringArray) -> Vec<char> {
 }
 
 fn tensor_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
-    let mut out = Vec::with_capacity(tensor.data.len());
-    for (idx, value) in tensor.data.iter().enumerate() {
-        match float_to_byte(*value) {
+    let len = tensor_utils::tensor_element_len(tensor);
+    let mut out = Vec::with_capacity(len);
+    if let Some(storage) = tensor.integer_storage() {
+        for idx in 0..len {
+            let value = storage
+                .value_at(idx)
+                .expect("integer storage mirrors tensor shape");
+            match int_value_to_byte(&value) {
+                Ok(byte) => out.push(byte),
+                Err(msg) => {
+                    return Err(filewrite_error_with_detail(
+                        &FILEWRITE_ERROR_INVALID_DATA,
+                        format!("numeric element {} {}", idx, msg),
+                    ));
+                }
+            }
+        }
+        return Ok(out);
+    }
+    let values = tensor_utils::tensor_values_f64_cow(tensor);
+    for (idx, value) in values.iter().copied().enumerate() {
+        match float_to_byte(value) {
             Ok(byte) => out.push(byte),
             Err(msg) => {
                 return Err(filewrite_error_with_detail(
@@ -784,6 +844,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::RuntimeError;
+    use runmat_builtins::IntegerStorage;
     use runmat_time::unix_timestamp_ms;
     use std::io::Read;
 
@@ -792,7 +853,59 @@ pub(crate) mod tests {
     }
 
     fn run_filewrite(path: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         futures::executor::block_on(filewrite_builtin(path, data, rest))
+    }
+
+    #[test]
+    fn filewrite_is_gated_before_filesystem_side_effects() {
+        let target = unique_path("filewrite_strict_gate");
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = futures::executor::block_on(filewrite_builtin(
+            Value::from(target.to_string_lossy().to_string()),
+            Value::from("must not be written"),
+            Vec::new(),
+        ))
+        .expect_err("strict compatibility mode must reject RunMat-native filewrite");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FilewriteNativeExtension")
+        );
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn filewrite_integer_metadata_covers_every_native_class() {
+        let capability = &FILEWRITE_INTEGER_CAPABILITIES[0];
+        assert_eq!(capability.inputs[0].classes.len(), 8);
+        assert_eq!(
+            capability.backend,
+            BuiltinIntegerBackendRule::GatherFallback
+        );
+        assert_eq!(FILEWRITE_EXTENSIONS[0].id, "filewrite-runmat-native");
+    }
+
+    #[test]
+    fn filewrite_gathers_resident_integer_bytes_before_host_io() {
+        test_support::with_test_provider(|provider| {
+            let values = [0_u64, 127, 255];
+            let handle = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&values),
+                    shape: &[1, 3],
+                })
+                .expect("upload integer bytes");
+            let target = unique_path("filewrite_resident_integer");
+            let result = run_filewrite(
+                Value::from(target.to_string_lossy().to_string()),
+                Value::GpuTensor(handle),
+                Vec::new(),
+            )
+            .expect("resident integer filewrite");
+            assert_eq!(result, Value::Num(3.0));
+            assert_eq!(test_support::fs::read(&target).unwrap(), vec![0, 127, 255]);
+            test_support::fs::remove_file(target).unwrap();
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -898,6 +1011,68 @@ pub(crate) mod tests {
         assert_eq!(bytes, vec![0u8, 127u8, 255u8]);
 
         let _ = test_support::fs::remove_file(&path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filewrite_writes_raw_bytes_from_typed_integer_storage() {
+        let path = unique_path("filewrite_typed_raw_bytes");
+        let tensor = Tensor::new_integer(IntegerStorage::U8(vec![0, 127, 255]), vec![3, 1])
+            .expect("typed byte tensor");
+
+        run_filewrite(
+            Value::from(path.to_string_lossy().to_string()),
+            Value::Tensor(tensor),
+            vec![Value::from("Encoding"), Value::from("raw")],
+        )
+        .expect("filewrite typed raw");
+
+        let bytes = test_support::fs::read(&path).expect("read typed raw file");
+        assert_eq!(bytes, vec![0u8, 127u8, 255u8]);
+
+        let _ = test_support::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tensor_to_bytes_reads_each_integer_storage_class() {
+        let cases = [
+            (IntegerStorage::I8(vec![1]), 1),
+            (IntegerStorage::I16(vec![2]), 2),
+            (IntegerStorage::I32(vec![3]), 3),
+            (IntegerStorage::I64(vec![4]), 4),
+            (IntegerStorage::U8(vec![5]), 5),
+            (IntegerStorage::U16(vec![6]), 6),
+            (IntegerStorage::U32(vec![7]), 7),
+            (IntegerStorage::U64(vec![8]), 8),
+        ];
+
+        for (storage, expected) in cases {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
+            assert_eq!(
+                tensor_to_bytes(&tensor).expect("byte payload"),
+                vec![expected]
+            );
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filewrite_typed_integer_tensor_range_errors_keep_exact_wide_values() {
+        let path = unique_path("filewrite_typed_integer_range");
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed integer tensor");
+
+        let err = unwrap_error_message(
+            run_filewrite(
+                Value::from(path.to_string_lossy().to_string()),
+                Value::Tensor(tensor),
+                vec![Value::from("Encoding"), Value::from("raw")],
+            )
+            .expect_err("wide uint64 must not fit in a byte"),
+        );
+
+        assert!(err.contains(&u64::MAX.to_string()), "{err}");
+        assert!(!err.contains("18446744073709552000"), "{err}");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

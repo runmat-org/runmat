@@ -240,20 +240,24 @@ fn prefix_equal(lhs: &str, rhs: &str, limit: usize) -> bool {
 
 fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
-            }
-            Ok(raw as usize)
-        }
+        Value::Int(i) => i
+            .try_to_usize()
+            .ok_or_else(|| strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH)),
         Value::Num(n) => parse_prefix_length_from_float(n),
         Value::Bool(b) => Ok(if b { 1 } else { 0 }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            if tensor::tensor_element_len(&tensor) != 1 {
                 return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
             }
-            parse_prefix_length_from_float(tensor.data[0])
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return value
+                    .try_to_usize()
+                    .ok_or_else(|| strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
+            }
+            parse_prefix_length_from_float(tensor::tensor_value_f64(&tensor, 0))
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
@@ -276,7 +280,7 @@ fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
     if (rounded - value).abs() > f64::EPSILON {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
-    if rounded > (usize::MAX as f64) {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     Ok(rounded as usize)
@@ -288,7 +292,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{
-        CellArray, CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type,
+        CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, StringArray,
+        Tensor, Type,
     };
 
     fn strncmp_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
@@ -388,6 +393,20 @@ pub(crate) mod tests {
     #[test]
     fn strncmp_prefix_length_tensor_scalar_double() {
         let limit = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let result = strncmp_builtin(
+            Value::String("gamma".into()),
+            Value::String("gamut".into()),
+            Value::Tensor(limit),
+        )
+        .expect("strncmp");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strncmp_prefix_length_typed_integer_tensor_reads_exact_storage() {
+        let limit =
+            Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
         let result = strncmp_builtin(
             Value::String("gamma".into()),
             Value::String("gamut".into()),
@@ -541,6 +560,39 @@ pub(crate) mod tests {
         assert!(err.to_ascii_lowercase().contains("nonnegative"));
     }
 
+    #[test]
+    fn strncmp_prefix_length_rejects_negative_typed_integer_tensor() {
+        let limit =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("integer tensor");
+        let err = error_message(
+            strncmp_builtin(
+                Value::String("abc".into()),
+                Value::String("abc".into()),
+                Value::Tensor(limit),
+            )
+            .expect_err("negative length"),
+        );
+        assert!(err.to_ascii_lowercase().contains("nonnegative"));
+    }
+
+    #[test]
+    fn strncmp_prefix_length_rejects_unrepresentable_double_boundary() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = error_message(
+            strncmp_builtin(
+                Value::String("abc".into()),
+                Value::String("abc".into()),
+                Value::Num(boundary),
+            )
+            .expect_err("unrepresentable prefix length"),
+        );
+        assert!(err.to_ascii_lowercase().contains("prefix length"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
@@ -556,7 +608,7 @@ pub(crate) mod tests {
         };
         let tensor = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload prefix length to GPU");

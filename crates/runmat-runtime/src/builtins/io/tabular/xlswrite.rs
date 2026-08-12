@@ -7,7 +7,8 @@ use calamine::{open_workbook_auto_from_rs, Data as SpreadsheetData, Reader as Sp
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, SparseTensor, StringArray, StructValue, Tensor, Value,
+    CellArray, CharArray, IntValue, LogicalArray, SparseTensor, StringArray, StructValue, Tensor,
+    Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -17,6 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::writecell::{self, CellTable, CellValue, RangeStart};
@@ -447,27 +449,18 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
     match value {
         Value::Num(n) => numeric_sheet_index(*n),
         Value::Int(i) => {
-            let index = i.to_i64();
-            if index <= 0 {
-                return Err(xlswrite_error_with(
-                    &XLSWRITE_ERROR_SHEET,
-                    "xlswrite: sheet index must be one-based",
-                ));
-            }
-            let index = usize::try_from(index - 1).map_err(|_| {
-                xlswrite_error_with(&XLSWRITE_ERROR_SHEET, "xlswrite: sheet index is too large")
-            })?;
-            if index >= MAX_XLSWRITE_SHEETS {
-                return Err(xlswrite_error_with(
-                    &XLSWRITE_ERROR_SHEET,
-                    format!(
-                        "xlswrite: sheet index exceeds supported limit of {MAX_XLSWRITE_SHEETS}"
-                    ),
-                ));
-            }
+            let index = integer_sheet_index(i)?;
             Ok(SheetSelector::Index(index))
         }
-        Value::Tensor(t) if t.data.len() == 1 => numeric_sheet_index(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                let index = integer_sheet_index(&value)?;
+                Ok(SheetSelector::Index(index))
+            } else {
+                numeric_sheet_index(tensor::tensor_value_f64(t, 0))
+            }
+        }
         _ => {
             let text = value_to_string_scalar(value).map_err(|_| {
                 xlswrite_error_with(
@@ -480,6 +473,25 @@ fn parse_sheet_selector(value: &Value) -> BuiltinResult<SheetSelector> {
     }
 }
 
+fn integer_sheet_index(value: &IntValue) -> BuiltinResult<usize> {
+    let index = value
+        .try_to_usize()
+        .and_then(|index| index.checked_sub(1))
+        .ok_or_else(|| {
+            xlswrite_error_with(
+                &XLSWRITE_ERROR_SHEET,
+                "xlswrite: sheet index must be one-based",
+            )
+        })?;
+    if index >= MAX_XLSWRITE_SHEETS {
+        return Err(xlswrite_error_with(
+            &XLSWRITE_ERROR_SHEET,
+            format!("xlswrite: sheet index exceeds supported limit of {MAX_XLSWRITE_SHEETS}"),
+        ));
+    }
+    Ok(index)
+}
+
 fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
     if !value.is_finite() || value < 1.0 || (value.round() - value).abs() > f64::EPSILON {
         return Err(xlswrite_error_with(
@@ -487,16 +499,21 @@ fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
             "xlswrite: sheet index must be a positive integer",
         ));
     }
-    let index = value.round() as u128;
+    let rounded = value.round();
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(xlswrite_error_with(
+            &XLSWRITE_ERROR_SHEET,
+            "xlswrite: sheet index is too large",
+        ));
+    }
+    let index = rounded as usize;
     let zero_based = index.checked_sub(1).ok_or_else(|| {
         xlswrite_error_with(
             &XLSWRITE_ERROR_SHEET,
             "xlswrite: sheet index must be one-based",
         )
     })?;
-    let index = usize::try_from(zero_based).map_err(|_| {
-        xlswrite_error_with(&XLSWRITE_ERROR_SHEET, "xlswrite: sheet index is too large")
-    })?;
+    let index = zero_based;
     if index >= MAX_XLSWRITE_SHEETS {
         return Err(xlswrite_error_with(
             &XLSWRITE_ERROR_SHEET,
@@ -541,7 +558,7 @@ fn parse_range_start(value: &Value) -> BuiltinResult<RangeStart> {
         return parse_range_text(&text);
     }
     match value {
-        Value::Tensor(t) => parse_numeric_range(&t.data),
+        Value::Tensor(t) => parse_numeric_range(&tensor::tensor_values_f64(t)),
         Value::Num(n) => parse_numeric_range(&[*n]),
         _ => Err(xlswrite_error_with(
             &XLSWRITE_ERROR_RANGE,
@@ -569,8 +586,15 @@ fn one_based_index(value: f64, label: &str) -> BuiltinResult<usize> {
             format!("xlswrite: range {label} must be a positive integer"),
         ));
     }
-    let one_based = value.round() as u128;
-    usize::try_from(one_based - 1).map_err(|_| {
+    let rounded = value.round();
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(xlswrite_error_with(
+            &XLSWRITE_ERROR_RANGE,
+            format!("xlswrite: range {label} is too large"),
+        ));
+    }
+    let one_based = rounded as usize;
+    one_based.checked_sub(1).ok_or_else(|| {
         xlswrite_error_with(
             &XLSWRITE_ERROR_RANGE,
             format!("xlswrite: range {label} is too large"),
@@ -1114,7 +1138,7 @@ impl XlsTable {
             Value::String(text) => Ok(Self::single(CellValue::Text(text))),
             Value::CharArray(chars) => Self::from_char_array(chars),
             Value::Num(value) => Ok(Self::single(CellValue::Number(value))),
-            Value::Int(value) => Ok(Self::single(CellValue::Number(value.to_f64()))),
+            Value::Int(value) => Ok(Self::single(CellValue::Integer(value))),
             Value::Bool(value) => Ok(Self::single(CellValue::Boolean(value))),
             Value::Complex(_, _) | Value::ComplexTensor(_) => Err(xlswrite_error_with(
                 &XLSWRITE_ERROR_DATA,
@@ -1242,7 +1266,14 @@ impl XlsTable {
         let mut cells = Vec::with_capacity(rows * cols);
         for row in 0..rows {
             for col in 0..cols {
-                cells.push(CellValue::Number(tensor.data[row + col * rows]));
+                let value = tensor
+                    .numeric_value_at(row + col * rows)
+                    .expect("index within authoritative numeric storage");
+                if let Some(value) = value.into_int_value() {
+                    cells.push(CellValue::Integer(value));
+                } else {
+                    cells.push(CellValue::Number(value.materialize_f64()));
+                }
             }
         }
         Ok(Self { rows, cols, cells })
@@ -1252,13 +1283,46 @@ impl XlsTable {
         let rows = sparse.rows;
         let cols = sparse.cols;
         checked_cell_count(rows, cols, "sparse array")?;
-        let mut cells = vec![CellValue::Number(0.0); rows * cols];
-        for col in 0..cols {
-            let start = sparse.col_ptrs[col];
-            let end = sparse.col_ptrs[col + 1];
-            for entry in start..end {
-                let row = sparse.row_indices[entry];
-                cells[row * cols + col] = CellValue::Number(sparse.values[entry]);
+        let mut cells = if sparse.is_logical() {
+            vec![CellValue::Boolean(false); rows * cols]
+        } else {
+            vec![CellValue::Number(0.0); rows * cols]
+        };
+        if sparse.is_logical() {
+            for col in 0..cols {
+                for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+                    let row = sparse.row_indices[entry];
+                    cells[row * cols + col] = CellValue::Boolean(true);
+                }
+            }
+        } else if let Some(storage) = sparse.integer_storage() {
+            for col in 0..cols {
+                let start = sparse.col_ptrs[col];
+                let end = sparse.col_ptrs[col + 1];
+                for entry in start..end {
+                    let row = sparse.row_indices[entry];
+                    let value = storage.value_at(entry).ok_or_else(|| {
+                        xlswrite_error_with(
+                            &XLSWRITE_ERROR_DATA,
+                            format!("xlswrite: sparse integer value buffer missing entry {entry}"),
+                        )
+                    })?;
+                    cells[row * cols + col] = CellValue::Integer(value);
+                }
+            }
+        } else {
+            for col in 0..cols {
+                let start = sparse.col_ptrs[col];
+                let end = sparse.col_ptrs[col + 1];
+                for entry in start..end {
+                    let row = sparse.row_indices[entry];
+                    cells[row * cols + col] = CellValue::Number(
+                        sparse
+                            .numeric_value_at(entry)
+                            .expect("sparse storage index is valid")
+                            .materialize_f64(),
+                    );
+                }
             }
         }
         Ok(Self { rows, cols, cells })
@@ -1326,14 +1390,16 @@ impl XlsTable {
 fn cell_value_from_scalar(value: Value) -> BuiltinResult<CellValue> {
     match value {
         Value::Num(n) => Ok(CellValue::Number(n)),
-        Value::Int(i) => Ok(CellValue::Number(i.to_f64())),
+        Value::Int(i) => Ok(CellValue::Integer(i)),
         Value::Bool(b) => Ok(CellValue::Boolean(b)),
         Value::String(s) => Ok(CellValue::Text(s)),
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(CellValue::Number(tensor.data[0])),
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            writecell::scalar_tensor_cell_value(&tensor)
+        }
+        Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
         }
@@ -1549,7 +1615,7 @@ mod tests {
     use super::*;
     use calamine::{open_workbook_auto, open_workbook_auto_from_rs, Data, Reader};
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, SparseTensor};
+    use runmat_builtins::{IntegerStorage, SparseTensor};
     use runmat_time::unix_timestamp_ms;
     use std::fs;
     use std::io::Cursor;
@@ -1601,6 +1667,22 @@ mod tests {
     }
 
     #[test]
+    fn xlswrite_numeric_range_reads_typed_integer_storage_exactly() {
+        let range =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("range");
+
+        let parsed = parse_range_start(&Value::Tensor(range)).expect("range");
+
+        assert_eq!(parsed.row, 1);
+        assert_eq!(parsed.col, 2);
+
+        let boundary = Value::Tensor(
+            Tensor::new(vec![usize::MAX as f64, 1.0], vec![1, 2]).expect("boundary range"),
+        );
+        assert!(parse_range_start(&boundary).is_err());
+    }
+
+    #[test]
     fn xlswrite_writes_numeric_matrix_with_sheet_and_range() {
         let path = temp_path("xlsx");
         let filename = path.to_string_lossy().into_owned();
@@ -1630,11 +1712,13 @@ mod tests {
     fn xlswrite_accepts_cell_strings_logicals_and_ints() {
         let path = temp_path("xls");
         let filename = path.to_string_lossy().into_owned();
+        let typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed scalar tensor");
         let values = cell(
             vec![
                 Value::from("name"),
                 Value::Bool(true),
-                Value::Int(IntValue::I32(7)),
+                Value::Tensor(typed),
                 Value::from("tail"),
             ],
             2,
@@ -1653,23 +1737,34 @@ mod tests {
         let range = workbook.worksheet_range("Sheet1").expect("worksheet");
         assert_eq!(range.get((0, 0)), Some(&Data::String("name".to_string())));
         assert_eq!(range.get((0, 1)), Some(&Data::Bool(true)));
-        assert_eq!(range.get((1, 0)), Some(&Data::Float(7.0)));
+        assert_eq!(range.get((1, 0)), Some(&Data::Float(2026.0)));
         assert_eq!(range.get((1, 1)), Some(&Data::String("tail".to_string())));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn xlswrite_preserves_integer_cell_xml_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
+
+        let scalar = block_on(XlsTable::from_value(Value::Int(IntValue::U64(u64::MAX))))
+            .expect("scalar table");
+        let scalar_xml =
+            writecell::build_sheet_xml(&scalar.into_cell_table().unwrap(), RangeStart::default());
+        assert!(scalar_xml.contains("<v>18446744073709551615</v>"));
+
+        let tensor = block_on(XlsTable::from_value(Value::Tensor(typed))).expect("tensor table");
+        let tensor_xml =
+            writecell::build_sheet_xml(&tensor.into_cell_table().unwrap(), RangeStart::default());
+        assert!(tensor_xml.contains("<v>9007199254740993</v>"));
     }
 
     #[test]
     fn xlswrite_accepts_top_level_sparse_matrix() {
         let path = temp_path("xlsx");
         let filename = path.to_string_lossy().into_owned();
-        let sparse = SparseTensor {
-            rows: 2,
-            cols: 2,
-            col_ptrs: vec![0, 1, 2],
-            row_indices: vec![1, 0],
-            values: vec![9.0, 8.0],
-            integer_data: None,
-        };
+        let sparse = SparseTensor::new(2, 2, vec![0, 1, 2], vec![1, 0], vec![9.0, 8.0]).unwrap();
 
         block_on(xlswrite_builtin(
             Value::from(filename),
@@ -1685,6 +1780,24 @@ mod tests {
         assert_eq!(range.get((1, 0)), Some(&Data::Float(9.0)));
         assert_eq!(range.get((1, 1)), Some(&Data::Float(0.0)));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn xlswrite_preserves_sparse_integer_cells_exactly() {
+        let sparse = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![1, 0],
+            IntegerStorage::U64(vec![u64::MAX, (1_u64 << 53) + 1]),
+        )
+        .expect("integer sparse");
+        let table = block_on(XlsTable::from_value(Value::SparseTensor(sparse))).expect("table");
+        let xml =
+            writecell::build_sheet_xml(&table.into_cell_table().unwrap(), RangeStart::default());
+
+        assert!(xml.contains("<v>18446744073709551615</v>"));
+        assert!(xml.contains("<v>9007199254740993</v>"));
     }
 
     #[test]
@@ -1823,14 +1936,7 @@ mod tests {
 
     #[test]
     fn xlswrite_rejects_sparse_inputs_that_would_densify_too_large() {
-        let sparse = SparseTensor {
-            rows: MAX_XLSWRITE_CELLS + 1,
-            cols: 1,
-            col_ptrs: vec![0, 0],
-            row_indices: Vec::new(),
-            values: Vec::new(),
-            integer_data: None,
-        };
+        let sparse = SparseTensor::zeros(MAX_XLSWRITE_CELLS + 1, 1);
         let err = block_on(xlswrite_builtin(
             Value::from("out.xlsx"),
             Value::SparseTensor(sparse),
@@ -1871,6 +1977,26 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:xlswrite:Sheet"));
+    }
+
+    #[test]
+    fn xlswrite_sheet_selector_preserves_typed_integer_tensor_bounds() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1])
+            .expect("typed sheet tensor");
+        assert!(matches!(
+            parse_sheet_selector(&Value::Tensor(tensor)),
+            Ok(SheetSelector::Index(6))
+        ));
+
+        let too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("typed sheet tensor");
+        assert!(parse_sheet_selector(&Value::Tensor(too_large)).is_err());
+        let negative =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("negative");
+        assert!(parse_sheet_selector(&Value::Tensor(negative)).is_err());
+
+        assert!(parse_sheet_selector(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_sheet_selector(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
     }
 
     #[test]

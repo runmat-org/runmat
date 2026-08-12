@@ -130,6 +130,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::trigonometry::tanh"
 )]
 async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "tanh")?;
     match value {
         Value::GpuTensor(handle) => tanh_gpu(handle).await,
         Value::Complex(re, im) => {
@@ -160,14 +161,17 @@ fn tanh_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn tanh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor.data.iter().map(|&v| v.tanh()).collect::<Vec<_>>();
+    let data = tensor::tensor_values_f64_cow(&tensor)
+        .iter()
+        .map(|&v| v.tanh())
+        .collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone())
         .map_err(|e| tanh_error_with_detail(&TANH_ERROR_INTERNAL, e))
 }
 
 fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let mapped = ct
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| tanh_complex_parts(re, im))
         .collect::<Vec<_>>();
@@ -268,12 +272,34 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 for (value, expected) in out
-                    .data
+                    .materialize_f64()
                     .iter()
                     .zip([-1.0_f64.tanh(), 0.0, 1.0_f64.tanh()].iter())
                 {
                     assert!((*value - *expected).abs() < 1e-12);
                 }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tanh_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-1, 0, 1]),
+            vec![3, 1],
+        )
+        .expect("integer tensor");
+
+        match tanh_builtin(Value::Tensor(tensor)).expect("tanh") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                let expected = [-1.0f64.tanh(), 0.0, 1.0f64.tanh()];
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -302,7 +328,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 let expected: Vec<f64> = "Az".chars().map(|c| (c as u32 as f64).tanh()).collect();
-                for (value, expect) in t.data.iter().zip(expected.iter()) {
+                for (value, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*value - *expect).abs() < 1e-12);
                 }
             }
@@ -324,14 +350,18 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0, 1.5], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = tanh_builtin(Value::GpuTensor(handle)).expect("tanh");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            for (value, expect) in gathered.data.iter().zip(tensor.data.iter()) {
+            for (value, expect) in gathered
+                .materialize_f64()
+                .iter()
+                .zip(tensor.materialize_f64().iter())
+            {
                 assert!((*value - expect.tanh()).abs() < 1e-12);
             }
         });
@@ -350,7 +380,7 @@ pub(crate) mod tests {
         let cpu_tensor = test_support::gather(cpu_value).expect("gather cpu");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = runmat_accelerate_api::provider()
@@ -368,7 +398,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (got, expect) in gpu_tensor.data.iter().zip(cpu_tensor.data.iter()) {
+        for (got, expect) in gpu_tensor
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!(
                 (*got - *expect).abs() < tol,
                 "tanh mismatch: got {got}, expect {expect}, tol {tol}"

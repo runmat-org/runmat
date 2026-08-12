@@ -607,8 +607,13 @@ impl MatrixData {
             MatrixData::Numeric(tensor) => {
                 let rows = tensor.rows();
                 let idx = row + col * rows;
-                let value = tensor.data[idx];
-                format_numeric(value, options.decimal_separator)
+                let value = tensor
+                    .numeric_value_at(idx)
+                    .expect("index within authoritative numeric storage");
+                if let Some(value) = value.into_int_value() {
+                    return value.decimal_string();
+                }
+                format_numeric(value.materialize_f64(), options.decimal_separator)
             }
             MatrixData::Text { rows, data, .. } => {
                 if *rows == 0 {
@@ -876,7 +881,7 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{StringArray, Tensor};
+    use runmat_builtins::{IntegerStorage, StringArray, Tensor};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -945,6 +950,28 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn writematrix_preserves_typed_integer_matrix_values_exactly() {
+        let path = temp_path("csv");
+        let tensor = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
+            vec![2, 2],
+        )
+        .expect("typed integer matrix");
+        let filename = path.to_string_lossy().into_owned();
+
+        block_on(writematrix_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from(filename)],
+        ))
+        .expect("writematrix");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(contents, "18446744073709551615,9007199254740993\n17,29\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn writematrix_honours_write_mode_append() {
         let path = temp_path("txt");
         let first = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
@@ -998,7 +1025,7 @@ pub(crate) mod tests {
             let path = temp_path("csv");
             let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

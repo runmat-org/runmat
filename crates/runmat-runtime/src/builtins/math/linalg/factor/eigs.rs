@@ -10,23 +10,147 @@ use std::cmp::Ordering;
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, ResolveContext, StructValue, Tensor, Type, Value,
+    ComplexTensor, IntValue, NumericDType, NumericScalar, ResolveContext, StructValue, Tensor,
+    Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::eig;
 
 const NAME: &str = "eigs";
 const DEFAULT_K: usize = 6;
+
+const EIGS_NONFLOATING_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "eigs-nonfloating-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eigs with a non-single/non-double coefficient matrix is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EigsNonfloatingMatrixExtension"),
+};
+
+const EIGS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "eigs-gpu-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eigs with a gpuArray argument is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EigsGpuInputExtension"),
+};
+
+const EIGS_INTEGER_SIGMA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "eigs-integer-sigma",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "eigs with a typed-integer sigma is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EigsIntegerSigmaExtension"),
+};
+
+const EIGS_INTEGER_START_VECTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "eigs-integer-start-vector",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "eigs with a typed-integer StartVector is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:EigsIntegerStartVectorExtension"),
+    };
+
+pub const EIGS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    EIGS_NONFLOATING_MATRIX_EXTENSION,
+    EIGS_GPU_INPUT_EXTENSION,
+    EIGS_INTEGER_SIGMA_EXTENSION,
+    EIGS_INTEGER_START_VECTOR_EXTENSION,
+];
+
+const EIGS_INTEGER_COEFFICIENT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Primary coefficient matrix.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "B",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Optional generalized coefficient matrix.",
+    },
+];
+const EIGS_INTEGER_K_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "k",
+    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "Positive structural count parsed exactly without a binary64 mirror.",
+}];
+const EIGS_INTEGER_SIGMA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "sigma",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat-only numeric shift crossing an exact binary64 boundary.",
+    }];
+const EIGS_INTEGER_START_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "StartVector",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat-only initial-vector class; current dense fallback validates shape but does not consume iterative values.",
+    }];
+
+pub const EIGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "eigs(A, B, ...) with a typed-integer coefficient",
+        inputs: &EIGS_INTEGER_COEFFICIENT_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "RunMat-only coefficients are checked before dense binary64 fallback.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "eigs(A, k, ...) with typed-integer k",
+        inputs: &EIGS_INTEGER_K_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Documented exact structural control.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "eigs(A, k, sigma, ...) with typed-integer sigma",
+        inputs: &EIGS_INTEGER_SIGMA_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::ScalarOnly,
+        notes: "RunMat-only shift extension.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "eigs(..., 'StartVector', v) with typed-integer v",
+        inputs: &EIGS_INTEGER_START_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "RunMat-only iterative-control class extension.",
+    },
+];
 
 const OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "d",
@@ -222,9 +346,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     type_resolver(eigs_type),
     descriptor(crate::builtins::math::linalg::factor::eigs::EIGS_DESCRIPTOR),
+    extensions(crate::builtins::math::linalg::factor::eigs::EIGS_EXTENSIONS),
+    integer_capabilities(crate::builtins::math::linalg::factor::eigs::EIGS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::linalg::factor::eigs"
 )]
 async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::value_contains_gpu(&a) || rest.iter().any(crate::value_contains_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(&EIGS_GPU_INPUT_EXTENSION, NAME)?;
+    }
+    ensure_eigs_coefficient_class_enabled(&a)?;
+    preflight_eigs_extensions(&rest)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, "eigs")?;
+    for value in &rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, "eigs")?;
+    }
     let request = Request::parse(a, rest).await?;
     let eval = compute_subset(request).await?;
 
@@ -239,6 +374,123 @@ async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ])),
         Some(_) => Err(eigs_error(&ERROR_INVALID_ARGUMENT)),
         None => Ok(eval.values),
+    }
+}
+
+fn ensure_eigs_coefficient_class_enabled(value: &Value) -> BuiltinResult<()> {
+    if is_nonfloating_supported_coefficient_matrix(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &EIGS_NONFLOATING_MATRIX_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+fn preflight_eigs_extensions(rest: &[Value]) -> BuiltinResult<()> {
+    let mut cursor = 0usize;
+    if let Some(candidate) = rest.first() {
+        if is_empty_matrix(candidate) {
+            cursor = 1;
+        } else if is_generalized_b(candidate) {
+            ensure_eigs_coefficient_class_enabled(candidate)?;
+            cursor = 1;
+        }
+    }
+    if cursor < rest.len() && parse_integer_scalar(&rest[cursor])?.is_some() {
+        cursor += 1;
+    }
+    if cursor < rest.len() && (is_text(&rest[cursor]) || is_numeric_sigma_value(&rest[cursor])) {
+        if is_typed_integer_value(&rest[cursor]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &EIGS_INTEGER_SIGMA_EXTENSION,
+                NAME,
+            )?;
+        }
+        cursor += 1;
+    }
+    if cursor < rest.len() {
+        preflight_start_vector_extension(&rest[cursor..])?;
+    }
+    Ok(())
+}
+
+fn preflight_start_vector_extension(args: &[Value]) -> BuiltinResult<()> {
+    if args.len() == 1 {
+        if let Value::Struct(options) = &args[0] {
+            for (name, value) in &options.fields {
+                if matches!(
+                    name.trim().to_ascii_lowercase().as_str(),
+                    "startvector" | "v0"
+                ) && is_typed_integer_value(value)
+                {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &EIGS_INTEGER_START_VECTOR_EXTENSION,
+                        NAME,
+                    )?;
+                }
+            }
+            return Ok(());
+        }
+    }
+    let mut idx = 0usize;
+    while idx + 1 < args.len() {
+        if text_value(&args[idx]).is_some_and(|name| {
+            matches!(
+                name.trim().to_ascii_lowercase().as_str(),
+                "startvector" | "v0"
+            )
+        }) && is_typed_integer_value(&args[idx + 1])
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &EIGS_INTEGER_START_VECTOR_EXTENSION,
+                NAME,
+            )?;
+        }
+        idx += 2;
+    }
+    Ok(())
+}
+
+fn is_typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn is_numeric_sigma_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Complex(_, _)
+            | Value::Tensor(_)
+            | Value::ComplexTensor(_)
+            | Value::LogicalArray(_)
+            | Value::Bool(_)
+    )
+}
+
+fn is_nonfloating_supported_coefficient_matrix(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => !matches!(
+            tensor.numeric_dtype(),
+            NumericDType::F64 | NumericDType::F32
+        ),
+        Value::SparseTensor(sparse) => {
+            sparse.is_logical()
+                || sparse
+                    .numeric_dtype()
+                    .is_some_and(|dtype| !matches!(dtype, NumericDType::F64 | NumericDType::F32))
+        }
+        Value::GpuTensor(handle) => {
+            runmat_accelerate_api::handle_is_logical(handle)
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
+        Value::ComplexTensor(_) => false,
+        _ => false,
     }
 }
 
@@ -306,6 +558,7 @@ impl Request {
         }
 
         let mut a = gather_matrix_value(a).await?;
+        ensure_exact_eigs_integer_boundary(&a, "A")?;
         let n = matrix_order(&a)?;
         let mut args = gather_args(rest).await?;
         let mut cursor = 0usize;
@@ -318,7 +571,10 @@ impl Request {
             if is_empty_matrix(candidate) {
                 cursor += 1;
             } else if is_generalized_b(candidate) {
-                b = Some(matrix_host_value(args.remove(0))?);
+                ensure_eigs_coefficient_class_enabled(candidate)?;
+                let candidate = matrix_host_value(args.remove(0))?;
+                ensure_exact_eigs_integer_boundary(&candidate, "B")?;
+                b = Some(candidate);
                 cursor = 0;
             }
         }
@@ -430,8 +686,8 @@ fn matrix_shape_from_slice(shape: &[usize]) -> (usize, usize) {
 
 fn is_empty_matrix(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
-        Value::ComplexTensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor_element_len(tensor) == 0,
+        Value::ComplexTensor(tensor) => complex_tensor_element_len(tensor) == 0,
         Value::LogicalArray(logical) => logical.data.is_empty(),
         Value::SparseTensor(sparse) => sparse.rows == 0 || sparse.cols == 0,
         _ => false,
@@ -463,10 +719,24 @@ fn parse_k(value: &Value) -> BuiltinResult<Option<usize>> {
 }
 
 fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
+    if let Some(value) = exact_integer_scalar(value) {
+        let Some(raw) = value.try_to_i64() else {
+            return Err(error_with_detail(
+                "eigs: k is too large for this platform",
+                &ERROR_INVALID_ARGUMENT,
+            ));
+        };
+        if raw <= 0 {
+            return Err(error_with_detail(
+                "eigs: k must be a positive integer scalar",
+                &ERROR_INVALID_ARGUMENT,
+            ));
+        }
+        return Ok(Some(raw));
+    }
     let raw = match value {
-        Value::Int(int) => int.to_f64(),
         Value::Num(n) => *n,
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => scalar_tensor_f64(tensor),
         Value::LogicalArray(logical) if logical.len() == 1 => {
             if logical.data[0] != 0 {
                 1.0
@@ -489,7 +759,7 @@ fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
             &ERROR_INVALID_ARGUMENT,
         ));
     }
-    if raw > (usize::MAX as f64) {
+    if raw >= i64::MAX as f64 {
         return Err(error_with_detail(
             "eigs: k is too large for this platform",
             &ERROR_INVALID_ARGUMENT,
@@ -504,14 +774,21 @@ fn parse_sigma(value: &Value) -> BuiltinResult<Option<Sigma>> {
     }
     match value {
         Value::Num(n) => Ok(Some(Sigma::Near(Complex64::new(*n, 0.0)))),
-        Value::Int(i) => Ok(Some(Sigma::Near(Complex64::new(i.to_f64(), 0.0)))),
-        Value::Complex(re, im) => Ok(Some(Sigma::Near(Complex64::new(*re, *im)))),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(Some(Sigma::Near(Complex64::new(tensor.data[0], 0.0))))
+        Value::Int(i) => {
+            ensure_exact_eigs_integer_boundary(value, "sigma")?;
+            Ok(Some(Sigma::Near(Complex64::new(i.to_f64(), 0.0))))
         }
-        Value::ComplexTensor(tensor) if tensor.data.len() == 1 => {
-            let (re, im) = tensor.data[0];
-            Ok(Some(Sigma::Near(Complex64::new(re, im))))
+        Value::Complex(re, im) => Ok(Some(Sigma::Near(Complex64::new(*re, *im)))),
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
+            ensure_exact_eigs_integer_boundary(value, "sigma")?;
+            Ok(Some(Sigma::Near(Complex64::new(
+                scalar_tensor_f64(tensor),
+                0.0,
+            ))))
+        }
+        Value::ComplexTensor(tensor) if tensor::is_scalar_complex_tensor(tensor) => {
+            let value = tensor::complex_tensor_value_complex64(tensor, 0);
+            Ok(Some(Sigma::Near(value)))
         }
         Value::LogicalArray(logical) if logical.len() == 1 => Ok(Some(Sigma::Near(
             Complex64::new(if logical.data[0] != 0 { 1.0 } else { 0.0 }, 0.0),
@@ -622,6 +899,7 @@ fn parse_named_option(
             }
         }
         "startvector" => {
+            ensure_exact_eigs_integer_boundary(value, "StartVector")?;
             let len = numeric_vector_len(value, "StartVector")?;
             if len != n {
                 return Err(error_with_detail(
@@ -718,10 +996,11 @@ async fn compute_subset(request: Request) -> BuiltinResult<SubsetEval> {
     let eval = eig::evaluate(request.a, &eig_args, false)
         .await
         .map_err(with_context)?;
+    let output_dtype = floating_output_dtype(&eval.eigenvalues());
     let all_values = eigenvalue_list(&eval.eigenvalues())?;
     let selected = select_indices(&all_values, request.k, request.sigma);
-    let values = select_vector(&all_values, &selected)?;
-    let diagonal = diagonal_from_selected(&all_values, &selected)?;
+    let values = select_vector(&all_values, &selected, output_dtype)?;
+    let diagonal = diagonal_from_selected(&all_values, &selected, output_dtype)?;
     let vectors = select_columns(&eval.right(), &selected)?;
     Ok(SubsetEval {
         values,
@@ -732,13 +1011,12 @@ async fn compute_subset(request: Request) -> BuiltinResult<SubsetEval> {
 
 fn eigenvalue_list(value: &Value) -> BuiltinResult<Vec<Complex64>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor
-            .data
+        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64_cow(tensor)
             .iter()
             .map(|&re| Complex64::new(re, 0.0))
             .collect()),
         Value::ComplexTensor(tensor) => Ok(tensor
-            .data
+            .materialize_f64()
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect()),
@@ -813,25 +1091,33 @@ fn total_cmp(lhs: f64, rhs: f64) -> Ordering {
     lhs.total_cmp(&rhs)
 }
 
-fn select_vector(values: &[Complex64], selected: &[usize]) -> BuiltinResult<Value> {
+fn select_vector(
+    values: &[Complex64],
+    selected: &[usize],
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
     let data = selected.iter().map(|&idx| values[idx]).collect::<Vec<_>>();
-    complex_vector_value(data)
+    complex_vector_value(data, dtype)
 }
 
-fn diagonal_from_selected(values: &[Complex64], selected: &[usize]) -> BuiltinResult<Value> {
+fn diagonal_from_selected(
+    values: &[Complex64],
+    selected: &[usize],
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
     let k = selected.len();
     let mut data = vec![Complex64::new(0.0, 0.0); k * k];
     for (out_idx, &value_idx) in selected.iter().enumerate() {
         data[out_idx + out_idx * k] = values[value_idx];
     }
-    complex_matrix_value(data, k, k)
+    complex_matrix_value_with_dtype(data, k, k, dtype)
 }
 
 fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
     match matrix {
         Value::Tensor(tensor) => {
             let rows = tensor.rows();
-            let mut data = Vec::with_capacity(rows * selected.len());
+            let mut indices = Vec::with_capacity(rows * selected.len());
             for &col in selected {
                 if col >= tensor.cols() {
                     return Err(error_with_detail(
@@ -840,10 +1126,16 @@ fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
                     ));
                 }
                 for row in 0..rows {
-                    data.push(tensor.data[row + col * rows]);
+                    indices.push(row + col * rows);
                 }
             }
-            Tensor::new_2d(data, rows, selected.len())
+            let storage = tensor
+                .clone()
+                .into_numeric_storage()
+                .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))?
+                .gather(&indices)
+                .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))?;
+            Tensor::from_numeric_storage(storage, vec![rows, selected.len()])
                 .map(Value::Tensor)
                 .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
         }
@@ -858,11 +1150,11 @@ fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
                     ));
                 }
                 for row in 0..rows {
-                    let (re, im) = tensor.data[row + col * rows];
+                    let (re, im) = tensor.materialize_f64()[row + col * rows];
                     data.push(Complex64::new(re, im));
                 }
             }
-            complex_matrix_value(data, rows, selected.len())
+            complex_matrix_value_with_dtype(data, rows, selected.len(), tensor.numeric_dtype())
         }
         other => Err(error_with_detail(
             format!("eigs: unexpected eigenvector output {other:?}"),
@@ -871,18 +1163,30 @@ fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
     }
 }
 
-fn complex_vector_value(data: Vec<Complex64>) -> BuiltinResult<Value> {
+fn floating_output_dtype(value: &Value) -> NumericDType {
+    match value {
+        Value::Tensor(tensor) => tensor.numeric_dtype(),
+        Value::ComplexTensor(tensor) => tensor.numeric_dtype(),
+        _ => NumericDType::F64,
+    }
+}
+
+fn complex_vector_value(data: Vec<Complex64>, dtype: NumericDType) -> BuiltinResult<Value> {
     if data.iter().all(|value| value.im.abs() <= 1e-12) {
-        Tensor::new(
-            data.iter().map(|value| value.re).collect(),
-            vec![data.len(), 1],
-        )
-        .map(Value::Tensor)
-        .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
+        let shape = vec![data.len(), 1];
+        let tensor = if dtype == NumericDType::F32 {
+            Tensor::from_f32(data.iter().map(|value| value.re as f32).collect(), shape)
+        } else {
+            Tensor::new(data.iter().map(|value| value.re).collect(), shape)
+        };
+        tensor
+            .map(Value::Tensor)
+            .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
     } else {
-        ComplexTensor::new(
+        ComplexTensor::from_f64_values_with_dtype(
             data.iter().map(|value| (value.re, value.im)).collect(),
             vec![data.len(), 1],
+            dtype,
         )
         .map(Value::ComplexTensor)
         .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
@@ -890,15 +1194,32 @@ fn complex_vector_value(data: Vec<Complex64>) -> BuiltinResult<Value> {
 }
 
 fn complex_matrix_value(data: Vec<Complex64>, rows: usize, cols: usize) -> BuiltinResult<Value> {
+    complex_matrix_value_with_dtype(data, rows, cols, NumericDType::F64)
+}
+
+fn complex_matrix_value_with_dtype(
+    data: Vec<Complex64>,
+    rows: usize,
+    cols: usize,
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
     if data.iter().all(|value| value.im.abs() <= 1e-12) {
-        Tensor::new_2d(data.iter().map(|value| value.re).collect(), rows, cols)
+        let tensor = if dtype == NumericDType::F32 {
+            Tensor::from_f32(
+                data.iter().map(|value| value.re as f32).collect(),
+                vec![rows, cols],
+            )
+        } else {
+            Tensor::new_2d(data.iter().map(|value| value.re).collect(), rows, cols)
+        };
+        tensor
             .map(Value::Tensor)
             .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
     } else {
-        ComplexTensor::new_2d(
+        ComplexTensor::from_f64_values_with_dtype(
             data.iter().map(|value| (value.re, value.im)).collect(),
-            rows,
-            cols,
+            vec![rows, cols],
+            dtype,
         )
         .map(Value::ComplexTensor)
         .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
@@ -949,8 +1270,7 @@ fn dense_complex_matrix(value: Value) -> BuiltinResult<DenseComplexMatrix> {
         Value::Tensor(tensor) => Ok(DenseComplexMatrix {
             rows: tensor.rows(),
             cols: tensor.cols(),
-            data: tensor
-                .data
+            data: tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect(),
@@ -959,7 +1279,7 @@ fn dense_complex_matrix(value: Value) -> BuiltinResult<DenseComplexMatrix> {
             rows: tensor.rows,
             cols: tensor.cols,
             data: tensor
-                .data
+                .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| Complex64::new(re, im))
                 .collect(),
@@ -1007,7 +1327,7 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => Ok(scalar_tensor_f64(tensor)),
         Value::LogicalArray(logical) if logical.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1020,10 +1340,27 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
 }
 
 fn positive_integer_option(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(value) = exact_integer_scalar(value) {
+        return value
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                error_with_detail(
+                    format!("eigs: {name} must be a positive integer"),
+                    &ERROR_INVALID_ARGUMENT,
+                )
+            });
+    }
     let parsed = numeric_scalar(value, name)?;
     if !parsed.is_finite() || parsed <= 0.0 || parsed.fract() != 0.0 {
         return Err(error_with_detail(
             format!("eigs: {name} must be a positive integer"),
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    if parsed > usize::MAX as f64 || (usize::BITS == 64 && parsed == usize::MAX as f64) {
+        return Err(error_with_detail(
+            format!("eigs: {name} is too large for this platform"),
             &ERROR_INVALID_ARGUMENT,
         ));
     }
@@ -1036,10 +1373,22 @@ fn parse_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
         Value::LogicalArray(logical) if logical.len() == 1 => Ok(logical.data[0] != 0),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
         Value::Int(i) if i.to_i64() == 0 || i.to_i64() == 1 => Ok(i.to_i64() != 0),
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(tensor.data[0] != 0.0)
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => {
+            if let Some(value) = exact_integer_scalar(value) {
+                let raw = value.try_to_i64();
+                if raw == Some(0) || raw == Some(1) {
+                    return Ok(raw != Some(0));
+                }
+            } else {
+                let raw = scalar_tensor_f64(tensor);
+                if raw == 0.0 || raw == 1.0 {
+                    return Ok(raw != 0.0);
+                }
+            }
+            Err(error_with_detail(
+                format!("eigs: {name} must be logical scalar true or false"),
+                &ERROR_INVALID_ARGUMENT,
+            ))
         }
         _ => Err(error_with_detail(
             format!("eigs: {name} must be logical scalar true or false"),
@@ -1050,9 +1399,11 @@ fn parse_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
 
 fn numeric_vector_len(value: &Value, name: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => Ok(tensor.data.len()),
+        Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
+            Ok(tensor_element_len(tensor))
+        }
         Value::ComplexTensor(tensor) if tensor.rows == 1 || tensor.cols == 1 => {
-            Ok(tensor.data.len())
+            Ok(complex_tensor_element_len(tensor))
         }
         Value::LogicalArray(logical) => {
             let (rows, cols) = matrix_shape_from_slice(&logical.shape);
@@ -1074,6 +1425,34 @@ fn numeric_vector_len(value: &Value, name: &str) -> BuiltinResult<usize> {
 }
 
 fn parse_permutation(value: &Value, n: usize) -> BuiltinResult<Vec<usize>> {
+    if let Some(values) = exact_integer_vector(value)? {
+        if values.len() != n {
+            return Err(error_with_detail(
+                "eigs: CholeskyPermutation length must match size(A,1)",
+                &ERROR_INVALID_ARGUMENT,
+            ));
+        }
+        let mut seen = vec![false; n];
+        let mut out = Vec::with_capacity(n);
+        for raw in values {
+            if raw < 1 || raw > n as i128 {
+                return Err(error_with_detail(
+                    "eigs: CholeskyPermutation must contain 1-based integer indices",
+                    &ERROR_INVALID_ARGUMENT,
+                ));
+            }
+            let idx = raw as usize;
+            if seen[idx - 1] {
+                return Err(error_with_detail(
+                    "eigs: CholeskyPermutation entries must be unique",
+                    &ERROR_INVALID_ARGUMENT,
+                ));
+            }
+            seen[idx - 1] = true;
+            out.push(idx);
+        }
+        return Ok(out);
+    }
     let values = numeric_vector_values(value, "CholeskyPermutation")?;
     if values.len() != n {
         return Err(error_with_detail(
@@ -1103,10 +1482,39 @@ fn parse_permutation(value: &Value, n: usize) -> BuiltinResult<Vec<usize>> {
     Ok(out)
 }
 
+fn exact_integer_vector(value: &Value) -> BuiltinResult<Option<Vec<i128>>> {
+    match value {
+        Value::Int(value) => Ok(Some(vec![int_value_i128(value)])),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            if tensor.rows() != 1 && tensor.cols() != 1 {
+                return Err(error_with_detail(
+                    "eigs: CholeskyPermutation must be a vector",
+                    &ERROR_INVALID_ARGUMENT,
+                ));
+            }
+            let mut values = Vec::with_capacity(tensor.len());
+            for index in 0..tensor.len() {
+                let exact = tensor
+                    .numeric_value_at(index)
+                    .and_then(numeric_scalar_i128)
+                    .ok_or_else(|| {
+                        error_with_detail(
+                            "eigs: unable to read integer CholeskyPermutation",
+                            &ERROR_INTERNAL,
+                        )
+                    })?;
+                values.push(exact);
+            }
+            Ok(Some(values))
+        }
+        _ => Ok(None),
+    }
+}
+
 fn numeric_vector_values(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
-            Ok(tensor.data.clone())
+            Ok(tensor::tensor_values_f64(tensor))
         }
         Value::LogicalArray(logical) => {
             let (rows, cols) = matrix_shape_from_slice(&logical.shape);
@@ -1173,14 +1581,123 @@ fn with_context(mut error: RuntimeError) -> RuntimeError {
     error
 }
 
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor_element_len(tensor) == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn ensure_exact_eigs_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
+    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+    let check = |exact: i128| {
+        if (-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+            Ok(())
+        } else {
+            Err(error_with_detail(
+                format!("eigs: integer {role} values must be exactly representable as double"),
+                &ERROR_INVALID_ARGUMENT,
+            ))
+        }
+    };
+    match value {
+        Value::Int(value) => check(int_value_i128(value)),
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            for index in 0..tensor.len() {
+                if let Some(exact) = tensor.numeric_value_at(index).and_then(numeric_scalar_i128) {
+                    check(exact)?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn int_value_i128(value: &IntValue) -> i128 {
+    match value {
+        IntValue::I8(value) => i128::from(*value),
+        IntValue::I16(value) => i128::from(*value),
+        IntValue::I32(value) => i128::from(*value),
+        IntValue::I64(value) => i128::from(*value),
+        IntValue::U8(value) => i128::from(*value),
+        IntValue::U16(value) => i128::from(*value),
+        IntValue::U32(value) => i128::from(*value),
+        IntValue::U64(value) => i128::from(*value),
+    }
+}
+
+fn numeric_scalar_i128(value: NumericScalar) -> Option<i128> {
+    match value {
+        NumericScalar::I8(value) => Some(i128::from(value)),
+        NumericScalar::I16(value) => Some(i128::from(value)),
+        NumericScalar::I32(value) => Some(i128::from(value)),
+        NumericScalar::I64(value) => Some(i128::from(value)),
+        NumericScalar::U8(value) => Some(i128::from(value)),
+        NumericScalar::U16(value) => Some(i128::from(value)),
+        NumericScalar::U32(value) => Some(i128::from(value)),
+        NumericScalar::U64(value) => Some(i128::from(value)),
+        NumericScalar::F32(_) | NumericScalar::F64(_) => None,
+    }
+}
+
+fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
+    tensor::tensor_value_f64(tensor, 0)
+}
+
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor.len()
+}
+
+fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
+    tensor
+        .integer_storage()
+        .as_ref()
+        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, SparseTensor};
+    use runmat_builtins::{
+        builtin_function_by_name, CharArray, IntegerComplexStorage, IntegerStorage, SparseTensor,
+    };
 
     fn real_matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new_2d(data, rows, cols).unwrap())
+    }
+
+    #[test]
+    fn eigs_rejects_typed_complex_integer_inputs() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .expect("storage"),
+            vec![1, 1],
+        )
+        .expect("tensor");
+        let err = block_on(eigs_builtin(Value::ComplexTensor(tensor), Vec::new()))
+            .expect_err("typed complex integer input must reject");
+        assert!(err.message().contains("complex numbers with integer types"));
+    }
+
+    #[test]
+    fn eigs_sigma_parser_reads_typed_integer_complex_scalar_without_mirror() {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I16(vec![3]), IntegerStorage::I16(vec![-2]))
+                .expect("storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("tensor");
+
+        match parse_sigma(&Value::ComplexTensor(tensor)).expect("sigma") {
+            Some(Sigma::Near(value)) => assert_eq!(value, Complex64::new(3.0, -2.0)),
+            _ => panic!("expected near sigma"),
+        }
     }
 
     fn tensor(value: Value) -> Tensor {
@@ -1197,8 +1714,166 @@ mod tests {
         }
     }
 
+    #[test]
+    fn eigs_selected_real_columns_preserve_native_single_storage() {
+        let matrix = Value::Tensor(
+            Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("single vectors"),
+        );
+        let selected = tensor(select_columns(&matrix, &[1]).expect("selected column"));
+        assert_eq!(selected.numeric_dtype(), runmat_builtins::NumericDType::F32);
+        assert_eq!(selected.shape, vec![2, 1]);
+        assert_eq!(selected.materialize_f64(), vec![3.0, 4.0]);
+    }
+
     fn call(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(eigs_builtin(a, rest))
+    }
+
+    #[test]
+    fn eigs_nonfloating_coefficients_follow_compatibility_mode() {
+        let integer_matrix = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::I16(vec![1, 0, 0, 8]), vec![2, 2])
+                    .expect("integer coefficient matrix"),
+            )
+        };
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                call(integer_matrix(), Vec::new()).expect_err("MATLAB mode rejects integer A");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:EigsNonfloatingMatrixExtension")
+            );
+
+            let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+            let error = call(a, vec![integer_matrix()])
+                .expect_err("MATLAB mode rejects integer generalized B");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:EigsNonfloatingMatrixExtension")
+            );
+
+            let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+            let k = Value::Int(IntValue::I16(1));
+            assert!(call(a, vec![k]).is_ok(), "integer k is not a coefficient");
+        }
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert!(call(integer_matrix(), Vec::new()).is_ok());
+        }
+
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![2, 2],
+            device_id: 0,
+            buffer_id: 9_300_002,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::I16,
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(Value::GpuTensor(handle.clone()), Vec::new())
+                .expect_err("MATLAB mode rejects resident integer A before gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:EigsGpuInputExtension")
+            );
+        }
+        runmat_accelerate_api::clear_handle_integer_type(&handle);
+    }
+
+    #[test]
+    fn eigs_integer_controls_have_role_specific_strict_mode_errors() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+        let sigma =
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).unwrap());
+        let error = call(a.clone(), vec![Value::Num(1.0), sigma])
+            .expect_err("typed-integer sigma must gate");
+        assert_eq!(
+            error.identifier(),
+            EIGS_INTEGER_SIGMA_EXTENSION.error_identifier
+        );
+
+        let mut options = StructValue::new();
+        options.insert(
+            "StartVector",
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap(),
+            ),
+        );
+        let error = call(a, vec![Value::Num(1.0), Value::Struct(options)])
+            .expect_err("typed-integer StartVector must gate");
+        assert_eq!(
+            error.identifier(),
+            EIGS_INTEGER_START_VECTOR_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn eigs_nested_resident_start_vector_gates_before_recursive_gather() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+        let mut options = StructValue::new();
+        options.insert(
+            "StartVector",
+            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![2, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+            }),
+        );
+        let error = call(a, vec![Value::Num(1.0), Value::Struct(options)])
+            .expect_err("nested resident StartVector must gate before gather");
+        assert_eq!(
+            error.identifier(),
+            EIGS_GPU_INPUT_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn eigs_admits_all_integer_coefficient_classes_and_rejects_wide_boundaries() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storages = [
+            IntegerStorage::I8(vec![2]),
+            IntegerStorage::I16(vec![2]),
+            IntegerStorage::I32(vec![2]),
+            IntegerStorage::I64(vec![2]),
+            IntegerStorage::U8(vec![2]),
+            IntegerStorage::U16(vec![2]),
+            IntegerStorage::U32(vec![2]),
+            IntegerStorage::U64(vec![2]),
+        ];
+        for storage in storages {
+            let a = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            assert!(call(a, Vec::new()).is_ok());
+        }
+
+        let wide = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap(),
+        );
+        let error = call(wide, Vec::new()).expect_err("wide coefficient must reject");
+        assert!(error.message().contains("exactly representable as double"));
+
+        let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+        let wide_sigma = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap(),
+        );
+        let error = call(a, vec![Value::Num(1.0), wide_sigma]).expect_err("wide sigma must reject");
+        assert!(error.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn eigs_preserves_single_outputs_and_registers_integer_policy() {
+        let a = Value::Tensor(Tensor::from_f32(vec![1.0, 0.0, 0.0, 8.0], vec![2, 2]).unwrap());
+        let output = tensor(call(a, vec![Value::Num(1.0)]).unwrap());
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+
+        let builtin = builtin_function_by_name(NAME).expect("registered eigs");
+        assert_eq!(builtin.extensions, &EIGS_EXTENSIONS);
+        assert_eq!(builtin.integer_capabilities.len(), 4);
     }
 
     #[test]
@@ -1206,7 +1881,7 @@ mod tests {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 4.0], 2, 2);
         let out = tensor(call(a, Vec::new()).unwrap());
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![4.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![4.0, 1.0]);
     }
 
     #[test]
@@ -1224,7 +1899,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![2.0, -4.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0, -4.0]);
     }
 
     #[test]
@@ -1237,7 +1912,7 @@ mod tests {
         assert_eq!(tensor(out[0].clone()).shape, vec![2, 1]);
         let d = tensor(out[1].clone());
         assert_eq!(d.shape, vec![1, 1]);
-        assert_eq!(d.data, vec![5.0]);
+        assert_eq!(d.materialize_f64(), vec![5.0]);
         assert_eq!(out[2], Value::Num(0.0));
     }
 
@@ -1245,7 +1920,36 @@ mod tests {
     fn eigs_numeric_sigma_selects_nearest() {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
         let out = tensor(call(a, vec![Value::Num(1.0), Value::Num(7.25)]).unwrap());
-        assert_eq!(out.data, vec![8.0]);
+        assert_eq!(out.materialize_f64(), vec![8.0]);
+    }
+
+    #[test]
+    fn eigs_reads_integer_tensor_k_and_sigma_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
+        let k = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).unwrap();
+        let sigma = Tensor::new_integer(IntegerStorage::I16(vec![7]), vec![1, 1]).unwrap();
+        let out = tensor(call(a, vec![Value::Tensor(k), Value::Tensor(sigma)]).unwrap());
+        assert_eq!(out.materialize_f64(), vec![8.0]);
+    }
+
+    #[test]
+    fn eigs_reads_integer_tensor_vector_options_exactly() {
+        let permutation =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 1, 3]), vec![1, 3]).unwrap();
+        assert_eq!(
+            parse_permutation(&Value::Tensor(permutation), 3).unwrap(),
+            vec![2, 1, 3]
+        );
+
+        let initial = Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).unwrap();
+        assert_eq!(
+            numeric_vector_values(&Value::Tensor(initial), "InitialVector").unwrap(),
+            vec![3.0, 2.0, 1.0]
+        );
+
+        let fail = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+        assert!(parse_bool(&Value::Tensor(fail), "Fail").unwrap());
     }
 
     #[test]
@@ -1263,21 +1967,24 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![2.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0]);
     }
 
     #[test]
     fn eigs_validates_options_without_affecting_exact_fallback() {
         let mut opts = StructValue::new();
         opts.insert("tol", Value::Num(1e-9));
-        opts.insert("maxit", Value::Int(IntValue::I32(100)));
-        opts.insert("p", Value::Int(IntValue::I32(4)));
+        let maxit = Tensor::new_integer(IntegerStorage::U16(vec![100]), vec![1, 1]).unwrap();
+        opts.insert("maxit", Value::Tensor(maxit));
+        let p = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+        opts.insert("p", Value::Tensor(p));
         opts.insert(
             "v0",
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap()),
         );
         opts.insert("fail", Value::CharArray(CharArray::new_row("keep")));
-        opts.insert("disp", Value::Bool(false));
+        let disp = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
+        opts.insert("disp", Value::Tensor(disp));
         let a = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
         let out = tensor(
             call(
@@ -1290,7 +1997,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![3.0]);
+        assert_eq!(out.materialize_f64(), vec![3.0]);
     }
 
     #[test]
@@ -1341,6 +2048,30 @@ mod tests {
     }
 
     #[test]
+    fn eigs_positive_integer_options_read_typed_storage_and_reject_float_boundary() {
+        let wide = if usize::BITS == 64 {
+            9_007_199_254_740_993
+        } else {
+            u32::MAX as u64
+        };
+        let typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("typed option");
+
+        assert_eq!(
+            positive_integer_option(&Value::Tensor(typed), "MaxIterations").expect("typed option"),
+            wide as usize
+        );
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(positive_integer_option(&Value::Num(boundary), "MaxIterations").is_err());
+        assert!(parse_k(&Value::Num(i64::MAX as f64)).is_err());
+    }
+
+    #[test]
     fn eigs_accepts_cholesky_factor_for_generalized_b() {
         let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
         let r = real_matrix(vec![1.0, 0.0, 0.0, 2.0], 2, 2);
@@ -1358,7 +2089,45 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.data, vec![2.0]);
+        assert_eq!(out.materialize_f64(), vec![2.0]);
+    }
+
+    #[test]
+    fn eigs_cholesky_factor_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
+        let r = Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 2]), vec![2, 2]).unwrap();
+        let mut opts = StructValue::new();
+        opts.insert("IsCholesky", Value::Bool(true));
+
+        let out = tensor(
+            call(
+                a,
+                vec![
+                    Value::Tensor(r),
+                    Value::Num(1.0),
+                    Value::CharArray(CharArray::new_row("smallestreal")),
+                    Value::Struct(opts),
+                ],
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(out.materialize_f64(), vec![2.0]);
+    }
+
+    #[test]
+    fn eigs_start_vector_length_reads_typed_integer_storage_exactly() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let a = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
+        let start = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
+        let mut opts = StructValue::new();
+        opts.insert("StartVector", Value::Tensor(start));
+
+        let out = tensor(call(a, vec![Value::Num(1.0), Value::Struct(opts)]).unwrap());
+
+        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.materialize_f64(), vec![3.0]);
     }
 
     #[test]

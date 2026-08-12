@@ -144,7 +144,13 @@ impl<'a> GraphBuilder<'a> {
                         let info = &self.values[id as usize];
                         let val = match &info.constant {
                             Some(Value::Num(n)) => *n,
-                            Some(Value::Int(i)) => i.to_f64(),
+                            // A Tensor constant has f64 storage.  Keep native
+                            // integer literals out of this acceleration-only
+                            // fold instead of silently rounding them.
+                            Some(Value::Int(_)) => {
+                                elems.clear();
+                                break;
+                            }
                             _ => {
                                 elems.clear();
                                 break;
@@ -233,15 +239,13 @@ impl<'a> GraphBuilder<'a> {
                                 return;
                             }
                         }
-                        Some(Value::Int(i)) => {
-                            let v = i.to_i64();
-                            if v >= 0 {
-                                v as usize
-                            } else {
+                        Some(Value::Int(i)) => match i.try_to_usize() {
+                            Some(v) => v,
+                            None => {
                                 self.reset_stack();
                                 return;
                             }
-                        }
+                        },
                         _ => {
                             self.reset_stack();
                             return;
@@ -265,7 +269,10 @@ impl<'a> GraphBuilder<'a> {
                             let info = &self.values[id as usize];
                             match &info.constant {
                                 Some(Value::Num(n)) => row_values.push(*n),
-                                Some(Value::Int(i)) => row_values.push(i.to_f64()),
+                                Some(Value::Int(_)) => {
+                                    all_numeric = false;
+                                    row_values.push(0.0);
+                                }
                                 _ => {
                                     all_numeric = false;
                                     row_values.push(0.0);
@@ -772,13 +779,13 @@ impl<'a> GraphBuilder<'a> {
                     if rows == 1 && cols > 0 {
                         let mut dims: Vec<Option<usize>> = Vec::with_capacity(cols);
                         for j in 0..cols {
-                            dims.push(Some(t.data[j].round() as usize));
+                            dims.push(tensor_dimension_at(t, j));
                         }
                         out_type = Type::Tensor { shape: Some(dims) };
                     } else if cols == 1 && rows > 0 {
                         let mut dims: Vec<Option<usize>> = Vec::with_capacity(rows);
                         for i in 0..rows {
-                            dims.push(Some(t.data[i].round() as usize));
+                            dims.push(tensor_dimension_at(t, i));
                         }
                         out_type = Type::Tensor { shape: Some(dims) };
                     }
@@ -813,7 +820,7 @@ impl<'a> GraphBuilder<'a> {
             return false;
         };
         match info.constant.as_ref() {
-            Some(Value::Tensor(t)) => t.data.is_empty(),
+            Some(Value::Tensor(t)) => t.is_empty(),
             Some(Value::LogicalArray(l)) => l.data.is_empty(),
             Some(Value::String(s)) => s.is_empty(),
             Some(Value::StringArray(sa)) => sa.data.is_empty(),
@@ -833,7 +840,7 @@ impl<'a> GraphBuilder<'a> {
         match info.constant.as_ref() {
             Some(Value::Num(value)) => value.is_finite(),
             Some(Value::Int(_)) | Some(Value::Bool(_)) => true,
-            Some(Value::Tensor(t)) => t.data.len() == 1,
+            Some(Value::Tensor(t)) => t.len() == 1,
             Some(Value::LogicalArray(l)) => l.data.len() == 1,
             _ => false,
         }
@@ -876,14 +883,13 @@ impl<'a> GraphBuilder<'a> {
                     }
                     break;
                 }
-                Some(Value::Int(i)) => {
-                    let v = i.to_i64();
-                    if v >= 0 {
-                        dims.push(Some(v as usize));
+                Some(Value::Int(i)) => match i.try_to_usize() {
+                    Some(v) => {
+                        dims.push(Some(v));
                         continue;
                     }
-                    break;
-                }
+                    None => break,
+                },
                 Some(Value::String(_)) => break,
                 _ => break,
             }
@@ -911,24 +917,14 @@ impl<'a> GraphBuilder<'a> {
                     // 1xN row vector
                     let mut out: Vec<Option<usize>> = Vec::with_capacity(cols);
                     for j in 0..cols {
-                        let v = t.data[j].round() as i64;
-                        if v >= 0 {
-                            out.push(Some(v as usize));
-                        } else {
-                            out.push(None);
-                        }
+                        out.push(tensor_dimension_at(t, j));
                     }
                     return Some(Type::Tensor { shape: Some(out) });
                 } else if (cols == 1 || cols == 0) && rows > 0 {
                     // Nx1 column vector
                     let mut out: Vec<Option<usize>> = Vec::with_capacity(rows);
                     for i in 0..rows {
-                        let v = t.data[i].round() as i64;
-                        if v >= 0 {
-                            out.push(Some(v as usize));
-                        } else {
-                            out.push(None);
-                        }
+                        out.push(tensor_dimension_at(t, i));
                     }
                     return Some(Type::Tensor { shape: Some(out) });
                 }
@@ -1047,7 +1043,9 @@ impl<'a> GraphBuilder<'a> {
         };
         let folded = match constant {
             Value::Num(n) => Some(Value::Num((*n as f32) as f64)),
-            Value::Int(i) => Some(Value::Num((i.to_f64() as f32) as f64)),
+            // Preserve the runtime conversion semantics for integer inputs;
+            // graph folding has no native f32 integer representation.
+            Value::Int(_) => None,
             Value::Bool(flag) => Some(Value::Num(if *flag { 1.0f32 } else { 0.0f32 } as f64)),
             _ => None,
         };
@@ -1057,6 +1055,23 @@ impl<'a> GraphBuilder<'a> {
             }
         }
     }
+}
+
+/// Read a tensor element used as structural metadata without consulting the
+/// compatibility f64 mirror for typed integer tensors.
+fn tensor_dimension_at(tensor: &runmat_builtins::Tensor, index: usize) -> Option<usize> {
+    let scalar = tensor.numeric_value_at(index)?;
+    if let Some(value) = scalar.into_int_value() {
+        return value.try_to_usize();
+    }
+    let value = scalar.materialize_f64();
+    if !value.is_finite() || value < 0.0 {
+        return None;
+    }
+    let rounded = value.round();
+    ((rounded - value).abs() <= f64::EPSILON)
+        .then_some(rounded)
+        .and_then(|value| usize::try_from(value as u128).ok())
 }
 
 fn categorize_builtin(tags: &[AccelGraphTag]) -> AccelOpCategory {
@@ -1112,6 +1127,57 @@ fn primitive_tags(op: PrimitiveOp) -> Vec<AccelGraphTag> {
 mod tests {
     use super::*;
     use crate::instr::Instr;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
+
+    #[test]
+    fn structural_tensor_dimensions_read_all_integer_classes_exactly() {
+        macro_rules! assert_dimensions {
+            ($storage:expr) => {{
+                let tensor = Tensor::new_integer($storage, vec![1, 2]).expect("dimensions");
+                assert_eq!(tensor_dimension_at(&tensor, 0), Some(2));
+                assert_eq!(tensor_dimension_at(&tensor, 1), Some(3));
+            }};
+        }
+
+        assert_dimensions!(IntegerStorage::I8(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::I16(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::I32(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::I64(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::U8(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::U16(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::U32(vec![2, 3]));
+        assert_dimensions!(IntegerStorage::U64(vec![2, 3]));
+    }
+
+    #[test]
+    fn graph_folding_declines_wide_integer_scalars() {
+        for constant in [
+            Value::Int(IntValue::I64(i64::MAX)),
+            Value::Int(IntValue::U64(u64::MAX)),
+        ] {
+            let mut builder = GraphBuilder::new(&[], &[]);
+            let input = builder.new_value(ValueOrigin::Constant, Type::Num, Some(constant));
+            let output = builder.new_value(ValueOrigin::Constant, Type::Num, None);
+
+            builder.maybe_fold_builtin_constant("single", &[input], output);
+            assert!(builder.values[output as usize].constant.is_none());
+        }
+    }
+
+    #[test]
+    fn graph_shape_inference_rejects_negative_integer_dimension() {
+        let mut builder = GraphBuilder::new(&[], &[]);
+        let dimension = builder.new_value(
+            ValueOrigin::Constant,
+            Type::Num,
+            Some(Value::Int(IntValue::I64(-1))),
+        );
+
+        assert_eq!(
+            builder.infer_array_constructor_from_tags(&[dimension]),
+            None
+        );
+    }
 
     #[test]
     fn accel_graph_mul_uses_matmul_shape() {

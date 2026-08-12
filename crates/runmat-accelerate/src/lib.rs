@@ -7,7 +7,8 @@
 //! - Defer actual kernel authoring to backend crates/modules; this crate defines traits and wiring.
 
 use once_cell::sync::Lazy;
-use runmat_builtins::{Tensor, Value};
+use runmat_accelerate_api::HostIntegerDataOwned;
+use runmat_builtins::{IntegerStorage, Tensor, Value};
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -486,7 +487,7 @@ impl Planner {
     /// Example decision hook: execute elementwise add on GPU if large enough.
     pub fn choose_elem_add(&self, a: &Tensor, b: &Tensor) -> ExecutionTarget {
         if let Some(bk) = &self.backend {
-            if a.data.len() >= 1 << 16 && a.rows() == b.rows() && a.cols() == b.cols() {
+            if a.len() >= 1 << 16 && a.rows() == b.rows() && a.cols() == b.cols() {
                 return ExecutionTarget::Gpu(bk.device_info());
             }
         }
@@ -503,6 +504,22 @@ pub enum ExecutionTarget {
 /// High-level façade for accelerated operations, falling back to `runmat-runtime`.
 pub struct Accelerator {
     planner: Planner,
+}
+
+fn integer_tensor_from_download(
+    integer: runmat_accelerate_api::HostIntegerTensorOwned,
+) -> anyhow::Result<Tensor> {
+    let storage = match integer.data {
+        HostIntegerDataOwned::I8(data) => IntegerStorage::I8(data),
+        HostIntegerDataOwned::I16(data) => IntegerStorage::I16(data),
+        HostIntegerDataOwned::I32(data) => IntegerStorage::I32(data),
+        HostIntegerDataOwned::I64(data) => IntegerStorage::I64(data),
+        HostIntegerDataOwned::U8(data) => IntegerStorage::U8(data),
+        HostIntegerDataOwned::U16(data) => IntegerStorage::U16(data),
+        HostIntegerDataOwned::U32(data) => IntegerStorage::U32(data),
+        HostIntegerDataOwned::U64(data) => IntegerStorage::U64(data),
+    };
+    Tensor::new_integer(storage, integer.shape).map_err(|e| anyhow::anyhow!(e))
 }
 
 impl Accelerator {
@@ -558,6 +575,14 @@ impl Accelerator {
         h: &runmat_accelerate_api::GpuTensorHandle,
     ) -> anyhow::Result<Value> {
         if let Some(p) = runmat_accelerate_api::provider() {
+            if runmat_accelerate_api::handle_integer_type(h).is_some() {
+                let integer = p
+                    .download_integer(h)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                let tensor = integer_tensor_from_download(integer)?;
+                return Ok(Value::Tensor(tensor));
+            }
             let ht = p.download(h).await.map_err(|e| anyhow::anyhow!(e))?;
             let t = Tensor::new(ht.data, ht.shape).map_err(|e| anyhow::anyhow!(e))?;
             Ok(Value::Tensor(t))
@@ -568,5 +593,28 @@ impl Accelerator {
             let zeros = Tensor::new(vec![0.0; total], shape).map_err(|e| anyhow::anyhow!(e))?;
             Ok(Value::Tensor(zeros))
         }
+    }
+}
+
+#[cfg(test)]
+mod integer_download_tests {
+    use super::*;
+
+    #[test]
+    fn integer_download_preserves_wide_uint64_without_a_float_mirror() {
+        let tensor = integer_tensor_from_download(runmat_accelerate_api::HostIntegerTensorOwned {
+            data: HostIntegerDataOwned::U64(vec![1_u64 << 63, u64::MAX]),
+            shape: vec![1, 2],
+        })
+        .expect("integer download");
+
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
+        );
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
+        );
     }
 }

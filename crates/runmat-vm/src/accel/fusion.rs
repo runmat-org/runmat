@@ -13,7 +13,7 @@ use runmat_accelerate::fusion_exec::{
 use runmat_accelerate::InstrSpan;
 use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
 use runmat_builtins::Value;
-use runmat_runtime::builtins::common::shape::is_scalar_shape;
+use runmat_runtime::builtins::common::{shape::is_scalar_shape, tensor::scalar_integer_value};
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
 
@@ -61,7 +61,7 @@ pub fn summarize_value(i: usize, v: &Value) -> String {
         Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape),
         Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape),
         Value::Num(n) => format!("in#{i}:Num({n:.6})"),
-        Value::Int(n) => format!("in#{i}:Int({})", n.to_i64()),
+        Value::Int(n) => format!("in#{i}:Int({n:?})"),
         Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
         Value::String(s) => format!("in#{i}:String({})", s),
         _ => format!("in#{i}:{}", value_kind(v)),
@@ -76,7 +76,7 @@ fn is_scalarish_runtime_value(value: &Value) -> bool {
         Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
         Value::LogicalArray(array) => is_scalar_shape(&array.shape),
         Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
-        Value::CharArray(array) => array.rows * array.cols == 1,
+        Value::CharArray(array) => array.data.len() == 1,
         _ => false,
     }
 }
@@ -588,7 +588,32 @@ pub fn resolve_reduction_geometry(
         reduce_all
     }
 
-    fn resolve_reduction_axis(plan: &runmat_accelerate::FusionGroupPlan) -> (usize, bool) {
+    fn reduction_axis_from_value(value: &Value) -> Result<Option<usize>, RuntimeError> {
+        if let Some(integer) = scalar_integer_value(value) {
+            return integer
+                .try_to_usize()
+                .and_then(|dim| dim.checked_sub(1))
+                .map(Some)
+                .ok_or_else(|| {
+                    mex(
+                        "FusionReductionAxisUnsupported",
+                        "fusion: integer reduction dimension is outside the platform index range",
+                    )
+                });
+        }
+        match value {
+            // Floating-point dimension arguments deliberately retain MATLAB's
+            // double conversion semantics. Native integers, however, must be
+            // representable by the host index type before acceleration plans
+            // them as an axis.
+            Value::Num(n) if *n >= 1.0 => Ok(Some((*n as usize).saturating_sub(1))),
+            _ => Ok(None),
+        }
+    }
+
+    fn resolve_reduction_axis(
+        plan: &runmat_accelerate::FusionGroupPlan,
+    ) -> Result<(usize, bool), RuntimeError> {
         let mut axis = 0usize;
         let mut axis_explicit = false;
         if let Some(runmat_accelerate::ReductionAxes::Explicit(dims)) = &plan.reduction_axes {
@@ -599,31 +624,25 @@ pub fn resolve_reduction_geometry(
         }
         if let Some(dim_vid) = plan.reduction_dim {
             if let Some(cv) = plan.const_values.get(&dim_vid) {
-                axis = match cv {
-                    Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
-                    Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
-                    _ => axis,
-                };
+                if let Some(parsed) = reduction_axis_from_value(cv)? {
+                    axis = parsed;
+                }
                 axis_explicit = true;
             } else if let Some(input_idx) = plan.inputs.iter().position(|v| *v == dim_vid) {
                 if let Some(cv) = plan.constants.get(&input_idx) {
-                    axis = match cv {
-                        Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
-                        Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
-                        _ => axis,
-                    };
+                    if let Some(parsed) = reduction_axis_from_value(cv)? {
+                        axis = parsed;
+                    }
                     axis_explicit = true;
                 }
             }
         } else if let Some(dim_const) = plan.constants.get(&1) {
-            axis = match dim_const {
-                Value::Num(n) if *n >= 1.0 => (*n as usize).saturating_sub(1),
-                Value::Int(i) => (i.to_f64() as usize).saturating_sub(1),
-                _ => axis,
-            };
+            if let Some(parsed) = reduction_axis_from_value(dim_const)? {
+                axis = parsed;
+            }
             axis_explicit = true;
         }
-        (axis, axis_explicit)
+        Ok((axis, axis_explicit))
     }
 
     fn derive_rows_cols(
@@ -764,7 +783,7 @@ pub fn resolve_reduction_geometry(
     let (mut axis, axis_explicit) = if reduce_all {
         (0usize, false)
     } else {
-        resolve_reduction_axis(plan)
+        resolve_reduction_axis(plan)?
     };
     if reduce_all && interp_engine::fusion_debug_enabled() {
         log::debug!(

@@ -5,9 +5,13 @@ use std::path::{Path, PathBuf};
 
 use encoding_rs::Encoding;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type, Value,
+    IntValue, NumericScalar, ResolveContext, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -18,6 +22,61 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 const NAME: &str = "extractFileText";
 const MAX_FILE_BYTES: usize = 512 * 1024 * 1024;
 const MAX_DOCX_XML_BYTES: usize = 128 * 1024 * 1024;
+
+const RESIDENT_PAGES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extractfiletext-resident-pages",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "extractFileText with a resident Pages control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractFileTextResidentPagesExtension"),
+};
+const BROAD_FILE_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "extractfiletext-broad-file-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description:
+        "extractFileText with a string-valued or nested filename cell is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:ExtractFileTextBroadFileCellExtension"),
+};
+const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [RESIDENT_PAGES_EXTENSION, BROAD_FILE_CELL_EXTENSION];
+const INTEGER_PAGES_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Pages",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Pages is a nonempty vector of positive page numbers and accepts every built-in integer class.",
+    }];
+const INTEGER_FILENAME_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "filename",
+        classes: &[],
+        availability: BuiltinIntegerInputAvailability::Rejected,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes:
+            "The filename or URL is text; integer data rejects before file IO or provider access.",
+    }];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "str = extractFileText(filename, 'Pages', integer_pages)",
+        inputs: &INTEGER_PAGES_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Pages values are parsed exactly without floating materialization. PDF extraction itself remains an explicitly unsupported format in RunMat.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "str = extractFileText(integer_filename)",
+        inputs: &INTEGER_FILENAME_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "Integer filenames are outside the public text domain and reject without conversion.",
+    },
+];
 
 const OUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "str",
@@ -48,7 +107,7 @@ const IN_FILE_REST: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Name-value options: Encoding and ExtractionMethod in this slice.",
+        description: "Name-value options: Encoding, ExtractionMethod, Password, and Pages.",
     },
 ];
 
@@ -114,11 +173,14 @@ fn extract_error(
     summary = "Read text from text, HTML, and DOCX files.",
     keywords = "extractFileText,text analytics,file,text,HTML,DOCX",
     accel = "sink",
+    extensions(EXTENSIONS),
+    integer_capabilities(INTEGER_CAPABILITIES),
     type_resolver(string_type),
     descriptor(crate::builtins::strings::text_analytics::file_text::EXTRACT_FILE_TEXT_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::text_analytics::file_text"
 )]
 async fn extract_file_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    preflight_args(&args)?;
     let args = gather_args(args).await?;
     let (source, options) = parse_args(args)?;
     if is_url(&source) {
@@ -150,6 +212,85 @@ async fn extract_file_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         FileKind::PlainText => decode_bytes(&bytes, options.encoding.as_deref())?,
     };
     Ok(Value::String(text))
+}
+
+fn preflight_args(args: &[Value]) -> BuiltinResult<()> {
+    if let Some(source) = args.first() {
+        if is_numeric_or_resident(source) || contains_numeric_or_resident(source) {
+            return Err(extract_error(
+                &ERROR_INVALID_INPUT,
+                "extractFileText: expected a text filename or URL",
+            ));
+        }
+        if filename_cell_is_broad(source) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &BROAD_FILE_CELL_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    for (idx, value) in args.iter().enumerate().skip(1) {
+        if contains_resident(value) {
+            let is_pages_value = idx >= 2
+                && idx % 2 == 0
+                && scalar_text(&args[idx - 1], NAME)
+                    .is_ok_and(|name| name.eq_ignore_ascii_case("pages"));
+            if is_pages_value {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &RESIDENT_PAGES_EXTENSION,
+                    NAME,
+                )?;
+            } else {
+                return Err(extract_error(
+                    &ERROR_INVALID_INPUT,
+                    "extractFileText: resident values are supported only for the Pages extension",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_numeric_or_resident(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::GpuTensor(_)
+    )
+}
+
+fn contains_numeric_or_resident(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .any(|value| is_numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        _ => false,
+    }
+}
+
+fn contains_resident(value: &Value) -> bool {
+    match value {
+        Value::GpuTensor(_) => true,
+        Value::Cell(cell) => cell.data.iter().any(contains_resident),
+        _ => false,
+    }
+}
+
+fn filename_cell_is_broad(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) if cell.data.len() == 1 => !matches!(
+            cell.data.first(),
+            Some(Value::CharArray(array)) if array.rows <= 1
+        ),
+        _ => false,
+    }
 }
 
 async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -256,9 +397,25 @@ fn nonempty_source(value: &str) -> BuiltinResult<String> {
 }
 
 fn parse_pages(value: &Value) -> BuiltinResult<Vec<usize>> {
-    let raw = match value {
-        Value::Num(value) => vec![*value],
-        Value::Tensor(tensor) => tensor.data.clone(),
+    let values = match value {
+        Value::Num(value) => vec![NumericScalar::F64(*value)],
+        Value::Int(value) => vec![int_numeric_scalar(value.clone())],
+        Value::Tensor(tensor) if tensor_shape_is_vector(&tensor.shape) => (0..tensor.len())
+            .map(|idx| {
+                tensor.numeric_value_at(idx).ok_or_else(|| {
+                    extract_error(
+                        &ERROR_INVALID_INPUT,
+                        "extractFileText: Pages must contain real numeric values",
+                    )
+                })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?,
+        Value::Tensor(_) => {
+            return Err(extract_error(
+                &ERROR_INVALID_INPUT,
+                "extractFileText: Pages must be a vector of positive integers",
+            ))
+        }
         other => {
             return Err(extract_error(
                 &ERROR_INVALID_INPUT,
@@ -266,23 +423,71 @@ fn parse_pages(value: &Value) -> BuiltinResult<Vec<usize>> {
             ))
         }
     };
-    if raw.is_empty() {
+    if values.is_empty() {
         return Err(extract_error(
             &ERROR_INVALID_INPUT,
             "extractFileText: Pages must not be empty",
         ));
     }
-    raw.into_iter()
-        .map(|value| {
-            if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
-                return Err(extract_error(
+    values.into_iter().map(parse_page_number).collect()
+}
+
+fn tensor_shape_is_vector(shape: &[usize]) -> bool {
+    shape.iter().filter(|dim| **dim > 1).count() <= 1
+}
+
+fn int_numeric_scalar(value: IntValue) -> NumericScalar {
+    match value {
+        IntValue::I8(value) => NumericScalar::I8(value),
+        IntValue::I16(value) => NumericScalar::I16(value),
+        IntValue::I32(value) => NumericScalar::I32(value),
+        IntValue::I64(value) => NumericScalar::I64(value),
+        IntValue::U8(value) => NumericScalar::U8(value),
+        IntValue::U16(value) => NumericScalar::U16(value),
+        IntValue::U32(value) => NumericScalar::U32(value),
+        IntValue::U64(value) => NumericScalar::U64(value),
+    }
+}
+
+fn parse_page_number(value: NumericScalar) -> BuiltinResult<usize> {
+    match value {
+        NumericScalar::F64(value) => parse_float_page(value),
+        NumericScalar::F32(value) => parse_float_page(f64::from(value)),
+        integer => integer
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .try_to_usize()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                extract_error(
                     &ERROR_INVALID_INPUT,
-                    format!("extractFileText: Pages values must be positive integers, got {value}"),
-                ));
-            }
-            Ok(value as usize)
-        })
-        .collect()
+                    "extractFileText: Pages values must be positive host-representable integers",
+                )
+            }),
+    }
+}
+
+fn parse_float_page(value: f64) -> BuiltinResult<usize> {
+    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+        return Err(extract_error(
+            &ERROR_INVALID_INPUT,
+            format!("extractFileText: Pages values must be positive integers, got {value}"),
+        ));
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return Err(extract_error(
+            &ERROR_INVALID_INPUT,
+            "extractFileText: Pages value exceeds the host index range",
+        ));
+    }
+    let page = value as usize;
+    if page as f64 != value {
+        return Err(extract_error(
+            &ERROR_INVALID_INPUT,
+            "extractFileText: Pages value is not exactly representable as a host index",
+        ));
+    }
+    Ok(page)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -477,7 +682,7 @@ fn xml_unescape(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{CellArray, Tensor};
+    use runmat_builtins::{CellArray, IntegerStorage, Tensor};
     use runmat_time::unix_timestamp_ms;
     use std::io::Write;
 
@@ -502,6 +707,73 @@ mod tests {
             Value::String(text) => text,
             other => panic!("expected string, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_pages_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 5]), vec![1, 2])
+            .expect("integer tensor");
+
+        assert_eq!(
+            parse_pages(&Value::Tensor(tensor)).expect("pages"),
+            vec![2, 5]
+        );
+    }
+
+    #[test]
+    fn parse_pages_accepts_every_integer_scalar_class() {
+        for page in [
+            IntValue::I8(2),
+            IntValue::I16(2),
+            IntValue::I32(2),
+            IntValue::I64(2),
+            IntValue::U8(2),
+            IntValue::U16(2),
+            IntValue::U32(2),
+            IntValue::U64(2),
+        ] {
+            assert_eq!(parse_pages(&Value::Int(page)).unwrap(), vec![2]);
+        }
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn parse_pages_preserves_wide_u64_values_without_f64_materialization() {
+        let page = (1_u64 << 53) + 1;
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![page]), vec![1, 1]).unwrap();
+        assert_eq!(
+            parse_pages(&Value::Tensor(tensor)).unwrap(),
+            vec![page as usize]
+        );
+    }
+
+    #[test]
+    fn parse_pages_rejects_nonvector_and_invalid_numeric_controls() {
+        let matrix = Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 3, 4]), vec![2, 2]).unwrap();
+        assert!(parse_pages(&Value::Tensor(matrix)).is_err());
+        for value in [Value::Num(0.0), Value::Num(-1.0), Value::Num(1.5)] {
+            assert!(parse_pages(&value).is_err());
+        }
+    }
+
+    #[test]
+    fn extract_file_text_strict_mode_rejects_resident_pages_before_gather() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = run(vec![
+            Value::String("document.pdf".into()),
+            Value::String("Pages".into()),
+            resident,
+        ])
+        .expect_err("strict resident Pages gate");
+        assert_eq!(
+            error.identifier(),
+            RESIDENT_PAGES_EXTENSION.error_identifier
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -600,7 +872,9 @@ mod tests {
         let path = unique_path("cell", "txt");
         test_support::fs::write(&path, "cell path").expect("write sample");
         let cell = CellArray::new(
-            vec![Value::String(path.to_string_lossy().to_string())],
+            vec![Value::CharArray(runmat_builtins::CharArray::new_row(
+                &path.to_string_lossy(),
+            ))],
             1,
             1,
         )

@@ -21,12 +21,9 @@ fn has_tensor_shape(vars: &[Value], shape: &[usize]) -> bool {
 
 fn has_tensor_data(vars: &[Value], shape: &[usize], expected: &[f64]) -> bool {
     vars.iter().any(|value| match value {
-        Value::Tensor(Tensor {
-            shape: tensor_shape,
-            data,
-            ..
-        }) => {
-            tensor_shape == shape
+        Value::Tensor(tensor) => {
+            let data = tensor.materialize_f64();
+            tensor.shape == shape
                 && data.len() == expected.len()
                 && data
                     .iter()
@@ -176,6 +173,15 @@ fn fitclinear_surface_executes_from_scripts() {
 }
 
 #[test]
+fn fitting_integer_semantics_execute_from_compiled_source() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(
+        "base = uint64(9007199254740992); labels = base + uint64([1;1;2;2]); X = [0;1;2;3]; linear = fitclinear(X, labels, 'Learner', 'logistic', 'Lambda', 0, 'Solver', 'sgd'); linear_labels = predict(linear, [0;3]); tree = fitctree(X, labels, 'MaxNumSplits', uint8(1), 'MinParentSize', uint16(2)); tree_labels = predict(tree, [0;3]); if ~strcmp(class(linear_labels),'uint64') || linear_labels(1) ~= base+uint64(1) || linear_labels(2) ~= base+uint64(2) || ~strcmp(class(tree_labels),'uint64') || tree_labels(1) ~= base+uint64(1) || tree_labels(2) ~= base+uint64(2); error('compiled classifier integer labels lost identity'); end; pd = fitdist(uint16([1;2;3]), 'Normal', 'Frequency', uint8([1;1;1])); if abs(pd.ParameterValues(1)-2) > 1e-10; error('compiled fitdist integer boundary failed'); end; mdl = fitlm(int16([0;1;2;3]), int32([1;3;5;7]), 'Intercept', uint8(1)); coefficients = mdl.Coefficients.Estimate; if abs(coefficients(1)-1) > 1e-8 || abs(coefficients(2)-2) > 1e-8; error('compiled fitlm integer boundary failed'); end;",
+    )
+    .expect("compiled fitting integer semantics");
+}
+
+#[test]
 fn tsne_surface_executes_from_scripts() {
     let vars = execute_source(
         "rng('default'); X = [0 0; 0.2 0.1; 9.8 9.9; NaN 1]; [Y,loss] = tsne(X, 'Algorithm', 'exact', 'Perplexity', 2, 'NumDimensions', 2, 'Options', struct('MaxIter', 5)); s = size(Y); rows = s(1); cols = s(2);",
@@ -284,6 +290,15 @@ fn confusionmat_surface_executes_from_scripts() {
 }
 
 #[test]
+fn confusionmat_preserves_typed_integer_order_through_compiled_dispatch() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    execute_source(
+        "hi = intmax('uint64'); truth = [hi-uint64(1); hi; hi]; predicted = [hi-uint64(1); hi-uint64(1); hi]; [C,ord] = confusionmat(truth,predicted); if ~strcmp(class(ord),'uint64') || ord(1) ~= hi-uint64(1) || ord(2) ~= hi || C(1,1) ~= 1 || C(2,1) ~= 1 || C(2,2) ~= 1; error('typed confusionmat mismatch'); end;",
+    )
+    .expect("typed integer confusionmat script");
+}
+
+#[test]
 fn perfcurve_surface_executes_from_scripts() {
     let vars = execute_source(
         "labels = [1; 0; 1; 0]; scores = [0.9; 0.8; 0.4; 0.1]; [X,Y,T,AUC,opt,suby,names] = perfcurve(labels, scores, 1); n = length(T); xl = X(end); yl = Y(end); [R,P] = perfcurve(labels, scores, 1, 'XCrit', 'reca', 'YCrit', 'prec', 'TVals', [0.8 0.4]); r2 = R(2); p1 = P(1);",
@@ -332,6 +347,21 @@ fn binscatter_surface_executes_from_scripts() {
     assert!(has_bool(&vars, true));
     assert!(has_string(&vars, "binscatter"));
     assert!(has_string(&vars, "density"));
+}
+
+#[test]
+fn binscatter_integer_classes_execute_from_compiled_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let vars = execute_source(
+        "h1 = binscatter(int8([0;1]),int8([0;1]),uint8([2 2])); c1 = class(get(h1,'XData')); h2 = binscatter(int16([0;1]),int16([0;1]),uint16([2 2])); c2 = class(get(h2,'XData')); h3 = binscatter(int32([0;1]),int32([0;1]),uint32([2 2])); c3 = class(get(h3,'XData')); h4 = binscatter(int64([0;1]),int64([0;1]),uint64([2 2])); c4 = class(get(h4,'XData')); h5 = binscatter(uint8([0;1]),uint8([0;1]),int8([2 2])); c5 = class(get(h5,'XData')); h6 = binscatter(uint16([0;1]),uint16([0;1]),int16([2 2])); c6 = class(get(h6,'XData')); h7 = binscatter(uint32([0;1]),uint32([0;1]),int32([2 2])); c7 = class(get(h7,'XData')); h8 = binscatter(uint64([0;1]),uint64([0;1]),int64([2 2])); c8 = class(get(h8,'XData')); vals = get(h8,'Values');",
+    )
+    .expect("compiled integer binscatter script");
+    for class in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+    ] {
+        assert!(has_string(&vars, class), "missing class {class}");
+    }
+    assert!(has_tensor_data(&vars, &[2, 2], &[1.0, 0.0, 0.0, 1.0]));
 }
 
 #[test]
@@ -458,6 +488,30 @@ fn bootstrp_surface_executes_from_scripts() {
 }
 
 #[test]
+fn bootstrp_integer_extensions_preserve_exact_compiled_callback_output() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "rng('default'); wide = uint64(9007199254740992) + uint64(1); x = [wide; uint64(7)]; w = uint8([1;0]); [b,s] = bootstrp(uint16(2), @min, x, \"Weights\", w);",
+    )
+    .expect("compiled integer bootstrp");
+    assert!(vars.iter().any(|value| {
+        matches!(
+            value,
+            Value::Tensor(tensor)
+                if tensor.shape == vec![2, 1]
+                    && tensor.integer_storage()
+                        == Some(&runmat_builtins::IntegerStorage::U64(vec![
+                            9_007_199_254_740_993,
+                            9_007_199_254_740_993,
+                        ]))
+        )
+    }));
+    assert!(vars.iter().any(
+        |value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![1.0; 4])
+    ));
+}
+
+#[test]
 fn dividerand_surface_executes_from_scripts() {
     let vars = execute_source(
         "rng('default'); [tr,val,te] = dividerand(10, 0.6, 0.2, 0.2); ntr = numel(tr); nv = numel(val); nt = numel(te); total = ntr + nv + nt; first = tr(1);",
@@ -487,12 +541,42 @@ fn ecdf_and_cdfplot_surface_executes_from_scripts() {
 }
 
 #[test]
+fn cdfplot_integer_extensions_execute_from_compiled_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "[h1,s1] = cdfplot(int8([-3;1])); [h2,s2] = cdfplot(int16([-3;1])); [h3,s3] = cdfplot(int32([-3;1])); [h4,s4] = cdfplot(int64([-3;1])); [h5,s5] = cdfplot(uint8([1;3])); [h6,s6] = cdfplot(uint16([1;3])); [h7,s7] = cdfplot(uint32([1;3])); [h8,s8] = cdfplot(uint64([1;3])); signed_mean = s1.mean+s2.mean+s3.mean+s4.mean; unsigned_mean = s5.mean+s6.mean+s7.mean+s8.mean;",
+    )
+    .expect("compiled integer cdfplot");
+    assert!(has_num(&vars, -4.0));
+    assert!(has_num(&vars, 8.0));
+    assert!(
+        vars.iter()
+            .filter(|value| matches!(value, Value::Num(handle) if *handle > 0.0))
+            .count()
+            >= 8
+    );
+}
+
+#[test]
 fn boxplot_surface_executes_from_scripts() {
     let _plot_guard = disable_interactive_plots_for_test();
     let vars = execute_source(
         "h = boxplot([1;2;10;20], {'A';'A';'B';'B'}, 'Labels', {'First','Second'}, 'GroupOrder', {'A','B'}, 'Orientation', 'horizontal', 'Whisker', 1, 'Symbol', '+r'); n = numel(h); first = h(1);",
     )
     .expect("boxplot script");
+    assert!(has_tensor_shape(&vars, &[1, 12]));
+    assert!(has_num(&vars, 12.0));
+}
+
+#[test]
+fn boxplot_integer_extensions_execute_from_compiled_scripts() {
+    let _plot_guard = disable_interactive_plots_for_test();
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "wide = uint64(9007199254740992) + uint64(1); x = int16([1;2;10;20]); g = [wide;wide+uint64(1);wide;wide+uint64(1)]; h = boxplot(x, g, 'Whisker', uint8(1), 'Labels', [wide,wide+uint64(1)]); n = numel(h);",
+    )
+    .expect("compiled integer boxplot");
     assert!(has_tensor_shape(&vars, &[1, 12]));
     assert!(has_num(&vars, 12.0));
 }
@@ -593,6 +677,44 @@ fn distribution_compatibility_surface_executes_from_scripts() {
     ));
     assert!(has_tensor_shape(&vars, &[2, 2]));
     assert!(has_tensor_shape(&vars, &[2, 3]));
+}
+
+#[test]
+fn binocdf_integer_extensions_cover_every_class_and_preserve_single_output() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "x = [binocdf(int8(1),2,0.5) binocdf(int16(1),2,0.5) binocdf(int32(1),2,0.5) binocdf(int64(1),2,0.5) binocdf(uint8(1),2,0.5) binocdf(uint16(1),2,0.5) binocdf(uint32(1),2,0.5) binocdf(uint64(1),2,0.5)]; n = [binocdf(0,int8(1),0.5) binocdf(0,int16(1),0.5) binocdf(0,int32(1),0.5) binocdf(0,int64(1),0.5) binocdf(0,uint8(1),0.5) binocdf(0,uint16(1),0.5) binocdf(0,uint32(1),0.5) binocdf(0,uint64(1),0.5)]; p = [binocdf(0,1,int8(1)) binocdf(0,1,int16(1)) binocdf(0,1,int32(1)) binocdf(0,1,int64(1)) binocdf(0,1,uint8(1)) binocdf(0,1,uint16(1)) binocdf(0,1,uint32(1)) binocdf(0,1,uint64(1))]; score = sum(x) + sum(n) + sum(p); integer_class = class(x); single_class = class(binocdf(single([1 1]),2,0.5));",
+    )
+    .expect("binocdf integer extension script");
+    assert!(has_num(&vars, 10.0));
+    assert!(has_string(&vars, "double"));
+    assert!(has_string(&vars, "single"));
+}
+
+#[test]
+fn cdf_integer_extensions_cover_every_class_broadcast_upper_and_single_output() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "x = [cdf('Normal',int8(1),0,1) cdf('Normal',int16(1),0,1) cdf('Normal',int32(1),0,1) cdf('Normal',int64(1),0,1) cdf('Normal',uint8(1),0,1) cdf('Normal',uint16(1),0,1) cdf('Normal',uint32(1),0,1) cdf('Normal',uint64(1),0,1)]; a = [cdf('Poisson',0,int8(1)) cdf('Poisson',0,int16(1)) cdf('Poisson',0,int32(1)) cdf('Poisson',0,int64(1)) cdf('Poisson',0,uint8(1)) cdf('Poisson',0,uint16(1)) cdf('Poisson',0,uint32(1)) cdf('Poisson',0,uint64(1))]; u = cdf('Normal',single([0;2]),[0;1],1,'upper'); score = numel(x) + numel(a) + numel(u); upper0 = u(1); integer_class = class(x); single_class = class(u);",
+    )
+    .expect("cdf integer extension script");
+    assert!(has_num(&vars, 18.0));
+    assert!(has_tensor_shape(&vars, &[2, 1]));
+    assert!(has_string(&vars, "double"));
+    assert!(has_string(&vars, "single"));
+}
+
+#[test]
+fn binornd_integer_extensions_cover_every_class_input_position_and_single_output() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source(
+        "rng('default'); n = [binornd(int8(1),1) binornd(int16(1),1) binornd(int32(1),1) binornd(int64(1),1) binornd(uint8(1),1) binornd(uint16(1),1) binornd(uint32(1),1) binornd(uint64(1),1)]; p = [binornd(1,int8(1)) binornd(1,int16(1)) binornd(1,int32(1)) binornd(1,int64(1)) binornd(1,uint8(1)) binornd(1,uint16(1)) binornd(1,uint32(1)) binornd(1,uint64(1))]; sizes = numel(binornd(1,1,int8(2))) + numel(binornd(1,1,int16(2))) + numel(binornd(1,1,int32(2))) + numel(binornd(1,1,int64(2))) + numel(binornd(1,1,uint8(2))) + numel(binornd(1,1,uint16(2))) + numel(binornd(1,1,uint32(2))) + numel(binornd(1,1,uint64(2))); score = sum(n) + sum(p); integer_class = class(n); single_class = class(binornd(single([1 1]),1));",
+    )
+    .expect("binornd integer extension script");
+    assert!(has_num(&vars, 16.0));
+    assert!(has_num(&vars, 32.0));
+    assert!(has_string(&vars, "double"));
+    assert!(has_string(&vars, "single"));
 }
 
 #[test]

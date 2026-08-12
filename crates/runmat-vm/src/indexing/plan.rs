@@ -1,5 +1,8 @@
 use crate::bytecode::EndExpr;
-use crate::indexing::selectors::{index_scalar_from_value, SliceSelector};
+use crate::indexing::selectors::{
+    index_scalar_from_value, logical_indices_linear, materialize_index_value,
+    numeric_tensor_indices, SliceSelector,
+};
 use crate::interpreter::errors::mex;
 use runmat_builtins::Value;
 use runmat_runtime::{builtins::common::shape::is_scalar_shape, RuntimeError};
@@ -301,6 +304,47 @@ pub fn build_index_plan(
     ))
 }
 
+/// Builds a write plan for sparse two-subscript indexed assignment. The plan's
+/// base shape is the target shape so CSC updates use the expanded stride, while
+/// colon selectors are materialized against the original shape before planning.
+pub fn build_sparse_assignment_plan(
+    selectors: &[SliceSelector],
+    dims: usize,
+    base_shape: &[usize],
+) -> VmResult<IndexPlan> {
+    if dims != 2 {
+        return build_index_plan(selectors, dims, base_shape);
+    }
+
+    let mut target_shape = base_shape.to_vec();
+    target_shape.resize(dims, 1);
+    let mut planned_selectors = Vec::with_capacity(dims);
+    for (d, target_len) in target_shape.iter_mut().enumerate().take(dims) {
+        let original_len = base_shape.get(d).copied().unwrap_or(1);
+        let selector = selectors
+            .get(d)
+            .cloned()
+            .unwrap_or(SliceSelector::Indices(Vec::new()));
+        let values = match &selector {
+            SliceSelector::Colon => (1..=original_len).collect::<Vec<_>>(),
+            SliceSelector::Scalar(value) => vec![*value],
+            SliceSelector::Indices(values) => values.clone(),
+            SliceSelector::LinearIndices { values, .. } => values.clone(),
+        };
+        if values.contains(&0) {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        if let Some(&max_value) = values.iter().max() {
+            *target_len = (*target_len).max(max_value);
+        }
+        planned_selectors.push(match selector {
+            SliceSelector::Colon => SliceSelector::Indices(values),
+            other => other,
+        });
+    }
+    build_index_plan(&planned_selectors, dims, &target_shape)
+}
+
 #[derive(Clone)]
 enum ExprSel {
     Colon,
@@ -373,12 +417,36 @@ fn validate_expr_range_selector_plan(
 
 pub async fn build_expr_index_plan<ResolveEnd, Fut>(
     spec: ExprPlanSpec<'_>,
-    mut resolve_end: ResolveEnd,
+    resolve_end: ResolveEnd,
 ) -> Result<IndexPlan, RuntimeError>
 where
     ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
     Fut: Future<Output = Result<f64, RuntimeError>>,
 {
+    build_expr_index_plan_with_growth(spec, resolve_end, false).await
+}
+
+pub async fn build_expr_sparse_assignment_plan<ResolveEnd, Fut>(
+    spec: ExprPlanSpec<'_>,
+    resolve_end: ResolveEnd,
+) -> Result<IndexPlan, RuntimeError>
+where
+    ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
+    Fut: Future<Output = Result<f64, RuntimeError>>,
+{
+    build_expr_index_plan_with_growth(spec, resolve_end, true).await
+}
+
+async fn build_expr_index_plan_with_growth<ResolveEnd, Fut>(
+    spec: ExprPlanSpec<'_>,
+    mut resolve_end: ResolveEnd,
+    allow_sparse_growth: bool,
+) -> Result<IndexPlan, RuntimeError>
+where
+    ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
+    Fut: Future<Output = Result<f64, RuntimeError>>,
+{
+    let allow_sparse_growth = allow_sparse_growth && spec.dims == 2;
     let rank = spec.shape.len();
     let full_shape: Vec<usize> = if spec.dims == 1 {
         vec![checked_total_len_from_shape(spec.shape)?]
@@ -439,11 +507,19 @@ where
                 .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index"))?;
             num_iter += 1;
             if let Some(idx) = index_scalar_from_value(v).await? {
-                if idx < 1 {
+                if idx.is_below_one() {
                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
-                selectors.push(ExprSel::Scalar(idx as usize));
+                let index = idx
+                    .positive_usize()
+                    .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
+                selectors.push(ExprSel::Scalar(index));
             } else {
+                // Vector selectors may be GPU-backed. Materialize them before
+                // inspecting their class so typed integer storage remains the
+                // source of truth instead of a floating-point compatibility view.
+                let materialized = materialize_index_value(v).await?;
+                let v = &materialized;
                 match v {
                     Value::Bool(b) => {
                         selectors.push(if *b {
@@ -461,43 +537,35 @@ where
                             });
                         } else {
                             let dim_len = *full_shape.get(d).unwrap_or(&1);
-                            if la.data.len() != dim_len {
-                                return Err(mex(
-                                    "IndexShape",
-                                    "Logical mask length mismatch for dimension",
-                                ));
-                            }
-                            let mut vv = Vec::new();
-                            for (i, &bit) in la.data.iter().enumerate() {
-                                if bit != 0 {
-                                    vv.push(i + 1);
-                                }
-                            }
                             if spec.dims == 1 {
+                                let vv = logical_indices_linear(la, dim_len)?;
                                 // MATLAB-style linear logical indexing returns a column vector.
                                 linear_output_shape = Some(vec![vv.len(), 1]);
+                                selectors.push(ExprSel::Indices(vv));
+                            } else {
+                                if la.data.len() != dim_len {
+                                    return Err(mex(
+                                        "IndexShape",
+                                        "Logical mask length mismatch for dimension",
+                                    ));
+                                }
+                                let vv = la
+                                    .data
+                                    .iter()
+                                    .enumerate()
+                                    .filter_map(|(index, &selected)| {
+                                        (selected != 0).then_some(index + 1)
+                                    })
+                                    .collect();
+                                selectors.push(ExprSel::Indices(vv));
                             }
-                            selectors.push(ExprSel::Indices(vv));
                         }
                     }
                     Value::Tensor(idx_t) => {
-                        let len = idx_t.shape.iter().product::<usize>();
                         if spec.dims == 1 {
                             linear_output_shape = Some(idx_t.shape.clone());
                         }
-                        let mut vv = Vec::with_capacity(len);
-                        for &val in &idx_t.data {
-                            let idx = exact_index_from_f64(val).ok_or_else(|| {
-                                mex(
-                                    "UnsupportedIndexType",
-                                    "Index values must be positive integers or logical values",
-                                )
-                            })?;
-                            if idx < 1 {
-                                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                            }
-                            vv.push(idx as usize);
-                        }
+                        let vv = numeric_tensor_indices(idx_t, None)?;
                         selectors.push(ExprSel::Indices(vv));
                     }
                     _ => return Err(mex("UnsupportedIndexType", "Unsupported index type")),
@@ -552,7 +620,7 @@ where
                 let end_i = end_i as i64;
                 if stp > 0 {
                     while cur <= end_i {
-                        if cur < 1 || cur > dim_len {
+                        if cur < 1 || (!allow_sparse_growth && cur > dim_len) {
                             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                         }
                         v.push(cur as usize);
@@ -560,7 +628,7 @@ where
                     }
                 } else {
                     while cur >= end_i {
-                        if cur < 1 || cur > dim_len {
+                        if cur < 1 || (!allow_sparse_growth && cur > dim_len) {
                             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                         }
                         v.push(cur as usize);
@@ -570,7 +638,10 @@ where
                 v
             }
         };
-        if idxs.iter().any(|&i| i == 0 || i > full_shape[d]) {
+        if idxs
+            .iter()
+            .any(|&i| i == 0 || (!allow_sparse_growth && i > full_shape[d]))
+        {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
         selection_lengths.push(idxs.len());
@@ -578,12 +649,20 @@ where
         scalar_mask.push(matches!(sel, ExprSel::Scalar(_)));
     }
 
+    let mut planned_shape = full_shape.clone();
+    if allow_sparse_growth && spec.dims > 1 {
+        for (d, indices) in per_dim_indices.iter().enumerate().take(spec.dims) {
+            if let Some(&max_index) = indices.iter().max() {
+                planned_shape[d] = planned_shape[d].max(max_index);
+            }
+        }
+    }
     let mut strides: Vec<usize> = vec![0; spec.dims];
     let mut acc = 1usize;
     for (d, stride) in strides.iter_mut().enumerate().take(spec.dims) {
         *stride = acc;
         acc = acc
-            .checked_mul(full_shape[d])
+            .checked_mul(planned_shape[d])
             .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
     }
     let total_out: usize = per_dim_indices.iter().try_fold(1usize, |acc, values| {
@@ -633,7 +712,7 @@ where
             output_shape,
             selection_lengths,
             spec.dims,
-            spec.shape.to_vec(),
+            planned_shape,
         ));
     }
 
@@ -709,16 +788,28 @@ where
         output_shape,
         selection_lengths,
         spec.dims,
-        spec.shape.to_vec(),
+        planned_shape,
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
+    use super::{
+        build_expr_index_plan, build_index_plan, build_sparse_assignment_plan, ExprPlanSpec,
+    };
     use crate::bytecode::EndExpr;
     use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
-    use runmat_builtins::{LogicalArray, Tensor, Value};
+    use runmat_builtins::{IntegerStorage, LogicalArray, Tensor, Value};
+
+    #[test]
+    fn sparse_assignment_plan_expands_numeric_dimensions_but_keeps_colon_at_old_extent() {
+        let selectors = vec![SliceSelector::Indices(vec![3, 4]), SliceSelector::Colon];
+        let plan = build_sparse_assignment_plan(&selectors, 2, &[2, 2])
+            .expect("sparse assignment plan should grow rows");
+        assert_eq!(plan.base_shape, vec![4, 2]);
+        assert_eq!(plan.selection_lengths, vec![2, 2]);
+        assert_eq!(plan.indices, vec![2, 3, 6, 7]);
+    }
 
     #[test]
     fn plain_and_expr_linear_range_plans_match() {
@@ -778,6 +869,68 @@ mod tests {
             assert_eq!(plain.properties.full_row, expr.properties.full_row);
             assert_eq!(plain.properties.full_column, expr.properties.full_column);
         })
+    }
+
+    #[test]
+    fn expr_integer_index_vectors_use_exact_storage_for_all_classes() {
+        macro_rules! assert_indices {
+            ($storage:expr) => {{
+                let indices =
+                    Tensor::new_integer($storage, vec![1, 2]).expect("typed integer index tensor");
+                let numeric = vec![Value::Tensor(indices)];
+                let plan = futures::executor::block_on(build_expr_index_plan(
+                    ExprPlanSpec {
+                        dims: 1,
+                        colon_mask: 0,
+                        end_mask: 0,
+                        range_dims: &[],
+                        range_params: &[],
+                        range_start_exprs: &[],
+                        range_step_exprs: &[],
+                        range_end_exprs: &[],
+                        numeric: &numeric,
+                        shape: &[1, 2],
+                    },
+                    |_, _| async { Ok(0.0) },
+                ))
+                .expect("exact integer vector index plan");
+                assert_eq!(plan.indices, vec![0, 1]);
+            }};
+        }
+
+        assert_indices!(IntegerStorage::I8(vec![1, 2]));
+        assert_indices!(IntegerStorage::I16(vec![1, 2]));
+        assert_indices!(IntegerStorage::I32(vec![1, 2]));
+        assert_indices!(IntegerStorage::I64(vec![1, 2]));
+        assert_indices!(IntegerStorage::U8(vec![1, 2]));
+        assert_indices!(IntegerStorage::U16(vec![1, 2]));
+        assert_indices!(IntegerStorage::U32(vec![1, 2]));
+        assert_indices!(IntegerStorage::U64(vec![1, 2]));
+    }
+
+    #[test]
+    fn expr_integer_index_vectors_reject_wide_values() {
+        let indices = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
+            .expect("typed integer index tensor");
+        let numeric = vec![Value::Tensor(indices)];
+
+        let err = futures::executor::block_on(build_expr_index_plan(
+            ExprPlanSpec {
+                dims: 1,
+                colon_mask: 0,
+                end_mask: 0,
+                range_dims: &[],
+                range_params: &[],
+                range_start_exprs: &[],
+                range_step_exprs: &[],
+                range_end_exprs: &[],
+                numeric: &numeric,
+                shape: &[1, 2],
+            },
+            |_, _| async { Ok(0.0) },
+        ))
+        .expect_err("wide exact integer index must not use its float mirror");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
     }
 
     #[test]
@@ -1203,6 +1356,42 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, expr.output_shape);
+            assert_eq!(plain.selection_lengths, expr.selection_lengths);
+        })
+    }
+
+    #[test]
+    fn expr_plan_short_linear_logical_mask_matches_plain_column_shape() {
+        futures::executor::block_on(async {
+            let shape = vec![2, 3];
+            let numeric = vec![Value::LogicalArray(
+                LogicalArray::new(vec![0, 1, 1], vec![1, 3]).expect("logical selector"),
+            )];
+            let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
+                .await
+                .unwrap();
+            let plain = build_index_plan(&plain_selectors, 1, &shape).unwrap();
+            let expr = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &numeric,
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plain.indices, vec![1, 2]);
+            assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, vec![2, 1]);
             assert_eq!(plain.output_shape, expr.output_shape);
             assert_eq!(plain.selection_lengths, expr.selection_lengths);
         })

@@ -6,7 +6,10 @@ use crate::call::shared::{
     ObjectIndexDescriptor, ObjectIndexOp, ObjectParenExprSelectorSpec,
 };
 use crate::indexing::end_expr as idx_end_expr;
-use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
+use crate::indexing::plan::{
+    build_expr_index_plan, build_expr_sparse_assignment_plan, build_index_plan,
+    build_sparse_assignment_plan, ExprPlanSpec, IndexPlan,
+};
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
 use crate::indexing::selectors::{
@@ -15,7 +18,8 @@ use crate::indexing::selectors::{
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
-use runmat_builtins::{CellArray, SymbolicExpr, Value};
+use runmat_builtins::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
+use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
 use std::pin::Pin;
@@ -32,9 +36,42 @@ fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeE
     crate::interpreter::errors::mex("ShapeMismatch", &format!("{context}: {err}"))
 }
 
+/// Materializes an integer scalar for indexed assignment without routing it
+/// through the lossy floating-point tensor mirror.
+fn integer_scalar_tensor(value: IntValue) -> Result<Tensor, RuntimeError> {
+    let storage = match value {
+        IntValue::I8(value) => IntegerStorage::I8(vec![value]),
+        IntValue::I16(value) => IntegerStorage::I16(vec![value]),
+        IntValue::I32(value) => IntegerStorage::I32(vec![value]),
+        IntValue::I64(value) => IntegerStorage::I64(vec![value]),
+        IntValue::U8(value) => IntegerStorage::U8(vec![value]),
+        IntValue::U16(value) => IntegerStorage::U16(vec![value]),
+        IntValue::U32(value) => IntegerStorage::U32(vec![value]),
+        IntValue::U64(value) => IntegerStorage::U64(vec![value]),
+    };
+    Tensor::new_integer(storage, vec![1, 1])
+        .map_err(|e| map_slice_shape_error("scalar index assign", e))
+}
+
+/// Applies a slice assignment to an integer scalar after materializing its
+/// exact storage. This keeps StoreSlice and StoreSliceExpr on the same path as
+/// StoreIndex instead of constructing an f64 compatibility tensor first.
+async fn assign_integer_scalar_with_plan(
+    value: IntValue,
+    plan: &IndexPlan,
+    rhs: &Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
+    let tensor = integer_scalar_tensor(value)?;
+    if delete {
+        idx_write_slice::delete_tensor_with_plan(tensor, plan, rhs)
+    } else {
+        idx_write_slice::assign_tensor_with_plan(tensor, plan, rhs).await
+    }
+}
+
 fn logical_value_from_tensor(t: runmat_builtins::Tensor) -> Result<Value, RuntimeError> {
-    let logical_data: Vec<u8> = t
-        .data
+    let logical_data: Vec<u8> = tensor_values_f64_cow(&t)
         .iter()
         .map(|&v| if v != 0.0 { 1 } else { 0 })
         .collect();
@@ -157,7 +194,7 @@ fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Optio
     }
 }
 
-async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
+async fn linear_index_values(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
         let mut index_value = value.clone();
@@ -172,7 +209,10 @@ async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, Runtim
                     &format!("Unsupported index type: expected numeric scalar, got {value:?}"),
                 )
             })?;
-        out.push(index_val as f64);
+        let index = index_val.positive_usize().ok_or_else(|| {
+            crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")
+        })?;
+        out.push(index);
     }
     Ok(out)
 }
@@ -185,11 +225,8 @@ async fn range_selector_scalar_to_f64(value: &Value) -> Result<f64, RuntimeError
     match scalar {
         Value::Num(n) => Ok(n),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t)
-            if t.data.len() == 1
-                && runmat_runtime::builtins::common::shape::is_scalar_shape(&t.shape) =>
-        {
-            Ok(t.data[0])
+        Value::Tensor(t) if runmat_runtime::builtins::common::tensor::is_scalar_tensor(&t) => {
+            Ok(tensor_value_f64(&t, 0))
         }
         _ => Err(crate::interpreter::errors::mex(
             "UnsupportedIndexType",
@@ -223,13 +260,6 @@ fn assign_scalar_struct_index(
             "Struct subscript out of bounds",
         )),
     }
-}
-
-fn sparse_assignment_unsupported() -> RuntimeError {
-    crate::interpreter::errors::mex(
-        "SparseAssignmentUnsupported",
-        "Sparse matrix assignment is not yet supported",
-    )
 }
 
 async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
@@ -1036,17 +1066,17 @@ pub async fn paren_index_value(
             if let Some((name, parameters)) = expr.function_reference_signature() {
                 apply_symbolic_function_reference(name, parameters, &raw_indices)
             } else {
-                let numeric = linear_index_values_to_f64(&raw_indices).await?;
-                if numeric.len() == 1 && numeric[0] == 1.0 {
+                let indices = linear_index_values(&raw_indices).await?;
+                if indices == [1] {
                     Ok(Value::Symbolic(expr.clone()))
                 } else {
-                    idx_read_linear::generic_index(&Value::Symbolic(expr.clone()), &numeric).await
+                    idx_read_linear::generic_index(&Value::Symbolic(expr.clone()), &indices).await
                 }
             }
         }
         _ => {
-            let numeric = linear_index_values_to_f64(&raw_indices).await?;
-            idx_read_linear::generic_index(&base, &numeric).await
+            let indices = linear_index_values(&raw_indices).await?;
+            idx_read_linear::generic_index(&base, &indices).await
         }
     }
 }
@@ -1057,8 +1087,10 @@ fn symbolic_scalar_from_value(value: &Value) -> Result<SymbolicExpr, RuntimeErro
         Value::Num(value) => Ok(SymbolicExpr::constant(*value)),
         Value::Int(value) => Ok(SymbolicExpr::constant(value.to_f64())),
         Value::Bool(value) => Ok(SymbolicExpr::constant(if *value { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => {
-            Ok(SymbolicExpr::constant(tensor.data[0]))
+        Value::Tensor(tensor)
+            if runmat_runtime::builtins::common::tensor::is_scalar_tensor(tensor) =>
+        {
+            Ok(SymbolicExpr::constant(tensor_value_f64(tensor, 0)))
         }
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(SymbolicExpr::constant(if logical.data[0] != 0 {
@@ -1238,13 +1270,16 @@ pub async fn dispatch_indexing(
                         "StoreIndex requires scalar indices; use StoreSlice for vector, range, or logical indices",
                     )
                 })?;
-                if idx_val < 1 {
+                if idx_val.is_below_one() {
                     return Err(crate::interpreter::errors::mex(
                         "IndexOutOfBounds",
                         "Index out of bounds",
                     ));
                 }
-                indices.push(idx_val as usize);
+                let index = idx_val.positive_usize().ok_or_else(|| {
+                    crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")
+                })?;
+                indices.push(index);
             }
             indices.reverse();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
@@ -1304,8 +1339,7 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::Int(i) => {
-                    let scalar = runmat_builtins::Tensor::new(vec![i.to_f64()], vec![1, 1])
-                        .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    let scalar = integer_scalar_tensor(i)?;
                     stack.push(
                         idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
                             .await?,
@@ -1341,7 +1375,9 @@ pub async fn dispatch_indexing(
                     ca, &indices, &rhs, delete,
                 )?),
                 Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
-                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
+                Value::SparseTensor(sparse) => stack.push(
+                    idx_write_linear::assign_sparse_scalar(sparse, &indices, &rhs, delete).await?,
+                ),
                 Value::GpuTensor(h) => stack
                     .push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs, delete).await?),
                 _ => {
@@ -1546,26 +1582,7 @@ pub async fn dispatch_indexing(
                     "logical slice missing result",
                 ))?;
                 let converted = match result {
-                    Value::Tensor(t) => {
-                        let logical_data: Vec<u8> = t
-                            .data
-                            .iter()
-                            .map(|&v| if v != 0.0 { 1 } else { 0 })
-                            .collect();
-                        if logical_data.len() <= 1 {
-                            Value::Bool(logical_data.first().copied().unwrap_or(0) != 0)
-                        } else {
-                            let logical =
-                                runmat_builtins::LogicalArray::new(logical_data, t.shape.clone())
-                                    .map_err(|e| {
-                                    crate::interpreter::errors::mex(
-                                        "SliceNonTensor",
-                                        &format!("slice: {e}"),
-                                    )
-                                })?;
-                            Value::LogicalArray(logical)
-                        }
-                    }
+                    Value::Tensor(t) => logical_value_from_tensor(t)?,
                     Value::Num(n) => Value::Bool(n != 0.0),
                     Value::Bool(_) | Value::LogicalArray(_) => result,
                     other => other,
@@ -1649,6 +1666,19 @@ pub async fn dispatch_indexing(
                         idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?
                     });
                 }
+                Value::Int(value) => {
+                    let tensor = integer_scalar_tensor(value.clone())?;
+                    let selectors = build_slice_selectors(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        &tensor.shape,
+                    )
+                    .await?;
+                    let plan = build_index_plan(&selectors, *dims, &tensor.shape)?;
+                    stack.push(assign_integer_scalar_with_plan(value, &plan, &rhs, delete).await?);
+                }
                 Value::LogicalArray(la) => {
                     let data: Vec<f64> = la
                         .data
@@ -1694,7 +1724,7 @@ pub async fn dispatch_indexing(
                         idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
                     }
                 }),
-                Value::ComplexTensor(mut ct) => {
+                Value::ComplexTensor(ct) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
                             .await
@@ -1705,16 +1735,11 @@ pub async fn dispatch_indexing(
                         stack.push(idx_write_slice::delete_complex_with_plan(ct, &plan, &rhs)?);
                         return Ok(true);
                     }
-                    if plan.indices.is_empty() {
-                        stack.push(Value::ComplexTensor(ct));
-                        return Ok(true);
-                    }
-                    let rhs_view =
-                        idx_write_slice::build_complex_rhs_view(&rhs, &plan.selection_lengths)
-                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                    idx_write_slice::scatter_complex_with_plan(&mut ct, &plan, &rhs_view)
-                        .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                    stack.push(Value::ComplexTensor(ct));
+                    stack.push(
+                        idx_write_slice::assign_complex_with_plan(ct, &plan, &rhs)
+                            .await
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?,
+                    );
                 }
                 Value::Cell(ca) => {
                     let selectors =
@@ -1731,7 +1756,33 @@ pub async fn dispatch_indexing(
                         )?,
                     );
                 }
-                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
+                Value::SparseTensor(sparse) => {
+                    let shape = sparse.shape();
+                    let selectors = if delete {
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape).await
+                    } else {
+                        crate::indexing::selectors::build_sparse_assignment_selectors(
+                            *dims,
+                            *colon_mask,
+                            *end_mask,
+                            &numeric,
+                            &shape,
+                        )
+                        .await
+                    }
+                    .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
+                    let plan = if delete {
+                        build_index_plan(&selectors, *dims, &shape)
+                    } else {
+                        build_sparse_assignment_plan(&selectors, *dims, &shape)
+                    }
+                    .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
+                    stack.push(if delete {
+                        idx_write_slice::delete_sparse_with_plan(sparse, &plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_sparse_with_plan(sparse, &plan, &rhs).await?
+                    });
+                }
                 Value::StringArray(mut sa) => {
                     if delete {
                         return Err(crate::interpreter::errors::mex(
@@ -1838,6 +1889,22 @@ pub async fn dispatch_indexing(
                         apply_end_offsets_to_numeric(
                             &numeric,
                             IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
+                    Value::Int(value) => {
+                        let tensor = integer_scalar_tensor(value.clone())?;
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(
+                                *dims,
+                                *colon_mask,
+                                *end_mask,
+                                range_dims,
+                                &tensor.shape,
+                            ),
                             end_numeric_exprs,
                             vars,
                         )
@@ -2260,7 +2327,7 @@ pub async fn dispatch_indexing(
                 };
             }
             match base {
-                Value::ComplexTensor(mut t) => {
+                Value::ComplexTensor(t) => {
                     let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -2283,14 +2350,7 @@ pub async fn dispatch_indexing(
                         )?);
                         return Ok(true);
                     }
-                    if !vm_plan.indices.is_empty() {
-                        let rhs_view = idx_write_slice::build_complex_rhs_view(
-                            &rhs,
-                            &vm_plan.selection_lengths,
-                        )?;
-                        idx_write_slice::scatter_complex_with_plan(&mut t, &vm_plan, &rhs_view)?;
-                    }
-                    stack.push(Value::ComplexTensor(t));
+                    stack.push(idx_write_slice::assign_complex_with_plan(t, &vm_plan, &rhs).await?);
                 }
                 Value::Tensor(t) => {
                     let vm_plan = build_expr_slice_plan(
@@ -2314,6 +2374,28 @@ pub async fn dispatch_indexing(
                     } else {
                         idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?
                     });
+                }
+                Value::Int(value) => {
+                    let tensor = integer_scalar_tensor(value.clone())?;
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &tensor.shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    stack.push(
+                        assign_integer_scalar_with_plan(value, &vm_plan, &rhs, delete).await?,
+                    );
                 }
                 Value::GpuTensor(h) => {
                     let vm_plan = build_expr_slice_plan(
@@ -2339,7 +2421,38 @@ pub async fn dispatch_indexing(
                     };
                     stack.push(updated);
                 }
-                Value::SparseTensor(_) => return Err(sparse_assignment_unsupported()),
+                Value::SparseTensor(sparse) => {
+                    let shape = sparse.shape();
+                    let read_only_vars: &[Value] = vars;
+                    let spec = ExprPlanSpec {
+                        dims: *dims,
+                        colon_mask: *colon_mask,
+                        end_mask: *end_mask,
+                        range_dims,
+                        range_params: &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        numeric: &numeric,
+                        shape: &shape,
+                    };
+                    let vm_plan = if delete {
+                        build_expr_slice_plan(spec, vars).await?
+                    } else {
+                        build_expr_sparse_assignment_plan(spec, |dim_len, expr| {
+                            let expr = expr.clone();
+                            async move {
+                                resolve_range_end_value(dim_len, &expr, read_only_vars).await
+                            }
+                        })
+                        .await?
+                    };
+                    stack.push(if delete {
+                        idx_write_slice::delete_sparse_with_plan(sparse, &vm_plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_sparse_with_plan(sparse, &vm_plan, &rhs).await?
+                    });
+                }
                 Value::Object(obj) => {
                     if let Some(err) = missing_member_index_overload_error(
                         &Value::Object(obj.clone()),
@@ -2467,12 +2580,65 @@ pub async fn dispatch_indexing(
 mod tests {
     use super::{
         apply_cell_end_exprs_for_base, apply_cell_end_offsets_for_base,
-        apply_end_offsets_to_numeric, map_slice_plan_error, range_selector_scalar_to_f64,
+        apply_end_offsets_to_numeric, assign_integer_scalar_with_plan, integer_scalar_tensor,
+        map_slice_plan_error, range_selector_scalar_to_f64, symbolic_scalar_from_value,
         validate_expr_range_step_metadata, IndexContext,
     };
     use crate::bytecode::EndExpr;
+    use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, ObjectArray, ObjectInstance, Value};
+    use runmat_builtins::{
+        CellArray, IntValue, IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor,
+        Value,
+    };
+
+    #[test]
+    fn integer_scalar_index_assignment_materialization_preserves_all_integer_classes() {
+        macro_rules! assert_scalar_storage {
+            ($value:expr, $storage:expr) => {{
+                let tensor = integer_scalar_tensor($value).expect("integer scalar tensor");
+                assert_eq!(tensor.integer_storage(), Some(&$storage));
+            }};
+        }
+
+        assert_scalar_storage!(IntValue::I8(i8::MIN), IntegerStorage::I8(vec![i8::MIN]));
+        assert_scalar_storage!(IntValue::I16(i16::MIN), IntegerStorage::I16(vec![i16::MIN]));
+        assert_scalar_storage!(IntValue::I32(i32::MIN), IntegerStorage::I32(vec![i32::MIN]));
+        assert_scalar_storage!(IntValue::I64(i64::MIN), IntegerStorage::I64(vec![i64::MIN]));
+        assert_scalar_storage!(IntValue::U8(u8::MAX), IntegerStorage::U8(vec![u8::MAX]));
+        assert_scalar_storage!(IntValue::U16(u16::MAX), IntegerStorage::U16(vec![u16::MAX]));
+        assert_scalar_storage!(IntValue::U32(u32::MAX), IntegerStorage::U32(vec![u32::MAX]));
+        assert_scalar_storage!(IntValue::U64(u64::MAX), IntegerStorage::U64(vec![u64::MAX]));
+    }
+
+    #[test]
+    fn integer_scalar_slice_assignment_preserves_all_integer_classes() {
+        macro_rules! assert_slice_assignment {
+            ($value:expr, $storage:expr) => {{
+                let plan = IndexPlan::new(vec![0], vec![1, 1], vec![1], 1, vec![1, 1]);
+                let result = block_on(assign_integer_scalar_with_plan(
+                    $value.clone(),
+                    &plan,
+                    &Value::Int($value),
+                    false,
+                ))
+                .expect("integer scalar slice assignment");
+                let Value::Tensor(tensor) = result else {
+                    panic!("integer scalar slice assignment must return a tensor");
+                };
+                assert_eq!(tensor.integer_storage(), Some(&$storage));
+            }};
+        }
+
+        assert_slice_assignment!(IntValue::I8(i8::MIN), IntegerStorage::I8(vec![i8::MIN]));
+        assert_slice_assignment!(IntValue::I16(i16::MIN), IntegerStorage::I16(vec![i16::MIN]));
+        assert_slice_assignment!(IntValue::I32(i32::MIN), IntegerStorage::I32(vec![i32::MIN]));
+        assert_slice_assignment!(IntValue::I64(i64::MIN), IntegerStorage::I64(vec![i64::MIN]));
+        assert_slice_assignment!(IntValue::U8(u8::MAX), IntegerStorage::U8(vec![u8::MAX]));
+        assert_slice_assignment!(IntValue::U16(u16::MAX), IntegerStorage::U16(vec![u16::MAX]));
+        assert_slice_assignment!(IntValue::U32(u32::MAX), IntegerStorage::U32(vec![u32::MAX]));
+        assert_slice_assignment!(IntValue::U64(u64::MAX), IntegerStorage::U64(vec![u64::MAX]));
+    }
 
     #[test]
     fn map_slice_plan_error_preserves_identifier_and_adds_context() {
@@ -2504,6 +2670,35 @@ mod tests {
         )))
         .expect_err("non-numeric range selector scalar should fail");
         assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+    }
+
+    #[test]
+    fn typed_integer_scalar_range_and_symbolic_paths_ignore_f64_mirrors() {
+        macro_rules! assert_typed_scalar {
+            ($storage:expr, $expected:expr) => {{
+                let tensor =
+                    Tensor::new_integer($storage, vec![1, 1]).expect("typed integer scalar");
+                let value = Value::Tensor(tensor);
+
+                assert_eq!(
+                    block_on(range_selector_scalar_to_f64(&value)).unwrap(),
+                    $expected
+                );
+                assert_eq!(
+                    symbolic_scalar_from_value(&value).unwrap(),
+                    SymbolicExpr::constant($expected)
+                );
+            }};
+        }
+
+        assert_typed_scalar!(IntegerStorage::I8(vec![-8]), -8.0);
+        assert_typed_scalar!(IntegerStorage::I16(vec![-16]), -16.0);
+        assert_typed_scalar!(IntegerStorage::I32(vec![-32]), -32.0);
+        assert_typed_scalar!(IntegerStorage::I64(vec![-64]), -64.0);
+        assert_typed_scalar!(IntegerStorage::U8(vec![8]), 8.0);
+        assert_typed_scalar!(IntegerStorage::U16(vec![16]), 16.0);
+        assert_typed_scalar!(IntegerStorage::U32(vec![32]), 32.0);
+        assert_typed_scalar!(IntegerStorage::U64(vec![64]), 64.0);
     }
 
     #[test]
@@ -2711,5 +2906,19 @@ mod tests {
             Value::ObjectArray(array)
                 if array.shape() == [1, 2] && array.class_name() == "matlab.unittest.TestResult"
         ));
+    }
+
+    #[test]
+    fn logical_value_from_integer_tensor_uses_native_storage_not_mirror() {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
+            .expect("typed integer tensor");
+
+        let value = super::logical_value_from_tensor(tensor).expect("logical conversion");
+        assert_eq!(
+            value,
+            Value::LogicalArray(
+                runmat_builtins::LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical array")
+            )
+        );
     }
 }

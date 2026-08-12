@@ -16,6 +16,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+#[cfg(test)]
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -386,6 +388,24 @@ fn default_axis(len: usize) -> Vec<f64> {
 }
 
 #[cfg(test)]
+fn transpose_for_surface(tensor: &Tensor) -> Tensor {
+    let mut indices = vec![0; tensor_utils::tensor_element_len(tensor)];
+    for row in 0..tensor.rows {
+        for col in 0..tensor.cols {
+            let src = row + tensor.rows * col;
+            let dst = col + tensor.cols * row;
+            indices[dst] = src;
+        }
+    }
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .and_then(|storage| storage.reorder(&indices))
+        .expect("heatmap transpose permutation");
+    Tensor::from_numeric_storage(storage, vec![tensor.cols, tensor.rows])
+        .expect("heatmap transpose shape")
+}
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
@@ -394,7 +414,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{CellArray, NumericDType, Value};
+    use runmat_builtins::{CellArray, Value};
     use runmat_plot::plots::PlotElement;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -406,14 +426,34 @@ mod tests {
     }
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
-        Tensor {
-            data,
-            integer_data: None,
-            shape: vec![rows, cols],
-            rows,
-            cols,
-            dtype: NumericDType::F64,
-        }
+        Tensor::new(data, vec![rows, cols]).expect("heatmap test matrix")
+    }
+
+    fn int_tensor(data: Vec<i16>, rows: usize, cols: usize) -> Tensor {
+        Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data), vec![rows, cols])
+            .expect("integer tensor")
+    }
+
+    #[test]
+    fn heatmap_transpose_reads_typed_integer_storage_exactly() {
+        let transposed = transpose_for_surface(&int_tensor(vec![1, 2, 3, 4, 5, 6], 2, 3));
+
+        assert_eq!(transposed.rows, 3);
+        assert_eq!(transposed.cols, 2);
+        assert_eq!(
+            transposed.materialize_f64(),
+            vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]
+        );
+        assert_eq!(
+            transposed.numeric_dtype(),
+            runmat_builtins::NumericDType::I16
+        );
+        assert_eq!(
+            transposed.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::I16(vec![
+                1, 3, 5, 2, 4, 6
+            ]))
+        );
     }
 
     #[test]

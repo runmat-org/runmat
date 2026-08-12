@@ -1,0 +1,19 @@
+{
+  "title": "fea.trends",
+  "category": "fea",
+  "keywords": ["fea", "trends", "window", "artifacts"],
+  "summary": "Summarize recent persisted FEA runs.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests", "integration": "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" },
+  "description": "`fea.trends(Name, Value, ...)` returns a `fea.Trends` summary over a bounded recent-run window.",
+  "behaviors": [
+    "`WindowSize` is the only option and defaults to 16.",
+    "Window size must be a positive exact structural scalar. All eight integer classes and ordinary integral doubles are accepted exactly; zero, negative, fractional, nonfinite, out-of-range, nonscalar, and resident values reject before artifact-store access.",
+    "Window size and returned run/count metadata remain exact typed integers. Timing, rate, ratio, and aggregate measurement fields remain binary64.",
+    "The query is host-side, performs no provider execution, and does not require native OCCT."
+  ],
+  "examples": [{ "description": "Summarize the latest 32 runs", "input": "trends = fea.trends(\"WindowSize\", uint32(32));" }],
+  "faqs": [{ "question": "Is zero an unlimited window?", "answer": "No. `WindowSize` must be positive; omit it to use the default of 16." }],
+  "links": [{ "label": "FEA evidence", "url": "../../fea/evidence" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/mod.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs" }
+}

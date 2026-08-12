@@ -7,6 +7,7 @@ use runmat_macros::runtime_builtin;
 
 use super::op_common::current_axes_target;
 use super::state::{set_view_for_axes, FigureError};
+use crate::builtins::common::tensor;
 use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -210,14 +211,15 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
     match args.len() {
         1 => {
             let tensor = scalar_or_tensor(&args[0])?;
-            if tensor.data.len() == 1 {
-                match tensor.data[0] as i32 {
+            let data = tensor::tensor_values_f64(&tensor);
+            if data.len() == 1 {
+                match data[0] as i32 {
                     2 => Ok((0.0, 90.0)),
                     3 => Ok((-37.5, 30.0)),
                     _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
                 }
-            } else if tensor.data.len() == 2 {
-                Ok((tensor.data[0] as f32, tensor.data[1] as f32))
+            } else if data.len() == 2 {
+                Ok((data[0] as f32, data[1] as f32))
             } else {
                 Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT))
             }
@@ -225,10 +227,13 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
         2 => {
             let az = scalar_or_tensor(&args[0])?;
             let el = scalar_or_tensor(&args[1])?;
-            if az.data.len() != 1 || el.data.len() != 1 {
+            if !tensor::is_scalar_tensor(&az) || !tensor::is_scalar_tensor(&el) {
                 return Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT));
             }
-            Ok((az.data[0] as f32, el.data[0] as f32))
+            Ok((
+                tensor::tensor_value_f64(&az, 0) as f32,
+                tensor::tensor_value_f64(&el, 0) as f32,
+            ))
         }
         _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
     }
@@ -236,22 +241,11 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
 
 fn scalar_or_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
     match value {
-        Value::Num(v) => Ok(Tensor {
-            rows: 1,
-            cols: 1,
-            shape: vec![1, 1],
-            data: vec![*v],
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        }),
-        Value::Int(i) => Ok(Tensor {
-            rows: 1,
-            cols: 1,
-            shape: vec![1, 1],
-            data: vec![i.to_f64()],
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        }),
+        Value::Num(v) => {
+            Tensor::new(vec![*v], vec![1, 1]).map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT))
+        }
+        Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
+            .map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
         other => Tensor::try_from(other).map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
     }
 }
@@ -273,25 +267,15 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             .map_err(map_view_figure_error)?;
         let az = meta.view_azimuth_deg.unwrap_or(-37.5) as f64;
         let el = meta.view_elevation_deg.unwrap_or(30.0) as f64;
-        return Ok(Value::Tensor(Tensor {
-            rows: 1,
-            cols: 2,
-            shape: vec![1, 2],
-            data: vec![az, el],
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        }));
+        return Ok(Value::Tensor(
+            Tensor::new(vec![az, el], vec![1, 2]).expect("view vector"),
+        ));
     }
     let (az, el) = parse_view_angles(rest)?;
     set_view_for_axes(target.0, target.1, az, el).map_err(map_view_figure_error)?;
-    Ok(Value::Tensor(Tensor {
-        rows: 1,
-        cols: 2,
-        shape: vec![1, 2],
-        data: vec![az as f64, el as f64],
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    }))
+    Ok(Value::Tensor(
+        Tensor::new(vec![az as f64, el as f64], vec![1, 2]).expect("view vector"),
+    ))
 }
 
 #[cfg(test)]
@@ -304,6 +288,7 @@ mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
+    use runmat_builtins::IntegerStorage;
 
     #[test]
     fn view_sets_axes_local_angles() {
@@ -313,7 +298,7 @@ mod tests {
         let _ = clear_figure(None);
         let value = view_builtin(vec![Value::Num(45.0), Value::Num(20.0)]).unwrap();
         let t = Tensor::try_from(&value).unwrap();
-        assert_eq!(t.data, vec![45.0, 20.0]);
+        assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
         let fig = clone_figure(current_figure_handle()).unwrap();
         let meta = fig.axes_metadata(0).unwrap();
         assert_eq!(meta.view_azimuth_deg, Some(45.0));
@@ -347,12 +332,12 @@ mod tests {
         let _ = view_builtin(vec![ax.clone(), Value::Num(2.0)]).unwrap();
         let v = view_builtin(vec![ax.clone()]).unwrap();
         let t = Tensor::try_from(&v).unwrap();
-        assert_eq!(t.data, vec![0.0, 90.0]);
+        assert_eq!(t.materialize_f64(), vec![0.0, 90.0]);
 
         let _ = view_builtin(vec![ax.clone(), Value::Num(3.0)]).unwrap();
         let v = view_builtin(vec![ax]).unwrap();
         let t = Tensor::try_from(&v).unwrap();
-        assert_eq!(t.data, vec![-37.5, 30.0]);
+        assert_eq!(t.materialize_f64(), vec![-37.5, 30.0]);
     }
 
     #[test]
@@ -369,19 +354,12 @@ mod tests {
         let _ = view_builtin(vec![ax.clone(), Value::Num(405.0), Value::Num(89.0)]).unwrap();
         let queried = get_builtin(vec![ax.clone(), Value::String("View".into())]).unwrap();
         let t = Tensor::try_from(&queried).unwrap();
-        assert_eq!(t.data, vec![405.0, 89.0]);
+        assert_eq!(t.materialize_f64(), vec![405.0, 89.0]);
 
         set_builtin(vec![
             ax,
             Value::String("View".into()),
-            Value::Tensor(Tensor {
-                rows: 1,
-                cols: 2,
-                shape: vec![1, 2],
-                data: vec![180.0, -30.0],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![180.0, -30.0], vec![1, 2]).expect("view vector")),
         ])
         .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -390,6 +368,38 @@ mod tests {
             fig.axes_metadata(0).unwrap().view_elevation_deg,
             Some(-30.0)
         );
+    }
+
+    #[test]
+    fn view_accepts_typed_integer_angle_vector() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![45, 20]), vec![1, 2]).expect("angles");
+        let angles = Value::Tensor(tensor);
+        let value = view_builtin(vec![angles]).unwrap();
+        let t = Tensor::try_from(&value).unwrap();
+
+        assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
+    }
+
+    #[test]
+    fn view_accepts_separate_typed_integer_angle_scalars() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        let az = Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).expect("azimuth");
+        let el = Tensor::new_integer(IntegerStorage::I16(vec![20]), vec![1, 1]).expect("elevation");
+
+        let value = view_builtin(vec![Value::Tensor(az), Value::Tensor(el)]).unwrap();
+        let t = Tensor::try_from(&value).unwrap();
+
+        assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
     }
 
     #[test]

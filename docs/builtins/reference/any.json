@@ -30,13 +30,14 @@
     "unit": "builtins::math::reduction::any::tests",
     "integration": "builtins::math::reduction::any::tests::any_gpu_provider_roundtrip"
   },
-  "description": "`any(X)` returns logical `true` when at least one element in the selected slice of `X` is nonzero. By default, `any` reduces along the first non-singleton dimension; optional `dim`, `\"all\"`, and `nanflag` arguments follow MATLAB semantics.",
+  "description": "`any(X)` returns logical `true` when at least one element in the selected slice of `X` is nonzero. By default, `any` reduces along the first non-singleton dimension and ignores `NaN`; `dim`, `vecdim`, and `\"all\"` follow the MATLAB-compatible contract, while explicit `nanflag` arguments are available only in RunMat mode.",
   "behaviors": [
     "Works with logical, numeric, complex, and character arrays; other types raise a descriptive error.",
     "Accepts `any(X, dim)` to reduce along a single dimension or `any(X, vecdim)` to collapse multiple axes at once.",
     "`any(X, 'all')` flattens the entire array into a single logical scalar.",
-    "`any(___, 'omitnan')` ignores `NaN` values (including complex parts) when deciding whether a slice contains nonzero content.",
-    "`any(___, 'includenan')` (default) treats `NaN` as logical `true`, matching MATLAB behaviour.",
+    "Typed integer data and integer `dim` or `vecdim` selectors accept all eight built-in integer classes and always return logical results.",
+    "`NaN` values are ignored by default, including complex values with a `NaN` component.",
+    "RunMat mode adds explicit `any(___, 'omitnan')` and `any(___, 'includenan')` forms; MATLAB-compatible modes reject those flags.",
     "Empty dimensions yield logical zeros with MATLAB-compatible shapes; empty arrays reduced with `'all'` return `false`.",
     "Results are always host-resident logical scalars or logical arrays, even when the input tensor lives on the GPU, because the runtime copies the compact output back to the CPU."
   ],
@@ -62,9 +63,9 @@
       "output": "anyNonZero = true"
     },
     {
-      "description": "Ignoring `NaN` values when probing slices",
-      "input": "E = [NaN 0 0; 0 0 0];\nwithNaN = any(E);              % returns [1 0 0]\nignoringNaN = any(E, 'omitnan'); % returns [0 0 0]\ndisp(withNaN);\ndisp(ignoringNaN)",
-      "output": "     1     0     0\n     0     0     0"
+      "description": "Observing the default `NaN` behavior",
+      "input": "E = [NaN 0 0; 0 0 0];\nhasValues = any(E);\ndisp(hasValues)",
+      "output": "0 0 0"
     },
     {
       "description": "Running `any` on GPU arrays with automatic fallback",
@@ -96,7 +97,7 @@
     },
     {
       "question": "How are `NaN` values handled?",
-      "answer": "By default they count as nonzero (`'includenan'`). Add `'omitnan'` to ignore them; if every element in a slice is `NaN`, the result becomes `false`."
+      "answer": "They are ignored by default. RunMat mode additionally accepts explicit `'omitnan'` and `'includenan'` flags; MATLAB-compatible modes reject those extension forms."
     },
     {
       "question": "Does `any` work with complex numbers?",

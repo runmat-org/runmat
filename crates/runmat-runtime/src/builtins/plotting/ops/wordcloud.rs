@@ -4,12 +4,13 @@ use glam::{Vec3, Vec4};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ObjectInstance, StringArray, StructValue, Tensor, Value,
+    IntValue, ObjectInstance, StringArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{Figure, TextStyle};
 use std::collections::HashMap;
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
     register_wordcloud_handle, update_wordcloud_figure, update_wordcloud_handle_state,
@@ -264,6 +265,13 @@ fn split_leading_parent_handle(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
 }
 
 fn numeric_figure_parent(value: &Value) -> Option<FigureHandle> {
+    if let Some(integer) = exact_integer_scalar(value) {
+        let id = integer.try_to_u64()?;
+        return u32::try_from(id)
+            .ok()
+            .filter(|id| *id > 0)
+            .map(FigureHandle::from);
+    }
     let scalar = value_as_f64(value)?;
     if scalar.is_finite() && scalar > 0.0 && scalar.fract() == 0.0 && scalar <= u32::MAX as f64 {
         Some(FigureHandle::from(scalar as u32))
@@ -683,10 +691,11 @@ fn counts_by_columns(words: Vec<String>, counts: Tensor) -> BuiltinResult<WordCl
         ));
     }
     let mut sizes = Vec::with_capacity(counts.cols);
+    let count_values = counts.materialize_f64();
     for col in 0..counts.cols {
         let mut sum = 0.0;
         for row in 0..counts.rows {
-            let value = counts.data[row + col * counts.rows];
+            let value = count_values[row + col * counts.rows];
             if !value.is_finite() || value < 0.0 {
                 return Err(wordcloud_error("counts must be finite nonnegative values"));
             }
@@ -705,7 +714,7 @@ fn categorical_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData> {
         .and_then(words_from_word_vector)?;
     let codes = tensor_property(object, "Codes", "categorical")?;
     let mut sizes = vec![0.0; categories.len()];
-    for code in codes.data {
+    for code in codes.materialize_f64() {
         if code.is_nan() {
             continue;
         }
@@ -1228,7 +1237,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
         Value::Int(value) => Ok(vec![value.to_f64()]),
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor_utils::tensor_values_f64(tensor)),
         other => Err(wordcloud_error(format!(
             "{name} must be numeric, got {other:?}"
         ))),
@@ -1283,13 +1292,33 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
 }
 
 fn nonnegative_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = exact_integer_scalar(value) {
+        return integer
+            .try_to_usize()
+            .ok_or_else(|| wordcloud_error(format!("{name} must be a nonnegative integer")));
+    }
     let scalar = numeric_scalar(value, name)?;
-    if scalar.fract() != 0.0 || scalar < 0.0 || scalar > usize::MAX as f64 {
+    if scalar.fract() != 0.0
+        || scalar < 0.0
+        || scalar > usize::MAX as f64
+        || (usize::BITS == 64 && scalar == usize::MAX as f64)
+    {
         return Err(wordcloud_error(format!(
             "{name} must be a nonnegative integer"
         )));
     }
     Ok(scalar as usize)
+}
+
+/// Return a scalar integer from its typed storage, avoiding the lossy f64 mirror.
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
 }
 
 fn max_display_words_value(value: &Value) -> BuiltinResult<usize> {
@@ -1350,13 +1379,15 @@ fn color_list(value: &Value, name: &str, expected_rows: Option<usize>) -> Builti
         return Ok(vec![parse_color(value)?]);
     }
     let tensor = Tensor::try_from(value).map_err(wordcloud_error)?;
-    if tensor.data.is_empty() {
+    let len = tensor_utils::tensor_element_len(&tensor);
+    if len == 0 {
         return Ok(Vec::new());
     }
-    if tensor.data.len() == 3 && (tensor.rows == 1 || tensor.cols == 1) {
-        return Ok(vec![rgb_triplet(&tensor.data, name)?]);
+    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+        let values = tensor_utils::tensor_values_f64(&tensor);
+        return Ok(vec![rgb_triplet(&values, name)?]);
     }
-    if tensor.cols != 3 {
+    if tensor.cols != 3 || len != tensor.rows.saturating_mul(3) {
         return Err(wordcloud_error(format!(
             "{name} matrix must have three columns"
         )));
@@ -1372,9 +1403,9 @@ fn color_list(value: &Value, name: &str, expected_rows: Option<usize>) -> Builti
     for row in 0..tensor.rows {
         colors.push(rgb_triplet(
             &[
-                tensor.data[row],
-                tensor.data[row + tensor.rows],
-                tensor.data[row + 2 * tensor.rows],
+                tensor_utils::tensor_value_f64(&tensor, row),
+                tensor_utils::tensor_value_f64(&tensor, row + tensor.rows),
+                tensor_utils::tensor_value_f64(&tensor, row + 2 * tensor.rows),
             ],
             name,
         )?);
@@ -1505,6 +1536,86 @@ mod tests {
         Value::Tensor(Tensor::new(values, shape).unwrap())
     }
 
+    fn integer_scalar_storages(value: u64) -> [runmat_builtins::IntegerStorage; 8] {
+        [
+            runmat_builtins::IntegerStorage::I8(vec![value as i8]),
+            runmat_builtins::IntegerStorage::I16(vec![value as i16]),
+            runmat_builtins::IntegerStorage::I32(vec![value as i32]),
+            runmat_builtins::IntegerStorage::I64(vec![value as i64]),
+            runmat_builtins::IntegerStorage::U8(vec![value as u8]),
+            runmat_builtins::IntegerStorage::U16(vec![value as u16]),
+            runmat_builtins::IntegerStorage::U32(vec![value as u32]),
+            runmat_builtins::IntegerStorage::U64(vec![value]),
+        ]
+    }
+
+    #[test]
+    fn wordcloud_integer_options_read_all_typed_storage_classes_with_poisoned_f64_mirrors() {
+        for storage in integer_scalar_storages(2) {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer option");
+            let value = Value::Tensor(tensor);
+
+            let mut options = WordCloudOptions::default();
+            apply_option(&mut options, "maxdisplaywords", &value).expect("MaxDisplayWords");
+            assert_eq!(options.max_display_words, 2);
+            apply_option(&mut options, "layoutnum", &value).expect("LayoutNum");
+            assert_eq!(options.layout_num, 2);
+        }
+    }
+
+    #[test]
+    fn wordcloud_parent_reads_all_typed_storage_classes_with_poisoned_f64_mirrors() {
+        for storage in integer_scalar_storages(1) {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer parent");
+            assert_eq!(
+                numeric_figure_parent(&Value::Tensor(tensor)),
+                Some(FigureHandle::from(1))
+            );
+        }
+    }
+
+    #[test]
+    fn wordcloud_numeric_vector_reads_typed_integer_storage_exactly() {
+        let sizes = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![2, 4, 8]),
+            vec![1, 3],
+        )
+        .expect("typed size vector");
+
+        assert_eq!(
+            numeric_vector(&Value::Tensor(sizes), "SizeData").expect("numeric vector"),
+            vec![2.0, 4.0, 8.0]
+        );
+    }
+
+    #[test]
+    fn wordcloud_color_reads_typed_integer_storage_exactly() {
+        let color = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 0, 0]),
+            vec![1, 3],
+        )
+        .expect("typed color vector");
+
+        assert_eq!(
+            color_list(&Value::Tensor(color), "Color", None).expect("color list"),
+            vec![Vec4::new(1.0, 0.0, 0.0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn wordcloud_color_matrix_reads_typed_integer_storage_exactly() {
+        let color = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U16(vec![1, 0, 0, 1, 0, 0]),
+            vec![2, 3],
+        )
+        .expect("typed color matrix");
+
+        assert_eq!(
+            color_list(&Value::Tensor(color), "Color", Some(2)).expect("color list"),
+            vec![Vec4::new(1.0, 0.0, 0.0, 1.0), Vec4::new(0.0, 1.0, 0.0, 1.0)]
+        );
+    }
+
     #[test]
     fn descriptor_covers_documented_common_forms() {
         let labels = WORDCLOUD_DESCRIPTOR
@@ -1608,7 +1719,7 @@ mod tests {
         let Value::Tensor(sizes) = sizes else {
             panic!("expected SizeData tensor");
         };
-        assert_eq!(sizes.data, vec![2.0, 1.0, 1.0]);
+        assert_eq!(sizes.materialize_f64(), vec![2.0, 1.0, 1.0]);
 
         let docs = tokenized_document_object(vec![
             vec!["delta".into(), "epsilon".into(), "delta".into()],
@@ -1642,7 +1753,7 @@ mod tests {
         let Value::Tensor(sizes) = sizes else {
             panic!("expected categorical counts");
         };
-        assert_eq!(sizes.data, vec![2.0, 1.0]);
+        assert_eq!(sizes.materialize_f64(), vec![2.0, 1.0]);
 
         let table = table_object(
             &["Word", "Count"],
@@ -1717,6 +1828,16 @@ mod tests {
         let err = wordcloud_builtin(vec![lda, Value::Num(1.0)])
             .expect_err("LDA model should be explicit unsupported");
         assert!(err.to_string().contains("ldaModel"));
+    }
+
+    #[test]
+    fn wordcloud_rejects_unrepresentable_integer_options_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(max_display_words_value(&Value::Num(boundary)).is_err());
     }
 
     fn tokenized_document_object(documents: Vec<Vec<String>>) -> Value {

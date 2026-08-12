@@ -6,7 +6,7 @@ use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    NumericDType, Tensor, Value,
+    IntValue, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
@@ -22,6 +22,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 
 use super::bar::apply_bar_style;
 use super::common::{numeric_vector, value_as_f64};
@@ -388,10 +389,11 @@ impl HistWeightsInput {
             other => {
                 let tensor =
                     Tensor::try_from(&other).map_err(|e| hist_err(format!("hist: Weights {e}")))?;
-                if tensor.data.len() != expected_len {
+                let len = tensor_utils::tensor_element_len(&tensor);
+                if len != expected_len {
                     return Err(hist_err(format!(
                         "hist: Weights must contain {expected_len} elements (got {})",
-                        tensor.data.len()
+                        len
                     )));
                 }
                 Ok(HistWeightsInput::Host(tensor))
@@ -439,7 +441,7 @@ impl HistWeightsInput {
             HistWeightsInput::Host(tensor) => {
                 let values = numeric_vector(tensor.clone());
                 let total = values.iter().copied().sum::<f64>() as f32;
-                match tensor.dtype {
+                match tensor.numeric_dtype() {
                     NumericDType::F32 => {
                         let data: Vec<f32> = values.iter().map(|v| *v as f32).collect();
                         Ok(HistogramGpuWeights::HostF32 {
@@ -451,12 +453,17 @@ impl HistWeightsInput {
                         data: values,
                         total_weight: total,
                     }),
-                    NumericDType::U8 | NumericDType::U16 | NumericDType::U32 => {
-                        Ok(HistogramGpuWeights::HostF64 {
-                            data: values,
-                            total_weight: total,
-                        })
-                    }
+                    NumericDType::I8
+                    | NumericDType::I16
+                    | NumericDType::I32
+                    | NumericDType::I64
+                    | NumericDType::U8
+                    | NumericDType::U16
+                    | NumericDType::U32
+                    | NumericDType::U64 => Ok(HistogramGpuWeights::HostF64 {
+                        data: values,
+                        total_weight: total,
+                    }),
                 }
             }
             HistWeightsInput::Gpu(handle) => {
@@ -690,6 +697,7 @@ fn parse_hist_bins(arg: Option<Value>, sample_len: usize) -> BuiltinResult<HistB
     let spec = match arg {
         None => HistBinSpec::Auto,
         Some(Value::Tensor(tensor)) => parse_center_vector(tensor)?,
+        Some(Value::Int(value)) => parse_integer_bin_count(&value)?,
         Some(Value::GpuTensor(_)) => {
             return Err(hist_err("hist: bin definitions must reside on the host"))
         }
@@ -955,6 +963,9 @@ fn ensure_no_explicit_bins(options: &HistBinOptions, source: &str) -> BuiltinRes
 }
 
 fn parse_num_bins_value(value: &Value) -> BuiltinResult<usize> {
+    if let Some(count) = exact_integer_scalar(value) {
+        return parse_integer_num_bins(&count);
+    }
     let Some(scalar) = value_as_f64(value) else {
         return Err(hist_err("hist: NumBins must be a numeric scalar"));
     };
@@ -964,6 +975,9 @@ fn parse_num_bins_value(value: &Value) -> BuiltinResult<usize> {
     let rounded = scalar.round();
     if (scalar - rounded).abs() > 1e-9 {
         return Err(hist_err("hist: NumBins must be an integer"));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(hist_err("hist: NumBins is too large"));
     }
     Ok(rounded as usize)
 }
@@ -1014,24 +1028,67 @@ fn parse_hist_bin_method(value: &Value) -> BuiltinResult<HistBinMethod> {
 }
 
 fn parse_center_vector(tensor: Tensor) -> BuiltinResult<HistBinSpec> {
-    let values = numeric_vector(tensor);
-    if values.is_empty() {
+    let len = tensor_utils::tensor_element_len(&tensor);
+    if len == 0 {
         return Err(hist_err("hist: bin center array cannot be empty"));
     }
-    if values.len() == 1 {
-        return parse_bin_count_value(values[0]);
+    if len == 1 {
+        if let Some(value) = tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0))
+        {
+            return parse_integer_bin_count(&value);
+        }
+        return parse_bin_count_value(tensor_utils::tensor_value_f64(&tensor, 0));
     }
+    let values = numeric_vector(tensor);
     validate_monotonic(&values)?;
     ensure_uniform_spacing(&values)?;
     Ok(HistBinSpec::Centers(values))
 }
 
 fn parse_bin_count_value(value: f64) -> BuiltinResult<HistBinSpec> {
-    if value.is_finite() && value > 0.0 {
-        Ok(HistBinSpec::Count(value.round() as usize))
-    } else {
-        Err(hist_err("hist: bin count must be positive"))
+    if !value.is_finite() || value <= 0.0 {
+        return Err(hist_err("hist: bin count must be positive"));
     }
+    let rounded = value.round();
+    if (value - rounded).abs() > 1e-9 {
+        return Err(hist_err("hist: bin count must be an integer"));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(hist_err("hist: bin count is too large"));
+    }
+    Ok(HistBinSpec::Count(rounded as usize))
+}
+
+fn exact_integer_scalar(value: &Value) -> Option<IntValue> {
+    match value {
+        Value::Int(value) => Some(value.clone()),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    }
+}
+
+fn parse_integer_num_bins(value: &IntValue) -> BuiltinResult<usize> {
+    let Some(count) = value.try_to_usize() else {
+        return Err(hist_err("hist: NumBins must be a positive finite scalar"));
+    };
+    if count == 0 {
+        return Err(hist_err("hist: NumBins must be a positive finite scalar"));
+    }
+    Ok(count)
+}
+
+fn parse_integer_bin_count(value: &IntValue) -> BuiltinResult<HistBinSpec> {
+    let Some(count) = value.try_to_usize() else {
+        return Err(hist_err("hist: bin count must be positive"));
+    };
+    if count == 0 {
+        return Err(hist_err("hist: bin count must be positive"));
+    }
+    Ok(HistBinSpec::Count(count))
 }
 
 fn is_bin_candidate(value: &Value) -> bool {
@@ -1485,7 +1542,7 @@ impl HistInput {
 
     fn len(&self) -> usize {
         match self {
-            Self::Host(tensor) => tensor.data.len(),
+            Self::Host(tensor) => tensor_utils::tensor_element_len(tensor),
             Self::Gpu(handle) => handle.shape.iter().product(),
         }
     }
@@ -1505,14 +1562,15 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("hist test vector")
+    }
+
+    fn int_tensor(data: Vec<i16>) -> Tensor {
+        Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(data.clone()),
+            vec![data.len()],
+        )
+        .expect("integer tensor")
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
@@ -1544,6 +1602,71 @@ pub(crate) mod tests {
         let result = block_on(hist_builtin(data, vec![centers]));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn hist_bin_counts_read_typed_integer_tensors_exactly() {
+        let exact = 9_007_199_254_740_993_u64;
+        let scalar_count = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![exact]),
+            vec![1, 1],
+        )
+        .expect("typed bin count");
+        match parse_hist_bins(Some(Value::Tensor(scalar_count)), 10).unwrap() {
+            HistBinSpec::Count(count) => assert_eq!(count, exact as usize),
+            _ => panic!("expected count bin spec"),
+        }
+
+        let num_bins = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![exact]),
+            vec![1, 1],
+        )
+        .expect("typed NumBins");
+        assert_eq!(
+            parse_num_bins_value(&Value::Tensor(num_bins)).unwrap(),
+            exact as usize
+        );
+
+        let negative = runmat_builtins::Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![-1]),
+            vec![1, 1],
+        )
+        .expect("negative bin count");
+        assert!(parse_hist_bins(Some(Value::Tensor(negative)), 10).is_err());
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        assert!(parse_num_bins_value(&Value::Num(boundary)).is_err());
+        assert!(parse_hist_bins(Some(Value::Num(boundary)), 10).is_err());
+        assert!(parse_hist_bins(Some(Value::Num(2.5)), 10).is_err());
+    }
+
+    #[test]
+    fn hist_weights_read_typed_integer_storage_exactly() {
+        let weights = HistWeightsInput::from_value(Value::Tensor(int_tensor(vec![1, 2, 3])), 3)
+            .expect("weights");
+
+        assert_eq!(weights.total_weight_hint(3), Some(6.0));
+    }
+
+    #[test]
+    fn hist_gpu_weights_preserve_native_single_class() {
+        let tensor =
+            Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![1, 3], NumericDType::F32).unwrap();
+        let weights =
+            HistWeightsInput::from_value(Value::Tensor(tensor), 3).expect("single weights");
+
+        match weights.to_gpu_weights(3).expect("GPU weights") {
+            HistogramGpuWeights::HostF32 { data, total_weight } => {
+                assert_eq!(data, vec![1.0_f32, 2.0, 3.0]);
+                assert_eq!(total_weight, 6.0);
+            }
+            _ => panic!("expected native single host weights"),
         }
     }
 
@@ -1611,12 +1734,12 @@ pub(crate) mod tests {
         let data = Value::Tensor(tensor_from(&[0.0, 0.2, 0.8, 1.0]));
         let eval = block_on(evaluate_async(data, &[])).expect("hist evaluate");
         let counts = match eval.counts_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected value: {other:?}"),
         };
         assert_eq!(counts.len(), 2);
         let centers = match eval.centers_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
         assert_eq!(centers.len(), 2);
@@ -1630,7 +1753,7 @@ pub(crate) mod tests {
         let args = vec![Value::String("NumBins".into()), Value::Num(4.0)];
         let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
         assert_eq!(centers.len(), 4);
@@ -1649,7 +1772,7 @@ pub(crate) mod tests {
         ];
         let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
         assert_eq!(centers.len(), 2);
@@ -1667,7 +1790,7 @@ pub(crate) mod tests {
         ];
         let eval = block_on(evaluate_async(data, &args)).expect("hist evaluate");
         let centers = match eval.centers_value() {
-            Value::Tensor(tensor) => tensor.data,
+            Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("unexpected centers: {other:?}"),
         };
         assert!(centers.len() >= 2);

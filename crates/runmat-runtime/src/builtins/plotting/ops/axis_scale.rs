@@ -6,6 +6,8 @@ use super::state::{
     set_log_modes_for_axes, FigureHandle,
 };
 use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::common::tensor as tensor_utils;
+use crate::builtins::plotting::op_common::handles::numeric_handle_scalar;
 use crate::builtins::plotting::style::value_as_string;
 use crate::BuiltinResult;
 
@@ -71,6 +73,40 @@ fn split_optional_axes_target(
     let Some(first) = iter.next() else {
         return Ok((None, Vec::new()));
     };
+    let integer_scalar = tensor_utils::scalar_integer_value(&first);
+    if let Some(integer) = integer_scalar {
+        // Axes handles occupy at most 52 bits (u32 figure id plus 20-bit axes
+        // index), so this bounded conversion to f64 remains exact.
+        let encoded = integer.try_to_u64().ok_or_else(|| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: expected axes handle followed by optional scale"),
+            )
+        })?;
+        const MAX_AXES_HANDLE: u64 = ((u32::MAX as u64) << 20) | ((1 << 20) - 1);
+        if encoded == 0 || encoded > MAX_AXES_HANDLE {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: expected axes handle followed by optional scale"),
+            ));
+        }
+        let scalar = encoded as f64;
+        let (handle, axes_index) = decode_axes_handle(scalar).map_err(|_| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: expected axes handle followed by optional scale"),
+            )
+        })?;
+        if !figure_handle_exists(handle) {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: invalid axes handle"),
+            ));
+        }
+        axes_metadata_snapshot(handle, axes_index)
+            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        return Ok((Some((handle, axes_index)), iter.collect()));
+    }
     if let Some(scalar) = numeric_scalar(&first) {
         let (handle, axes_index) = decode_axes_handle(scalar).map_err(|_| {
             plotting_error(
@@ -95,12 +131,7 @@ fn split_optional_axes_target(
 }
 
 fn numeric_scalar(value: &Value) -> Option<f64> {
-    match value {
-        Value::Num(v) => Some(*v),
-        Value::Int(i) => Some(i.to_f64()),
-        Value::Tensor(t) if t.data.len() == 1 => Some(t.data[0]),
-        _ => None,
-    }
+    numeric_handle_scalar(value)
 }
 
 fn query_scale(
@@ -139,4 +170,41 @@ fn set_scale(
     };
     set_log_modes_for_axes(handle, axes_index, x_log, y_log)
         .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    fn poisoned_scalar(storage: IntegerStorage) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn axis_scale_numeric_scalar_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![12]), vec![1, 1]).unwrap();
+
+        assert_eq!(numeric_scalar(&Value::Tensor(tensor)), Some(12.0));
+    }
+
+    #[test]
+    fn axis_scale_handle_parser_reads_all_integer_storages_without_mirrors() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let err = split_optional_axes_target("xscale", vec![poisoned_scalar(storage)])
+                .expect_err("unregistered axes handle must be rejected");
+            assert!(err.message().contains("expected axes handle"));
+        }
+    }
 }

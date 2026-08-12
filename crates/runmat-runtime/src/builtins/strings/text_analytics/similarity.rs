@@ -3,12 +3,17 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, ObjectInstance, ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::tensor::{tensor_into_values_f64, tensor_values_f64_cow};
 use crate::builtins::strings::common::is_missing_string;
 use crate::builtins::strings::text_analytics::documents::{
     checked_count_len, counts_from_bag, documents_from_object, vocabulary_from_bag,
@@ -18,6 +23,45 @@ use crate::builtins::strings::text_analytics::ngrams::BAG_OF_NGRAMS_CLASS;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 const NAME: &str = "cosineSimilarity";
+pub const COSINE_SIMILARITY_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cosine-similarity-integer-matrix",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "cosineSimilarity with typed-integer matrix input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CosineSimilarityIntegerMatrixExtension"),
+    };
+pub const COSINE_SIMILARITY_SINGLE_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cosine-similarity-single-matrix",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "cosineSimilarity with single matrix input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CosineSimilaritySingleMatrixExtension"),
+    };
+pub const COSINE_SIMILARITY_LOGICAL_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cosine-similarity-logical-matrix",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "cosineSimilarity with logical matrix input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CosineSimilarityLogicalMatrixExtension"),
+    };
+pub const COSINE_SIMILARITY_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "cosine-similarity-resident-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "cosineSimilarity with resident matrix input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:CosineSimilarityResidentInputExtension"),
+    };
+pub const COSINE_SIMILARITY_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    COSINE_SIMILARITY_INTEGER_MATRIX_EXTENSION,
+    COSINE_SIMILARITY_SINGLE_MATRIX_EXTENSION,
+    COSINE_SIMILARITY_LOGICAL_MATRIX_EXTENSION,
+    COSINE_SIMILARITY_RESIDENT_INPUT_EXTENSION,
+];
+const COSINE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
+    BuiltinIntegerInputCapability { name: "M1", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Real or typed-complex integer matrix values must be exactly representable at the binary64 norm and inner-product boundary." },
+    BuiltinIntegerInputCapability { name: "M2", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The optional second matrix follows the same exact binary64 boundary and column-count rule." },
+];
+pub const COSINE_SIMILARITY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "similarities = cosineSimilarity(integer_M1, integer_M2?)", inputs: &COSINE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat mode validates authoritative integer components before double norm/dot evaluation; real output is host sparse double, while complex output remains a dense complex-double representation gap." }];
 
 const OUT_SIMILARITIES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "similarities",
@@ -137,16 +181,107 @@ fn descriptor_error(
     accel = "sink",
     type_resolver(any_type),
     descriptor(crate::builtins::strings::text_analytics::similarity::COSINE_SIMILARITY_DESCRIPTOR),
+    extensions(COSINE_SIMILARITY_EXTENSIONS),
+    integer_capabilities(COSINE_SIMILARITY_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::strings::text_analytics::similarity"
 )]
 async fn cosine_similarity_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(similarity_error(
+            "cosineSimilarity: expected one or two input arguments",
+        ));
+    }
+    ensure_extensions(&args)?;
     let args = gather_args(args).await?;
+    for arg in &args {
+        ensure_integer_exact(arg)?;
+    }
     match args.as_slice() {
         [single] => cosine_similarity_one(single),
         [lhs, rhs] => cosine_similarity_two(lhs, rhs),
         _ => Err(similarity_error(
             "cosineSimilarity: expected one or two input arguments",
         )),
+    }
+}
+
+fn ensure_extensions(args: &[Value]) -> BuiltinResult<()> {
+    for value in args {
+        if value_has_integer(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &COSINE_SIMILARITY_INTEGER_MATRIX_EXTENSION,
+                NAME,
+            )?;
+        }
+        if value_is_single(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &COSINE_SIMILARITY_SINGLE_MATRIX_EXTENSION,
+                NAME,
+            )?;
+        }
+        if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+            || matches!(value, Value::SparseTensor(s) if s.numeric_dtype().is_none())
+            || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_is_logical(h))
+        {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &COSINE_SIMILARITY_LOGICAL_MATRIX_EXTENSION,
+                NAME,
+            )?;
+        }
+        if matches!(value, Value::GpuTensor(_)) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &COSINE_SIMILARITY_RESIDENT_INPUT_EXTENSION,
+                NAME,
+            )?;
+        }
+    }
+    Ok(())
+}
+fn value_has_integer(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(t) if t.integer_storage().is_some())
+        || matches!(value, Value::ComplexTensor(t) if t.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(s)
+            if matches!(s.numeric_dtype(), Some(dtype) if !matches!(dtype,
+                runmat_builtins::NumericDType::F64 | runmat_builtins::NumericDType::F32)))
+        || matches!(value, Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
+}
+fn value_is_single(value: &Value) -> bool {
+    matches!(value, Value::Tensor(t) if t.numeric_dtype() == runmat_builtins::NumericDType::F32)
+        || matches!(value, Value::ComplexTensor(t) if t.numeric_dtype() == runmat_builtins::NumericDType::F32)
+        || matches!(value, Value::SparseTensor(s)
+            if s.numeric_dtype() == Some(runmat_builtins::NumericDType::F32))
+        || matches!(value, Value::GpuTensor(h)
+            if runmat_accelerate_api::handle_integer_type(h).is_none()
+                && !runmat_accelerate_api::handle_is_logical(h)
+                && runmat_accelerate_api::handle_precision(h)
+                    == Some(runmat_accelerate_api::ProviderPrecision::F32))
+}
+fn ensure_integer_exact(value: &Value) -> BuiltinResult<()> {
+    let ok = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let valid = match value {
+        Value::Int(v) => ok(v),
+        Value::Tensor(t) => t
+            .integer_storage()
+            .is_none_or(|s| s.exact_values().iter().all(ok)),
+        Value::ComplexTensor(t) => t.integer_storage().is_none_or(|s| {
+            s.real
+                .exact_values()
+                .iter()
+                .chain(s.imag.exact_values().iter())
+                .all(ok)
+        }),
+        Value::SparseTensor(s) => s
+            .integer_storage()
+            .is_none_or(|storage| storage.exact_values().iter().all(ok)),
+        _ => true,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(similarity_error(
+            "cosineSimilarity: integer matrix values must be exactly representable as double",
+        ))
     }
 }
 
@@ -174,8 +309,14 @@ fn cosine_similarity_one(value: &Value) -> BuiltinResult<Value> {
 fn cosine_similarity_two(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     match classify_primary(lhs)? {
         PrimaryInput::Real(lhs_matrix) => {
-            let rhs_matrix = real_matrix_input(rhs, NAME)?;
-            sparse_real_cosine(&lhs_matrix, &rhs_matrix).map(Value::SparseTensor)
+            if matches!(rhs, Value::Complex(..) | Value::ComplexTensor(_)) {
+                let lhs_matrix = complex_matrix_input(lhs, NAME)?;
+                let rhs_matrix = complex_matrix_input(rhs, NAME)?;
+                complex_cosine(&lhs_matrix, &rhs_matrix).map(Value::ComplexTensor)
+            } else {
+                let rhs_matrix = real_matrix_input(rhs, NAME)?;
+                sparse_real_cosine(&lhs_matrix, &rhs_matrix).map(Value::SparseTensor)
+            }
         }
         PrimaryInput::Complex(lhs_matrix) => {
             let rhs_matrix = complex_matrix_input(rhs, NAME)?;
@@ -294,7 +435,10 @@ fn real_matrix_input(value: &Value, fn_name: &str) -> BuiltinResult<RealRows> {
             RealRows::new(1, 1, nonzero_real_rows(1, 1, &[scalar]))
         }
         Value::Tensor(tensor) => {
-            RealRows::new(tensor.rows, tensor.cols, nonzero_real_rows(tensor.rows, tensor.cols, &tensor.data))
+            let rows = tensor.rows();
+            let cols = tensor.cols();
+            let values = tensor_values_f64_cow(tensor);
+            RealRows::new(rows, cols, nonzero_real_rows(rows, cols, &values))
         }
         Value::SparseTensor(sparse) => real_rows_from_sparse(sparse),
         Value::Complex(..) | Value::ComplexTensor(_) => Err(similarity_error(format!(
@@ -321,9 +465,10 @@ fn nonzero_real_rows(rows: usize, cols: usize, values: &[f64]) -> Vec<Vec<(usize
 
 fn real_rows_from_sparse(sparse: &SparseTensor) -> BuiltinResult<RealRows> {
     let mut rows = vec![Vec::new(); sparse.rows];
+    let values = sparse.materialize_f64();
     for col in 0..sparse.cols {
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
-            let value = sparse.values[idx];
+            let value = values[idx];
             if value != 0.0 || value.is_nan() {
                 rows[sparse.row_indices[idx]].push((col, value));
             }
@@ -338,7 +483,7 @@ fn complex_matrix_input(value: &Value, fn_name: &str) -> BuiltinResult<ComplexRo
         Value::ComplexTensor(tensor) => ComplexRows::new(
             tensor.rows,
             tensor.cols,
-            nonzero_complex_rows(tensor.rows, tensor.cols, &tensor.data),
+            nonzero_complex_rows(tensor.rows, tensor.cols, &tensor.materialize_f64()),
         ),
         Value::Num(value) => ComplexRows::new(1, 1, nonzero_complex_rows(1, 1, &[(*value, 0.0)])),
         Value::Bool(value) => {
@@ -346,16 +491,11 @@ fn complex_matrix_input(value: &Value, fn_name: &str) -> BuiltinResult<ComplexRo
             ComplexRows::new(1, 1, nonzero_complex_rows(1, 1, &[(scalar, 0.0)]))
         }
         Value::Tensor(tensor) => {
-            let data = tensor
-                .data
-                .iter()
-                .map(|value| (*value, 0.0))
-                .collect::<Vec<_>>();
-            ComplexRows::new(
-                tensor.rows,
-                tensor.cols,
-                nonzero_complex_rows(tensor.rows, tensor.cols, &data),
-            )
+            let rows = tensor.rows();
+            let cols = tensor.cols();
+            let values = tensor_values_f64_cow(tensor);
+            let data = values.iter().map(|value| (*value, 0.0)).collect::<Vec<_>>();
+            ComplexRows::new(rows, cols, nonzero_complex_rows(rows, cols, &data))
         }
         Value::SparseTensor(sparse) => {
             let real = real_rows_from_sparse(sparse)?;
@@ -409,19 +549,17 @@ enum Terms {
 impl TextModel {
     fn from_counts(terms: Terms, counts: Tensor, fn_name: &str) -> BuiltinResult<Self> {
         let term_len = terms.len();
-        if counts.cols != term_len {
+        let rows = counts.rows();
+        let cols = counts.cols();
+        if cols != term_len {
             return Err(similarity_error(format!(
                 "{fn_name}: count matrix columns ({}) must match term count ({term_len})",
-                counts.cols
+                cols
             )));
         }
-        let rows = counts.rows;
-        let real_rows = RealRows::new(
-            counts.rows,
-            counts.cols,
-            nonzero_real_rows(counts.rows, counts.cols, &counts.data),
-        )?;
-        let idf = idf_from_counts(&counts.data, rows, counts.cols);
+        let values = tensor_into_values_f64(counts);
+        let real_rows = RealRows::new(rows, cols, nonzero_real_rows(rows, cols, &values))?;
+        let idf = idf_from_counts(&values, rows, cols);
         Ok(Self {
             terms,
             counts: real_rows,
@@ -770,7 +908,9 @@ fn complex_dot_conj(lhs: &[(usize, (f64, f64))], rhs: &[(usize, (f64, f64))]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, ObjectInstance, StringArray};
+    use runmat_builtins::{
+        CellArray, IntegerComplexStorage, IntegerStorage, ObjectInstance, StringArray,
+    };
 
     fn dense_sparse(value: Value) -> Tensor {
         match value {
@@ -781,6 +921,238 @@ mod tests {
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("tensor"))
+    }
+
+    #[tokio::test]
+    async fn integer_gate_all_classes_boundary_and_single_gate() {
+        assert_eq!(
+            COSINE_SIMILARITY_INTEGER_CAPABILITIES[0].inputs[0]
+                .classes
+                .len(),
+            8
+        );
+        assert_eq!(
+            COSINE_SIMILARITY_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::Double
+        );
+        let integer = || {
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I8(vec![1, 0]), vec![1, 2]).unwrap())
+        };
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        assert!(cosine_similarity_builtin(vec![integer()]).await.is_err());
+        assert!(cosine_similarity_builtin(vec![Value::Tensor(
+            Tensor::from_f32(vec![1.0, 0.0], vec![1, 2]).unwrap(),
+        )])
+        .await
+        .is_err());
+        drop(_strict);
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in [
+            IntegerStorage::I8(vec![1, 0]),
+            IntegerStorage::I16(vec![1, 0]),
+            IntegerStorage::I32(vec![1, 0]),
+            IntegerStorage::I64(vec![1, 0]),
+            IntegerStorage::U8(vec![1, 0]),
+            IntegerStorage::U16(vec![1, 0]),
+            IntegerStorage::U32(vec![1, 0]),
+            IntegerStorage::U64(vec![1, 0]),
+        ] {
+            let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).unwrap());
+            assert!(matches!(
+                cosine_similarity_builtin(vec![value]).await.unwrap(),
+                Value::SparseTensor(_)
+            ));
+        }
+        let wide = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1, 0]), vec![1, 2])
+                .unwrap(),
+        );
+        assert!(cosine_similarity_builtin(vec![wide]).await.is_err());
+        let exact_wide = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 54, 0]), vec![1, 2]).unwrap(),
+        );
+        assert!(cosine_similarity_builtin(vec![exact_wide]).await.is_ok());
+        assert!(matches!(
+            cosine_similarity_builtin(vec![Value::Tensor(
+                Tensor::from_f32(vec![1.0, 0.0], vec![1, 2]).unwrap(),
+            )])
+            .await
+            .unwrap(),
+            Value::SparseTensor(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn sparse_numeric_and_logical_inputs_use_their_matching_extension_gates() {
+        let cases = [
+            (
+                Value::SparseTensor(
+                    SparseTensor::new_integer(
+                        1,
+                        2,
+                        vec![0, 1, 1],
+                        vec![0],
+                        IntegerStorage::I8(vec![1]),
+                    )
+                    .expect("sparse integer"),
+                ),
+                COSINE_SIMILARITY_INTEGER_MATRIX_EXTENSION.error_identifier,
+            ),
+            (
+                Value::SparseTensor(
+                    SparseTensor::new_f32(1, 2, vec![0, 1, 1], vec![0], vec![1.0])
+                        .expect("sparse single"),
+                ),
+                COSINE_SIMILARITY_SINGLE_MATRIX_EXTENSION.error_identifier,
+            ),
+            (
+                Value::SparseTensor(
+                    SparseTensor::new_logical(1, 2, vec![0, 1, 1], vec![0])
+                        .expect("sparse logical"),
+                ),
+                COSINE_SIMILARITY_LOGICAL_MATRIX_EXTENSION.error_identifier,
+            ),
+        ];
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (input, expected_identifier) in cases {
+            let error = cosine_similarity_builtin(vec![input])
+                .await
+                .expect_err("MATLAB mode rejects sparse extension input");
+            assert_eq!(error.identifier(), expected_identifier);
+        }
+    }
+
+    #[tokio::test]
+    async fn sparse_integer_storage_is_gated_exactly_before_double_computation() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ] {
+            let sparse = SparseTensor::new_integer(1, 2, vec![0, 1, 1], vec![0], storage)
+                .expect("typed sparse integer");
+            assert!(matches!(
+                cosine_similarity_builtin(vec![Value::SparseTensor(sparse)])
+                    .await
+                    .expect("exact sparse integer"),
+                Value::SparseTensor(_)
+            ));
+        }
+
+        let exact = SparseTensor::new_integer(
+            1,
+            2,
+            vec![0, 1, 1],
+            vec![0],
+            IntegerStorage::U64(vec![1_u64 << 54]),
+        )
+        .expect("exact wide sparse integer");
+        assert!(cosine_similarity_builtin(vec![Value::SparseTensor(exact)])
+            .await
+            .is_ok());
+
+        let lossy = SparseTensor::new_integer(
+            1,
+            2,
+            vec![0, 1, 1],
+            vec![0],
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+        )
+        .expect("lossy sparse integer");
+        let error = cosine_similarity_builtin(vec![Value::SparseTensor(lossy)])
+            .await
+            .expect_err("lossy sparse integer must not enter the double domain");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[tokio::test]
+    async fn sparse_logical_zero_norm_rows_preserve_nan_cosine_semantics() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let sparse = SparseTensor::new_logical(2, 2, vec![0, 1, 1], vec![0])
+            .expect("sparse logical with a zero row");
+        let out = dense_sparse(
+            cosine_similarity_builtin(vec![Value::SparseTensor(sparse)])
+                .await
+                .expect("sparse logical cosine"),
+        );
+        let values = out.materialize_f64();
+        assert_eq!(values[0], 1.0);
+        assert!(values[1].is_nan());
+        assert!(values[2].is_nan());
+        assert!(values[3].is_nan());
+    }
+
+    fn typed_complex_integer(real: Vec<i64>, imag: Vec<i64>) -> Value {
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::I64(real), IntegerStorage::I64(imag))
+                .expect("typed complex integer storage");
+        Value::ComplexTensor(
+            ComplexTensor::new_integer(storage, vec![1, 2]).expect("typed complex tensor"),
+        )
+    }
+
+    #[tokio::test]
+    async fn typed_complex_integer_roles_are_gated_and_return_complex_double() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        for args in [
+            vec![typed_complex_integer(vec![1, 0], vec![1, 0])],
+            vec![
+                tensor(vec![1.0, 0.0], 1, 2),
+                typed_complex_integer(vec![1, 0], vec![1, 0]),
+            ],
+        ] {
+            let error = cosine_similarity_builtin(args)
+                .await
+                .expect_err("MATLAB mode rejects typed complex integer matrices");
+            assert_eq!(
+                error.identifier(),
+                COSINE_SIMILARITY_INTEGER_MATRIX_EXTENSION.error_identifier
+            );
+        }
+        drop(_strict);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for args in [
+            vec![typed_complex_integer(vec![1, 0], vec![1, 0])],
+            vec![
+                typed_complex_integer(vec![1, 0], vec![1, 0]),
+                tensor(vec![1.0, 0.0], 1, 2),
+            ],
+            vec![
+                tensor(vec![1.0, 0.0], 1, 2),
+                typed_complex_integer(vec![1, 0], vec![1, 0]),
+            ],
+        ] {
+            assert!(matches!(
+                cosine_similarity_builtin(args).await.unwrap(),
+                Value::ComplexTensor(_)
+            ));
+        }
+
+        let lossy = typed_complex_integer(vec![(1_i64 << 53) + 1, 0], vec![0, 0]);
+        assert!(cosine_similarity_builtin(vec![lossy]).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn arity_precedes_extension_gates() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer =
+            || Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap());
+        let error = cosine_similarity_builtin(vec![integer(), integer(), integer()])
+            .await
+            .expect_err("arity must be checked first");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:cosineSimilarity:InvalidInput")
+        );
+        assert!(error.message().contains("one or two"));
     }
 
     fn tokenized(docs: Vec<Vec<&str>>) -> Value {
@@ -811,7 +1183,30 @@ mod tests {
         let m = tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2);
         let out = dense_sparse(cosine_similarity_builtin(vec![m]).await.expect("cosine"));
         assert_eq!(out.shape, vec![2, 2]);
-        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[tokio::test]
+    async fn native_single_and_integer_matrix_extensions_use_explicit_double_domain() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let inputs = [
+            Value::Tensor(
+                Tensor::from_f32(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("single matrix"),
+            ),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 1]), vec![2, 2])
+                    .expect("integer matrix"),
+            ),
+        ];
+        for input in inputs {
+            let out = dense_sparse(
+                cosine_similarity_builtin(vec![input])
+                    .await
+                    .expect("extended numeric cosine"),
+            );
+            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+        }
     }
 
     #[tokio::test]
@@ -825,8 +1220,9 @@ mod tests {
         );
         let inv = 1.0 / 2.0_f64.sqrt();
         assert_eq!(out.shape, vec![2, 1]);
-        assert!((out.data[0] - inv).abs() < 1e-12);
-        assert!((out.data[1] - inv).abs() < 1e-12);
+        let values = out.materialize_f64();
+        assert!((values[0] - inv).abs() < 1e-12);
+        assert!((values[1] - inv).abs() < 1e-12);
     }
 
     #[tokio::test]
@@ -838,9 +1234,10 @@ mod tests {
         ]);
         let out = dense_sparse(cosine_similarity_builtin(vec![docs]).await.expect("cosine"));
         assert_eq!(out.shape, vec![3, 3]);
-        assert!((out.data[0] - 1.0).abs() < 1e-12);
-        assert!(out.data[1] > 0.0 && out.data[1] < 1.0);
-        assert!(out.data[2] > 0.0 && out.data[2] < 1.0);
+        let values = out.materialize_f64();
+        assert!((values[0] - 1.0).abs() < 1e-12);
+        assert!(values[1] > 0.0 && values[1] < 1.0);
+        assert!(values[2] > 0.0 && values[2] < 1.0);
     }
 
     #[tokio::test]
@@ -865,7 +1262,7 @@ mod tests {
                 .expect("cosine"),
         );
         assert_eq!(out.shape, vec![2, 1]);
-        assert_eq!(out.data, vec![1.0, 0.0]);
+        assert_eq!(out.materialize_f64(), vec![1.0, 0.0]);
     }
 
     #[tokio::test]
@@ -896,7 +1293,10 @@ mod tests {
         match out {
             Value::SparseTensor(sparse) => {
                 assert_eq!(sparse.nnz(), 2);
-                assert_eq!(sparse.to_dense().unwrap().data, vec![1.0, 0.0, 0.0, 1.0]);
+                assert_eq!(
+                    sparse.to_dense().unwrap().materialize_f64(),
+                    vec![1.0, 0.0, 0.0, 1.0]
+                );
             }
             other => panic!("expected sparse result, got {other:?}"),
         }
@@ -916,8 +1316,57 @@ mod tests {
         };
         assert_eq!(out.shape, vec![1, 1]);
         let inv = 1.0 / 2.0_f64.sqrt();
-        assert!((out.data[0].0 - inv).abs() < 1e-12);
-        assert!((out.data[0].1 + inv).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].0 - inv).abs() < 1e-12);
+        assert!((out.materialize_f64()[0].1 + inv).abs() < 1e-12);
+    }
+
+    #[tokio::test]
+    async fn mixed_real_complex_matrix_roles_are_both_supported() {
+        let real = tensor(vec![1.0, 0.0], 1, 2);
+        let complex = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 1.0), (0.0, 0.0)], vec![1, 2]).unwrap(),
+        );
+        let Value::ComplexTensor(real_complex) =
+            cosine_similarity_builtin(vec![real.clone(), complex.clone()])
+                .await
+                .expect("real then complex")
+        else {
+            panic!("expected complex output")
+        };
+        let Value::ComplexTensor(complex_real) = cosine_similarity_builtin(vec![complex, real])
+            .await
+            .expect("complex then real")
+        else {
+            panic!("expected complex output")
+        };
+        let forward = real_complex.materialize_f64()[0];
+        let reverse = complex_real.materialize_f64()[0];
+        assert!((forward.0 - reverse.0).abs() < 1e-12);
+        assert!((forward.1 + reverse.1).abs() < 1e-12);
+    }
+
+    #[tokio::test]
+    async fn zero_norm_rows_return_nan_as_mathematically_undefined() {
+        let out = dense_sparse(
+            cosine_similarity_builtin(vec![tensor(vec![0.0, 1.0], 2, 1)])
+                .await
+                .expect("zero norm behavior"),
+        );
+        let values = out.materialize_f64();
+        assert!(values[0].is_nan());
+        assert!(values[1].is_nan());
+        assert!(values[2].is_nan());
+        assert_eq!(values[3], 1.0);
+
+        let zero = Value::ComplexTensor(ComplexTensor::zeros(vec![1, 2]));
+        let Value::ComplexTensor(out) = cosine_similarity_builtin(vec![zero])
+            .await
+            .expect("complex zero norm behavior")
+        else {
+            panic!("expected complex output")
+        };
+        assert!(out.materialize_f64()[0].0.is_nan());
+        assert!(out.materialize_f64()[0].1.is_nan());
     }
 
     #[tokio::test]

@@ -24,6 +24,7 @@ use super::style::{
     looks_like_option_name, parse_line_style_args, value_as_bool, value_as_string, LineAppearance,
     LineStyleParseOptions,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
@@ -547,12 +548,12 @@ fn expand_xy_series(x: &Tensor, y: &Tensor) -> BuiltinResult<Vec<Series2D>> {
     }
     if is_vector_tensor(x) && vector_len(x) == y.rows() {
         return Ok((0..y.cols())
-            .map(|col| (x.data.clone(), column(y, col)))
+            .map(|col| (tensor_utils::tensor_values_f64(x), column(y, col)))
             .collect());
     }
     if is_vector_tensor(y) && vector_len(y) == x.rows() {
         return Ok((0..x.cols())
-            .map(|col| (column(x, col), y.data.clone()))
+            .map(|col| (column(x, col), tensor_utils::tensor_values_f64(y)))
             .collect());
     }
     Err(line_err("X and Y inputs must be vectors with equal length, matrices with the same size, or a vector paired with each matrix column"))
@@ -575,7 +576,7 @@ fn expand_xyz_series(x: &Tensor, y: &Tensor, z: &Tensor) -> BuiltinResult<Vec<Se
 
 fn column(tensor: &Tensor, col: usize) -> Vec<f64> {
     (0..tensor.rows())
-        .map(|row| tensor.data[row + col * tensor.rows()])
+        .map(|row| tensor_utils::tensor_value_f64(tensor, row + col * tensor.rows()))
         .collect()
 }
 
@@ -584,7 +585,7 @@ fn is_vector_tensor(tensor: &Tensor) -> bool {
 }
 
 fn vector_len(tensor: &Tensor) -> usize {
-    tensor.data.len()
+    tensor_utils::tensor_element_len(tensor)
 }
 
 fn same_matrix_shape(a: &Tensor, b: &Tensor) -> bool {
@@ -595,26 +596,15 @@ pub(super) fn handles_value(handles: Vec<f64>) -> Value {
     if handles.len() == 1 {
         Value::Num(handles[0])
     } else {
-        Value::Tensor(Tensor {
-            rows: 1,
-            cols: handles.len(),
-            shape: vec![1, handles.len()],
-            data: handles,
-            integer_data: None,
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        let len = handles.len();
+        Value::Tensor(Tensor::new(handles, vec![1, len]).expect("line handle row vector"))
     }
 }
 
 fn vector_value(data: &[f64]) -> Value {
-    Value::Tensor(Tensor {
-        data: data.to_vec(),
-        integer_data: None,
-        rows: 1,
-        cols: data.len(),
-        shape: vec![1, data.len()],
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(
+        Tensor::new(data.to_vec(), vec![1, data.len()]).expect("line property row vector"),
+    )
 }
 
 fn begins_with_name_value(args: &[Value]) -> bool {
@@ -653,6 +643,7 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clone_figure, configure_subplot, current_figure_handle};
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
 
     fn setup() -> PlotTestLockGuard {
@@ -663,14 +654,11 @@ mod tests {
     }
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: runmat_builtins::NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).expect("line test tensor"))
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
+        Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor")
     }
 
     #[test]
@@ -683,6 +671,22 @@ mod tests {
         assert!(labels.contains(&"h = line(X, Y)"));
         assert!(labels.contains(&"h = line(X, Y, Z)"));
         assert!(labels.contains(&"h = line(Name, Value, ...)"));
+    }
+
+    #[test]
+    fn expand_xy_series_reads_typed_integer_storage_without_mirror() {
+        let x = cleared_int_tensor(IntegerStorage::I16(vec![1, 2]), 1, 2);
+        let y = cleared_int_tensor(IntegerStorage::I16(vec![10, 20, 30, 40]), 2, 2);
+
+        let series = expand_xy_series(&x, &y).expect("series");
+
+        assert_eq!(
+            series,
+            vec![
+                (vec![1.0, 2.0], vec![10.0, 20.0]),
+                (vec![1.0, 2.0], vec![30.0, 40.0])
+            ]
+        );
     }
 
     #[test]
@@ -805,7 +809,7 @@ mod tests {
         let Value::Tensor(x) = x else {
             panic!("expected XData tensor");
         };
-        assert_eq!(x.data, vec![7.0, 8.0, 9.0, 10.0]);
+        assert_eq!(x.materialize_f64(), vec![7.0, 8.0, 9.0, 10.0]);
     }
 
     #[test]
@@ -839,7 +843,7 @@ mod tests {
         let Value::Tensor(handles) = handles else {
             panic!("expected handle row vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plots().count(), 2);
     }
@@ -883,6 +887,6 @@ mod tests {
         let Value::Tensor(z) = z else {
             panic!("expected ZData tensor");
         };
-        assert_eq!(z.data, vec![7.0, 8.0, 9.0]);
+        assert_eq!(z.materialize_f64(), vec![7.0, 8.0, 9.0]);
     }
 }

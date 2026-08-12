@@ -8,7 +8,7 @@ use base64::Engine;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, StructValue, Tensor, Value,
+    CellArray, CharArray, IntegerStorage, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use url::Url;
@@ -20,6 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::io::json::jsondecode::decode_json_text;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -599,11 +600,11 @@ fn execute_request(
             Ok(Value::CharArray(array))
         }
         ResolvedContentType::Binary => {
-            let data: Vec<f64> = response.body.iter().map(|b| f64::from(*b)).collect();
             let cols = response.body.len();
-            let tensor = Tensor::new(data, vec![1, cols]).map_err(|err| {
-                webread_error_with(&WEBREAD_ERROR_OUTPUT, format!("webread: {err}"))
-            })?;
+            let tensor = Tensor::new_integer(IntegerStorage::U8(response.body), vec![1, cols])
+                .map_err(|err| {
+                    webread_error_with(&WEBREAD_ERROR_OUTPUT, format!("webread: {err}"))
+                })?;
             Ok(Value::Tensor(tensor))
         }
     }
@@ -713,8 +714,8 @@ fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(tensor.data[0])
+            if tensor_utils::is_scalar_tensor(tensor) {
+                Ok(tensor_utils::tensor_value_f64(tensor, 0))
             } else {
                 Err(webread_error(context))
             }
@@ -738,11 +739,17 @@ fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::Num(n) => Ok(format!("{}", n)),
-        Value::Int(i) => Ok(i.to_i64().to_string()),
+        Value::Int(i) => Ok(i.decimal_string()),
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(format!("{}", tensor.data[0]))
+            if tensor_utils::is_scalar_tensor(tensor) {
+                Ok(tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                    .map_or_else(
+                        || format!("{}", tensor_utils::tensor_value_f64(tensor, 0)),
+                        |value| value.decimal_string(),
+                    ))
             } else {
                 Err(webread_error(format!(
                     "webread: query parameter '{}' must be scalar",
@@ -854,6 +861,36 @@ pub(crate) mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc;
     use std::thread;
+
+    #[test]
+    fn query_text_preserves_exact_uint64() {
+        assert_eq!(
+            value_to_query_string(&Value::Int(runmat_builtins::IntValue::U64(u64::MAX)), "id")
+                .expect("query text"),
+            "18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn query_text_and_numeric_scalar_read_typed_integer_storage_exactly() {
+        let query = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![u64::MAX]),
+            vec![1, 1],
+        )
+        .expect("typed query tensor");
+        assert_eq!(
+            value_to_query_string(&Value::Tensor(query), "id").expect("query text"),
+            "18446744073709551615"
+        );
+
+        let timeout =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U16(vec![2026]), vec![1, 1])
+                .expect("typed timeout tensor");
+        assert_eq!(
+            numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
+            2026.0
+        );
+    }
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
@@ -989,8 +1026,25 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 5]);
-                let bytes: Vec<u8> = tensor.data.iter().map(|v| *v as u8).collect();
-                assert_eq!(bytes, payload);
+                assert_eq!(
+                    tensor.integer_storage(),
+                    Some(&IntegerStorage::U8(payload.to_vec()))
+                );
+
+                // Binary consumers must use exact uint8 backing storage rather
+                // than the compatibility f64 mirror.
+                let persisted = crate::data::DataArrayPayload::from_value(
+                    "uint8".to_string(),
+                    &Value::Tensor(tensor),
+                )
+                .expect("persist binary payload");
+                let bytes = serde_json::to_vec(&persisted).expect("encode payload");
+                let decoded: crate::data::DataArrayPayload =
+                    serde_json::from_slice(&bytes).expect("decode payload");
+                assert_eq!(
+                    decoded.values,
+                    crate::data::DataArrayValues::U8(payload.to_vec())
+                );
             }
             other => panic!("expected tensor, got {other:?}"),
         }

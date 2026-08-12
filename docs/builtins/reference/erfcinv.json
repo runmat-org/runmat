@@ -10,7 +10,7 @@
   ],
   "summary": "Compute inverse complementary error-function values.",
   "gpu_support": {
-    "elementwise": false,
+    "elementwise": true,
     "reduction": false,
     "precisions": [
       "f32",

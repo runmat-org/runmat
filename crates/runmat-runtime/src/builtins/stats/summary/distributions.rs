@@ -1,13 +1,18 @@
 //! Probability distribution compatibility helpers.
 
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Tensor, Type, Value,
+    NumericDType, NumericScalar, ResolveContext, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::{broadcast, tensor};
+use crate::builtins::common::{broadcast, gpu_helpers, tensor};
 use crate::builtins::math::elementwise::erfcinv::erfcinv_scalar;
 use crate::builtins::stats::summary::distribution_math;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -206,6 +211,14 @@ const INPUTS_DIST_P_ALPHA_BETA: [BuiltinParamDescriptor; 4] =
 const INPUTS_P_MU: [BuiltinParamDescriptor; 2] = [INPUT_P, INPUT_MU];
 const INPUTS_P_MU_SIGMA: [BuiltinParamDescriptor; 3] = [INPUT_P, INPUT_MU, INPUT_SIGMA];
 const INPUTS_X_NU: [BuiltinParamDescriptor; 2] = [INPUT_X, INPUT_NU];
+const INPUT_TAIL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "tail",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("\"upper\""),
+    description: "Upper-tail selector (`\"upper\"`).",
+};
+const INPUTS_X_NU_UPPER: [BuiltinParamDescriptor; 3] = [INPUT_X, INPUT_NU, INPUT_TAIL];
 const INPUTS_P_NU: [BuiltinParamDescriptor; 2] = [INPUT_P, INPUT_NU];
 const INPUTS_X_N_P: [BuiltinParamDescriptor; 3] = [INPUT_X, INPUT_N, INPUT_PROB];
 const INPUTS_P_A_B: [BuiltinParamDescriptor; 3] = [INPUT_P, INPUT_A, INPUT_B];
@@ -315,7 +328,7 @@ const CHI2CDF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
     BuiltinSignatureDescriptor {
         label: "p = chi2cdf(x, nu, \"upper\")",
-        inputs: &INPUTS_X_NU,
+        inputs: &INPUTS_X_NU_UPPER,
         outputs: &OUTPUT_Y,
     },
 ];
@@ -496,7 +509,9 @@ async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
-    tensor::value_into_tensor_for(name, gathered)
+    let tensor = tensor::value_into_tensor_for(name, gathered)
+        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+    tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| normal_error(name, format!("{name}: {err}")))
 }
 
@@ -571,7 +586,6 @@ struct ThreeArgs {
     a: Vec<f64>,
     b: Vec<f64>,
     shape: Vec<usize>,
-    upper: bool,
 }
 
 fn broadcast_pair(
@@ -610,27 +624,21 @@ fn broadcast_tensor_to(
     if len == 0 {
         return Ok(Vec::new());
     }
-    let in_shape = align_shape(&tensor.shape, out_shape.len());
+    let in_shape = broadcast::align_shape(&tensor.shape, out_shape.len());
     let strides = broadcast::compute_strides(&in_shape);
     let mut out = Vec::with_capacity(len);
+    let input_len = tensor::tensor_element_len(tensor);
     for idx in 0..len {
         let source_idx = broadcast::broadcast_index(idx, out_shape, &in_shape, &strides);
-        let Some(value) = tensor.data.get(source_idx) else {
+        if source_idx >= input_len {
             return Err(normal_error(
                 name,
                 format!("{name}: tensor data does not match tensor shape"),
             ));
-        };
-        out.push(*value);
+        }
+        out.push(tensor::tensor_value_f64(tensor, source_idx));
     }
     Ok(out)
-}
-
-fn align_shape(shape: &[usize], rank: usize) -> Vec<usize> {
-    let mut aligned = Vec::with_capacity(rank);
-    aligned.extend(std::iter::repeat_n(1, rank.saturating_sub(shape.len())));
-    aligned.extend_from_slice(shape);
-    aligned
 }
 
 async fn t_args(
@@ -673,20 +681,7 @@ async fn three_args(
     first: Value,
     rest: Vec<Value>,
     defaults: Option<(f64, f64)>,
-    allow_upper: bool,
 ) -> BuiltinResult<ThreeArgs> {
-    let mut rest = rest;
-    let mut upper = false;
-    if allow_upper {
-        if let Some(last) = rest.last() {
-            if let Some(keyword) = crate::builtins::common::random_args::keyword_of(last) {
-                if keyword.eq_ignore_ascii_case("upper") {
-                    upper = true;
-                    rest.pop();
-                }
-            }
-        }
-    }
     let (a, b) = match (rest.as_slice(), defaults) {
         ([], Some((a, b))) => (scalar_tensor(a), scalar_tensor(b)),
         ([a, b], _) => (
@@ -705,13 +700,7 @@ async fn three_args(
     let x = broadcasted.remove(0);
     let a = broadcasted.remove(0);
     let b = broadcasted.remove(0);
-    Ok(ThreeArgs {
-        x,
-        a,
-        b,
-        shape,
-        upper,
-    })
+    Ok(ThreeArgs { x, a, b, shape })
 }
 
 fn finish(shape: Vec<usize>, data: Vec<f64>) -> BuiltinResult<Value> {
@@ -1216,6 +1205,101 @@ pub mod binocdf {
     use super::*;
     normal_descriptor!("binocdf", BINOCDF_SIGNATURES);
 
+    const INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "binocdf-integer-x",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "binocdf with typed-integer evaluation points is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:BinocdfIntegerXExtension"),
+    };
+
+    const INTEGER_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "binocdf-integer-trials",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "binocdf with typed-integer trial counts is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:BinocdfIntegerTrialsExtension"),
+    };
+
+    const INTEGER_P_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "binocdf-integer-probability",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "binocdf with typed-integer probabilities is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:BinocdfIntegerProbabilityExtension"),
+    };
+
+    const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "binocdf-logical-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "binocdf with logical numeric inputs is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:BinocdfLogicalInputExtension"),
+    };
+
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+        INTEGER_X_EXTENSION,
+        INTEGER_N_EXTENSION,
+        INTEGER_P_EXTENSION,
+        LOGICAL_INPUT_EXTENSION,
+    ];
+
+    const INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "x",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer evaluation points are gated by binocdf-integer-x and enter the floating binomial-CDF boundary without an integer compatibility mirror.",
+        }];
+
+    const INTEGER_N_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "n",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer trial counts are gated by binocdf-integer-trials and must be exactly representable at the documented floating computation boundary.",
+        }];
+
+    const INTEGER_P_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "p",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer probabilities are gated by binocdf-integer-probability; only values in the ordinary probability domain can produce non-NaN results.",
+        }];
+
+    pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+        BuiltinIntegerCapabilityDescriptor {
+            form: "y = binocdf(x, n, p) with integer x",
+            inputs: &INTEGER_X_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::Multiple,
+            notes: "RunMat-only typed-integer x values produce double probabilities unless a documented single input makes the output single; resident inputs use host fallback and the result is re-uploaded to the owning provider.",
+        },
+        BuiltinIntegerCapabilityDescriptor {
+            form: "y = binocdf(x, n, p) with integer n",
+            inputs: &INTEGER_N_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::Multiple,
+            notes: "RunMat-only typed-integer n values produce double probabilities unless a documented single input makes the output single, after an exact-representability check at the binary64 boundary.",
+        },
+        BuiltinIntegerCapabilityDescriptor {
+            form: "y = binocdf(x, n, p) with integer p",
+            inputs: &INTEGER_P_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::Multiple,
+            notes: "RunMat-only typed-integer p values produce double probabilities unless a documented single input makes the output single; resident inputs use host fallback and preserve output residency.",
+        },
+    ];
+
     #[runtime_builtin(
         name = "binocdf",
         category = "stats/summary",
@@ -1223,10 +1307,12 @@ pub mod binocdf {
         keywords = "binocdf,binomial,cdf,upper tail,statistics,distribution",
         type_resolver(super::normal_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::distributions::binocdf"
     )]
     pub(crate) async fn binocdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::three_args("binocdf", value, rest, None, true).await?;
+        let args = parse_args(value, rest).await?;
         let data = args
             .x
             .iter()
@@ -1234,13 +1320,249 @@ pub mod binocdf {
             .zip(args.b.iter())
             .map(|((x, n), p)| super::binocdf_scalar(*x, *n, *p, args.upper))
             .collect();
-        super::finish(args.shape, data)
+        build_output(data, args.shape, args.output_precision, args.gpu_source)
+    }
+
+    #[derive(Clone, Copy)]
+    enum OutputPrecision {
+        Double,
+        Single,
+    }
+
+    struct BinocdfArgs {
+        x: Vec<f64>,
+        a: Vec<f64>,
+        b: Vec<f64>,
+        shape: Vec<usize>,
+        upper: bool,
+        output_precision: OutputPrecision,
+        gpu_source: Option<GpuTensorHandle>,
+    }
+
+    async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<BinocdfArgs> {
+        let upper = rest
+            .last()
+            .and_then(crate::builtins::common::random_args::keyword_of)
+            .is_some_and(|keyword| keyword.eq_ignore_ascii_case("upper"));
+        if upper {
+            rest.pop();
+        }
+        if rest.len() != 2 {
+            return Err(super::normal_error(
+                "binocdf",
+                "binocdf: expected x, n, and p arguments",
+            ));
+        }
+        let inputs = [&value, &rest[0], &rest[1]];
+        ensure_extensions(inputs)?;
+        let output_precision = if inputs.iter().any(|value| is_single_value(value)) {
+            OutputPrecision::Single
+        } else {
+            OutputPrecision::Double
+        };
+        let gpu_source = inputs.iter().find_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        });
+        let x = gather_numeric(value).await?;
+        let n = gather_numeric(rest.remove(0)).await?;
+        let p = gather_numeric(rest.remove(0)).await?;
+        ensure_exact_integer_boundary(&x, "x")?;
+        ensure_exact_integer_boundary(&n, "n")?;
+        ensure_exact_integer_boundary(&p, "p")?;
+        let (mut broadcasted, shape) = super::broadcast_tensors("binocdf", &[&x, &n, &p])?;
+        Ok(BinocdfArgs {
+            x: broadcasted.remove(0),
+            a: broadcasted.remove(0),
+            b: broadcasted.remove(0),
+            shape,
+            upper,
+            output_precision,
+            gpu_source,
+        })
+    }
+
+    fn ensure_extensions(inputs: [&Value; 3]) -> BuiltinResult<()> {
+        for (value, extension) in inputs.into_iter().zip([
+            &INTEGER_X_EXTENSION,
+            &INTEGER_N_EXTENSION,
+            &INTEGER_P_EXTENSION,
+        ]) {
+            if is_typed_integer_value(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(extension, "binocdf")?;
+            }
+        }
+        if inputs.into_iter().any(is_logical_value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &LOGICAL_INPUT_EXTENSION,
+                "binocdf",
+            )?;
+        }
+        Ok(())
+    }
+
+    fn is_typed_integer_value(value: &Value) -> bool {
+        matches!(value, Value::Int(_))
+            || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+            || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    }
+
+    fn is_logical_value(value: &Value) -> bool {
+        matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+            || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    }
+
+    fn is_single_value(value: &Value) -> bool {
+        matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            || matches!(value, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(handle)
+                    && runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F32))
+    }
+
+    async fn gather_numeric(value: Value) -> BuiltinResult<Tensor> {
+        let gathered = gather_if_needed_async(&value)
+            .await
+            .map_err(|err| super::normal_error("binocdf", format!("binocdf: {err}")))?;
+        tensor::value_into_tensor_for("binocdf", gathered)
+            .map_err(|err| super::normal_error("binocdf", format!("binocdf: {err}")))
+    }
+
+    fn ensure_exact_integer_boundary(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+        if tensor.integer_storage().is_none() {
+            return Ok(());
+        }
+        const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
+        for index in 0..tensor.len() {
+            let exact = match tensor.numeric_value_at(index) {
+                Some(NumericScalar::I8(value)) => i128::from(value),
+                Some(NumericScalar::I16(value)) => i128::from(value),
+                Some(NumericScalar::I32(value)) => i128::from(value),
+                Some(NumericScalar::I64(value)) => i128::from(value),
+                Some(NumericScalar::U8(value)) => i128::from(value),
+                Some(NumericScalar::U16(value)) => i128::from(value),
+                Some(NumericScalar::U32(value)) => i128::from(value),
+                Some(NumericScalar::U64(value)) => i128::from(value),
+                _ => continue,
+            };
+            if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+                return Err(super::normal_error(
+                    "binocdf",
+                    format!(
+                        "binocdf: integer {name} values must be exactly representable as double"
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn build_output(
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        precision: OutputPrecision,
+        gpu_source: Option<GpuTensorHandle>,
+    ) -> BuiltinResult<Value> {
+        let tensor = match precision {
+            OutputPrecision::Double => Tensor::new(data, shape),
+            OutputPrecision::Single => {
+                Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
+            }
+        }
+        .map_err(|err| super::normal_error("binocdf", format!("binocdf: {err}")))?;
+        if let Some(source) = gpu_source {
+            let provider = runmat_accelerate_api::provider_for_handle(&source)
+                .or_else(runmat_accelerate_api::provider)
+                .ok_or_else(|| {
+                    super::normal_error(
+                        "binocdf",
+                        "binocdf: no acceleration provider registered for GPU output",
+                    )
+                })?;
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
+                .map_err(|err| super::normal_error("binocdf", format!("binocdf: {err}")))?;
+            runmat_accelerate_api::set_handle_precision(
+                &handle,
+                match precision {
+                    OutputPrecision::Double => ProviderPrecision::F64,
+                    OutputPrecision::Single => ProviderPrecision::F32,
+                },
+            );
+            return Ok(gpu_helpers::resident_gpu_value(handle));
+        }
+        match precision {
+            OutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),
+            OutputPrecision::Single => Ok(Value::Tensor(tensor)),
+        }
     }
 }
 
 pub mod chi2cdf {
     use super::*;
     normal_descriptor!("chi2cdf", CHI2CDF_SIGNATURES);
+
+    const INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "chi2cdf-integer-x",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "chi2cdf with typed-integer evaluation points is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Chi2cdfIntegerXExtension"),
+    };
+    const INTEGER_NU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "chi2cdf-integer-degrees-of-freedom",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "chi2cdf with typed-integer degrees of freedom is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Chi2cdfIntegerDegreesOfFreedomExtension"),
+    };
+    const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+        id: "chi2cdf-logical-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "chi2cdf with logical numeric input is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:Chi2cdfLogicalInputExtension"),
+    };
+    pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+        INTEGER_X_EXTENSION,
+        INTEGER_NU_EXTENSION,
+        LOGICAL_INPUT_EXTENSION,
+    ];
+
+    const INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "x",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer evaluation points are outside the documented single/double input domain and cross a checked floating boundary only in RunMat mode.",
+        }];
+    const INTEGER_NU_INPUT: [BuiltinIntegerInputCapability; 1] =
+        [BuiltinIntegerInputCapability {
+            name: "nu",
+            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "Typed-integer degrees of freedom are outside the documented single/double input domain and cross a checked floating boundary only in RunMat mode.",
+        }];
+    pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+        BuiltinIntegerCapabilityDescriptor {
+            form: "p = chi2cdf(integer_x, nu, ...)",
+            inputs: &INTEGER_X_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+            notes: "RunMat-only integer x is checked for exact binary64 representation before CDF evaluation; documented single input selects single output and documented resident calls return to the owning provider.",
+        },
+        BuiltinIntegerCapabilityDescriptor {
+            form: "p = chi2cdf(x, integer_nu, ...)",
+            inputs: &INTEGER_NU_INPUT,
+            computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+            output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+            overflow: BuiltinIntegerOverflowRule::Error,
+            backend: BuiltinIntegerBackendRule::GatherFallback,
+            overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
+            notes: "RunMat-only integer nu is checked for exact binary64 representation before CDF evaluation; documented single input selects single output and documented resident calls return to the owning provider.",
+        },
+    ];
 
     #[runtime_builtin(
         name = "chi2cdf",
@@ -1249,17 +1571,229 @@ pub mod chi2cdf {
         keywords = "chi2cdf,chi-square,cdf,upper tail,statistics,distribution",
         type_resolver(super::normal_type),
         descriptor(self::DESCRIPTOR),
+        extensions(self::EXTENSIONS),
+        integer_capabilities(self::INTEGER_CAPABILITIES),
         builtin_path = "crate::builtins::stats::summary::distributions::chi2cdf"
     )]
     pub(crate) async fn chi2cdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::t_args("chi2cdf", value, rest, true).await?;
+        let args = parse_args(value, rest).await?;
         let data = args
             .x
             .iter()
             .zip(args.nu.iter())
             .map(|(x, nu)| super::chi2cdf_scalar(*x, *nu, args.upper))
             .collect();
-        super::finish(args.shape, data)
+        build_output(data, args.shape, args.precision, args.gpu_source)
+    }
+
+    #[derive(Clone, Copy)]
+    enum OutputPrecision {
+        Double,
+        Single,
+    }
+
+    struct Args {
+        x: Vec<f64>,
+        nu: Vec<f64>,
+        shape: Vec<usize>,
+        upper: bool,
+        precision: OutputPrecision,
+        gpu_source: Option<GpuTensorHandle>,
+    }
+
+    async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<Args> {
+        let upper = rest
+            .last()
+            .and_then(crate::builtins::common::random_args::keyword_of)
+            .is_some_and(|keyword| keyword.eq_ignore_ascii_case("upper"));
+        if upper {
+            rest.pop();
+        }
+        if rest.len() != 1 {
+            return Err(super::normal_error(
+                "chi2cdf",
+                "chi2cdf: expected x and nu, optionally followed by 'upper'",
+            ));
+        }
+        let nu_value = rest.pop().expect("one nu argument");
+        ensure_extensions(&value, &nu_value)?;
+        let precision = if is_single(&value) || is_single(&nu_value) {
+            OutputPrecision::Single
+        } else {
+            OutputPrecision::Double
+        };
+        let gpu_source = [&value, &nu_value]
+            .into_iter()
+            .find_map(|input| match input {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            });
+        let x = gather_numeric(value).await?;
+        let nu = gather_numeric(nu_value).await?;
+        ensure_exact_integer_boundary(&x, "x")?;
+        ensure_exact_integer_boundary(&nu, "nu")?;
+        let (x, nu, shape) = same_size_or_scalar(&x, &nu)?;
+        Ok(Args {
+            x,
+            nu,
+            shape,
+            upper,
+            precision,
+            gpu_source,
+        })
+    }
+
+    fn ensure_extensions(x: &Value, nu: &Value) -> BuiltinResult<()> {
+        if is_typed_integer(x) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGER_X_EXTENSION,
+                "chi2cdf",
+            )?;
+        }
+        if is_typed_integer(nu) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &INTEGER_NU_EXTENSION,
+                "chi2cdf",
+            )?;
+        }
+        if is_logical(x) || is_logical(nu) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &LOGICAL_INPUT_EXTENSION,
+                "chi2cdf",
+            )?;
+        }
+        Ok(())
+    }
+
+    fn is_typed_integer(value: &Value) -> bool {
+        matches!(value, Value::Int(_))
+            || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+            || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    }
+
+    fn is_logical(value: &Value) -> bool {
+        matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+            || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
+    }
+
+    fn is_single(value: &Value) -> bool {
+        matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            || matches!(value, Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(handle)
+                    && runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F32))
+    }
+
+    async fn gather_numeric(value: Value) -> BuiltinResult<Tensor> {
+        let host = gather_if_needed_async(&value)
+            .await
+            .map_err(|error| super::normal_error("chi2cdf", format!("chi2cdf: {error}")))?;
+        tensor::value_into_tensor_for("chi2cdf", host)
+            .map_err(|error| super::normal_error("chi2cdf", format!("chi2cdf: {error}")))
+    }
+
+    fn ensure_exact_integer_boundary(tensor: &Tensor, label: &str) -> BuiltinResult<()> {
+        if tensor.integer_storage().is_none() {
+            return Ok(());
+        }
+        const MAX_EXACT: i128 = 1_i128 << 53;
+        for index in 0..tensor.len() {
+            let exact = match tensor.numeric_value_at(index) {
+                Some(NumericScalar::I8(value)) => i128::from(value),
+                Some(NumericScalar::I16(value)) => i128::from(value),
+                Some(NumericScalar::I32(value)) => i128::from(value),
+                Some(NumericScalar::I64(value)) => i128::from(value),
+                Some(NumericScalar::U8(value)) => i128::from(value),
+                Some(NumericScalar::U16(value)) => i128::from(value),
+                Some(NumericScalar::U32(value)) => i128::from(value),
+                Some(NumericScalar::U64(value)) => i128::from(value),
+                _ => continue,
+            };
+            if !(-MAX_EXACT..=MAX_EXACT).contains(&exact) {
+                return Err(super::normal_error(
+                    "chi2cdf",
+                    format!(
+                        "chi2cdf: integer {label} values must be exactly representable as double"
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn same_size_or_scalar(
+        x: &Tensor,
+        nu: &Tensor,
+    ) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
+        let x_scalar = x.len() == 1;
+        let nu_scalar = nu.len() == 1;
+        let shape = if x_scalar && !nu_scalar {
+            nu.shape.clone()
+        } else if nu_scalar || x.shape == nu.shape {
+            x.shape.clone()
+        } else {
+            return Err(super::normal_error(
+                "chi2cdf",
+                "chi2cdf: x and nu must have the same size unless one input is scalar",
+            ));
+        };
+        let len = shape.iter().try_fold(1usize, |count, extent| {
+            count.checked_mul(*extent).ok_or_else(|| {
+                super::normal_error("chi2cdf", "chi2cdf: output shape exceeds platform limits")
+            })
+        })?;
+        let x_values = tensor::tensor_values_f64(x);
+        let nu_values = tensor::tensor_values_f64(nu);
+        let x = if x_scalar {
+            vec![x_values[0]; len]
+        } else {
+            x_values
+        };
+        let nu = if nu_scalar {
+            vec![nu_values[0]; len]
+        } else {
+            nu_values
+        };
+        Ok((x, nu, shape))
+    }
+
+    fn build_output(
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        precision: OutputPrecision,
+        gpu_source: Option<GpuTensorHandle>,
+    ) -> BuiltinResult<Value> {
+        let tensor = match precision {
+            OutputPrecision::Double => Tensor::new(data, shape),
+            OutputPrecision::Single => {
+                Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
+            }
+        }
+        .map_err(|error| super::normal_error("chi2cdf", format!("chi2cdf: {error}")))?;
+        if let Some(source) = gpu_source {
+            let provider = runmat_accelerate_api::provider_for_handle(&source)
+                .or_else(runmat_accelerate_api::provider)
+                .ok_or_else(|| {
+                    super::normal_error(
+                        "chi2cdf",
+                        "chi2cdf: no acceleration provider registered for GPU output",
+                    )
+                })?;
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
+                .map_err(|error| super::normal_error("chi2cdf", format!("chi2cdf: {error}")))?;
+            runmat_accelerate_api::set_handle_precision(
+                &handle,
+                match precision {
+                    OutputPrecision::Double => ProviderPrecision::F64,
+                    OutputPrecision::Single => ProviderPrecision::F32,
+                },
+            );
+            return Ok(gpu_helpers::resident_gpu_value(handle));
+        }
+        match precision {
+            OutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),
+            OutputPrecision::Single => Ok(Value::Tensor(tensor)),
+        }
     }
 }
 
@@ -1277,7 +1811,7 @@ pub mod wblinv {
         builtin_path = "crate::builtins::stats::summary::distributions::wblinv"
     )]
     pub(crate) async fn wblinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::three_args("wblinv", value, rest, Some((1.0, 1.0)), false).await?;
+        let args = super::three_args("wblinv", value, rest, Some((1.0, 1.0))).await?;
         let data = args
             .x
             .iter()
@@ -1430,7 +1964,7 @@ pub mod icdf {
     }
 
     async fn weibull_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::three_args("icdf", p, rest, Some((1.0, 1.0)), false).await?;
+        let args = super::three_args("icdf", p, rest, Some((1.0, 1.0))).await?;
         let data = args
             .x
             .iter()
@@ -1453,7 +1987,7 @@ pub mod icdf {
     }
 
     async fn binomial_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::three_args("icdf", p, rest, None, false).await?;
+        let args = super::three_args("icdf", p, rest, None).await?;
         let data = args
             .x
             .iter()
@@ -1467,7 +2001,7 @@ pub mod icdf {
     }
 
     async fn gamma_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::three_args("icdf", p, rest, None, false).await?;
+        let args = super::three_args("icdf", p, rest, None).await?;
         let data = args
             .x
             .iter()
@@ -1501,7 +2035,7 @@ pub mod icdf {
     }
 
     async fn uniform_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::three_args("icdf", p, rest, Some((0.0, 1.0)), false).await?;
+        let args = super::three_args("icdf", p, rest, Some((0.0, 1.0))).await?;
         let data = args
             .x
             .iter()
@@ -1525,7 +2059,7 @@ pub mod icdf {
     }
 
     async fn beta_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::three_args("icdf", p, rest, None, false).await?;
+        let args = super::three_args("icdf", p, rest, None).await?;
         let data = args
             .x
             .iter()
@@ -1537,7 +2071,7 @@ pub mod icdf {
     }
 
     async fn f_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let args = super::three_args("icdf", p, rest, None, false).await?;
+        let args = super::three_args("icdf", p, rest, None).await?;
         let data = args
             .x
             .iter()
@@ -1576,6 +2110,7 @@ pub mod icdf {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn assert_close(actual: f64, expected: f64, tol: f64) {
         assert!(
@@ -1589,6 +2124,33 @@ mod tests {
             Value::Num(value) => value,
             other => panic!("expected scalar icdf result, got {other:?}"),
         }
+    }
+
+    fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn all_integer_binocdf_storages(value: i8) -> Vec<IntegerStorage> {
+        vec![
+            IntegerStorage::I8(vec![value]),
+            IntegerStorage::I16(vec![i16::from(value)]),
+            IntegerStorage::I32(vec![i32::from(value)]),
+            IntegerStorage::I64(vec![i64::from(value)]),
+            IntegerStorage::U8(vec![value as u8]),
+            IntegerStorage::U16(vec![value as u16]),
+            IntegerStorage::U32(vec![value as u32]),
+            IntegerStorage::U64(vec![value as u64]),
+        ]
+    }
+
+    #[test]
+    fn distribution_broadcast_indexing_appends_trailing_singletons() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        assert_eq!(
+            broadcast_tensor_to("normcdf", &tensor, &[2, 1, 3]).unwrap(),
+            vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
+        );
     }
 
     #[test]
@@ -1621,8 +2183,8 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 0.5, 1e-12);
-                assert_close(tensor.data[1], 0.841_344_746_068_543, 1e-12);
+                assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
+                assert_close(tensor.materialize_f64()[1], 0.841_344_746_068_543, 1e-12);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -1721,8 +2283,8 @@ mod tests {
         match normal {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 1.0, 1e-10);
-                assert_close(tensor.data[1], 4.289_707_253_902_944, 1e-10);
+                assert_close(tensor.materialize_f64()[0], 1.0, 1e-10);
+                assert_close(tensor.materialize_f64()[1], 4.289_707_253_902_944, 1e-10);
             }
             other => panic!("expected tensor normal icdf, got {other:?}"),
         }
@@ -1847,8 +2409,8 @@ mod tests {
         match normal {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 0.0, 1e-10);
-                assert_close(tensor.data[1], 0.0, 1e-10);
+                assert_close(tensor.materialize_f64()[0], 0.0, 1e-10);
+                assert_close(tensor.materialize_f64()[1], 0.0, 1e-10);
             }
             other => panic!("expected tensor normal icdf, got {other:?}"),
         }
@@ -1865,8 +2427,8 @@ mod tests {
         match uniform {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 2]);
-                assert_close(tensor.data[0], 0.5, 1e-12);
-                assert_close(tensor.data[1], 1.0, 1e-12);
+                assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
+                assert_close(tensor.materialize_f64()[1], 1.0, 1e-12);
             }
             other => panic!("expected tensor uniform icdf, got {other:?}"),
         }
@@ -1977,9 +2539,9 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_close(tensor.data[0], 0.5, 1e-12);
-                assert_close(tensor.data[1], 0.818_391_266, 1e-9);
-                assert_close(tensor.data[2], 0.977_249_868, 1e-9);
+                assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
+                assert_close(tensor.materialize_f64()[1], 0.818_391_266, 1e-9);
+                assert_close(tensor.materialize_f64()[2], 0.977_249_868, 1e-9);
             }
             other => panic!("expected tensor cdf, got {other:?}"),
         }
@@ -2116,6 +2678,211 @@ mod tests {
     }
 
     #[test]
+    fn distribution_helpers_accept_typed_integer_tensors_at_f64_boundary() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let out = block_on(normcdf::normcdf_builtin(
+            mirrorless_int_tensor(IntegerStorage::I16(vec![0, 1]), vec![1, 2]),
+            vec![
+                mirrorless_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+                mirrorless_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
+            ],
+        ))
+        .unwrap();
+        match out {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_close(tensor.materialize_f64()[0], 0.5, 1.0e-12);
+                assert_close(tensor.materialize_f64()[1], 0.841_344_746_068_543, 1.0e-12);
+            }
+            other => panic!("expected tensor normcdf, got {other:?}"),
+        }
+
+        let chi2 = block_on(chi2cdf::chi2cdf_builtin(
+            mirrorless_int_tensor(IntegerStorage::U16(vec![3]), vec![1, 1]),
+            vec![mirrorless_int_tensor(
+                IntegerStorage::U16(vec![5]),
+                vec![1, 1],
+            )],
+        ))
+        .unwrap();
+        match chi2 {
+            Value::Num(value) => assert_close(value, 0.300_014_164_121_372, 1.0e-12),
+            other => panic!("expected scalar chi2cdf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chi2cdf_integer_roles_are_gated_and_wide_values_do_not_round() {
+        assert_eq!(chi2cdf::INTEGER_CAPABILITIES.len(), 2);
+        assert!(chi2cdf::INTEGER_CAPABILITIES
+            .iter()
+            .all(|capability| capability.inputs[0].classes.len() == 8));
+
+        {
+            let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
+            let x_error = block_on(chi2cdf::chi2cdf_builtin(
+                Value::Int(runmat_builtins::IntValue::I16(3)),
+                vec![Value::Num(5.0)],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                x_error.identifier(),
+                Some("RunMat:compatibility:Chi2cdfIntegerXExtension")
+            );
+            let nu_error = block_on(chi2cdf::chi2cdf_builtin(
+                Value::Num(3.0),
+                vec![Value::Int(runmat_builtins::IntValue::U16(5))],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                nu_error.identifier(),
+                Some("RunMat:compatibility:Chi2cdfIntegerDegreesOfFreedomExtension")
+            );
+        }
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide_error = block_on(chi2cdf::chi2cdf_builtin(
+            Value::Int(runmat_builtins::IntValue::U64((1_u64 << 53) + 1)),
+            vec![Value::Num(5.0)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            wide_error.identifier(),
+            Some("RunMat:chi2cdf:InvalidArgument")
+        );
+        assert!(wide_error
+            .message()
+            .contains("exactly representable as double"));
+
+        let signed_wide_error = block_on(chi2cdf::chi2cdf_builtin(
+            Value::Int(runmat_builtins::IntValue::I64(i64::MIN)),
+            vec![Value::Num(5.0)],
+        ))
+        .unwrap_err();
+        assert!(signed_wide_error
+            .message()
+            .contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn chi2cdf_executes_every_integer_class_and_upper_tail() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for (x_storage, nu_storage) in all_integer_binocdf_storages(3)
+            .into_iter()
+            .zip(all_integer_binocdf_storages(5))
+        {
+            let out = block_on(chi2cdf::chi2cdf_builtin(
+                Value::Tensor(Tensor::new_integer(x_storage, vec![1, 1]).unwrap()),
+                vec![Value::Tensor(
+                    Tensor::new_integer(nu_storage, vec![1, 1]).unwrap(),
+                )],
+            ))
+            .unwrap();
+            assert!(
+                matches!(out, Value::Num(value) if (value - 0.300_014_164_121_372).abs() < 1.0e-12)
+            );
+        }
+        let upper = block_on(chi2cdf::chi2cdf_builtin(
+            Value::Int(runmat_builtins::IntValue::U16(3)),
+            vec![
+                Value::Int(runmat_builtins::IntValue::U16(5)),
+                Value::from("upper"),
+            ],
+        ))
+        .unwrap();
+        assert!(
+            matches!(upper, Value::Num(value) if (value - 0.699_985_835_878_628).abs() < 1.0e-12)
+        );
+    }
+
+    #[test]
+    fn chi2cdf_logical_and_resident_integer_gates_precede_gather() {
+        {
+            let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
+            let logical = block_on(chi2cdf::chi2cdf_builtin(
+                Value::Bool(true),
+                vec![Value::Num(5.0)],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                logical.identifier(),
+                Some("RunMat:compatibility:Chi2cdfLogicalInputExtension")
+            );
+        }
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let input = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
+            {
+                let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = block_on(chi2cdf::chi2cdf_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::Num(5.0)],
+                ))
+                .unwrap_err();
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:compatibility:Chi2cdfIntegerXExtension")
+                );
+            }
+            let result = block_on(chi2cdf::chi2cdf_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::Num(5.0)],
+            ))
+            .unwrap();
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = crate::builtins::common::test_support::gather(result).unwrap();
+            assert!((gathered.materialize_f64()[0] - 0.300_014_164_121_372).abs() < 1.0e-12);
+            let _ = provider.free(&handle);
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn chi2cdf_wgpu_integer_fallback_preserves_residency() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .expect("wgpu provider");
+        let input = Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
+        let result = block_on(chi2cdf::chi2cdf_builtin(
+            Value::GpuTensor(handle),
+            vec![Value::Int(runmat_builtins::IntValue::U16(5))],
+        ))
+        .expect("chi2cdf");
+        assert!(matches!(result, Value::GpuTensor(_)));
+        let gathered = crate::builtins::common::test_support::gather(result).expect("gather");
+        assert!((gathered.materialize_f64()[0] - 0.300_014_164_121_372).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn chi2cdf_preserves_single_and_uses_only_scalar_expansion() {
+        let single = Tensor::from_f32(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        let out = block_on(chi2cdf::chi2cdf_builtin(
+            Value::Tensor(single),
+            vec![Value::Num(5.0)],
+        ))
+        .unwrap();
+        let Value::Tensor(tensor) = out else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.shape, vec![1, 2]);
+
+        let err = block_on(chi2cdf::chi2cdf_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            vec![Value::Tensor(
+                Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap(),
+            )],
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("same size"));
+    }
+
+    #[test]
     fn distribution_helpers_broadcast_and_return_nan_for_bad_parameters() {
         let out = block_on(chi2cdf::chi2cdf_builtin(
             Value::Num(3.0),
@@ -2127,7 +2894,7 @@ mod tests {
         match out {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 3]);
-                assert_close(tensor.data[2], 0.300_014_164_121_372, 1.0e-12);
+                assert_close(tensor.materialize_f64()[2], 0.300_014_164_121_372, 1.0e-12);
             }
             other => panic!("expected tensor chi2cdf, got {other:?}"),
         }
@@ -2169,6 +2936,172 @@ mod tests {
         ))
         .unwrap();
         assert!(matches!(impossible, Value::Num(value) if value.is_nan()));
+    }
+
+    #[test]
+    fn binocdf_classifies_all_integer_input_positions_as_runmat_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_binocdf_storages(1) {
+            let x = block_on(binocdf::binocdf_builtin(
+                mirrorless_int_tensor(storage.clone(), vec![1, 1]),
+                vec![Value::Num(2.0), Value::Num(0.5)],
+            ))
+            .expect("integer x");
+            assert!(matches!(x, Value::Num(value) if (value - 0.75).abs() < 1.0e-12));
+
+            let n = block_on(binocdf::binocdf_builtin(
+                Value::Num(0.0),
+                vec![
+                    mirrorless_int_tensor(storage.clone(), vec![1, 1]),
+                    Value::Num(0.5),
+                ],
+            ))
+            .expect("integer n");
+            assert!(matches!(n, Value::Num(value) if (value - 0.5).abs() < 1.0e-12));
+
+            let p = block_on(binocdf::binocdf_builtin(
+                Value::Num(0.0),
+                vec![Value::Num(1.0), mirrorless_int_tensor(storage, vec![1, 1])],
+            ))
+            .expect("integer p");
+            assert_eq!(p, Value::Num(0.0));
+        }
+    }
+
+    #[test]
+    fn binocdf_compatibility_mode_rejects_integer_and_logical_extensions() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let integer_x = block_on(binocdf::binocdf_builtin(
+            mirrorless_int_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]),
+            vec![Value::Num(2.0), Value::Num(0.5)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            integer_x.identifier(),
+            Some("RunMat:compatibility:BinocdfIntegerXExtension")
+        );
+        let integer_n = block_on(binocdf::binocdf_builtin(
+            Value::Num(1.0),
+            vec![
+                mirrorless_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                Value::Num(0.5),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            integer_n.identifier(),
+            Some("RunMat:compatibility:BinocdfIntegerTrialsExtension")
+        );
+        let integer_p = block_on(binocdf::binocdf_builtin(
+            Value::Num(1.0),
+            vec![
+                Value::Num(2.0),
+                mirrorless_int_tensor(IntegerStorage::U32(vec![1]), vec![1, 1]),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            integer_p.identifier(),
+            Some("RunMat:compatibility:BinocdfIntegerProbabilityExtension")
+        );
+        let logical = block_on(binocdf::binocdf_builtin(
+            Value::Bool(true),
+            vec![Value::Num(2.0), Value::Num(0.5)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            logical.identifier(),
+            Some("RunMat:compatibility:BinocdfLogicalInputExtension")
+        );
+    }
+
+    #[test]
+    fn binocdf_preserves_single_output_and_rejects_inexact_wide_integers() {
+        let single = block_on(binocdf::binocdf_builtin(
+            Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap()),
+            vec![Value::Num(2.0), Value::Num(0.5)],
+        ))
+        .expect("single binocdf");
+        let Value::Tensor(single) = single else {
+            panic!("single scalar output must retain its class");
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert!((single.materialize_f64()[0] - 0.75).abs() < f64::from(f32::EPSILON));
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(binocdf::binocdf_builtin(
+            mirrorless_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
+            vec![Value::Num(2.0), Value::Num(0.5)],
+        ))
+        .unwrap_err();
+        assert!(error.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn binocdf_gpu_fallback_preserves_residency_precision_and_integer_guard_order() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single input");
+            let handle = gpu_helpers::upload_tensor(provider, &single).expect("single upload");
+            runmat_accelerate_api::set_handle_precision(&handle, ProviderPrecision::F32);
+            let result = block_on(binocdf::binocdf_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Num(2.0), Value::Num(0.5)],
+            ))
+            .expect("resident binocdf");
+            let Value::GpuTensor(result_handle) = &result else {
+                panic!("expected resident output");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(result_handle),
+                Some(ProviderPrecision::F32)
+            );
+            let gathered = test_support::gather(result).expect("gather result");
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert!((gathered.materialize_f64()[0] - 0.75).abs() < f64::from(f32::EPSILON));
+
+            let integer =
+                Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).expect("integer x");
+            let handle = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(binocdf::binocdf_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Num(2.0), Value::Num(0.5)],
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:compatibility:BinocdfIntegerXExtension")
+            );
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn binocdf_wgpu_fallback_preserves_residency_for_all_integer_classes() {
+        use crate::builtins::common::test_support;
+
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for storage in all_integer_binocdf_storages(1) {
+            let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer x");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
+            let result = block_on(binocdf::binocdf_builtin(
+                Value::GpuTensor(handle),
+                vec![Value::Num(2.0), Value::Num(0.5)],
+            ))
+            .expect("resident integer binocdf");
+            assert!(matches!(result, Value::GpuTensor(_)));
+            let gathered = test_support::gather(result).expect("gather result");
+            assert!((gathered.materialize_f64()[0] - 0.75).abs() < 1.0e-12);
+        }
     }
 
     #[test]

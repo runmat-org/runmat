@@ -167,3 +167,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Output.data[global_index] = Input.data[src_index];
 }
 "#;
+
+pub fn flip_shader_u32() -> String {
+    FLIP_SHADER_F32.replace("array<f32>", "array<u32>")
+}

@@ -1,7 +1,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use runmat_builtins::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
+use runmat_builtins::{
+    CellArray, NumericDType, NumericScalar, NumericStorage, ObjectInstance, StructValue, Tensor,
+    Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
@@ -249,11 +252,7 @@ pub(super) fn dlarray_node_id(value: &Value) -> Option<usize> {
     object
         .properties
         .get(AD_NODE_PROPERTY)
-        .and_then(|value| match value {
-            Value::Num(n) if n.is_finite() && *n >= 0.0 => Some(*n as usize),
-            Value::Int(i) => Some(i.to_f64() as usize),
-            _ => None,
-        })
+        .and_then(|value| super::nonnegative_usize(value, "dlarray", AD_NODE_PROPERTY))
 }
 
 pub(super) fn dlarray_format_and_labels(value: &Value) -> (Value, Value) {
@@ -382,7 +381,7 @@ pub(super) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
         ));
     };
     let loss_tensor = value_for_node(loss_node)?;
-    if loss_tensor.data.len() != 1 {
+    if tensor::tensor_element_len(&loss_tensor) != 1 {
         return Err(deep_learning_error(
             "dlgradient",
             "dlgradient: loss must be scalar",
@@ -418,9 +417,13 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
             })
     })?;
     let mut grads: HashMap<usize, Tensor> = HashMap::new();
+    let loss_dtype = nodes
+        .get(loss_node)
+        .map(|node| node.value.numeric_dtype())
+        .unwrap_or(NumericDType::F64);
     grads.insert(
         loss_node,
-        Tensor::new(vec![1.0], vec![1, 1]).map_err(|err| deep_learning_error("dlgradient", err))?,
+        floating_tensor_from_f64(vec![1.0], vec![1, 1], loss_dtype, "dlgradient")?,
     );
     for id in (0..=loss_node).rev() {
         let Some(grad) = grads.get(&id).cloned() else {
@@ -429,6 +432,7 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
         let Some(node) = nodes.get(id) else {
             continue;
         };
+        let grad_values = floating_tensor_values(&grad, "dlgradient")?;
         match &node.kind {
             NodeKind::Leaf => {}
             NodeKind::Add {
@@ -440,12 +444,22 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                 accumulate_parent(
                     &mut grads,
                     *lhs,
-                    reduce_gradient(&grad.data, lhs_shape, &node.value.shape)?,
+                    reduce_gradient(
+                        &grad_values,
+                        lhs_shape,
+                        &node.value.shape,
+                        node_dtype(&nodes, *lhs, node.value.numeric_dtype()),
+                    )?,
                 );
                 accumulate_parent(
                     &mut grads,
                     *rhs,
-                    reduce_gradient(&grad.data, rhs_shape, &node.value.shape)?,
+                    reduce_gradient(
+                        &grad_values,
+                        rhs_shape,
+                        &node.value.shape,
+                        node_dtype(&nodes, *rhs, node.value.numeric_dtype()),
+                    )?,
                 );
             }
             NodeKind::Sub {
@@ -457,12 +471,26 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                 accumulate_parent(
                     &mut grads,
                     *lhs,
-                    reduce_gradient(&grad.data, lhs_shape, &node.value.shape)?,
+                    reduce_gradient(
+                        &grad_values,
+                        lhs_shape,
+                        &node.value.shape,
+                        node_dtype(&nodes, *lhs, node.value.numeric_dtype()),
+                    )?,
                 );
-                let mut rhs_grad = reduce_gradient(&grad.data, rhs_shape, &node.value.shape)?;
-                for value in &mut rhs_grad.data {
-                    *value = -*value;
-                }
+                let rhs_dtype = node_dtype(&nodes, *rhs, node.value.numeric_dtype());
+                let rhs_grad =
+                    reduce_gradient(&grad_values, rhs_shape, &node.value.shape, rhs_dtype)?;
+                let rhs_shape = rhs_grad.shape.clone();
+                let rhs_grad = floating_tensor_from_f64(
+                    floating_tensor_values(&rhs_grad, "dlgradient")?
+                        .into_iter()
+                        .map(|value| -value)
+                        .collect(),
+                    rhs_shape,
+                    rhs_dtype,
+                    "dlgradient",
+                )?;
                 accumulate_parent(&mut grads, *rhs, rhs_grad);
             }
             NodeKind::Mul {
@@ -474,8 +502,7 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                 rhs_shape,
             } => {
                 if let Some(parent) = *lhs {
-                    let data = grad
-                        .data
+                    let data = grad_values
                         .iter()
                         .zip(rhs_values)
                         .map(|(g, r)| g * r)
@@ -483,12 +510,16 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                     accumulate_parent(
                         &mut grads,
                         Some(parent),
-                        reduce_gradient(&data, lhs_shape, &node.value.shape)?,
+                        reduce_gradient(
+                            &data,
+                            lhs_shape,
+                            &node.value.shape,
+                            node_dtype(&nodes, Some(parent), node.value.numeric_dtype()),
+                        )?,
                     );
                 }
                 if let Some(parent) = *rhs {
-                    let data = grad
-                        .data
+                    let data = grad_values
                         .iter()
                         .zip(lhs_values)
                         .map(|(g, l)| g * l)
@@ -496,7 +527,12 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                     accumulate_parent(
                         &mut grads,
                         Some(parent),
-                        reduce_gradient(&data, rhs_shape, &node.value.shape)?,
+                        reduce_gradient(
+                            &data,
+                            rhs_shape,
+                            &node.value.shape,
+                            node_dtype(&nodes, Some(parent), node.value.numeric_dtype()),
+                        )?,
                     );
                 }
             }
@@ -509,8 +545,7 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                 rhs_shape,
             } => {
                 if let Some(parent) = *lhs {
-                    let data = grad
-                        .data
+                    let data = grad_values
                         .iter()
                         .zip(rhs_values)
                         .map(|(g, r)| g / r)
@@ -518,12 +553,16 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                     accumulate_parent(
                         &mut grads,
                         Some(parent),
-                        reduce_gradient(&data, lhs_shape, &node.value.shape)?,
+                        reduce_gradient(
+                            &data,
+                            lhs_shape,
+                            &node.value.shape,
+                            node_dtype(&nodes, Some(parent), node.value.numeric_dtype()),
+                        )?,
                     );
                 }
                 if let Some(parent) = *rhs {
-                    let data = grad
-                        .data
+                    let data = grad_values
                         .iter()
                         .zip(lhs_values)
                         .zip(rhs_values)
@@ -532,7 +571,12 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                     accumulate_parent(
                         &mut grads,
                         Some(parent),
-                        reduce_gradient(&data, rhs_shape, &node.value.shape)?,
+                        reduce_gradient(
+                            &data,
+                            rhs_shape,
+                            &node.value.shape,
+                            node_dtype(&nodes, Some(parent), node.value.numeric_dtype()),
+                        )?,
                     );
                 }
             }
@@ -564,59 +608,84 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                 input_value,
                 weights_value,
             } => {
-                let mut input_grad = vec![0.0; input_value.data.len()];
-                let mut weights_grad = vec![0.0; weights_value.data.len()];
+                let input_values = floating_tensor_values(input_value, "dlgradient")?;
+                let weights_values = floating_tensor_values(weights_value, "dlgradient")?;
+                let mut input_grad = vec![0.0; input_values.len()];
+                let mut weights_grad = vec![0.0; weights_values.len()];
                 let mut bias_grad = vec![0.0; weights_value.rows];
                 for row in 0..input_value.rows {
                     for out_col in 0..weights_value.rows {
-                        let g = grad.data[row + out_col * grad.rows];
+                        let g = grad_values[row + out_col * grad.rows];
                         bias_grad[out_col] += g;
                         for feature in 0..input_value.cols {
                             input_grad[row + feature * input_value.rows] +=
-                                g * weights_value.data[out_col + feature * weights_value.rows];
+                                g * weights_values[out_col + feature * weights_value.rows];
                             weights_grad[out_col + feature * weights_value.rows] +=
-                                input_value.data[row + feature * input_value.rows] * g;
+                                input_values[row + feature * input_value.rows] * g;
                         }
                     }
                 }
                 accumulate_parent(
                     &mut grads,
                     *input,
-                    Tensor::new(input_grad, input_value.shape.clone())
-                        .map_err(|err| deep_learning_error("dlgradient", err))?,
+                    floating_tensor_from_f64(
+                        input_grad,
+                        input_value.shape.clone(),
+                        input_value.numeric_dtype(),
+                        "dlgradient",
+                    )?,
                 );
                 accumulate_parent(
                     &mut grads,
                     *weights,
-                    Tensor::new(weights_grad, weights_value.shape.clone())
-                        .map_err(|err| deep_learning_error("dlgradient", err))?,
+                    floating_tensor_from_f64(
+                        weights_grad,
+                        weights_value.shape.clone(),
+                        weights_value.numeric_dtype(),
+                        "dlgradient",
+                    )?,
                 );
                 accumulate_parent(
                     &mut grads,
                     *bias,
-                    Tensor::new(bias_grad, vec![weights_value.rows, 1])
-                        .map_err(|err| deep_learning_error("dlgradient", err))?,
+                    floating_tensor_from_f64(
+                        bias_grad,
+                        vec![weights_value.rows, 1],
+                        node_dtype(&nodes, *bias, weights_value.numeric_dtype()),
+                        "dlgradient",
+                    )?,
                 );
             }
             NodeKind::SumAll { input, input_shape } => {
-                let seed = grad.data.iter().copied().sum::<f64>();
+                let seed = grad_values.iter().copied().sum::<f64>();
                 let count = input_shape.iter().product();
-                let tensor = Tensor::new(vec![seed; count], input_shape.clone())
-                    .map_err(|err| deep_learning_error("dlgradient", err))?;
-                accumulate_parent(&mut grads, Some(*input), tensor);
+                accumulate_parent(
+                    &mut grads,
+                    Some(*input),
+                    floating_tensor_from_f64(
+                        vec![seed; count],
+                        input_shape.clone(),
+                        node_dtype(&nodes, Some(*input), node.value.numeric_dtype()),
+                        "dlgradient",
+                    )?,
+                );
             }
             NodeKind::Relu { input, input_value } => {
-                let data = grad
-                    .data
+                let input_values = floating_tensor_values(input_value, "dlgradient")?;
+                let data = grad_values
                     .iter()
-                    .zip(&input_value.data)
+                    .zip(&input_values)
                     .map(|(g, x)| if *x > 0.0 { *g } else { 0.0 })
                     .collect::<Vec<_>>();
                 accumulate_parent(
                     &mut grads,
                     Some(*input),
-                    Tensor::new(data, input_value.shape.clone())
-                        .map_err(|err| deep_learning_error("dlgradient", err))?,
+                    floating_tensor_from_f64(
+                        data,
+                        input_value.shape.clone(),
+                        input_value.numeric_dtype(),
+                        "dlgradient",
+                    )?,
                 );
             }
             NodeKind::Elu {
@@ -624,41 +693,50 @@ fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
                 input_value,
                 alpha,
             } => {
-                let data = grad
-                    .data
+                let input_values = floating_tensor_values(input_value, "dlgradient")?;
+                let data = grad_values
                     .iter()
-                    .zip(&input_value.data)
+                    .zip(&input_values)
                     .map(|(g, x)| if *x > 0.0 { *g } else { *g * alpha * x.exp() })
                     .collect::<Vec<_>>();
                 accumulate_parent(
                     &mut grads,
                     Some(*input),
-                    Tensor::new(data, input_value.shape.clone())
-                        .map_err(|err| deep_learning_error("dlgradient", err))?,
+                    floating_tensor_from_f64(
+                        data,
+                        input_value.shape.clone(),
+                        input_value.numeric_dtype(),
+                        "dlgradient",
+                    )?,
                 );
             }
             NodeKind::Softmax {
                 input,
                 output_value,
             } => {
-                let mut data = vec![0.0; output_value.data.len()];
+                let output_values = floating_tensor_values(output_value, "dlgradient")?;
+                let mut data = vec![0.0; output_values.len()];
                 for row in 0..output_value.rows {
                     let dot = (0..output_value.cols)
                         .map(|col| {
                             let idx = row + col * output_value.rows;
-                            grad.data[idx] * output_value.data[idx]
+                            grad_values[idx] * output_values[idx]
                         })
                         .sum::<f64>();
                     for col in 0..output_value.cols {
                         let idx = row + col * output_value.rows;
-                        data[idx] = output_value.data[idx] * (grad.data[idx] - dot);
+                        data[idx] = output_values[idx] * (grad_values[idx] - dot);
                     }
                 }
                 accumulate_parent(
                     &mut grads,
                     Some(*input),
-                    Tensor::new(data, output_value.shape.clone())
-                        .map_err(|err| deep_learning_error("dlgradient", err))?,
+                    floating_tensor_from_f64(
+                        data,
+                        output_value.shape.clone(),
+                        output_value.numeric_dtype(),
+                        "dlgradient",
+                    )?,
                 );
             }
         }
@@ -670,15 +748,19 @@ fn reduce_gradient(
     data: &[f64],
     parent_shape: &[usize],
     output_shape: &[usize],
+    dtype: NumericDType,
 ) -> BuiltinResult<Tensor> {
     let parent_len = parent_shape.iter().product::<usize>();
     if parent_len == data.len() && parent_shape == output_shape {
-        return Tensor::new(data.to_vec(), parent_shape.to_vec())
-            .map_err(|err| deep_learning_error("dlgradient", err));
+        return floating_tensor_from_f64(data.to_vec(), parent_shape.to_vec(), dtype, "dlgradient");
     }
     if parent_len == 1 {
-        return Tensor::new(vec![data.iter().sum()], parent_shape.to_vec())
-            .map_err(|err| deep_learning_error("dlgradient", err));
+        return floating_tensor_from_f64(
+            vec![data.iter().sum()],
+            parent_shape.to_vec(),
+            dtype,
+            "dlgradient",
+        );
     }
     Err(deep_learning_error(
         "dlgradient",
@@ -693,8 +775,19 @@ fn accumulate_parent(grads: &mut HashMap<usize, Tensor>, id: Option<usize>, grad
     grads
         .entry(id)
         .and_modify(|existing| {
-            for (dst, src) in existing.data.iter_mut().zip(&grad.data) {
-                *dst += src;
+            for index in 0..tensor::tensor_element_len(existing) {
+                let current = floating_scalar_f64(
+                    existing
+                        .numeric_value_at(index)
+                        .expect("gradient index remains valid"),
+                );
+                let increment = floating_scalar_f64(
+                    grad.numeric_value_at(index)
+                        .expect("gradient index remains valid"),
+                );
+                existing
+                    .set_numeric_assignment_at(index, NumericScalar::F64(current + increment))
+                    .expect("same-shape floating gradient accumulation remains valid");
             }
         })
         .or_insert(grad);
@@ -716,8 +809,12 @@ fn gradient_tree_for_target(
                 tensor
             } else {
                 let target_tensor = host_tensor_from_value(target, "dlgradient", "target")?;
-                Tensor::new(vec![0.0; target_tensor.data.len()], target_tensor.shape.clone())
-                    .map_err(|err| deep_learning_error("dlgradient", err))?
+                floating_tensor_from_f64(
+                    vec![0.0; tensor::tensor_element_len(&target_tensor)],
+                    target_tensor.shape.clone(),
+                    target_tensor.numeric_dtype(),
+                    "dlgradient",
+                )?
             };
             let (format, labels) = dlarray_format_and_labels(target);
             Ok(super::object(
@@ -799,7 +896,7 @@ impl Payload {
         let (format, labels) = dlarray_format_and_labels(&value);
         let data = dlarray_data(&value, function)?;
         let tensor = host_tensor_from_value(&data, function, "operand")?;
-        let dtype = tensor.dtype;
+        let dtype = tensor.numeric_dtype();
         Ok(Self {
             tensor,
             node,
@@ -808,6 +905,60 @@ impl Payload {
             dtype,
         })
     }
+}
+
+fn floating_tensor_values(tensor: &Tensor, function: &'static str) -> BuiltinResult<Vec<f64>> {
+    match tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|err| deep_learning_error(function, err))?
+    {
+        NumericStorage::F64(values) => Ok(values),
+        NumericStorage::F32(values) => Ok(values.into_iter().map(f64::from).collect::<Vec<_>>()),
+        storage => Err(deep_learning_error(
+            function,
+            format!(
+                "{function}: automatic differentiation requires double or single tensors, got {}",
+                storage.class_name()
+            ),
+        )),
+    }
+}
+
+fn floating_tensor_from_f64(
+    data: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+    function: &'static str,
+) -> BuiltinResult<Tensor> {
+    match dtype {
+        NumericDType::F64 | NumericDType::F32 => Tensor::new_with_dtype(data, shape, dtype)
+            .map_err(|err| deep_learning_error(function, err)),
+        dtype => Err(deep_learning_error(
+            function,
+            format!(
+                "{function}: automatic differentiation cannot construct {} gradients",
+                dtype.class_name()
+            ),
+        )),
+    }
+}
+
+fn floating_scalar_f64(value: NumericScalar) -> f64 {
+    match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        value => panic!(
+            "automatic differentiation gradient unexpectedly used {} storage",
+            value.class_name()
+        ),
+    }
+}
+
+fn node_dtype(nodes: &[Node], id: Option<usize>, fallback: NumericDType) -> NumericDType {
+    id.and_then(|id| nodes.get(id))
+        .map(|node| node.value.numeric_dtype())
+        .unwrap_or(fallback)
 }
 
 fn wrap_result(payload: &Payload, tensor: Tensor, node: Option<usize>) -> Value {
@@ -1035,9 +1186,10 @@ pub(super) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResu
         ));
     }
     let payload = Payload::parse(input, "sum")?;
-    let total = payload.tensor.data.iter().sum::<f64>();
-    let out =
-        Tensor::new(vec![total], vec![1, 1]).map_err(|err| deep_learning_error("sum", err))?;
+    let total = floating_tensor_values(&payload.tensor, "sum")?
+        .iter()
+        .sum::<f64>();
+    let out = floating_tensor_from_f64(vec![total], vec![1, 1], payload.dtype, "sum")?;
     let node = if tape_is_active() {
         payload
             .node
@@ -1216,7 +1368,7 @@ fn record_fully_connected(
             ),
         ));
     }
-    if bias.tensor.data.len() != weights.tensor.rows {
+    if tensor::tensor_element_len(&bias.tensor) != weights.tensor.rows {
         return Err(deep_learning_error(
             function,
             format!(
@@ -1225,19 +1377,26 @@ fn record_fully_connected(
             ),
         ));
     }
+    let input_values = floating_tensor_values(&input_payload.tensor, function)?;
+    let weight_values = floating_tensor_values(&weights.tensor, function)?;
+    let bias_values = floating_tensor_values(&bias.tensor, function)?;
     let mut out = vec![0.0; input_payload.tensor.rows * weights.tensor.rows];
     for row in 0..input_payload.tensor.rows {
         for out_col in 0..weights.tensor.rows {
-            let mut acc = bias.tensor.data[out_col];
+            let mut acc = bias_values[out_col];
             for feature in 0..input_payload.tensor.cols {
-                acc += input_payload.tensor.data[row + feature * input_payload.tensor.rows]
-                    * weights.tensor.data[out_col + feature * weights.tensor.rows];
+                acc += input_values[row + feature * input_payload.tensor.rows]
+                    * weight_values[out_col + feature * weights.tensor.rows];
             }
             out[row + out_col * input_payload.tensor.rows] = acc;
         }
     }
-    let output = Tensor::new(out, vec![input_payload.tensor.rows, weights.tensor.rows])
-        .map_err(|err| deep_learning_error(function, err))?;
+    let output = floating_tensor_from_f64(
+        out,
+        vec![input_payload.tensor.rows, weights.tensor.rows],
+        input_payload.dtype,
+        function,
+    )?;
     let node = if input_payload.node.is_some() || weights.node.is_some() || bias.node.is_some() {
         Some(push_node(
             output.clone(),
@@ -1260,23 +1419,26 @@ fn map_tensor(
     f: impl Fn(f64) -> f64,
     function: &'static str,
 ) -> BuiltinResult<Tensor> {
-    Tensor::new_with_dtype(
-        input.data.into_iter().map(f).collect(),
-        input.shape,
-        input.dtype,
-    )
-    .map_err(|err| deep_learning_error(function, err))
+    let dtype = input.numeric_dtype();
+    let shape = input.shape.clone();
+    let data = floating_tensor_values(&input, function)?
+        .into_iter()
+        .map(f)
+        .collect();
+    floating_tensor_from_f64(data, shape, dtype, function)
 }
 
 fn softmax_rows(input: Tensor, function: &'static str) -> BuiltinResult<Tensor> {
-    let mut out = vec![0.0; input.data.len()];
+    let dtype = input.numeric_dtype();
+    let input_values = floating_tensor_values(&input, function)?;
+    let mut out = vec![0.0; input_values.len()];
     for row in 0..input.rows {
         let max_value = (0..input.cols)
-            .map(|col| input.data[row + col * input.rows])
+            .map(|col| input_values[row + col * input.rows])
             .fold(f64::NEG_INFINITY, f64::max);
         let mut denom = 0.0;
         for col in 0..input.cols {
-            let value = (input.data[row + col * input.rows] - max_value).exp();
+            let value = (input_values[row + col * input.rows] - max_value).exp();
             out[row + col * input.rows] = value;
             denom += value;
         }
@@ -1290,33 +1452,37 @@ fn softmax_rows(input: Tensor, function: &'static str) -> BuiltinResult<Tensor> 
             out[row + col * input.rows] /= denom;
         }
     }
-    Tensor::new(out, input.shape).map_err(|err| deep_learning_error(function, err))
+    floating_tensor_from_f64(out, input.shape, dtype, function)
 }
 
 fn matmul_grad_lhs(grad: &Tensor, lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
-    let mut data = vec![0.0; lhs.data.len()];
+    let grad_values = floating_tensor_values(grad, "dlgradient")?;
+    let rhs_values = floating_tensor_values(rhs, "dlgradient")?;
+    let mut data = vec![0.0; tensor::tensor_element_len(lhs)];
     for row in 0..lhs.rows {
         for col in 0..lhs.cols {
             let mut acc = 0.0;
             for k in 0..rhs.cols {
-                acc += grad.data[row + k * grad.rows] * rhs.data[col + k * rhs.rows];
+                acc += grad_values[row + k * grad.rows] * rhs_values[col + k * rhs.rows];
             }
             data[row + col * lhs.rows] = acc;
         }
     }
-    Tensor::new(data, lhs.shape.clone()).map_err(|err| deep_learning_error("dlgradient", err))
+    floating_tensor_from_f64(data, lhs.shape.clone(), lhs.numeric_dtype(), "dlgradient")
 }
 
 fn matmul_grad_rhs(grad: &Tensor, lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
-    let mut data = vec![0.0; rhs.data.len()];
+    let grad_values = floating_tensor_values(grad, "dlgradient")?;
+    let lhs_values = floating_tensor_values(lhs, "dlgradient")?;
+    let mut data = vec![0.0; tensor::tensor_element_len(rhs)];
     for row in 0..rhs.rows {
         for col in 0..rhs.cols {
             let mut acc = 0.0;
             for k in 0..lhs.rows {
-                acc += lhs.data[k + row * lhs.rows] * grad.data[k + col * grad.rows];
+                acc += lhs_values[k + row * lhs.rows] * grad_values[k + col * grad.rows];
             }
             data[row + col * rhs.rows] = acc;
         }
     }
-    Tensor::new(data, rhs.shape.clone()).map_err(|err| deep_learning_error("dlgradient", err))
+    floating_tensor_from_f64(data, rhs.shape.clone(), rhs.numeric_dtype(), "dlgradient")
 }

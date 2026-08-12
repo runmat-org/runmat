@@ -3,7 +3,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, Tensor, Value,
+    CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -169,8 +169,17 @@ fn real_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn real_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let data = ct.data.iter().map(|&(re, _)| re).collect::<Vec<_>>();
-    let tensor = Tensor::new(data, ct.shape.clone())
+    let shape = ct.shape.clone();
+    let storage = match ct.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::Integer(storage) => NumericStorage::from_integer_storage(storage.real),
+    };
+    let tensor = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error_with_detail(&REAL_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -256,12 +265,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn real_int_promotes_to_double() {
+    fn real_int_scalar_preserves_integer_class() {
         let result = real_builtin(Value::Int(IntValue::I32(7))).expect("real");
-        match result {
-            Value::Num(n) => assert!((n - 7.0).abs() < 1e-12),
-            other => panic!("expected scalar result, got {other:?}"),
-        }
+        assert_eq!(result, Value::Int(IntValue::I32(7)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -273,11 +279,85 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                assert!((t.data[0] - 1.0).abs() < 1e-12);
-                assert!((t.data[1] + 3.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[0] - 1.0).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] + 3.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn real_complex_single_preserves_native_class_shape_and_empty_storage() {
+        let complex = ComplexTensor::from_f32(vec![(1.25, 2.5), (-3.0, 4.0)], vec![2, 1]).unwrap();
+        let Value::Tensor(output) = real_builtin(Value::ComplexTensor(complex)).expect("real")
+        else {
+            panic!("expected single real tensor");
+        };
+        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![1.25, -3.0])
+        );
+
+        let empty = ComplexTensor::from_f32(Vec::new(), vec![0, 4]).unwrap();
+        let Value::Tensor(output) = real_builtin(Value::ComplexTensor(empty)).expect("real") else {
+            panic!("expected empty single real tensor");
+        };
+        assert_eq!(output.shape, vec![0, 4]);
+        assert_eq!(
+            output.into_numeric_storage().unwrap(),
+            NumericStorage::F32(Vec::new())
+        );
+    }
+
+    #[test]
+    fn real_integer_complex_tensor_preserves_uint64_values() {
+        let complex = ComplexTensor::new_integer(
+            runmat_builtins::IntegerComplexStorage::new(
+                runmat_builtins::IntegerStorage::U64(vec![9_223_372_036_854_775_809, u64::MAX]),
+                runmat_builtins::IntegerStorage::U64(vec![2, 3]),
+            )
+            .unwrap(),
+            vec![1, 2],
+        )
+        .unwrap();
+        let result = real_builtin(Value::ComplexTensor(complex)).expect("real");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected typed real tensor");
+        };
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::U64(vec![
+                9_223_372_036_854_775_809,
+                u64::MAX,
+            ]))
+        );
+    }
+
+    #[test]
+    fn real_integer_complex_tensor_reads_storage_without_mirror() {
+        let complex = ComplexTensor::new_integer(
+            runmat_builtins::IntegerComplexStorage::new(
+                runmat_builtins::IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+                runmat_builtins::IntegerStorage::I64(vec![7, -8]),
+            )
+            .unwrap(),
+            vec![2, 1],
+        )
+        .unwrap();
+
+        let result = real_builtin(Value::ComplexTensor(complex)).expect("real");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected typed real tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(
+            tensor.integer_storage(),
+            Some(&runmat_builtins::IntegerStorage::I64(vec![
+                i64::MIN,
+                i64::MAX,
+            ]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -288,7 +368,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0, 1.0, 1.0, 0.0]);
+                assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -302,7 +382,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data, vec![65.0, 90.0]);
+                assert_eq!(t.materialize_f64(), vec![65.0, 90.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -323,14 +403,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, -2.0, 3.5, -4.25], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = real_builtin(Value::GpuTensor(handle)).expect("real");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 1]);
-            assert_eq!(gathered.data, tensor.data);
+            assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
         });
     }
 
@@ -350,7 +430,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 1]);
-            assert_eq!(gathered.data, vec![1.0, -3.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, -3.0]);
         });
     }
 
@@ -364,7 +444,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 1.0, -2.5, 4.0], vec![4, 1]).unwrap();
         let cpu = real_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let h = runmat_accelerate_api::provider()
@@ -383,7 +463,11 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        for (a, b) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+        for (a, b) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu_tensor.materialize_f64().iter())
+        {
             assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
         }
     }
@@ -406,6 +490,6 @@ pub(crate) mod tests {
             runmat_accelerate_api::GpuTensorStorage::Real
         );
         let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-        assert_eq!(gathered.data, vec![1.0, -3.0]);
+        assert_eq!(gathered.materialize_f64(), vec![1.0, -3.0]);
     }
 }

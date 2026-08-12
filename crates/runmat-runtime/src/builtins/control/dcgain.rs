@@ -1,8 +1,12 @@
 //! DC gain for SISO transfer-function models.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -66,6 +70,26 @@ pub const DCGAIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DCGAIN_ERRORS,
 };
 
+const DCGAIN_INTEGER_SYS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "sys",
+    classes: &[],
+    availability: BuiltinIntegerInputAvailability::Rejected,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "dcgain accepts an LTI model object. Integer coefficient support belongs to model constructors and does not make an integer array a valid sys input.",
+}];
+
+pub const DCGAIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "k = dcgain(integer_sys)",
+        inputs: &DCGAIN_INTEGER_SYS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer input is inapplicable at the dynamic-system object boundary and rejects before provider access. Coefficients have already crossed the constructor's model-numeric boundary.",
+    }];
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::dcgain")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dcgain",
@@ -100,10 +124,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "dcgain,control system,steady state,transfer function,tf",
     type_resolver(dcgain_type),
     descriptor(crate::builtins::control::dcgain::DCGAIN_DESCRIPTOR),
+    integer_capabilities(crate::builtins::control::dcgain::DCGAIN_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::control::dcgain"
 )]
 async fn dcgain_builtin(sys: Value) -> BuiltinResult<Value> {
-    let model = TfModel::from_value_async(sys, "dcgain").await?;
+    let model = TfModel::from_value(sys, "dcgain")?;
     Ok(output_complex_scalar(model.dc_gain()?))
 }
 
@@ -111,7 +136,7 @@ async fn dcgain_builtin(sys: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn continuous_dcgain_evaluates_at_zero() {
@@ -127,5 +152,94 @@ mod tests {
             panic!("expected scalar gain");
         };
         assert!((gain - 2.0 / 3.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn dcgain_returns_infinity_for_continuous_and_discrete_integrators() {
+        for (numerator, denominator, sample_time, expected_negative) in [
+            (
+                Value::Num(2.0),
+                Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+                None,
+                false,
+            ),
+            (
+                Value::Num(-2.0),
+                Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+                None,
+                true,
+            ),
+            (
+                Value::Num(3.0),
+                Value::Tensor(Tensor::new(vec![1.0, -1.0], vec![1, 2]).unwrap()),
+                Some(0.1),
+                false,
+            ),
+        ] {
+            let mut arguments = vec![numerator, denominator];
+            if let Some(sample_time) = sample_time {
+                arguments.push(Value::Num(sample_time));
+            }
+            let sys = block_on(crate::call_builtin_async("tf", &arguments)).expect("tf");
+            let Value::Num(gain) = block_on(dcgain_builtin(sys)).expect("dcgain") else {
+                panic!("expected real infinite gain");
+            };
+            assert!(gain.is_infinite());
+            assert_eq!(gain.is_sign_negative(), expected_negative);
+        }
+    }
+
+    #[test]
+    fn dcgain_rejects_integer_sys_without_conflating_integer_coefficients() {
+        for sys in [
+            Value::Int(IntValue::I64(i64::MAX)),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+            ),
+        ] {
+            let error = block_on(dcgain_builtin(sys)).expect_err("integer sys rejection");
+            assert_eq!(error.identifier(), Some("RunMat:dcgain:InvalidModel"));
+        }
+
+        let sys = block_on(crate::call_builtin_async(
+            "tf",
+            &[
+                Value::Int(IntValue::U8(2)),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::I16(vec![1, 3]), vec![1, 2]).unwrap(),
+                ),
+            ],
+        ))
+        .expect("tf with integer coefficients");
+        let Value::Num(gain) = block_on(dcgain_builtin(sys)).expect("dcgain model object") else {
+            panic!("real scalar gain");
+        };
+        assert!((gain - 2.0 / 3.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn dcgain_resident_nonobject_rejects_before_provider_access() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX - 610,
+        };
+        runmat_accelerate_api::set_handle_integer_type(
+            &handle,
+            runmat_accelerate_api::IntegerElementType::U64,
+        );
+        let error = block_on(dcgain_builtin(Value::GpuTensor(handle)))
+            .expect_err("resident nonobject rejection");
+        assert_eq!(error.identifier(), Some("RunMat:dcgain:InvalidModel"));
+    }
+
+    #[test]
+    fn dcgain_integer_capability_is_an_object_boundary_rejection() {
+        assert_eq!(DCGAIN_INTEGER_CAPABILITIES.len(), 1);
+        assert!(DCGAIN_INTEGER_CAPABILITIES[0].inputs[0].classes.is_empty());
+        assert_eq!(
+            DCGAIN_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Rejected
+        );
     }
 }

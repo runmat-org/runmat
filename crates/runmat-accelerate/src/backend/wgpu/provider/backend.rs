@@ -83,6 +83,8 @@ mod image;
 mod indexing;
 #[path = "init.rs"]
 mod init;
+#[path = "ops/integer.rs"]
+mod integer;
 #[path = "ops/interpolation.rs"]
 mod interpolation;
 #[path = "ops/io.rs"]

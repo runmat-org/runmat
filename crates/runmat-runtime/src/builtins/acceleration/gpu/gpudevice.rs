@@ -4,7 +4,7 @@ use runmat_accelerate_api::{ApiDeviceInfo, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, StructValue, Value,
+    IntValue, NumericScalar, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "gpuDevice";
@@ -243,17 +244,10 @@ fn handle_single_argument(arg: &Value) -> BuiltinResult<Value> {
 
 fn struct_device_index(info: &StructValue) -> Option<u32> {
     info.fields.get("index").and_then(|value| match value {
-        Value::Int(intv) => {
-            let idx = intv.to_i64();
-            if idx >= 0 && idx <= u32::MAX as i64 {
-                Some(idx as u32)
-            } else {
-                None
-            }
-        }
+        Value::Int(intv) => intv.try_to_u64().and_then(|idx| u32::try_from(idx).ok()),
         Value::Num(n) if n.is_finite() && *n >= 0.0 => {
             let rounded = n.round();
-            if (rounded - n).abs() <= 1e-9 {
+            if (rounded - n).abs() <= 1e-9 && rounded <= u32::MAX as f64 {
                 Some(rounded as u32)
             } else {
                 None
@@ -268,7 +262,7 @@ fn is_reset_arg(value: &Value) -> bool {
         return true;
     }
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(la) => la.data.is_empty(),
         _ => false,
     }
@@ -285,9 +279,20 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
                 Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
             }
         }
-        Value::Tensor(t) => match t.data.len() {
+        Value::Tensor(t) => match tensor::tensor_element_len(t) {
             0 => Ok(None),
-            1 => num_to_index(t.data[0]),
+            1 => match t
+                .numeric_value_at(0)
+                .expect("tensor storage length matches shape")
+            {
+                NumericScalar::F64(value) => num_to_index(value),
+                NumericScalar::F32(value) => num_to_index(f64::from(value)),
+                value => integer_to_index(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                ),
+            },
             _ => Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into()),
         },
         Value::LogicalArray(la) => match la.data.len() {
@@ -315,12 +320,24 @@ fn int_to_index(raw: i64) -> BuiltinResult<Option<u32>> {
     Ok(Some(raw as u32))
 }
 
+fn integer_to_index(value: &IntValue) -> BuiltinResult<Option<u32>> {
+    value
+        .try_to_u64()
+        .and_then(|raw| u32::try_from(raw).ok())
+        .filter(|raw| *raw > 0)
+        .map(Some)
+        .ok_or_else(|| gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
+}
+
 fn num_to_index(raw: f64) -> BuiltinResult<Option<u32>> {
     if !raw.is_finite() {
         return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > 1e-9 {
+        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
+    }
+    if rounded > u32::MAX as f64 {
         return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
     let idx = rounded as i64;
@@ -332,7 +349,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{IntegerStorage, NumericStorage, ResolveContext, Tensor, Type};
 
     fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(gpu_device_builtin(args))
@@ -375,6 +392,42 @@ pub(crate) mod tests {
                 let value = call(vec![case]).expect("gpuDevice");
                 assert!(matches!(value, Value::Struct(_)));
             }
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_device_index_parser_reads_typed_integer_storage_exactly() {
+        test_support::with_test_provider(|_| {
+            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1])
+                .expect("integer tensor");
+
+            let value = call(vec![Value::Tensor(tensor)]).expect("gpuDevice");
+            assert!(matches!(value, Value::Struct(_)));
+
+            let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+                .expect("integer tensor");
+            let err = call(vec![Value::Tensor(negative)]).unwrap_err().to_string();
+            assert_eq!(err, GPU_DEVICE_ERROR_INVALID_INDEX.message);
+        });
+    }
+
+    #[test]
+    fn gpu_device_index_parser_reads_native_single_storage() {
+        test_support::with_test_provider(|_| {
+            let tensor = Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0]), vec![1, 1])
+                .expect("single tensor");
+            let value = call(vec![Value::Tensor(tensor)]).expect("gpuDevice");
+            assert!(matches!(value, Value::Struct(_)));
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gpu_device_index_parser_rejects_out_of_range_double_before_casting() {
+        test_support::with_test_provider(|_| {
+            let err = call(vec![Value::Num((u32::MAX as f64) + 1.0)]).unwrap_err();
+            assert_eq!(err.to_string(), GPU_DEVICE_ERROR_INVALID_INDEX.message);
         });
     }
 

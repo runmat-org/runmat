@@ -1,5 +1,5 @@
 use crate::graph::{AccelGraph, AccelNode, AccelOpCategory, ValueId};
-use runmat_builtins::{IntValue, Tensor, Type, Value};
+use runmat_builtins::{IntValue, NumericScalar, Tensor, Type, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReductionBehavior {
@@ -146,12 +146,10 @@ fn parse_dims_from_value(value: &Value) -> Option<Vec<usize>> {
 }
 
 fn parse_single_int(int_val: &IntValue) -> Option<Vec<usize>> {
-    let raw = int_val.to_i64();
-    if raw >= 1 {
-        Some(vec![raw as usize])
-    } else {
-        None
-    }
+    int_val
+        .try_to_usize()
+        .filter(|raw| *raw >= 1)
+        .map(|raw| vec![raw])
 }
 
 fn parse_single_float(value: f64) -> Option<Vec<usize>> {
@@ -166,20 +164,75 @@ fn parse_single_float(value: f64) -> Option<Vec<usize>> {
 }
 
 fn parse_tensor_dims(tensor: &Tensor) -> Option<Vec<usize>> {
-    if tensor.data.is_empty() {
+    if tensor.is_empty() {
         return None;
     }
-    let mut dims = Vec::with_capacity(tensor.data.len());
-    for value in &tensor.data {
-        if let Some(parsed) = parse_single_float(*value) {
-            dims.extend(parsed);
-        } else {
-            return None;
-        }
+    let mut dims = Vec::with_capacity(tensor.len());
+    for index in 0..tensor.len() {
+        let parsed = match tensor.numeric_value_at(index)? {
+            NumericScalar::F64(value) => parse_single_float(value),
+            NumericScalar::F32(value) => parse_single_float(f64::from(value)),
+            value => value
+                .into_int_value()
+                .and_then(|value| parse_single_int(&value)),
+        }?;
+        dims.extend(parsed);
     }
     if dims.is_empty() {
         None
     } else {
         Some(dims)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn reduction_dimension_preserves_representable_uint64_values() {
+        let expected = usize::try_from(u64::MAX).ok();
+        assert_eq!(
+            parse_single_int(&IntValue::U64(u64::MAX)),
+            expected.map(|value| vec![value])
+        );
+        assert_eq!(parse_single_int(&IntValue::I64(-1)), None);
+    }
+
+    #[test]
+    fn reduction_tensor_dims_read_typed_integer_storage_exactly() {
+        let dims = Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("dims");
+
+        assert_eq!(parse_tensor_dims(&dims), Some(vec![2, 3]));
+    }
+
+    #[test]
+    fn reduction_tensor_dims_read_all_integer_classes_exactly() {
+        macro_rules! assert_dims {
+            ($storage:expr) => {{
+                let dims = Tensor::new_integer($storage, vec![1, 2]).expect("dims");
+                assert_eq!(parse_tensor_dims(&dims), Some(vec![2, 3]));
+            }};
+        }
+
+        assert_dims!(IntegerStorage::I8(vec![2, 3]));
+        assert_dims!(IntegerStorage::I16(vec![2, 3]));
+        assert_dims!(IntegerStorage::I32(vec![2, 3]));
+        assert_dims!(IntegerStorage::I64(vec![2, 3]));
+        assert_dims!(IntegerStorage::U8(vec![2, 3]));
+        assert_dims!(IntegerStorage::U16(vec![2, 3]));
+        assert_dims!(IntegerStorage::U32(vec![2, 3]));
+        assert_dims!(IntegerStorage::U64(vec![2, 3]));
+    }
+
+    #[test]
+    fn reduction_tensor_dims_reject_invalid_typed_integer_storage() {
+        let zero = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("zero");
+        assert_eq!(parse_tensor_dims(&zero), None);
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("negative");
+        assert_eq!(parse_tensor_dims(&negative), None);
     }
 }

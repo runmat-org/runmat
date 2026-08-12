@@ -135,6 +135,7 @@ fn tand_complex(re: f64, im: f64) -> (f64, f64) {
     builtin_path = "crate::builtins::math::trigonometry::tand"
 )]
 async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, "tand")?;
     match value {
         Value::GpuTensor(handle) => tand_gpu(handle).await,
         Value::Complex(re, im) => {
@@ -159,8 +160,7 @@ fn tand_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let data = tensor
-        .data
+    let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| tand_scalar(value))
         .collect::<Vec<_>>();
@@ -170,7 +170,7 @@ fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 
 fn tand_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     let data = tensor
-        .data
+        .materialize_f64()
         .iter()
         .map(|&(re, im)| tand_complex(re, im))
         .collect::<Vec<_>>();
@@ -297,10 +297,32 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data[0], 0.0);
-                assert_eq!(t.data[1], 1.0);
-                assert_eq!(t.data[2], f64::INFINITY);
-                assert_eq!(t.data[3], -1.0);
+                assert_eq!(t.materialize_f64()[0], 0.0);
+                assert_eq!(t.materialize_f64()[1], 1.0);
+                assert_eq!(t.materialize_f64()[2], f64::INFINITY);
+                assert_eq!(t.materialize_f64()[3], -1.0);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tand_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![0, 45]),
+            vec![1, 2],
+        )
+        .expect("integer tensor");
+
+        match tand_builtin(Value::Tensor(tensor)).expect("tand") {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                let expected = [0.0, 1.0];
+                for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
+                    assert!((actual - expected).abs() < 1e-12);
+                }
+                assert!(out.integer_storage().is_none());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -314,9 +336,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.data[0], 0.0);
+                assert_eq!(t.materialize_f64()[0], 0.0);
                 let expected = (1.0_f64 * DEG_TO_RAD).tan();
-                assert!((t.data[1] - expected).abs() < 1e-12);
+                assert!((t.materialize_f64()[1] - expected).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

@@ -275,8 +275,9 @@ fn lasso_compute(x: Value, y: Value, mut options: LassoOptions) -> BuiltinResult
             y_values.len()
         )));
     }
+    let x_values = tensor::tensor_values_f64_cow(&x);
     if y_values.iter().any(|value| !value.is_finite())
-        || x.data.iter().any(|value| !value.is_finite())
+        || x_values.iter().any(|value| !value.is_finite())
     {
         return Err(invalid_argument(
             "lasso: X and y must contain finite real values",
@@ -440,7 +441,7 @@ fn value_to_real_vector(label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.iter().filter(|dim| **dim > 1).count() > 1 {
         return Err(invalid_argument(format!("lasso: {label} must be a vector")));
     }
-    Ok(tensor.data)
+    Ok(tensor::tensor_into_values_f64(tensor))
 }
 
 fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
@@ -465,7 +466,9 @@ fn scalar_f64(value: &Value, label: &str) -> BuiltinResult<f64> {
                 0.0
             }
         }
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            tensor::tensor_value_f64(tensor, 0)
+        }
         Value::LogicalArray(array) if array.data.len() == 1 => {
             if array.data[0] == 0 {
                 0.0
@@ -514,7 +517,11 @@ fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
 
 fn positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
     let raw = scalar_f64(value, label)?;
-    if raw < 1.0 || raw.fract() != 0.0 || raw > usize::MAX as f64 {
+    if raw < 1.0
+        || raw.fract() != 0.0
+        || raw > usize::MAX as f64
+        || (usize::BITS == 64 && raw == usize::MAX as f64)
+    {
         return Err(invalid_argument(format!(
             "lasso: {label} must be a positive integer scalar"
         )));
@@ -530,7 +537,7 @@ fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
                     "lasso: {label} must be a numeric vector"
                 )));
             }
-            tensor.data.clone()
+            tensor::tensor_values_f64(tensor)
         }
         Value::LogicalArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
@@ -629,6 +636,7 @@ fn string_list(value: &Value, label: &str) -> BuiltinResult<Vec<String>> {
 fn prepare_data(x: &Tensor, y: &[f64], options: &LassoOptions) -> BuiltinResult<PreparedData> {
     let rows = x.rows();
     let cols = x.cols();
+    let x_values = tensor::tensor_values_f64_cow(x);
     let mut weights = options.weights.clone().unwrap_or_else(|| vec![1.0; rows]);
     let weight_sum: f64 = weights.iter().sum();
     if !(weight_sum > 0.0 && weight_sum.is_finite()) {
@@ -649,10 +657,10 @@ fn prepare_data(x: &Tensor, y: &[f64], options: &LassoOptions) -> BuiltinResult<
 
     let mut x_means = vec![0.0; cols];
     let mut x_scales = vec![1.0; cols];
-    let mut x_work = vec![0.0; x.data.len()];
+    let mut x_work = vec![0.0; x_values.len()];
     for col in 0..cols {
         let mean = if options.intercept {
-            weighted_column_mean(x, &weights, col)
+            weighted_column_mean(&x_values, rows, &weights, col)
         } else {
             0.0
         };
@@ -660,7 +668,7 @@ fn prepare_data(x: &Tensor, y: &[f64], options: &LassoOptions) -> BuiltinResult<
         if options.intercept && options.standardize {
             let variance = (0..rows)
                 .map(|row| {
-                    let centered = x.get2(row, col).unwrap_or(0.0) - mean;
+                    let centered = x_values[row + col * rows] - mean;
                     weights[row] * centered * centered
                 })
                 .sum::<f64>();
@@ -673,12 +681,12 @@ fn prepare_data(x: &Tensor, y: &[f64], options: &LassoOptions) -> BuiltinResult<
         x_scales[col] = scale;
         for row in 0..rows {
             let idx = row + col * rows;
-            x_work[idx] = (x.data[idx] - mean) / scale;
+            x_work[idx] = (x_values[idx] - mean) / scale;
         }
     }
 
     Ok(PreparedData {
-        x_original: x.data.clone(),
+        x_original: x_values.to_vec(),
         x_work,
         y_original: y.to_vec(),
         y_work,
@@ -699,9 +707,9 @@ fn weighted_mean(values: &[f64], weights: &[f64]) -> f64 {
         .sum()
 }
 
-fn weighted_column_mean(x: &Tensor, weights: &[f64], col: usize) -> f64 {
-    (0..x.rows())
-        .map(|row| x.get2(row, col).unwrap_or(0.0) * weights[row])
+fn weighted_column_mean(x_values: &[f64], rows: usize, weights: &[f64], col: usize) -> f64 {
+    (0..rows)
+        .map(|row| x_values[row + col * rows] * weights[row])
         .sum()
 }
 
@@ -1144,9 +1152,20 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::StringArray;
+    use runmat_builtins::{IntValue, IntegerStorage};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn output_pair(value: Value) -> (Value, Value) {
@@ -1188,8 +1207,8 @@ mod tests {
             panic!("expected coefficient tensor");
         };
         assert_eq!(coeffs.shape, vec![2, 1]);
-        assert!((coeffs.data[0] - 2.0).abs() < 1.0e-8);
-        assert!(coeffs.data[1].abs() < 1.0e-8);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-8);
+        assert!(coeffs.materialize_f64()[1].abs() < 1.0e-8);
     }
 
     #[test]
@@ -1233,6 +1252,60 @@ mod tests {
         assert!(info.fields.contains_key("DF"));
         assert!(info.fields.contains_key("MSE"));
         assert!(info.fields.contains_key("PredictorNames"));
+    }
+
+    #[test]
+    fn lasso_reads_typed_integer_storage_exactly() {
+        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]);
+        let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), vec![4, 1]);
+        let out = block_on(lasso_builtin(
+            x,
+            y,
+            vec![
+                Value::CharArray(CharArray::new_row("Lambda")),
+                cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::CharArray(CharArray::new_row("Alpha")),
+                cleared_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+                Value::CharArray(CharArray::new_row("Weights")),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), vec![4, 1]),
+                Value::CharArray(CharArray::new_row("MaxIter")),
+                cleared_int_tensor(IntegerStorage::U16(vec![50]), vec![1, 1]),
+                Value::CharArray(CharArray::new_row("Standardize")),
+                Value::Bool(false),
+            ],
+        ))
+        .unwrap();
+        let Value::Tensor(coeffs) = out else {
+            panic!("expected coefficient tensor");
+        };
+        assert_eq!(coeffs.shape, vec![1, 1]);
+        assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-8);
+    }
+
+    #[test]
+    fn lasso_positive_usize_parses_integer_bounds_exactly() {
+        assert_eq!(
+            positive_usize(&Value::Int(IntValue::U16(3)), "NumLambda").unwrap(),
+            3
+        );
+        assert_eq!(
+            positive_usize(
+                &cleared_int_tensor(IntegerStorage::U64(vec![3]), vec![1, 1]),
+                "NumLambda"
+            )
+            .unwrap(),
+            3
+        );
+
+        for value in [
+            Value::Int(IntValue::I8(-1)),
+            Value::Num(1.5),
+            Value::Num(usize::MAX as f64),
+            Value::Num(usize::MAX as f64 + 1.0),
+            cleared_int_tensor(IntegerStorage::U64(vec![usize::MAX as u64]), vec![1, 1]),
+        ] {
+            assert!(positive_usize(&value, "NumLambda").is_err());
+        }
     }
 
     #[test]
@@ -1302,17 +1375,17 @@ mod tests {
         let lambda = row_field(&info, "Lambda");
         let mse = row_field(&info, "MSE");
         let se = row_field(&info, "SE");
-        assert_eq!(coeffs.cols, lambda.data.len());
-        assert_eq!(mse.data.len(), lambda.data.len());
-        assert_eq!(se.data.len(), lambda.data.len());
+        assert_eq!(coeffs.cols, lambda.materialize_f64().len());
+        assert_eq!(mse.materialize_f64().len(), lambda.materialize_f64().len());
+        assert_eq!(se.materialize_f64().len(), lambda.materialize_f64().len());
         let Some(Value::Num(index_min_mse)) = info.fields.get("IndexMinMSE") else {
             panic!("expected IndexMinMSE");
         };
         let Some(Value::Num(index_1se)) = info.fields.get("Index1SE") else {
             panic!("expected Index1SE");
         };
-        assert!(*index_min_mse >= 1.0 && *index_min_mse <= lambda.data.len() as f64);
-        assert!(*index_1se >= 1.0 && *index_1se <= lambda.data.len() as f64);
+        assert!(*index_min_mse >= 1.0 && *index_min_mse <= lambda.materialize_f64().len() as f64);
+        assert!(*index_1se >= 1.0 && *index_1se <= lambda.materialize_f64().len() as f64);
     }
 
     #[test]

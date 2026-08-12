@@ -208,7 +208,7 @@ fn empty_return_value() -> Value {
     Value::Tensor(Tensor::zeros(vec![0, 0]))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use futures::executor::block_on;

@@ -9,7 +9,7 @@ use futures::lock::Mutex as AsyncMutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, Value,
+    CellArray, IntValue, Value,
 };
 use runmat_filesystem::{File, OpenOptions};
 use runmat_macros::runtime_builtin;
@@ -19,6 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "writecell";
@@ -551,10 +552,38 @@ fn parse_file_type(value: &Value) -> BuiltinResult<OutputFileType> {
 
 fn parse_sheet(value: &Value) -> BuiltinResult<SheetSelector> {
     match value {
-        Value::Num(n) if n.is_finite() && *n >= 1.0 && n.fract() == 0.0 => {
+        Value::Num(n)
+            if n.is_finite() && *n >= 1.0 && n.fract() == 0.0 && *n < usize::MAX as f64 =>
+        {
             Ok(SheetSelector::Index(*n as usize))
         }
-        Value::Int(i) if i.to_i64() >= 1 => Ok(SheetSelector::Index(i.to_i64() as usize)),
+        Value::Int(i) => i
+            .try_to_usize()
+            .filter(|index| *index >= 1)
+            .map(SheetSelector::Index)
+            .ok_or_else(|| {
+                writecell_error_with(
+                    &WRITECELL_ERROR_OPTION,
+                    "writecell: Sheet must be a name or one-based numeric index",
+                )
+            }),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                let value = storage.value_at(0).expect("one-element integer storage");
+                value
+                    .try_to_usize()
+                    .filter(|index| *index >= 1)
+                    .map(SheetSelector::Index)
+                    .ok_or_else(|| {
+                        writecell_error_with(
+                            &WRITECELL_ERROR_OPTION,
+                            "writecell: Sheet must be a name or one-based numeric index",
+                        )
+                    })
+            } else {
+                parse_sheet(&Value::Num(tensor::tensor_value_f64(tensor, 0)))
+            }
+        }
         _ => {
             let text = string_scalar_from_value(value, "Sheet")
                 .map_err(|message| writecell_error_with(&WRITECELL_ERROR_OPTION, message))?;
@@ -617,6 +646,7 @@ fn parse_a1_cell(value: &str) -> Option<RangeStart> {
 pub(super) enum CellValue {
     Empty,
     Number(f64),
+    Integer(IntValue),
     Boolean(bool),
     Text(String),
 }
@@ -697,14 +727,16 @@ fn ensure_cell_shape(cell: &CellArray) -> BuiltinResult<()> {
 fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
     match value {
         Value::Num(n) => Ok(CellValue::Number(n)),
-        Value::Int(i) => Ok(CellValue::Number(i.to_f64())),
+        Value::Int(i) => Ok(CellValue::Integer(i)),
         Value::Bool(b) => Ok(CellValue::Boolean(b)),
         Value::String(s) => Ok(CellValue::Text(s)),
         Value::CharArray(ca) if ca.rows == 1 => Ok(CellValue::Text(ca.data.iter().collect())),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(CellValue::Text(sa.data[0].clone())),
         Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(CellValue::Number(tensor.data[0])),
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(CellValue::Empty),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
+            scalar_tensor_cell_value(&tensor)
+        }
+        Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
         }
@@ -721,6 +753,17 @@ fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
             &WRITECELL_ERROR_DATA,
             format!("writecell: unsupported cell value {other:?}"),
         )),
+    }
+}
+
+pub(super) fn scalar_tensor_cell_value(
+    tensor: &runmat_builtins::Tensor,
+) -> BuiltinResult<CellValue> {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage.value_at(0).expect("one-element integer storage");
+        Ok(CellValue::Integer(value))
+    } else {
+        Ok(CellValue::Number(tensor::tensor_value_f64(tensor, 0)))
     }
 }
 
@@ -1148,6 +1191,12 @@ pub(super) fn build_sheet_xml(table: &CellTable, start: RangeStart) -> String {
                         format_numeric(*value)
                     ));
                 }
+                CellValue::Integer(value) => {
+                    xml.push_str(&format!(
+                        "      <c r=\"{reference}\"><v>{}</v></c>\n",
+                        value.decimal_string()
+                    ));
+                }
                 CellValue::Boolean(value) => {
                     xml.push_str(&format!(
                         "      <c r=\"{reference}\" t=\"b\"><v>{}</v></c>\n",
@@ -1172,6 +1221,7 @@ fn format_cell_for_text(cell: &CellValue, options: &WriteCellOptions, delimiter:
     match cell {
         CellValue::Empty => String::new(),
         CellValue::Number(value) => format_numeric(*value),
+        CellValue::Integer(value) => value.decimal_string(),
         CellValue::Boolean(value) => {
             if *value {
                 "1".to_string()
@@ -1387,7 +1437,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::time::Duration;
 
-    use runmat_builtins::{CharArray, LogicalArray, Tensor};
+    use runmat_builtins::{CharArray, IntValue, IntegerStorage, LogicalArray, Tensor};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -1611,10 +1661,12 @@ mod tests {
     fn writecell_accepts_scalar_char_tensor_and_logical_cells() {
         let path = temp_path("csv");
         let filename = path.to_string_lossy().into_owned();
+        let typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed scalar tensor");
         let values = cell(
             vec![
                 Value::CharArray(CharArray::new_row("name")),
-                Value::Tensor(Tensor::new(vec![42.0], vec![1, 1]).expect("scalar tensor")),
+                Value::Tensor(typed),
                 Value::LogicalArray(LogicalArray::new(vec![0], vec![1, 1]).expect("logical")),
             ],
             1,
@@ -1624,8 +1676,45 @@ mod tests {
         block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
 
         let contents = fs::read_to_string(&path).expect("read contents");
-        assert_eq!(contents, "\"name\",42,0\n");
+        assert_eq!(contents, "\"name\",2026,0\n");
         let _ = fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn writecell_preserves_integer_cell_text_exactly() {
+        let path = temp_path("csv");
+        let filename = path.to_string_lossy().into_owned();
+        let wide = (1_u64 << 53) + 1;
+        let typed =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
+        let values = cell(
+            vec![Value::Int(IntValue::U64(u64::MAX)), Value::Tensor(typed)],
+            1,
+            2,
+        );
+
+        block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
+
+        let contents = fs::read_to_string(&path).expect("read contents");
+        assert_eq!(contents, "18446744073709551615,9007199254740993\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn writecell_sheet_parser_rejects_unrepresentable_double_boundary() {
+        assert!(parse_sheet(&Value::Num(usize::MAX as f64)).is_err());
+        assert!(parse_sheet(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+
+        let typed = Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+            .expect("typed sheet");
+        let parsed = parse_sheet(&Value::Tensor(typed));
+        match usize::try_from((1_u64 << 53) + 1) {
+            Ok(expected) => {
+                assert!(matches!(parsed, Ok(SheetSelector::Index(actual)) if actual == expected))
+            }
+            Err(_) => assert!(parsed.is_err()),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

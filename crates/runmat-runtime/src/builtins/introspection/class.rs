@@ -6,8 +6,12 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::type_resolvers::class_type;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -69,6 +73,27 @@ pub const CLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &CLASS_ERRORS,
 };
 
+const CLASS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "A",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer scalars and arrays report their exact signedness and width; gpuArray reports its container class without inspecting or gathering payload data.",
+    }];
+
+pub const CLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "name = class(A)",
+        inputs: &CLASS_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::HostAndGpu,
+        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
+        notes: "The result is a host character class name. Dense, sparse, and paired complex integer host storage is read from exact dtype metadata; resident values return gpuArray without provider access.",
+    }];
+
 #[runtime_builtin(
     name = "class",
     category = "introspection",
@@ -76,6 +101,7 @@ pub const CLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     keywords = "class,type inspection,type name,gpuArray class",
     type_resolver(class_type),
     descriptor(crate::builtins::introspection::class::CLASS_DESCRIPTOR),
+    integer_capabilities(crate::builtins::introspection::class::CLASS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::class"
 )]
 fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
@@ -85,12 +111,10 @@ fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
 /// Return the canonical MATLAB class name for a runtime value.
 pub(crate) fn class_name_for_value(value: &Value) -> String {
     match value {
-        Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
-        Value::Tensor(tensor) => tensor.integer_storage().map_or_else(
-            || tensor.dtype.class_name().to_string(),
-            |storage| storage.class_name().to_string(),
-        ),
-        Value::SparseTensor(_) => "double".to_string(),
+        Value::Num(_) | Value::Complex(_, _) => "double".to_string(),
+        Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
+        Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
+        Value::SparseTensor(sparse) => sparse.class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
@@ -130,8 +154,9 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, Listener, LogicalArray,
-        MException, ObjectInstance, StringArray, StructValue, SymbolicExpr, Tensor,
+        CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
+        IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, StringArray,
+        StructValue, SymbolicExpr, Tensor,
     };
 
     fn test_handle_target() -> runmat_gc::GcHandle {
@@ -161,6 +186,75 @@ pub(crate) mod tests {
         .expect("uint64 tensor");
 
         assert_eq!(class_name_for_value(&Value::Tensor(tensor)), "uint64");
+    }
+
+    #[test]
+    fn class_reports_exact_integer_sparse_storage_type() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .expect("uint64 sparse");
+
+        assert_eq!(class_name_for_value(&Value::SparseTensor(sparse)), "uint64");
+    }
+
+    #[test]
+    fn class_reports_exact_integer_type_for_every_typed_complex_class() {
+        let cases = [
+            (
+                "int8",
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I8(vec![2]),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![-3]),
+                IntegerStorage::I16(vec![4]),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![-5]),
+                IntegerStorage::I32(vec![6]),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![-7]),
+                IntegerStorage::I64(vec![8]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U8(vec![2]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![3]),
+                IntegerStorage::U16(vec![4]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![5]),
+                IntegerStorage::U32(vec![6]),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![7]),
+                IntegerStorage::U64(vec![8]),
+            ),
+        ];
+
+        for (expected, real, imag) in cases {
+            let storage = IntegerComplexStorage::new(real, imag).expect("matching components");
+            let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+            assert_eq!(
+                class_name_for_value(&Value::ComplexTensor(tensor)),
+                expected
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -236,7 +330,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -300,7 +394,7 @@ pub(crate) mod tests {
 
         let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("wgpu upload");

@@ -53,10 +53,16 @@ impl ErrorBar {
     pub fn new_vertical(
         x: Vec<f64>,
         y: Vec<f64>,
-        y_neg: Vec<f64>,
-        y_pos: Vec<f64>,
+        mut y_neg: Vec<f64>,
+        mut y_pos: Vec<f64>,
     ) -> Result<Self, String> {
         let n = x.len();
+        if y_neg.is_empty() {
+            y_neg.resize(n, 0.0);
+        }
+        if y_pos.is_empty() {
+            y_pos.resize(n, 0.0);
+        }
         if n == 0 || y.len() != n || y_neg.len() != n || y_pos.len() != n {
             return Err("errorbar: input vectors must have equal non-zero length".to_string());
         }
@@ -72,13 +78,7 @@ impl ErrorBar {
             line_width: 1.0,
             line_style: LineStyle::Solid,
             cap_size: 6.0,
-            marker: Some(LineMarkerAppearance {
-                kind: crate::plots::scatter::MarkerStyle::Circle,
-                size: 6.0,
-                edge_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
-                face_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
-                filled: false,
-            }),
+            marker: None,
             label: None,
             visible: true,
             vertices: None,
@@ -97,12 +97,18 @@ impl ErrorBar {
     pub fn new_both(
         x: Vec<f64>,
         y: Vec<f64>,
-        x_neg: Vec<f64>,
-        x_pos: Vec<f64>,
+        mut x_neg: Vec<f64>,
+        mut x_pos: Vec<f64>,
         y_neg: Vec<f64>,
         y_pos: Vec<f64>,
     ) -> Result<Self, String> {
         let n = x.len();
+        if x_neg.is_empty() {
+            x_neg.resize(n, 0.0);
+        }
+        if x_pos.is_empty() {
+            x_pos.resize(n, 0.0);
+        }
         if n == 0
             || y.len() != n
             || x_neg.len() != n
@@ -789,5 +795,22 @@ mod tests {
         let render = plot.render_data_with_viewport(Some((600, 400)));
         assert_eq!(render.pipeline_type, PipelineType::Triangles);
         assert!(!render.vertices.is_empty());
+    }
+
+    #[test]
+    fn empty_directional_deltas_are_omitted_and_default_marker_is_none() {
+        let plot = ErrorBar::new_both(
+            vec![1.0, 2.0],
+            vec![3.0, 4.0],
+            Vec::new(),
+            Vec::new(),
+            vec![0.1, 0.2],
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(plot.x_neg, vec![0.0, 0.0]);
+        assert_eq!(plot.x_pos, vec![0.0, 0.0]);
+        assert_eq!(plot.y_pos, vec![0.0, 0.0]);
+        assert!(plot.marker.is_none());
     }
 }

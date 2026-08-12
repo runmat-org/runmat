@@ -390,7 +390,12 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
 
 fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
     let raw = match value {
-        Value::Int(i) => i.to_i64(),
+        Value::Int(i) => i.try_to_i64().ok_or_else(|| {
+            tcpclient_flow(
+                &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                format!("tcpclient: {label} must lie in 1..{}", i32::MAX),
+            )
+        })?,
         Value::Num(n) => {
             if !n.is_finite() || n.fract() != 0.0 {
                 return Err(tcpclient_flow(
@@ -400,15 +405,24 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
             }
             *n as i64
         }
-        Value::Tensor(t) if t.data.len() == 1 => {
-            let n = t.data[0];
-            if !n.is_finite() || n.fract() != 0.0 {
-                return Err(tcpclient_flow(
-                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
-                    format!("tcpclient: {label} must be a finite integer"),
-                ));
+        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
+            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                int.try_to_i64().ok_or_else(|| {
+                    tcpclient_flow(
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpclient: {label} must lie in 1..{}", i32::MAX),
+                    )
+                })?
+            } else {
+                let n = crate::builtins::common::tensor::tensor_value_f64(t, 0);
+                if !n.is_finite() || n.fract() != 0.0 {
+                    return Err(tcpclient_flow(
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpclient: {label} must be a finite integer"),
+                    ));
+                }
+                n as i64
             }
-            n as i64
         }
         _ => {
             return Err(tcpclient_flow(
@@ -549,7 +563,7 @@ fn build_tcpclient_struct(
 pub(crate) mod tests {
     use super::super::accept::remove_client_for_test;
     use super::*;
-    use runmat_builtins::Value;
+    use runmat_builtins::{IntegerStorage, Tensor, Value};
     use std::net::TcpListener;
     use std::thread;
     use std::time::Duration;
@@ -590,6 +604,34 @@ pub(crate) mod tests {
             .collect();
         assert!(labels.contains(&"client = tcpclient(host, port)"));
         assert!(labels.contains(&"client = tcpclient(host, port, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn typed_buffer_size_parser_preserves_range_boundaries() {
+        assert_eq!(
+            parse_buffer_size(&Value::Int(IntValue::U16(512)), "InputBufferSize").unwrap(),
+            512
+        );
+        assert!(parse_buffer_size(&Value::Int(IntValue::I8(-1)), "InputBufferSize").is_err());
+        assert!(
+            parse_buffer_size(&Value::Int(IntValue::U64(u64::MAX)), "InputBufferSize").is_err()
+        );
+
+        let typed = Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64]), vec![1, 1])
+            .expect("typed buffer size");
+        assert_eq!(
+            parse_buffer_size(&Value::Tensor(typed), "InputBufferSize").unwrap(),
+            i32::MAX
+        );
+
+        let typed_too_large =
+            Tensor::new_integer(IntegerStorage::U64(vec![i32::MAX as u64 + 1]), vec![1, 1])
+                .expect("typed buffer size");
+        assert!(parse_buffer_size(&Value::Tensor(typed_too_large), "InputBufferSize").is_err());
+
+        let typed_negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
+            .expect("typed buffer size");
+        assert!(parse_buffer_size(&Value::Tensor(typed_negative), "InputBufferSize").is_err());
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {

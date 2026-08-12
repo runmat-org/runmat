@@ -178,8 +178,8 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        assert!((tensor.data[0] - 2.25).abs() < 1e-10);
-        assert!((tensor.data[1] - 6.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[0] - 2.25).abs() < 1e-10);
+        assert!((tensor.materialize_f64()[1] - 6.25).abs() < 1e-10);
     }
 
     #[test]

@@ -8,19 +8,20 @@
     "reduction": false,
     "precisions": ["f64"],
     "broadcasting": "none",
-    "notes": "dividerand produces host-side index partitions and uses RunMat's global random generator state."
+    "notes": "No GPU capability is documented. Host output is standard; resident scalar arguments are accepted only as a named RunMat extension."
   },
   "fusion": { "elementwise": false, "reduction": false, "max_inputs": 0, "constants": "none" },
   "requires_feature": null,
   "tested": { "unit": "builtins::stats::random::sampling::tests", "integration": "crates/runmat-vm/tests/stats_ml.rs" },
   "description": "`dividerand(Q,trainRatio,valRatio,testRatio)` randomly permutes the one-based target indices `1:Q` and divides them into training, validation, and test row vectors. `dividerand(Q)` uses the documented default ratios `0.7`, `0.15`, and `0.15`.",
   "behaviors": [
-    "`Q` must be a nonnegative integer scalar.",
+    "`Q` must be a nonnegative integer scalar. All eight typed integer scalar classes are decoded exactly before allocation.",
     "`Q` is capped at 10,000,000 so index partitions fail cleanly before excessive host allocation.",
     "Ratios must be finite nonnegative scalar values, and at least one ratio must be positive.",
-    "Ratios are normalized before allocation, so they do not need to sum to one.",
+    "RunMat normalizes ratios and uses largest remainders for allocation. The public documentation does not specify this tie-breaking algorithm.",
     "Returned indices are one-based row vectors and together form a random permutation of `1:Q`.",
-    "Empty partitions are returned as `1-by-0` numeric tensors."
+    "Empty partitions are returned as `1-by-0` double tensors.",
+    "MathWorks marks `dividerand` for removal in R2026a; RunMat retains it for backward compatibility."
   ],
   "examples": [
     { "description": "Default split", "input": "[trainInd,valInd,testInd] = dividerand(100)" },
@@ -32,7 +33,7 @@
       "answer": "Yes. The random permutation is drawn from RunMat's global random generator, so `rng('default')` and numeric seeds make results reproducible."
     }
   ],
-  "links": [{ "label": "rng", "url": "./rng" }, { "label": "randperm", "url": "./randperm" }],
+  "links": [{ "label": "rng", "url": "./rng" }, { "label": "randperm", "url": "./randperm" }, {"label": "MathWorks R2026a dividerand documentation", "url": "https://www.mathworks.com/help/deeplearning/ref/dividerand.html"}],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/stats/random/sampling.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/sampling.rs"

@@ -209,6 +209,7 @@ mod tests {
         ));
         let title = Value::CharArray(CharArray {
             data: "Right".chars().collect(),
+            shape: vec![1, 5],
             rows: 1,
             cols: 5,
         });

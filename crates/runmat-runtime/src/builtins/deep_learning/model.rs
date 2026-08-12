@@ -1,12 +1,15 @@
-use runmat_builtins::{CellArray, ObjectInstance, StructValue, Tensor, Value};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_builtins::{
+    CellArray, NumericDType, NumericStorage, ObjectInstance, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
-use crate::BuiltinResult;
+use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
     any_type, autodiff, deep_learning_error, gather_args, layer_names, layers_from_value,
-    numeric_values, object, parse_name_values, scalar_text, string_array, tensor_value,
-    unsupported_error,
+    logical_scalar, numeric_values, numeric_vector, object, parse_name_values, positive_usize,
+    scalar_text, string_array, tensor_value, unsupported_error,
 };
 
 pub(crate) const DLNETWORK_CLASS: &str = "dlnetwork";
@@ -60,11 +63,22 @@ pub(super) async fn forward_builtin(
             "forward: name-value options are not supported for RunMat network forward execution",
         ));
     }
-    if is_gpu_backed_dlarray(&input) {
-        return Err(unsupported_error(
-            "forward",
-            "forward: GPU-backed dlarray execution requires provider-resident deep-learning kernels",
-        ));
+    if let Some(handle) = gpu_backed_dlarray_handle(&input) {
+        let network_object = require_network_object(network, "forward")?;
+        let format = dlarray_format(&input);
+        let output = evaluate_network_gpu(&network_object, handle, "forward").await?;
+        let wrapped = object(
+            "dlarray",
+            vec![
+                (
+                    "Data",
+                    crate::builtins::common::gpu_helpers::resident_gpu_value(output),
+                ),
+                ("Format", Value::String(format.clone())),
+                ("Labels", Value::String(format)),
+            ],
+        );
+        return autodiff::annotate_dlarray_value(wrapped);
     }
     let network = crate::gather_if_needed_async(&network).await?;
     let input = crate::gather_if_needed_async(&input).await?;
@@ -96,16 +110,17 @@ pub(super) async fn forward_builtin(
     }
 }
 
-fn is_gpu_backed_dlarray(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Object(object)
-            if object.class_name == "dlarray"
-                && object
-                    .properties
-                    .get("Data")
-                    .is_some_and(crate::value_contains_gpu)
-    )
+fn gpu_backed_dlarray_handle(value: &Value) -> Option<&GpuTensorHandle> {
+    let Value::Object(object) = value else {
+        return None;
+    };
+    if object.class_name != "dlarray" {
+        return None;
+    }
+    match object.properties.get("Data") {
+        Some(Value::GpuTensor(handle)) => Some(handle),
+        _ => None,
+    }
 }
 
 pub(crate) fn is_deep_learning_network_object(object: &ObjectInstance) -> bool {
@@ -255,31 +270,6 @@ fn remove_case_insensitive_option(
         .find(|key| key.eq_ignore_ascii_case(name))
         .cloned()?;
     options.remove(&key)
-}
-
-fn logical_scalar(value: &Value, function: &'static str, label: &str) -> BuiltinResult<bool> {
-    match value {
-        Value::Bool(flag) => Ok(*flag),
-        Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(*n != 0.0),
-        Value::Int(i) => {
-            let n = i.to_f64();
-            if n == 0.0 || n == 1.0 {
-                Ok(n != 0.0)
-            } else {
-                Err(deep_learning_error(
-                    function,
-                    format!("{function}: {label} must be logical scalar true or false"),
-                ))
-            }
-        }
-        Value::Tensor(t) if t.data.len() == 1 && (t.data[0] == 0.0 || t.data[0] == 1.0) => {
-            Ok(t.data[0] != 0.0)
-        }
-        other => Err(deep_learning_error(
-            function,
-            format!("{function}: {label} must be logical scalar true or false, got {other:?}"),
-        )),
-    }
 }
 
 pub(super) fn learnables_struct(layers: &[Value], function: &'static str) -> BuiltinResult<Value> {
@@ -436,7 +426,7 @@ fn require_network_object(value: Value, function: &'static str) -> BuiltinResult
 }
 
 fn input_tensor(value: Value, function: &'static str) -> BuiltinResult<Tensor> {
-    match value {
+    let tensor = match value {
         Value::Object(object) if object.class_name == "dlarray" => {
             let data = object.properties.get("Data").cloned().ok_or_else(|| {
                 deep_learning_error(function, format!("{function}: dlarray is missing Data"))
@@ -451,7 +441,8 @@ fn input_tensor(value: Value, function: &'static str) -> BuiltinResult<Tensor> {
         }
         other => crate::builtins::common::tensor::value_into_tensor_for(function, other)
             .map_err(|err| deep_learning_error(function, format!("{function}: {err}"))),
-    }
+    }?;
+    normalize_numeric_tensor(tensor, function)
 }
 
 fn dlarray_format(value: &Value) -> String {
@@ -531,6 +522,290 @@ fn evaluate_network(
     Ok(current)
 }
 
+/// Execute the subset of sequential feed-forward networks for which every
+/// operation is available through the acceleration provider. The complete
+/// layer sequence is validated before the first upload or dispatch so a
+/// rejected layer cannot leave behind a partially executed GPU forward pass.
+async fn evaluate_network_gpu(
+    object: &ObjectInstance,
+    input: &GpuTensorHandle,
+    function: &'static str,
+) -> BuiltinResult<GpuTensorHandle> {
+    let provider = runmat_accelerate_api::provider_for_handle(input).ok_or_else(|| {
+        unsupported_error(
+            function,
+            format!("{function}: no acceleration provider owns the GPU dlarray input"),
+        )
+    })?;
+    let layers = object
+        .properties
+        .get("Layers")
+        .cloned()
+        .map(|value| layers_from_value(value, function))
+        .transpose()?
+        .unwrap_or_default();
+    validate_gpu_forward_layers(&layers, input, function)?;
+
+    let mut current = input.clone();
+    let mut current_is_temporary = false;
+    for layer in layers {
+        let Value::Object(layer) = layer else {
+            unreachable!("validate_gpu_forward_layers accepts layer objects only");
+        };
+        match layer.class_name.as_str() {
+            "nnet.cnn.layer.FullyConnectedLayer" => {
+                current = fully_connected_forward_gpu(
+                    provider,
+                    current,
+                    current_is_temporary,
+                    &layer,
+                    function,
+                )
+                .await?;
+                current_is_temporary = true;
+            }
+            "nnet.cnn.layer.ReLULayer" => {
+                let output = provider.scalar_max(&current, 0.0).map_err(|err| {
+                    deep_learning_error(
+                        function,
+                        format!("{function}: provider-resident ReLU failed: {err}"),
+                    )
+                })?;
+                if current_is_temporary {
+                    let _ = provider.free(&current);
+                }
+                current = output;
+                current_is_temporary = true;
+            }
+            "nnet.cnn.layer.ELULayer" => {
+                let alpha = elu_alpha(&layer, function)?;
+                let output = match provider.activation_elu(&current, alpha).await {
+                    Ok(handle) => handle,
+                    Err(err) => {
+                        if current_is_temporary {
+                            let _ = provider.free(&current);
+                        }
+                        return Err(deep_learning_error(
+                            function,
+                            format!("{function}: provider-resident ELU failed: {err}"),
+                        ));
+                    }
+                };
+                if current_is_temporary {
+                    let _ = provider.free(&current);
+                }
+                current = output;
+                current_is_temporary = true;
+            }
+            "nnet.cnn.layer.SoftmaxLayer" => {
+                let output = match provider.activation_softmax_rows(&current).await {
+                    Ok(handle) => handle,
+                    Err(err) => {
+                        if current_is_temporary {
+                            let _ = provider.free(&current);
+                        }
+                        return Err(deep_learning_error(
+                            function,
+                            format!("{function}: provider-resident Softmax failed: {err}"),
+                        ));
+                    }
+                };
+                if current_is_temporary {
+                    let _ = provider.free(&current);
+                }
+                current = output;
+                current_is_temporary = true;
+            }
+            _ => {}
+        }
+    }
+    Ok(current)
+}
+
+fn validate_gpu_forward_layers(
+    layers: &[Value],
+    input: &GpuTensorHandle,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    if runmat_accelerate_api::handle_storage(input) != runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        return Err(unsupported_error(
+            function,
+            format!(
+                "{function}: provider-resident forward currently requires a real dlarray input"
+            ),
+        ));
+    }
+    if input.shape.len() != 2 {
+        return Err(unsupported_error(
+            function,
+            format!("{function}: provider-resident forward currently requires a 2-D dlarray input"),
+        ));
+    }
+    let mut features = input.shape[1];
+    let mut saw_input = false;
+    let mut saw_transform = false;
+    for layer in layers {
+        let Value::Object(layer) = layer else {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: network layers must be layer objects"),
+            ));
+        };
+        match layer.class_name.as_str() {
+            "nnet.cnn.layer.FeatureInputLayer" if !saw_input => {
+                let expected = feature_input_width(layer, function)?;
+                if features != expected {
+                    return Err(deep_learning_error(
+                        function,
+                        format!(
+                            "{function}: input has {features} features, but featureInputLayer expects {expected}"
+                        ),
+                    ));
+                }
+                saw_input = true;
+            }
+            "nnet.cnn.layer.FullyConnectedLayer" if saw_input => {
+                let weights = tensor_property(layer, "Weights", function)?;
+                if weights.shape.len() > 2 || weights.cols != features {
+                    return Err(deep_learning_error(
+                        function,
+                        format!(
+                            "{function}: fullyConnectedLayer Weights must be outputSize-by-{features}"
+                        ),
+                    ));
+                }
+                let bias = tensor_property(layer, "Bias", function)?;
+                if tensor::tensor_element_len(&bias) != weights.rows {
+                    return Err(deep_learning_error(
+                        function,
+                        format!(
+                            "{function}: fullyConnectedLayer Bias must have {} elements",
+                            weights.rows
+                        ),
+                    ));
+                }
+                features = weights.rows;
+                saw_transform = true;
+            }
+            "nnet.cnn.layer.ReLULayer" if saw_input => saw_transform = true,
+            "nnet.cnn.layer.ELULayer" if saw_input => {
+                let _ = elu_alpha(layer, function)?;
+                saw_transform = true;
+            }
+            "nnet.cnn.layer.SoftmaxLayer" if saw_input => saw_transform = true,
+            "nnet.cnn.layer.ClassificationOutputLayer" | "nnet.cnn.layer.RegressionOutputLayer"
+                if saw_input && saw_transform => {}
+            other => {
+                return Err(unsupported_error(
+                    function,
+                    format!(
+                        "{function}: provider-resident forward does not yet support layer type '{other}'"
+                    ),
+                ));
+            }
+        }
+    }
+    if !saw_input {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: network must start with a supported input layer"),
+        ));
+    }
+    if !saw_transform {
+        return Err(unsupported_error(
+            function,
+            format!(
+                "{function}: provider-resident forward requires at least one supported transform layer"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+async fn fully_connected_forward_gpu(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    current: GpuTensorHandle,
+    current_is_temporary: bool,
+    layer: &ObjectInstance,
+    function: &'static str,
+) -> BuiltinResult<GpuTensorHandle> {
+    let weights = tensor_property(layer, "Weights", function)?;
+    let bias = tensor_property(layer, "Bias", function)?;
+    let weights_transposed = transpose_2d(&weights, function)?;
+    let bias_row = Tensor::from_numeric_storage(
+        bias.into_numeric_storage()
+            .map_err(|err| deep_learning_error(function, err))?,
+        vec![1, weights.rows],
+    )
+    .map_err(|err| deep_learning_error(function, err))?;
+    let weights_upload = tensor::tensor_values_f64_cow(&weights_transposed);
+    let weights_handle = provider
+        .upload(&HostTensorView {
+            data: weights_upload.as_ref(),
+            shape: &weights_transposed.shape,
+        })
+        .map_err(|err| {
+            deep_learning_error(
+                function,
+                format!("{function}: GPU weight upload failed: {err}"),
+            )
+        })?;
+    let bias_upload = tensor::tensor_values_f64_cow(&bias_row);
+    let bias_handle = match provider.upload(&HostTensorView {
+        data: bias_upload.as_ref(),
+        shape: &bias_row.shape,
+    }) {
+        Ok(handle) => handle,
+        Err(err) => {
+            let _ = provider.free(&weights_handle);
+            if current_is_temporary {
+                let _ = provider.free(&current);
+            }
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: GPU bias upload failed: {err}"),
+            ));
+        }
+    };
+    let product = match provider.matmul(&current, &weights_handle).await {
+        Ok(handle) => handle,
+        Err(err) => {
+            let _ = provider.free(&weights_handle);
+            let _ = provider.free(&bias_handle);
+            if current_is_temporary {
+                let _ = provider.free(&current);
+            }
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: provider-resident fully connected matmul failed: {err}"),
+            ));
+        }
+    };
+    let output = match provider.elem_add(&product, &bias_handle).await {
+        Ok(handle) => handle,
+        Err(err) => {
+            let _ = provider.free(&weights_handle);
+            let _ = provider.free(&bias_handle);
+            let _ = provider.free(&product);
+            if current_is_temporary {
+                let _ = provider.free(&current);
+            }
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: provider-resident fully connected bias add failed: {err}"),
+            ));
+        }
+    };
+    let _ = provider.free(&weights_handle);
+    let _ = provider.free(&bias_handle);
+    let _ = provider.free(&product);
+    if current_is_temporary {
+        let _ = provider.free(&current);
+    }
+    Ok(output)
+}
+
 fn fully_connected_forward(
     input: Tensor,
     layer: &ObjectInstance,
@@ -547,7 +822,7 @@ fn fully_connected_forward(
         ));
     }
     let bias = tensor_property(layer, "Bias", function)?;
-    if bias.data.len() != weights.rows {
+    if tensor::tensor_element_len(&bias) != weights.rows {
         return Err(deep_learning_error(
             function,
             format!(
@@ -556,19 +831,22 @@ fn fully_connected_forward(
             ),
         ));
     }
+    let dtype = input.numeric_dtype();
+    let input_values = floating_tensor_values(&input, function)?;
+    let weight_values = floating_tensor_values(&weights, function)?;
+    let bias_values = floating_tensor_values(&bias, function)?;
     let mut out = vec![0.0; input.rows * weights.rows];
     for row in 0..input.rows {
         for out_col in 0..weights.rows {
-            let mut acc = bias.data[out_col];
+            let mut acc = bias_values[out_col];
             for feature in 0..input.cols {
-                acc += input.data[row + feature * input.rows]
-                    * weights.data[out_col + feature * weights.rows];
+                acc += input_values[row + feature * input.rows]
+                    * weight_values[out_col + feature * weights.rows];
             }
             out[row + out_col * input.rows] = acc;
         }
     }
-    Tensor::new(out, vec![input.rows, weights.rows])
-        .map_err(|err| deep_learning_error(function, err))
+    floating_tensor_from_f64(out, vec![input.rows, weights.rows], dtype, function)
 }
 
 fn elu_forward(
@@ -576,13 +854,7 @@ fn elu_forward(
     layer: &ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<Tensor> {
-    let alpha = layer
-        .properties
-        .get("Alpha")
-        .map(|value| numeric_values(value, function, "Alpha"))
-        .transpose()?
-        .and_then(|values| values.first().copied())
-        .unwrap_or(1.0);
+    let alpha = elu_alpha(layer, function)?;
     map_tensor(
         input,
         |value| {
@@ -596,15 +868,27 @@ fn elu_forward(
     )
 }
 
+fn elu_alpha(layer: &ObjectInstance, function: &'static str) -> BuiltinResult<f64> {
+    Ok(layer
+        .properties
+        .get("Alpha")
+        .map(|value| numeric_values(value, function, "Alpha"))
+        .transpose()?
+        .and_then(|values| values.first().copied())
+        .unwrap_or(1.0))
+}
+
 fn softmax_rows(input: Tensor, function: &'static str) -> BuiltinResult<Tensor> {
-    let mut out = vec![0.0; input.data.len()];
+    let dtype = input.numeric_dtype();
+    let input_values = floating_tensor_values(&input, function)?;
+    let mut out = vec![0.0; input_values.len()];
     for row in 0..input.rows {
         let max_value = (0..input.cols)
-            .map(|col| input.data[row + col * input.rows])
+            .map(|col| input_values[row + col * input.rows])
             .fold(f64::NEG_INFINITY, f64::max);
         let mut denom = 0.0;
         for col in 0..input.cols {
-            let value = (input.data[row + col * input.rows] - max_value).exp();
+            let value = (input_values[row + col * input.rows] - max_value).exp();
             out[row + col * input.rows] = value;
             denom += value;
         }
@@ -618,7 +902,7 @@ fn softmax_rows(input: Tensor, function: &'static str) -> BuiltinResult<Tensor> 
             out[row + col * input.rows] /= denom;
         }
     }
-    Tensor::new(out, input.shape).map_err(|err| deep_learning_error(function, err))
+    floating_tensor_from_f64(out, input.shape, dtype, function)
 }
 
 fn map_tensor(
@@ -626,12 +910,13 @@ fn map_tensor(
     f: impl Fn(f64) -> f64,
     function: &'static str,
 ) -> BuiltinResult<Tensor> {
-    Tensor::new_with_dtype(
-        input.data.into_iter().map(f).collect(),
-        input.shape,
-        input.dtype,
-    )
-    .map_err(|err| deep_learning_error(function, err))
+    let dtype = input.numeric_dtype();
+    let shape = input.shape.clone();
+    let data = floating_tensor_values(&input, function)?
+        .into_iter()
+        .map(f)
+        .collect();
+    floating_tensor_from_f64(data, shape, dtype, function)
 }
 
 fn require_2d(tensor: Tensor, function: &'static str, label: &str) -> BuiltinResult<Tensor> {
@@ -651,14 +936,57 @@ fn transpose_2d(tensor: &Tensor, function: &'static str) -> BuiltinResult<Tensor
             "predict: ObservationsIn='columns' requires a 2-D matrix",
         ));
     }
-    let mut out = vec![0.0; tensor.data.len()];
+    let mut indices = vec![0usize; tensor::tensor_element_len(tensor)];
     for row in 0..tensor.rows {
         for col in 0..tensor.cols {
-            out[col + row * tensor.cols] = tensor.data[row + col * tensor.rows];
+            indices[col + row * tensor.cols] = row + col * tensor.rows;
         }
     }
-    Tensor::new(out, vec![tensor.cols, tensor.rows])
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|err| deep_learning_error(function, err))?
+        .reorder(&indices)
+        .map_err(|err| deep_learning_error(function, err))?;
+    Tensor::from_numeric_storage(storage, vec![tensor.cols, tensor.rows])
         .map_err(|err| deep_learning_error(function, err))
+}
+
+fn floating_tensor_values(tensor: &Tensor, function: &'static str) -> BuiltinResult<Vec<f64>> {
+    match tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|err| deep_learning_error(function, err))?
+    {
+        NumericStorage::F64(values) => Ok(values),
+        NumericStorage::F32(values) => Ok(values.into_iter().map(f64::from).collect()),
+        storage => Err(deep_learning_error(
+            function,
+            format!(
+                "{function}: model forward requires double or single tensors, got {}",
+                storage.class_name()
+            ),
+        )),
+    }
+}
+
+fn floating_tensor_from_f64(
+    data: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+    function: &'static str,
+) -> BuiltinResult<Tensor> {
+    match dtype {
+        NumericDType::F64 | NumericDType::F32 => Tensor::new_with_dtype(data, shape, dtype)
+            .map_err(|err| deep_learning_error(function, err)),
+        dtype => Err(deep_learning_error(
+            function,
+            format!(
+                "{function}: model forward cannot construct {} output",
+                dtype.class_name()
+            ),
+        )),
+    }
 }
 
 pub(super) fn feature_input_width(
@@ -669,20 +997,14 @@ pub(super) fn feature_input_width(
         .properties
         .get("InputSize")
         .ok_or_else(|| deep_learning_error(function, "featureInputLayer is missing InputSize"))
-        .and_then(|value| numeric_values(value, function, "InputSize"))?;
+        .and_then(|value| numeric_vector(value, function, "InputSize"))?;
     let Some(width) = values.first() else {
         return Err(deep_learning_error(
             function,
             "featureInputLayer InputSize must not be empty",
         ));
     };
-    if !width.is_finite() || *width < 1.0 || width.fract().abs() > f64::EPSILON {
-        return Err(deep_learning_error(
-            function,
-            "featureInputLayer InputSize must contain positive integers",
-        ));
-    }
-    Ok(*width as usize)
+    Ok(*width)
 }
 
 pub(super) fn positive_property_usize(
@@ -690,24 +1012,16 @@ pub(super) fn positive_property_usize(
     name: &str,
     function: &'static str,
 ) -> BuiltinResult<usize> {
-    let values = object
-        .properties
-        .get(name)
-        .ok_or_else(|| {
-            deep_learning_error(function, format!("{function}: layer is missing {name}"))
-        })
-        .and_then(|value| numeric_values(value, function, name))?;
-    if values.len() != 1
-        || !values[0].is_finite()
-        || values[0] < 1.0
-        || values[0].fract().abs() > f64::EPSILON
-    {
-        return Err(deep_learning_error(
+    let values = object.properties.get(name).ok_or_else(|| {
+        deep_learning_error(function, format!("{function}: layer is missing {name}"))
+    })?;
+    match positive_usize(values, function, name) {
+        Ok(value) => Ok(value),
+        Err(_) => Err(deep_learning_error(
             function,
             format!("{function}: {name} must be a positive integer scalar"),
-        ));
+        )),
     }
-    Ok(values[0] as usize)
 }
 
 pub(super) fn tensor_property(
@@ -721,6 +1035,11 @@ pub(super) fn tensor_property(
     let value = autodiff::dlarray_data(&value, function)?;
     crate::builtins::common::tensor::value_into_tensor_for(function, value)
         .map_err(|err| deep_learning_error(function, format!("{function}: {err}")))
+        .and_then(|tensor| normalize_numeric_tensor(tensor, function))
+}
+
+fn normalize_numeric_tensor(tensor: Tensor, function: &'static str) -> BuiltinResult<Tensor> {
+    tensor::integer_tensor_to_f64(tensor).map_err(|err| deep_learning_error(function, err))
 }
 
 pub(super) fn layer_name(object: &ObjectInstance) -> String {

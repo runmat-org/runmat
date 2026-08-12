@@ -197,9 +197,10 @@ fn is_underlying_type_builtin(value: Value, typename: Value) -> BuiltinResult<Va
 /// Return the canonical underlying MATLAB data type for a runtime value.
 pub(crate) fn underlying_type_for_value(value: &Value) -> String {
     match value {
-        Value::Tensor(tensor) => tensor.dtype.class_name().to_string(),
-        Value::SparseTensor(_) => "double".to_string(),
-        Value::ComplexTensor(_) | Value::Complex(_, _) | Value::Num(_) => "double".to_string(),
+        Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
+        Value::SparseTensor(sparse) => sparse.class_name().to_string(),
+        Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
+        Value::Complex(_, _) | Value::Num(_) => "double".to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::GpuTensor(handle) => {
@@ -251,8 +252,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, CharArray, IntValue, LogicalArray, NumericDType, ObjectInstance, StringArray,
-        StructValue, Tensor,
+        CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+        LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor,
     };
 
     #[test]
@@ -284,6 +285,78 @@ pub(crate) mod tests {
             underlying_type_for_value(&Value::String("abc".into())),
             "string"
         );
+    }
+
+    #[test]
+    fn underlying_type_reports_typed_sparse_integer_class() {
+        let sparse = runmat_builtins::SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .expect("int64 sparse");
+
+        assert_eq!(
+            underlying_type_for_value(&Value::SparseTensor(sparse)),
+            "int64"
+        );
+    }
+
+    #[test]
+    fn underlying_type_reports_every_typed_complex_integer_class() {
+        let cases = [
+            (
+                "int8",
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I8(vec![2]),
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![-3]),
+                IntegerStorage::I16(vec![4]),
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![-5]),
+                IntegerStorage::I32(vec![6]),
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![-7]),
+                IntegerStorage::I64(vec![8]),
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U8(vec![2]),
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![3]),
+                IntegerStorage::U16(vec![4]),
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![5]),
+                IntegerStorage::U32(vec![6]),
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![7]),
+                IntegerStorage::U64(vec![8]),
+            ),
+        ];
+
+        for (expected, real, imag) in cases {
+            let storage = IntegerComplexStorage::new(real, imag).expect("matching components");
+            let value = Value::ComplexTensor(
+                ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex"),
+            );
+            assert_eq!(underlying_type_for_value(&value), expected);
+            assert!(underlying_type_matches(&value, expected));
+        }
     }
 
     #[test]
@@ -362,7 +435,7 @@ pub(crate) mod tests {
             let tensor =
                 Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::F32).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -384,26 +457,32 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn underlying_type_reports_integer_gpu_class_metadata() {
+    fn underlying_type_reports_integer_gpu_class_from_native_provider_storage() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.2, -3.7, 123456.0], vec![3, 1]).unwrap();
-            let value = crate::dispatcher::call_builtin(
+            let handle = match crate::dispatcher::call_builtin(
                 "gpuArray",
                 &[Value::Tensor(tensor), Value::from("int32")],
             )
-            .expect("gpuArray int32");
+            .expect("gpuArray int32 native upload")
+            {
+                Value::GpuTensor(handle) => handle,
+                other => panic!("expected gpu tensor, got {other:?}"),
+            };
 
             assert_eq!(
-                underlying_type_builtin(value.clone()).expect("underlying"),
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(runmat_accelerate_api::IntegerElementType::I32)
+            );
+            assert_eq!(
+                underlying_type_builtin(Value::GpuTensor(handle.clone())).expect("underlying"),
                 "int32"
             );
             assert_eq!(
-                is_underlying_type_builtin(value.clone(), Value::from("int32")).expect("predicate"),
+                is_underlying_type_builtin(Value::GpuTensor(handle), Value::from("int32"))
+                    .expect("predicate"),
                 Value::Bool(true)
-            );
-            assert_eq!(
-                is_underlying_type_builtin(value, Value::from("double")).expect("predicate"),
-                Value::Bool(false)
             );
         });
     }
@@ -413,7 +492,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");

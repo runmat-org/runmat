@@ -6,11 +6,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use encoding_rs::Encoding;
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LogicalArray, Tensor, Value,
+    IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor, Value,
 };
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
@@ -19,6 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::io::filetext::helpers::decode_bytes;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -515,18 +515,16 @@ fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String>
 }
 
 fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            readmatrix_error_with(
+                &READMATRIX_ERROR_OPTION_VALUE,
+                format!("readmatrix: {context} must be a non-negative integer"),
+            )
+        });
+    }
+
     match value {
-        Value::Int(i) => {
-            let num = i.to_i64();
-            if num < 0 {
-                Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OPTION_VALUE,
-                    format!("readmatrix: {context} must be a non-negative integer"),
-                ))
-            } else {
-                Ok(num as usize)
-            }
-        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(readmatrix_error_with(
@@ -540,13 +538,30 @@ fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
                     format!("readmatrix: {context} must be a non-negative integer"),
                 ));
             }
-            if (n.round() - n).abs() > f64::EPSILON {
+            let rounded = n.round();
+            if (rounded - n).abs() > f64::EPSILON {
                 return Err(readmatrix_error_with(
                     &READMATRIX_ERROR_OPTION_VALUE,
                     format!("readmatrix: {context} must be an integer value"),
                 ));
             }
-            Ok(n.round() as usize)
+            if rounded > usize::MAX.saturating_sub(1) as f64 {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!("readmatrix: {context} is too large"),
+                ));
+            }
+            let parsed = rounded as usize;
+            if parsed as f64 != rounded || parsed == usize::MAX {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!("readmatrix: {context} is too large"),
+                ));
+            }
+            Ok(parsed)
+        }
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
+            value_to_usize(&Value::Num(tensor::tensor_value_f64(t, 0)), context)
         }
         _ => Err(readmatrix_error_with(
             &READMATRIX_ERROR_OPTION_VALUE,
@@ -569,8 +584,8 @@ fn value_to_f64(value: &Value, context: &str) -> BuiltinResult<f64> {
         }
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                let v = t.data[0];
+            if tensor::is_scalar_tensor(t) {
+                let v = tensor::tensor_value_f64(t, 0);
                 if v.is_finite() {
                     Ok(v)
                 } else {
@@ -602,10 +617,15 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
             Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data.iter().collect()),
             Value::StringArray(sa) => out.extend(sa.data),
             Value::Num(n) => out.push(format_numeric_token(n)),
-            Value::Int(i) => out.push(format!("{}", i.to_i64())),
+            Value::Int(i) => out.push(i.decimal_string()),
             Value::Tensor(t) => {
-                if t.data.len() == 1 {
-                    out.push(format_numeric_token(t.data[0]));
+                if tensor::is_scalar_tensor(&t) {
+                    if let Some(storage) = t.integer_storage() {
+                        let value = storage.value_at(0).expect("one-element integer storage");
+                        out.push(value.decimal_string());
+                    } else {
+                        out.push(format_numeric_token(tensor::tensor_value_f64(&t, 0)));
+                    }
                 } else {
                     return Err(readmatrix_error_with(
                         &READMATRIX_ERROR_OPTION_VALUE,
@@ -664,7 +684,7 @@ impl Default for ReadMatrixOptions {
             treat_as_missing: HashSet::new(),
             empty_value: None,
             range: None,
-            output_template: OutputTemplate::Double,
+            output_template: OutputTemplate::Numeric(NumericDType::F64),
             encoding: "utf-8".to_string(),
         }
     }
@@ -710,18 +730,30 @@ impl ReadMatrixOptions {
                 "readmatrix: cannot combine 'Like' with OutputType",
             ));
         }
-        if spec.eq_ignore_ascii_case("double") {
-            self.output_template = OutputTemplate::Double;
-            return Ok(());
-        }
         if spec.eq_ignore_ascii_case("logical") {
             self.output_template = OutputTemplate::Logical;
             return Ok(());
         }
-        Err(readmatrix_error_with(
-            &READMATRIX_ERROR_OUTPUT_TYPE,
-            format!("readmatrix: unsupported OutputType '{}'", spec),
-        ))
+        let dtype = match spec.to_ascii_lowercase().as_str() {
+            "double" => NumericDType::F64,
+            "single" => NumericDType::F32,
+            "int8" => NumericDType::I8,
+            "int16" => NumericDType::I16,
+            "int32" => NumericDType::I32,
+            "int64" => NumericDType::I64,
+            "uint8" => NumericDType::U8,
+            "uint16" => NumericDType::U16,
+            "uint32" => NumericDType::U32,
+            "uint64" => NumericDType::U64,
+            _ => {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OUTPUT_TYPE,
+                    format!("readmatrix: unsupported OutputType '{}'", spec),
+                ));
+            }
+        };
+        self.output_template = OutputTemplate::Numeric(dtype);
+        Ok(())
     }
 
     fn set_like(&mut self, proto: Value) -> BuiltinResult<()> {
@@ -731,7 +763,10 @@ impl ReadMatrixOptions {
                 "readmatrix: multiple 'Like' specifications are not supported",
             ));
         }
-        if !matches!(self.output_template, OutputTemplate::Double) {
+        if !matches!(
+            self.output_template,
+            OutputTemplate::Numeric(NumericDType::F64)
+        ) {
             return Err(readmatrix_error_with(
                 &READMATRIX_ERROR_OUTPUT_TYPE,
                 "readmatrix: cannot combine 'Like' with OutputType overrides",
@@ -751,7 +786,7 @@ enum Delimiter {
 
 #[derive(Clone)]
 enum OutputTemplate {
-    Double,
+    Numeric(NumericDType),
     Logical,
     Like(Value),
 }
@@ -864,7 +899,7 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
 
 fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
-        Value::Tensor(t) => t.data.clone(),
+        Value::Tensor(t) => tensor::tensor_values_f64(t),
         _ => {
             return Err(readmatrix_error_with(
                 &READMATRIX_ERROR_RANGE,
@@ -1083,19 +1118,34 @@ fn apply_range(
 
 fn finalize_output(tensor: Tensor, options: &ReadMatrixOptions) -> BuiltinResult<Value> {
     match &options.output_template {
-        OutputTemplate::Double => Ok(Value::Tensor(tensor)),
+        OutputTemplate::Numeric(dtype) => {
+            let tensor = tensor::coerce_tensor_dtype(tensor, *dtype);
+            Ok(Value::Tensor(tensor))
+        }
         OutputTemplate::Logical => tensor_to_logical(tensor),
         OutputTemplate::Like(proto) => finalize_like(tensor, proto),
     }
 }
 
 fn tensor_to_logical(tensor: Tensor) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(tensor.data.len());
-    for value in &tensor.data {
-        let bit = if *value == 0.0 { 0 } else { 1 };
-        data.push(bit);
-    }
-    let logical = LogicalArray::new(data, tensor.shape.clone()).map_err(|e| {
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(|error| {
+        readmatrix_error_with(
+            &READMATRIX_ERROR_TENSOR_BUILD,
+            format!("readmatrix: {error}"),
+        )
+    })?;
+    let NumericStorage::F64(values) = storage else {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_TENSOR_BUILD,
+            "readmatrix: parsed logical source was not double",
+        ));
+    };
+    let data = values
+        .into_iter()
+        .map(|value| if value == 0.0 { 0 } else { 1 })
+        .collect();
+    let logical = LogicalArray::new(data, shape).map_err(|e| {
         readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
     })?;
     Ok(Value::LogicalArray(logical))
@@ -1105,7 +1155,14 @@ fn finalize_like(tensor: Tensor, proto: &Value) -> BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => tensor_to_logical(tensor),
         Value::GpuTensor(handle) => tensor_to_gpu(tensor, handle),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(Value::Tensor(tensor)),
+        Value::Tensor(prototype) => Ok(Value::Tensor(tensor::coerce_tensor_dtype(
+            tensor,
+            prototype.numeric_dtype(),
+        ))),
+        Value::Int(value) => {
+            tensor_to_integer_like(tensor, &IntegerStorage::from_scalar(value.clone()))
+        }
+        Value::Num(_) => Ok(Value::Tensor(tensor)),
         Value::ComplexTensor(_) | Value::Complex(_, _) => Ok(Value::Tensor(tensor)),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Ok(Value::Tensor(tensor)),
         Value::Cell(_) => Ok(Value::Tensor(tensor)),
@@ -1113,16 +1170,31 @@ fn finalize_like(tensor: Tensor, proto: &Value) -> BuiltinResult<Value> {
     }
 }
 
+fn tensor_to_integer_like(tensor: Tensor, prototype: &IntegerStorage) -> BuiltinResult<Value> {
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(|e| {
+        readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
+    })?;
+    let NumericStorage::F64(values) = storage else {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_TENSOR_BUILD,
+            "readmatrix: parsed integer-like source was not double",
+        ));
+    };
+    let tensor =
+        crate::builtins::common::tensor::integer_tensor_from_f64_like(prototype, values, &shape)
+            .map_err(|e| {
+                readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
+            })?;
+    Ok(Value::Tensor(tensor))
+}
+
 fn tensor_to_gpu(
     tensor: Tensor,
     _handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &tensor.data,
-            shape: &tensor.shape,
-        };
-        if let Ok(uploaded) = provider.upload(&view) {
+        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor) {
             return Ok(Value::GpuTensor(uploaded));
         }
     }
@@ -1509,7 +1581,6 @@ pub(crate) mod tests {
     use std::fs;
 
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -1517,6 +1588,90 @@ pub(crate) mod tests {
         let mut path = std::env::temp_dir();
         path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
         path
+    }
+
+    fn values(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
+    #[test]
+    fn readmatrix_like_preserves_every_exact_integer_class() {
+        let prototypes = [
+            IntegerStorage::I8(vec![0]),
+            IntegerStorage::I16(vec![0]),
+            IntegerStorage::I32(vec![0]),
+            IntegerStorage::I64(vec![0]),
+            IntegerStorage::U8(vec![0]),
+            IntegerStorage::U16(vec![0]),
+            IntegerStorage::U32(vec![0]),
+            IntegerStorage::U64(vec![0]),
+        ];
+
+        for storage in prototypes {
+            let expected = storage
+                .from_same_class_values(
+                    [1.0, 2.5, -3.0]
+                        .into_iter()
+                        .map(|value| storage.cast_f64_assignment(value))
+                        .collect(),
+                )
+                .expect("expected storage");
+            let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+            let prototype = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
+            let output = finalize_like(source, &prototype).expect("integer like output");
+            let Value::Tensor(output) = output else {
+                panic!("expected tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+
+        let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+        let prototype = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
+        let output = finalize_like(source, &prototype).expect("single like output");
+        let Value::Tensor(output) = output else {
+            panic!("expected single tensor output");
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(values(&output), vec![1.0, 2.5, -3.0]);
+    }
+
+    #[test]
+    fn readmatrix_output_type_supports_every_numeric_class() {
+        let cases = [
+            ("int8", IntegerStorage::I8(vec![1, 3, -3])),
+            ("int16", IntegerStorage::I16(vec![1, 3, -3])),
+            ("int32", IntegerStorage::I32(vec![1, 3, -3])),
+            ("int64", IntegerStorage::I64(vec![1, 3, -3])),
+            ("uint8", IntegerStorage::U8(vec![1, 3, 0])),
+            ("uint16", IntegerStorage::U16(vec![1, 3, 0])),
+            ("uint32", IntegerStorage::U32(vec![1, 3, 0])),
+            ("uint64", IntegerStorage::U64(vec![1, 3, 0])),
+        ];
+        for (class_name, expected) in cases {
+            let mut options = ReadMatrixOptions::default();
+            options
+                .set_output_type(class_name)
+                .expect("numeric output type");
+            let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+            let Value::Tensor(output) = finalize_output(source, &options).expect("numeric output")
+            else {
+                panic!("expected numeric tensor output");
+            };
+            assert_eq!(output.integer_storage(), Some(&expected));
+        }
+
+        let mut single_options = ReadMatrixOptions::default();
+        single_options
+            .set_output_type("single")
+            .expect("single output type");
+        let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
+        let Value::Tensor(single) =
+            finalize_output(source, &single_options).expect("single output")
+        else {
+            panic!("expected single tensor output");
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(values(&single), vec![1.0, 2.5, -3.0]);
     }
 
     #[test]
@@ -1561,11 +1716,95 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let _ = fs::remove_file(&path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn treat_as_missing_preserves_exact_uint64_text() {
+        let tokens = block_on(parse_treat_as_missing(&Value::Int(IntValue::U64(u64::MAX))))
+            .expect("TreatAsMissing token");
+        assert_eq!(tokens, vec!["18446744073709551615"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn treat_as_missing_reads_typed_integer_tensor_storage_exactly() {
+        let wide = (1_u64 << 53) + 1;
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("token");
+
+        let tokens =
+            block_on(parse_treat_as_missing(&Value::Tensor(tensor))).expect("TreatAsMissing token");
+        assert_eq!(tokens, vec!["9007199254740993"]);
+    }
+
+    #[test]
+    fn empty_value_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-7]), vec![1, 1]).expect("empty value");
+
+        let value = value_to_f64(&Value::Tensor(tensor), "EmptyValue").expect("EmptyValue");
+        assert_eq!(value, -7.0);
+    }
+
+    #[test]
+    fn numeric_range_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4]).expect("range");
+
+        let range = parse_range_numeric(&Value::Tensor(tensor)).expect("range");
+        assert_eq!(range.start_row, 1);
+        assert_eq!(range.start_col, 2);
+        assert_eq!(range.end_row, Some(3));
+        assert_eq!(range.end_col, Some(4));
+    }
+
+    #[test]
+    fn option_usize_preserves_representable_uint64_values() {
+        assert_eq!(
+            value_to_usize(&Value::Int(IntValue::U64(u64::MAX)), "option").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert!(value_to_usize(&Value::Int(IntValue::I64(-1)), "option").is_err());
+
+        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1]).expect("option");
+        assert_eq!(value_to_usize(&Value::Tensor(tensor), "option").unwrap(), 9);
+
+        let negative =
+            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("option");
+        assert!(value_to_usize(&Value::Tensor(negative), "option").is_err());
+        assert!(value_to_usize(&Value::Num(1.0e300), "option").is_err());
+    }
+
+    #[test]
+    fn option_usize_reads_every_integer_class_exactly() {
+        let classes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![7]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![7]),
+        ];
+
+        for storage in classes {
+            let value = Tensor::new_integer(storage, vec![1, 1]).expect("typed option");
+            assert_eq!(value_to_usize(&Value::Tensor(value), "option").unwrap(), 7);
+        }
+
+        let too_wide =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("wide");
+        assert_eq!(
+            value_to_usize(&Value::Tensor(too_wide), "option").ok(),
+            usize::try_from(u64::MAX).ok()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1582,7 +1821,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![0.0, 1.0, 10.0, 12.0]);
+                assert_eq!(values(&t), vec![0.0, 1.0, 10.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1603,7 +1842,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1624,7 +1863,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![22.0, 32.0, 23.0, 33.0]);
+                assert_eq!(values(&t), vec![22.0, 32.0, 23.0, 33.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1646,7 +1885,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![22.0, 32.0, 23.0, 33.0]);
+                assert_eq!(values(&t), vec![22.0, 32.0, 23.0, 33.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1669,9 +1908,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert!(t.data[1].is_nan()); // column 1, row 2
-                assert!(t.data[2].is_nan()); // column 2, row 1
-                assert!(t.data[5].is_nan()); // column 3, row 2
+                let values = values(&t);
+                assert!(values[1].is_nan()); // column 1, row 2
+                assert!(values[2].is_nan()); // column 2, row 1
+                assert!(values[5].is_nan()); // column 3, row 2
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1699,8 +1939,9 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.data[0] - 1234.56).abs() < 1e-9);
-                assert!((t.data[1] - 7890.12).abs() < 1e-9);
+                let values = values(&t);
+                assert!((values[0] - 1234.56).abs() < 1e-9);
+                assert!((values[1] - 7890.12).abs() < 1e-9);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1721,7 +1962,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 0.0, 0.0, 3.0, 6.0]);
+                assert_eq!(values(&t), vec![1.0, 4.0, 0.0, 0.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1749,7 +1990,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![9.0, 11.0, 10.0, 12.0]);
+                assert_eq!(values(&t), vec![9.0, 11.0, 10.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1787,7 +2028,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1844,11 +2085,8 @@ pub(crate) mod tests {
             let path = unique_path("readmatrix_like_gpu");
             fs::write(&path, "1,2\n3,4\n").expect("write sample file");
             let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
-            let view = HostTensorView {
-                data: &proto_tensor.data,
-                shape: &proto_tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload prototype");
+            let handle =
+                gpu_helpers::upload_tensor(provider, &proto_tensor).expect("upload prototype");
             let args = vec![Value::from("Like"), Value::GpuTensor(handle.clone())];
             let result = block_on(readmatrix_builtin(
                 Value::from(path.to_string_lossy().to_string()),
@@ -1861,7 +2099,7 @@ pub(crate) mod tests {
             );
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 3.0, 2.0, 4.0]);
+            assert_eq!(values(&gathered), vec![1.0, 3.0, 2.0, 4.0]);
             let _ = fs::remove_file(&path);
         });
     }
@@ -1880,7 +2118,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(values(&t), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1900,7 +2138,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+                assert_eq!(values(&t), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1920,9 +2158,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 3]);
-                assert!(t.data[0].is_infinite() && t.data[0].is_sign_negative());
-                assert!(t.data[1].is_infinite() && t.data[1].is_sign_positive());
-                assert!(t.data[2].is_nan());
+                let values = values(&t);
+                assert!(values[0].is_infinite() && values[0].is_sign_negative());
+                assert!(values[1].is_infinite() && values[1].is_sign_positive());
+                assert!(values[2].is_nan());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1942,7 +2181,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(values(&t), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1966,7 +2205,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+                assert_eq!(values(&t), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1986,7 +2225,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

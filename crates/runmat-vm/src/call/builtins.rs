@@ -10,6 +10,9 @@ use crate::runtime::workspace::{
 use runmat_builtins::Value;
 use runmat_hir::{CallableIdentity, FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
+use runmat_runtime::builtins::common::tensor::{
+    is_scalar_tensor, scalar_integer_value, tensor_value_f64,
+};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
 use std::collections::{HashMap, HashSet};
@@ -74,7 +77,7 @@ impl Default for DynamicEvalOptions {
     fn default() -> Self {
         Self {
             compat_mode: CompatMode::Matlab,
-            runmat_extensions_enabled: true,
+            runmat_extensions_enabled: false,
             top_level_await_enabled: true,
             dynamic_eval_enabled: true,
         }
@@ -92,6 +95,7 @@ pub fn set_dynamic_eval_options(
     top_level_await_enabled: bool,
     dynamic_eval_enabled: bool,
 ) {
+    runmat_runtime::compatibility::set_runmat_extensions_enabled(runmat_extensions_enabled);
     DYNAMIC_EVAL_OPTIONS.with(|slot| {
         *slot.borrow_mut() = DynamicEvalOptions {
             compat_mode,
@@ -110,9 +114,12 @@ pub struct DynamicEvalOptionsGuard {
 impl Drop for DynamicEvalOptionsGuard {
     fn drop(&mut self) {
         let previous = self.previous;
-        DYNAMIC_EVAL_OPTIONS.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
+        set_dynamic_eval_options(
+            previous.compat_mode,
+            previous.runmat_extensions_enabled,
+            previous.top_level_await_enabled,
+            previous.dynamic_eval_enabled,
+        );
     }
 }
 
@@ -218,10 +225,18 @@ fn parse_finite_arity_bound(
     builtin: &str,
     name: &str,
 ) -> Result<usize, RuntimeError> {
+    if let Some(integer) = scalar_integer_value(value) {
+        return integer.try_to_usize().ok_or_else(|| {
+            mex(
+                &format!("{builtin}ArgumentInvalid"),
+                &format!("{builtin}: {name} exceeds the platform argument-count range"),
+            )
+        });
+    }
+
     let number = match value {
         Value::Num(value) => *value,
-        Value::Int(value) => value.to_f64(),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(tensor) if is_scalar_tensor(tensor) => tensor_value_f64(tensor, 0),
         other => {
             return Err(mex(
                 &format!("{builtin}ArgumentInvalid"),
@@ -251,9 +266,9 @@ fn parse_max_arity_bound(value: &Value, builtin: &str) -> Result<ArityBound, Run
             Ok(ArityBound::Unbounded)
         }
         Value::Tensor(tensor)
-            if tensor.data.len() == 1
-                && tensor.data[0].is_infinite()
-                && tensor.data[0].is_sign_positive() =>
+            if is_scalar_tensor(tensor)
+                && tensor_value_f64(tensor, 0).is_infinite()
+                && tensor_value_f64(tensor, 0).is_sign_positive() =>
         {
             Ok(ArityBound::Unbounded)
         }
@@ -465,9 +480,14 @@ pub async fn vm_dynamic_workspace_builtin(
         }
         VmDynamicWorkspaceBuiltin::Assignin => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 3)?;
+            if requested_outputs > 0 {
+                return Err(
+                    runmat_runtime::builtins::introspection::dynamic_workspace::assignin_too_many_outputs_error(),
+                );
+            }
             let target = workspace_target_arg(builtin.name(), &args[0])?;
             let name = workspace_text_arg(builtin.name(), &args[1])?;
-            if !is_valid_workspace_identifier(&name) {
+            if !runmat_runtime::builtins::common::identifiers::is_valid_varname(&name) {
                 return Err(mex(
                     "DynamicWorkspaceName",
                     &format!(
@@ -577,15 +597,6 @@ fn workspace_target_arg(builtin: &str, value: &Value) -> Result<WorkspaceTarget,
             &format!("{builtin}: workspace selector must be 'base' or 'caller'"),
         )),
     }
-}
-
-fn is_valid_workspace_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 struct WorkspaceEvalRequest {
@@ -1382,8 +1393,30 @@ pub fn rethrow_without_explicit_exception(
 #[cfg(test)]
 mod tests {
     use super::{
-        dynamic_source_context, imported_builtin_qualified_name, rethrow_without_explicit_exception,
+        current_dynamic_eval_options, dynamic_source_context, imported_builtin_qualified_name,
+        parse_finite_arity_bound, push_dynamic_eval_options, rethrow_without_explicit_exception,
     };
+    use runmat_builtins::{IntValue, IntegerStorage, Tensor, Value};
+    use runmat_parser::CompatMode;
+
+    #[test]
+    fn dynamic_eval_guard_restores_runtime_extension_policy() {
+        let original = current_dynamic_eval_options();
+        let original_runtime = runmat_runtime::compatibility::runmat_extensions_enabled();
+        {
+            let _guard = push_dynamic_eval_options(CompatMode::RunMat, true, false, false);
+            assert!(current_dynamic_eval_options().runmat_extensions_enabled);
+            assert!(runmat_runtime::compatibility::runmat_extensions_enabled());
+        }
+        assert_eq!(
+            current_dynamic_eval_options().runmat_extensions_enabled,
+            original.runmat_extensions_enabled
+        );
+        assert_eq!(
+            runmat_runtime::compatibility::runmat_extensions_enabled(),
+            original_runtime
+        );
+    }
 
     #[test]
     fn imported_builtin_qualified_name_uses_typed_segments() {
@@ -1438,6 +1471,35 @@ mod tests {
         );
         assert_eq!(dynamic.text, "mfilename()");
         assert_ne!(dynamic.source_id, source_id);
+    }
+
+    #[test]
+    fn arity_bound_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("arity tensor");
+        assert_eq!(
+            parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs").unwrap(),
+            7
+        );
+    }
+
+    #[test]
+    fn arity_bound_rejects_wide_integer_scalars_and_poisoned_tensor_mirrors() {
+        let scalar = Value::Int(IntValue::U64(u64::MAX));
+        if usize::BITS == 64 {
+            assert_eq!(
+                parse_finite_arity_bound(&scalar, "narginchk", "minArgs").unwrap(),
+                usize::MAX
+            );
+        } else {
+            assert!(parse_finite_arity_bound(&scalar, "narginchk", "minArgs").is_err());
+        }
+
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("arity tensor");
+        // The f64 mirror is intentionally plausible but must never decide an
+        // integer-only argument bound.
+        assert!(parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs",).is_err());
     }
 
     #[cfg(feature = "native-accel")]

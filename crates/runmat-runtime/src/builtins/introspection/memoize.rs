@@ -9,16 +9,18 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ClassDef, ComplexTensor, HandleRef, IntValue, LogicalArray, MethodDef,
-    ObjectInstance, PropertyDef, SparseTensor, StringArray, StructValue, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, CellArray, CharArray,
+    ClassDef, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage, IntegerStorage,
+    LogicalArray, MethodDef, NumericScalar, ObjectInstance, PropertyDef, SparseTensor, StringArray,
+    StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 use crate::{
-    build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
-    OBJECT_SUBSREF_METHOD,
+    build_runtime_error, builtins::common::tensor, BuiltinResult, RuntimeError,
+    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN, OBJECT_SUBSREF_METHOD,
 };
 
 pub(crate) const MEMOIZED_FUNCTION_CLASS: &str = "MemoizedFunction";
@@ -89,8 +91,15 @@ const STATS_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 const CLEAR_CACHE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "clearCache(memoizedFcn)",
     inputs: &MEMOIZED_INPUTS,
-    outputs: &STATUS_OUTPUTS,
+    outputs: &[],
 }];
+
+pub const CLEAR_CACHE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "clearCache accepts only a MemoizedFunction handle and has no public output; integer values may exist inside cached results but are opaque to cache clearing.",
+    };
 const STATS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "S = stats(memoizedFcn)",
     inputs: &MEMOIZED_INPUTS,
@@ -168,6 +177,12 @@ const MEMOIZE_ERROR_GC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "The memoized object target cannot be allocated or accessed.",
     message: "memoize: internal object storage failed",
 };
+const CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CLEAR_CACHE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:clearCache:TooManyOutputs"),
+    when: "An output is requested from clearCache.",
+    message: "clearCache does not return output arguments",
+};
 const MEMOIZE_CREATE_ERRORS: [BuiltinErrorDescriptor; 2] =
     [MEMOIZE_ERROR_INVALID_FUNCTION, MEMOIZE_ERROR_GC];
 const MEMOIZED_SUBSREF_ERRORS: [BuiltinErrorDescriptor; 4] = [
@@ -176,8 +191,11 @@ const MEMOIZED_SUBSREF_ERRORS: [BuiltinErrorDescriptor; 4] = [
     MEMOIZE_ERROR_INVALID_INDEX,
     MEMOIZE_ERROR_GC,
 ];
-const CLEAR_CACHE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [MEMOIZE_ERROR_INVALID_OBJECT, MEMOIZE_ERROR_GC];
+const CLEAR_CACHE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    MEMOIZE_ERROR_INVALID_OBJECT,
+    MEMOIZE_ERROR_GC,
+    CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS,
+];
 const STATS_ERRORS: [BuiltinErrorDescriptor; 3] = [
     MEMOIZE_ERROR_INVALID_OBJECT,
     MEMOIZE_ERROR_INVALID_CACHE_SIZE,
@@ -316,9 +334,16 @@ pub(crate) async fn memoized_subsref_builtin(
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::introspection::memoize::CLEAR_CACHE_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::memoize::CLEAR_CACHE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::memoize"
 )]
 pub(crate) async fn clear_cache_builtin(receiver: Value) -> BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 0) {
+        return Err(memoize_error(
+            &CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS,
+            CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS.message,
+        ));
+    }
     let handle = memoized_handle(&receiver)?;
     clear_cache_for_handle(handle)?;
     Ok(Value::Num(0.0))
@@ -484,7 +509,13 @@ fn memoized_state(handle: &HandleRef) -> BuiltinResult<(Value, bool, usize)> {
                 Some(Value::Num(value)) => *value != 0.0,
                 Some(Value::Int(value)) => !value.is_zero(),
                 Some(Value::LogicalArray(array)) if array.data.len() == 1 => array.data[0] != 0,
-                Some(Value::Tensor(tensor)) if tensor.data.len() == 1 => tensor.data[0] != 0.0,
+                Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor) => {
+                    if let Some(storage) = tensor.integer_storage() {
+                        !storage.value_at(0).is_some_and(|value| value.is_zero())
+                    } else {
+                        tensor::tensor_value_f64(tensor, 0) != 0.0
+                    }
+                }
                 _ => true,
             };
             let cache_size = parse_cache_size(object.properties.get(CACHE_SIZE_PROPERTY))?;
@@ -499,10 +530,33 @@ fn memoized_state(handle: &HandleRef) -> BuiltinResult<(Value, bool, usize)> {
 }
 
 fn parse_cache_size(value: Option<&Value>) -> BuiltinResult<usize> {
+    if let Some(Value::Int(v)) = value {
+        return v.try_to_usize().filter(|value| *value >= 1).ok_or_else(|| {
+            memoize_error(
+                &MEMOIZE_ERROR_INVALID_CACHE_SIZE,
+                MEMOIZE_ERROR_INVALID_CACHE_SIZE.message,
+            )
+        });
+    }
+    if let Some(Value::Tensor(t)) = value {
+        if tensor::is_scalar_tensor(t) {
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .and_then(|value| value.try_to_usize())
+                    .filter(|value| *value >= 1)
+                    .ok_or_else(|| {
+                        memoize_error(
+                            &MEMOIZE_ERROR_INVALID_CACHE_SIZE,
+                            MEMOIZE_ERROR_INVALID_CACHE_SIZE.message,
+                        )
+                    });
+            }
+        }
+    }
     let numeric = match value {
         Some(Value::Num(v)) => *v,
-        Some(Value::Int(v)) => v.to_f64(),
-        Some(Value::Tensor(t)) if t.data.len() == 1 => t.data[0],
+        Some(Value::Tensor(t)) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         Some(Value::LogicalArray(a)) if a.data.len() == 1 => a.data[0] as f64,
         Some(Value::Bool(v)) => {
             if *v {
@@ -525,7 +579,7 @@ fn parse_cache_size(value: Option<&Value>) -> BuiltinResult<usize> {
             MEMOIZE_ERROR_INVALID_CACHE_SIZE.message,
         ));
     }
-    if numeric > usize::MAX as f64 {
+    if numeric > usize::MAX as f64 || (usize::BITS == 64 && numeric == usize::MAX as f64) {
         return Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_CACHE_SIZE,
             MEMOIZE_ERROR_INVALID_CACHE_SIZE.message,
@@ -857,10 +911,20 @@ fn object_counter(object: &ObjectInstance, name: &str) -> usize {
 
 fn numeric_counter(value: Option<&Value>) -> Option<usize> {
     match value {
-        Some(Value::Num(value)) if value.is_finite() && *value >= 0.0 => Some(*value as usize),
-        Some(Value::Int(value)) if value.to_i64() >= 0 => Some(value.to_i64() as usize),
+        Some(Value::Num(value)) => nonnegative_platform_usize(*value),
+        Some(Value::Int(value)) => value.try_to_usize(),
         _ => None,
     }
+}
+
+fn nonnegative_platform_usize(value: f64) -> Option<usize> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn output_value_to_cell(value: &Value, requested_outputs: usize) -> BuiltinResult<CellArray> {
@@ -940,31 +1004,64 @@ fn ints_equal(a: &IntValue, b: &IntValue) -> bool {
 }
 
 fn tensors_equal(a: &Tensor, b: &Tensor) -> bool {
-    a.shape == b.shape
-        && a.dtype == b.dtype
-        && a.data
-            .iter()
-            .zip(b.data.iter())
-            .all(|(x, y)| floats_equal_nan(*x, *y))
+    if a.shape != b.shape || a.numeric_dtype() != b.numeric_dtype() || a.len() != b.len() {
+        return false;
+    }
+    (0..a.len()).all(|index| {
+        numeric_scalars_equal_nan(
+            a.numeric_value_at(index)
+                .expect("validated tensor storage length"),
+            b.numeric_value_at(index)
+                .expect("validated tensor storage length"),
+        )
+    })
 }
 
 fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
-    a.rows == b.rows
-        && a.cols == b.cols
-        && a.col_ptrs == b.col_ptrs
-        && a.row_indices == b.row_indices
-        && a.values
-            .iter()
-            .zip(b.values.iter())
-            .all(|(x, y)| floats_equal_nan(*x, *y))
+    if a.rows != b.rows
+        || a.cols != b.cols
+        || a.col_ptrs != b.col_ptrs
+        || a.row_indices != b.row_indices
+        || a.nnz() != b.nnz()
+    {
+        return false;
+    }
+    match (a.integer_storage(), b.integer_storage()) {
+        (Some(a), Some(b)) => return a == b,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
+    if a.numeric_dtype() != b.numeric_dtype() {
+        return false;
+    }
+    a.materialize_f64()
+        .iter()
+        .zip(b.materialize_f64())
+        .all(|(x, y)| floats_equal_nan(*x, y))
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor) -> bool {
-    a.shape == b.shape
-        && a.data
-            .iter()
-            .zip(b.data.iter())
-            .all(|(x, y)| floats_equal_nan(x.0, y.0) && floats_equal_nan(x.1, y.1))
+    let len = tensor::complex_tensor_element_len(a);
+    if a.shape != b.shape || len != tensor::complex_tensor_element_len(b) {
+        return false;
+    }
+    (0..len).all(|index| {
+        let (a_real, a_imag) = a
+            .numeric_value_at(index)
+            .expect("validated complex tensor storage length");
+        let (b_real, b_imag) = b
+            .numeric_value_at(index)
+            .expect("validated complex tensor storage length");
+        numeric_scalars_equal_nan(a_real, b_real) && numeric_scalars_equal_nan(a_imag, b_imag)
+    })
+}
+
+fn numeric_scalars_equal_nan(a: NumericScalar, b: NumericScalar) -> bool {
+    match (a, b) {
+        (NumericScalar::F64(a), NumericScalar::F64(b)) => floats_equal_nan(a, b),
+        (NumericScalar::F32(a), NumericScalar::F32(b)) => a == b || (a.is_nan() && b.is_nan()),
+        _ => a == b,
+    }
 }
 
 fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
@@ -1028,8 +1125,45 @@ fn values_fingerprint(values: &[Value]) -> String {
 fn value_fingerprint(value: &Value) -> String {
     match value {
         Value::Num(value) if value.is_nan() => "num:NaN".to_string(),
-        Value::Tensor(tensor) => format!("tensor:{:?}:{:?}", tensor.shape, tensor.data),
-        Value::ComplexTensor(tensor) => format!("complex:{:?}:{:?}", tensor.shape, tensor.data),
+        Value::Tensor(tensor) => {
+            let values = (0..tensor.len())
+                .map(|index| {
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated tensor storage length")
+                })
+                .collect::<Vec<_>>();
+            format!(
+                "tensor:{:?}:{:?}:{values:?}",
+                tensor.numeric_dtype(),
+                tensor.shape
+            )
+        }
+        Value::SparseTensor(tensor) => match tensor.integer_storage() {
+            Some(storage) => format!(
+                "sparse:{}x{}:{:?}:{:?}:{storage:?}",
+                tensor.rows, tensor.cols, tensor.col_ptrs, tensor.row_indices
+            ),
+            None => format!(
+                "sparse:{}x{}:{:?}:{:?}:{:?}:{:?}",
+                tensor.rows,
+                tensor.cols,
+                tensor.col_ptrs,
+                tensor.row_indices,
+                tensor.numeric_dtype(),
+                tensor.materialize_f64()
+            ),
+        },
+        Value::ComplexTensor(tensor) => {
+            let values = (0..tensor::complex_tensor_element_len(tensor))
+                .map(|index| {
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated complex tensor storage length")
+                })
+                .collect::<Vec<_>>();
+            format!("complex:{:?}:{values:?}", tensor.shape)
+        }
         Value::Cell(cell) => format!("cell:{:?}:{}", cell.shape, values_fingerprint(&cell.data)),
         Value::Struct(struct_value) => format!(
             "struct:{}",
@@ -1072,6 +1206,7 @@ pub(crate) fn reset_memoize_registry_for_test() {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
     use std::sync::{Arc, Mutex};
 
     fn counting_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
@@ -1082,7 +1217,9 @@ mod tests {
                 *counter.lock().unwrap() += 1;
                 let base = match args.first() {
                     Some(Value::Num(value)) => *value,
-                    Some(Value::Tensor(tensor)) => tensor.data.first().copied().unwrap_or(0.0),
+                    Some(Value::Tensor(tensor)) if !tensor.is_empty() => {
+                        tensor::tensor_value_f64(tensor, 0)
+                    }
                     _ => 0.0,
                 };
                 if requested_outputs == 2 {
@@ -1095,6 +1232,23 @@ mod tests {
                 }
             })
         })
+    }
+
+    #[test]
+    fn clear_cache_is_integer_inapplicable_and_has_no_public_output() {
+        assert!(CLEAR_CACHE_DESCRIPTOR.signatures[0].outputs.is_empty());
+        for value in [
+            IntValue::I8(-1),
+            IntValue::I16(-1),
+            IntValue::I32(-1),
+            IntValue::I64(-1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(u64::MAX),
+        ] {
+            assert!(block_on(clear_cache_builtin(Value::Int(value))).is_err());
+        }
     }
 
     fn echo_first_invoker() -> Arc<crate::user_functions::FunctionInvoker> {
@@ -1110,6 +1264,162 @@ mod tests {
             function: 42,
         }))
         .expect("memoized function")
+    }
+
+    #[test]
+    fn typed_cache_counters_preserve_platform_representable_uint64() {
+        assert_eq!(
+            numeric_counter(Some(&Value::Int(IntValue::U64(3)))),
+            Some(3)
+        );
+        assert_eq!(
+            numeric_counter(Some(&Value::Int(IntValue::U64(u64::MAX)))),
+            usize::try_from(u64::MAX).ok()
+        );
+        assert_eq!(numeric_counter(Some(&Value::Int(IntValue::I64(-1)))), None);
+        assert_eq!(numeric_counter(Some(&Value::Num(1.5))), None);
+        assert_eq!(
+            numeric_counter(Some(&Value::Num(usize::MAX as f64 + 1.0))),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_cache_size_reads_typed_integer_tensor_storage_exactly() {
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![3]), vec![1, 1]).expect("cache size");
+
+        assert_eq!(
+            parse_cache_size(Some(&Value::Tensor(tensor))).expect("cache size"),
+            3
+        );
+    }
+
+    #[test]
+    fn memoized_state_reads_enabled_from_typed_integer_tensor_storage() {
+        let function = Value::BoundFunctionHandle {
+            name: "step".to_string(),
+            function: 42,
+        };
+        let enabled =
+            Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("enabled");
+
+        let mut object = ObjectInstance::new(MEMOIZED_FUNCTION_CLASS.to_string());
+        object
+            .properties
+            .insert(FUNCTION_PROPERTY.to_string(), function);
+        object
+            .properties
+            .insert(ENABLED_PROPERTY.to_string(), Value::Tensor(enabled));
+        let target = runmat_gc::gc_allocate(Value::Object(object)).expect("target");
+        let handle = HandleRef {
+            class_name: MEMOIZED_FUNCTION_CLASS.to_string(),
+            target,
+            valid: true,
+        };
+
+        let (_function, enabled, _cache_size) = memoized_state(&handle).expect("state");
+        assert!(enabled);
+    }
+
+    #[test]
+    fn cache_value_equality_preserves_exact_integer_tensor_storage() {
+        let left = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("left integer tensor"),
+        );
+        let same = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                vec![1, 2],
+            )
+            .expect("same integer tensor"),
+        );
+        let rounded_collision = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 53, u64::MAX]), vec![1, 2])
+                .expect("different integer tensor"),
+        );
+
+        assert!(value_equal_for_cache(&left, &same));
+        assert!(!value_equal_for_cache(&left, &rounded_collision));
+        assert_ne!(
+            value_fingerprint(&left),
+            value_fingerprint(&rounded_collision)
+        );
+    }
+
+    #[test]
+    fn cache_value_equality_distinguishes_native_single_from_double() {
+        let single = Value::Tensor(
+            Tensor::from_f32(vec![1.25, f32::NAN], vec![1, 2]).expect("single tensor"),
+        );
+        let same_single = Value::Tensor(
+            Tensor::from_f32(vec![1.25, f32::NAN], vec![1, 2]).expect("same single tensor"),
+        );
+        let double =
+            Value::Tensor(Tensor::new(vec![1.25, f64::NAN], vec![1, 2]).expect("double tensor"));
+
+        assert!(value_equal_for_cache(&single, &same_single));
+        assert!(!value_equal_for_cache(&single, &double));
+        assert_ne!(value_fingerprint(&single), value_fingerprint(&double));
+    }
+
+    #[test]
+    fn cache_value_equality_preserves_exact_sparse_integer_storage() {
+        let left = Value::SparseTensor(
+            SparseTensor::new_integer(
+                2,
+                2,
+                vec![0, 1, 2],
+                vec![0, 1],
+                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            )
+            .expect("left sparse integer tensor"),
+        );
+        let rounded_collision = Value::SparseTensor(
+            SparseTensor::new_integer(
+                2,
+                2,
+                vec![0, 1, 2],
+                vec![0, 1],
+                IntegerStorage::U64(vec![1_u64 << 53, u64::MAX]),
+            )
+            .expect("different sparse integer tensor"),
+        );
+
+        assert!(!value_equal_for_cache(&left, &rounded_collision));
+        assert_ne!(
+            value_fingerprint(&left),
+            value_fingerprint(&rounded_collision)
+        );
+    }
+
+    #[test]
+    fn cache_value_equality_preserves_exact_complex_integer_storage() {
+        let complex = |real, imag| {
+            Value::ComplexTensor(
+                ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        IntegerStorage::U64(real),
+                        IntegerStorage::U64(imag),
+                    )
+                    .expect("matching complex integer storage"),
+                    vec![1, 2],
+                )
+                .expect("complex integer tensor"),
+            )
+        };
+        let left = complex(vec![(1_u64 << 53) + 1, u64::MAX], vec![0, 1_u64 << 63]);
+        let rounded_collision = complex(vec![1_u64 << 53, u64::MAX], vec![0, 1_u64 << 63]);
+
+        assert!(!value_equal_for_cache(&left, &rounded_collision));
+        assert_ne!(
+            value_fingerprint(&left),
+            value_fingerprint(&rounded_collision)
+        );
     }
 
     fn set_handle_property(handle: &HandleRef, name: &str, value: Value) {
@@ -1135,6 +1445,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn memoize_returns_shared_handle_for_same_function() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
 
@@ -1150,6 +1461,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repeated_call_hits_cache_for_same_inputs_and_nargout() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
@@ -1179,6 +1491,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nan_inputs_match_existing_cache_entry() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
@@ -1206,6 +1519,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn requested_output_count_is_part_of_cache_key() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
@@ -1238,6 +1552,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn disabled_memoized_function_bypasses_cache_and_stats() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
@@ -1273,6 +1588,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cache_size_evicts_oldest_entries() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
@@ -1312,6 +1628,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn clear_cache_and_clear_all_reset_counters() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
@@ -1319,6 +1636,12 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let f = memoized();
+
+        {
+            let _outputs = crate::output_count::push_output_count(Some(1));
+            let err = block_on(clear_cache_builtin(f.clone())).unwrap_err();
+            assert_eq!(err.identifier(), Some("RunMat:clearCache:TooManyOutputs"));
+        }
 
         let _ = block_on(crate::call_feval_async_with_outputs(
             f.clone(),
@@ -1353,6 +1676,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_non_function_handle() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let err = block_on(memoize_builtin(Value::Num(1.0))).expect_err("expected error");
@@ -1362,6 +1686,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalid_cache_size_errors_before_dispatch() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let f = memoized();
@@ -1382,7 +1707,21 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn cache_size_rejects_unrepresentable_double_boundary_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        let err = parse_cache_size(Some(&Value::Num(boundary))).expect_err("boundary rejected");
+        assert_eq!(err.identifier(), Some("RunMat:memoize:InvalidCacheSize"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn member_access_returns_properties_and_stats() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let f = memoized();
@@ -1407,6 +1746,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn internal_cache_property_is_not_exposed_as_public_member() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let f = memoized();
@@ -1424,6 +1764,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn invalidated_memoized_handle_is_rejected() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let f = memoized();
@@ -1440,6 +1781,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn handle_valued_outputs_are_reported_from_object_backed_cache() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
         let _guard =

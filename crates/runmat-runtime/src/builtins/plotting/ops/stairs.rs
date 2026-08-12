@@ -19,6 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 
 use super::common::numeric_pair;
 use super::gpu_helpers::gpu_xy_bounds;
@@ -489,18 +490,13 @@ fn infer_stairs_x_from_y(y: &Value) -> BuiltinResult<Value> {
         other => {
             let tensor = Tensor::try_from(other)
                 .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?;
-            tensor.data.len().max(1)
+            tensor_utils::tensor_element_len(&tensor).max(1)
         }
     };
     let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
-    Ok(Value::Tensor(Tensor {
-        data,
-        shape: vec![len],
-        rows: len,
-        cols: 1,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    }))
+    Ok(Value::Tensor(
+        Tensor::new(data, vec![len]).expect("implicit stairs axis"),
+    ))
 }
 
 fn build_stairs_gpu_plot(
@@ -626,6 +622,7 @@ pub(crate) mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
+    use runmat_builtins::IntegerStorage;
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
@@ -635,14 +632,26 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("stairs test vector")
+    }
+
+    fn cleared_int_value(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn infer_stairs_x_reads_typed_integer_length_without_mirror() {
+        let x = infer_stairs_x_from_y(&cleared_int_value(
+            IntegerStorage::I16(vec![4, 5, 6]),
+            vec![1, 3],
+        ))
+        .expect("x");
+
+        let Value::Tensor(x) = x else {
+            panic!("expected tensor");
+        };
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

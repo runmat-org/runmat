@@ -7,8 +7,8 @@ use std::sync::OnceLock;
 use runmat_builtins::{
     Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ClassDef, MethodDef, ObjectInstance, PropertyDef, ResolveContext, StringArray, Tensor, Type,
-    Value,
+    ClassDef, IntValue, MethodDef, ObjectInstance, PropertyDef, ResolveContext, StringArray,
+    Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -691,33 +691,33 @@ fn graph_from_adjacency(
     for col in 0..node_count {
         for row in 0..node_count {
             let weight = if directed {
-                matrix.data[row + col * matrix.rows]
+                tensor::tensor_value_f64(matrix, row + col * matrix.rows)
             } else {
                 match mode {
                     TriangleMode::Full => {
                         if row > col {
                             continue;
                         }
-                        let upper = matrix.data[row + col * matrix.rows];
+                        let upper = tensor::tensor_value_f64(matrix, row + col * matrix.rows);
                         if upper != 0.0 {
                             upper
                         } else if row == col {
                             0.0
                         } else {
-                            matrix.data[col + row * matrix.rows]
+                            tensor::tensor_value_f64(matrix, col + row * matrix.rows)
                         }
                     }
                     TriangleMode::Upper => {
                         if row > col {
                             continue;
                         }
-                        matrix.data[row + col * matrix.rows]
+                        tensor::tensor_value_f64(matrix, row + col * matrix.rows)
                     }
                     TriangleMode::Lower => {
                         if row < col {
                             continue;
                         }
-                        matrix.data[row + col * matrix.rows]
+                        tensor::tensor_value_f64(matrix, row + col * matrix.rows)
                     }
                 }
             };
@@ -1010,8 +1010,8 @@ fn edge_pairs_from_value(
         Value::Tensor(tensor) if tensor.cols == 2 => {
             let mut out = Vec::with_capacity(tensor.rows);
             for row in 0..tensor.rows {
-                let source = node_index_from_f64(tensor.data[row], node_count, name)?;
-                let target = node_index_from_f64(tensor.data[row + tensor.rows], node_count, name)?;
+                let source = node_index_from_tensor(tensor, row, node_count, name)?;
+                let target = node_index_from_tensor(tensor, row + tensor.rows, node_count, name)?;
                 out.push((source, target));
             }
             Ok(out)
@@ -1123,7 +1123,7 @@ fn resolve_node_token(
 fn looks_like_weights(value: &Value, expected_len: usize) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) => expected_len == 1,
-        Value::Tensor(tensor) => tensor.data.len() == expected_len,
+        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == expected_len,
         _ => false,
     }
 }
@@ -1148,11 +1148,19 @@ fn weights_from_value(value: &Value, len: usize, name: &'static str) -> BuiltinR
 }
 
 fn numeric_vector(value: &Value, name: &'static str) -> BuiltinResult<Vec<usize>> {
+    if let Some(values) = exact_integer_vector(value, name) {
+        return values;
+    }
     let values = numeric_f64_vector(value, name)?;
     values
         .into_iter()
         .map(|value| {
-            if !value.is_finite() || value < 0.0 || value.fract().abs() > 1e-9 {
+            if !value.is_finite()
+                || value < 0.0
+                || value.fract().abs() > 1e-9
+                || value > usize::MAX as f64
+                || (usize::BITS == 64 && value == usize::MAX as f64)
+            {
                 Err(graph_error(
                     name,
                     format!("{name}: node indices must be nonnegative integers"),
@@ -1169,7 +1177,7 @@ fn numeric_f64_vector(value: &Value, name: &'static str) -> BuiltinResult<Vec<f6
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
         Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
+        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64(tensor)),
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -1180,6 +1188,29 @@ fn numeric_f64_vector(value: &Value, name: &'static str) -> BuiltinResult<Vec<f6
             format!("{name}: expected numeric vector, got {other:?}"),
         )),
     }
+}
+
+fn exact_integer_vector(value: &Value, name: &'static str) -> Option<BuiltinResult<Vec<usize>>> {
+    match value {
+        Value::Int(value) => Some(parse_nonnegative_integer(value, name).map(|value| vec![value])),
+        Value::Tensor(tensor) => tensor.integer_storage().map(|storage| {
+            storage
+                .exact_values()
+                .into_iter()
+                .map(|value| parse_nonnegative_integer(&value, name))
+                .collect()
+        }),
+        _ => None,
+    }
+}
+
+fn parse_nonnegative_integer(value: &IntValue, name: &'static str) -> BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        graph_error(
+            name,
+            format!("{name}: node indices must be nonnegative integers"),
+        )
+    })
 }
 
 fn parse_node_names(
@@ -1313,8 +1344,42 @@ fn node_indices_from_value(
     }
 }
 
+fn node_index_from_tensor(
+    tensor: &Tensor,
+    index: usize,
+    node_count: usize,
+    name: &'static str,
+) -> BuiltinResult<usize> {
+    if let Some(storage) = tensor.integer_storage() {
+        let value = storage
+            .value_at(index)
+            .ok_or_else(|| graph_error(name, format!("{name}: endpoint index is out of bounds")))?;
+        return node_index_from_integer(&value, node_count, name);
+    }
+    node_index_from_f64(tensor::tensor_value_f64(tensor, index), node_count, name)
+}
+
+fn node_index_from_integer(
+    value: &IntValue,
+    node_count: usize,
+    name: &'static str,
+) -> BuiltinResult<usize> {
+    let Some(value) = value.try_to_usize() else {
+        return Err(graph_error(
+            name,
+            format!("{name}: edge endpoints must be positive integer node ids"),
+        ));
+    };
+    node_index_from_one_based(value, node_count, name)
+}
+
 fn node_index_from_f64(value: f64, node_count: usize, name: &'static str) -> BuiltinResult<usize> {
-    if !value.is_finite() || value < 1.0 || value.fract().abs() > 1e-9 {
+    if !value.is_finite()
+        || value < 1.0
+        || value.fract().abs() > 1e-9
+        || value > usize::MAX as f64
+        || (usize::BITS == 64 && value == usize::MAX as f64)
+    {
         return Err(graph_error(
             name,
             format!("{name}: edge endpoints must be positive integer node ids"),
@@ -1632,14 +1697,20 @@ fn register_graph_class(name: &str) {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn numeric(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("tensor"))
     }
 
+    fn int_numeric(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
+    }
+
     fn tensor_data(value: Value) -> Vec<f64> {
         match value {
-            Value::Tensor(t) => t.data,
+            Value::Tensor(t) => t.materialize_f64(),
             Value::Num(n) => vec![n],
             other => panic!("expected numeric value, got {other:?}"),
         }
@@ -1665,6 +1736,77 @@ mod tests {
         assert_eq!(
             tensor_data(adjacency),
             vec![0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn graph_constructor_accepts_typed_integer_node_vectors() {
+        let graph = block_on(graph_builtin(vec![
+            int_numeric(IntegerStorage::I16(vec![1, 2, 3]), 3, 1),
+            int_numeric(IntegerStorage::U16(vec![2, 3, 1]), 3, 1),
+            int_numeric(IntegerStorage::U8(vec![1, 2, 3]), 3, 1),
+        ]))
+        .expect("graph");
+        assert_eq!(
+            block_on(numnodes_builtin(graph.clone())).unwrap(),
+            Value::Num(3.0)
+        );
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(graph)).unwrap()),
+            vec![0.0, 1.0, 3.0, 1.0, 0.0, 2.0, 3.0, 2.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn graph_adjacency_reads_typed_integer_storage_exactly() {
+        let graph = block_on(graph_builtin(vec![int_numeric(
+            IntegerStorage::I16(vec![0, 2, 0, 0, 0, 3, 4, 0, 0]),
+            3,
+            3,
+        )]))
+        .expect("graph from adjacency");
+
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(graph)).unwrap()),
+            vec![0.0, 2.0, 4.0, 2.0, 0.0, 3.0, 4.0, 3.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn digraph_adjacency_reads_typed_integer_storage_exactly() {
+        let graph = block_on(digraph_builtin(vec![int_numeric(
+            IntegerStorage::I16(vec![0, 2, 0, 0, 0, 3, 4, 0, 0]),
+            3,
+            3,
+        )]))
+        .expect("digraph from adjacency");
+
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(graph)).unwrap()),
+            vec![0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn graph_adjacency_triangle_modes_read_typed_integer_storage_exactly() {
+        let upper = block_on(graph_builtin(vec![
+            int_numeric(IntegerStorage::I16(vec![0, 9, 0, 2, 0, 8, 4, 3, 0]), 3, 3),
+            Value::String("upper".into()),
+        ]))
+        .expect("upper graph");
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(upper)).unwrap()),
+            vec![0.0, 2.0, 4.0, 2.0, 0.0, 3.0, 4.0, 3.0, 0.0]
+        );
+
+        let lower = block_on(graph_builtin(vec![
+            int_numeric(IntegerStorage::I16(vec![0, 2, 4, 9, 0, 3, 0, 8, 0]), 3, 3),
+            Value::String("lower".into()),
+        ]))
+        .expect("lower graph");
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(lower)).unwrap()),
+            vec![0.0, 2.0, 4.0, 2.0, 0.0, 3.0, 4.0, 3.0, 0.0]
         );
     }
 
@@ -1734,6 +1876,29 @@ mod tests {
     }
 
     #[test]
+    fn edge_endnodes_table_accepts_typed_integer_matrix() {
+        let endnodes = int_numeric(IntegerStorage::U16(vec![1, 2, 2, 3]), 2, 2);
+        let edges =
+            table_from_columns(vec!["EndNodes".to_string()], vec![endnodes]).expect("edges table");
+        let nodes = table_from_columns(
+            vec!["Index".to_string()],
+            vec![numeric(vec![1.0, 2.0, 3.0], 3, 1)],
+        )
+        .expect("nodes table");
+        let mut graph = ObjectInstance::new(GRAPH_CLASS.to_string());
+        graph
+            .properties
+            .insert(NUM_NODES_PROPERTY.to_string(), Value::Num(3.0));
+        graph.properties.insert("Edges".to_string(), edges);
+        graph.properties.insert("Nodes".to_string(), nodes);
+        let graph = Value::Object(graph);
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(graph)).unwrap()),
+            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
     fn undirected_adjacency_constructor_accepts_lower_triangle() {
         let graph =
             block_on(graph_builtin(vec![numeric(vec![0.0, 5.0, 0.0, 0.0], 2, 2)])).expect("graph");
@@ -1762,5 +1927,57 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert_eq!(tensor_data(values[0].clone()).len(), 4);
         assert_eq!(tensor_data(values[1].clone()), vec![-0.0, -1.0, -1.0, -2.0]);
+    }
+
+    #[test]
+    fn treelayout_accepts_typed_integer_parent_vector() {
+        let result = block_on(treelayout_builtin(int_numeric(
+            IntegerStorage::I16(vec![0, 1, 1, 2]),
+            1,
+            4,
+        )))
+        .expect("treelayout");
+        assert_eq!(tensor_data(result).len(), 4);
+    }
+
+    #[test]
+    fn graph_numeric_vector_reads_large_typed_integer_storage_exactly() {
+        let wide = 9_007_199_254_740_993_u64;
+        let value = int_numeric(IntegerStorage::U64(vec![wide, wide - 1]), 1, 2);
+        match usize::try_from(wide) {
+            Ok(wide_usize) => {
+                assert_eq!(
+                    numeric_vector(&value, "graph").expect("numeric vector"),
+                    vec![wide_usize, wide_usize - 1]
+                );
+            }
+            Err(_) => {
+                assert!(numeric_vector(&value, "graph").is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn graph_numeric_vector_rejects_unrepresentable_double_boundary_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(numeric_vector(&Value::Num(boundary), "graph").is_err());
+        assert!(numeric_vector(&Value::Num(1.5), "graph").is_err());
+    }
+
+    #[test]
+    fn graph_node_index_rejects_unrepresentable_double_boundary_before_cast() {
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+
+        assert!(node_index_from_f64(boundary, usize::MAX, "graph").is_err());
+        assert!(node_index_from_f64(1.5, 3, "graph").is_err());
     }
 }

@@ -5,7 +5,8 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, LogicalArray, NumericDType, NumericScalar, StringArray,
+    Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -216,36 +217,51 @@ fn floats_equal(a: f64, b: f64, nan_equal: bool) -> bool {
 }
 
 fn tensors_equal(a: &Tensor, b: &Tensor, nan_equal: bool) -> bool {
-    if a.dtype != b.dtype || a.shape != b.shape {
+    if a.numeric_dtype() != b.numeric_dtype() || a.shape != b.shape || a.len() != b.len() {
         return false;
     }
-    if a.data.len() != b.data.len() {
-        return false;
-    }
-    // NaN != NaN in isequal (use isequaln for NaN equality)
-    a.data
-        .iter()
-        .zip(b.data.iter())
-        .all(|(x, y)| floats_equal(*x, *y, nan_equal))
+    (0..a.len()).all(|index| {
+        let lhs = a.numeric_value_at(index).expect("validated tensor index");
+        let rhs = b.numeric_value_at(index).expect("validated tensor index");
+        numeric_scalars_equal(lhs, rhs, nan_equal)
+    })
 }
 
 fn scalar_tensor_equal(t: &Tensor, n: f64, nan_equal: bool) -> bool {
-    if t.dtype != runmat_builtins::NumericDType::F64 || t.data.len() != 1 {
+    if t.numeric_dtype() != NumericDType::F64 || t.len() != 1 {
         return false;
     }
-    floats_equal(t.data[0], n, nan_equal)
+    matches!(
+        t.numeric_value_at(0),
+        Some(NumericScalar::F64(value)) if floats_equal(value, n, nan_equal)
+    )
+}
+
+fn numeric_scalars_equal(a: NumericScalar, b: NumericScalar, nan_equal: bool) -> bool {
+    match (a, b) {
+        (NumericScalar::F64(a), NumericScalar::F64(b)) => floats_equal(a, b, nan_equal),
+        (NumericScalar::F32(a), NumericScalar::F32(b)) => {
+            a == b || (nan_equal && a.is_nan() && b.is_nan())
+        }
+        (a, b) => a == b,
+    }
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) -> bool {
     if a.shape != b.shape {
         return false;
     }
-    if a.data.len() != b.data.len() {
+    if a.materialize_f64().len() != b.materialize_f64().len() {
         return false;
     }
-    a.data
+    match (&a.integer_storage(), &b.integer_storage()) {
+        (Some(a), Some(b)) => return a == b,
+        (Some(_), None) | (None, Some(_)) => return false,
+        (None, None) => {}
+    }
+    a.materialize_f64()
         .iter()
-        .zip(b.data.iter())
+        .zip(b.materialize_f64().iter())
         .all(|((ar, ai), (br, bi))| {
             floats_equal(*ar, *br, nan_equal) && floats_equal(*ai, *bi, nan_equal)
         })
@@ -330,7 +346,7 @@ fn equality_error_with_detail(
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::CellArray;
+    use runmat_builtins::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn run_isequal(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(isequal_builtin(args))
@@ -338,6 +354,18 @@ pub(crate) mod tests {
 
     fn run_isequaln(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(isequaln_builtin(args))
+    }
+
+    fn typed_complex_u64(real: u64, imag: u64) -> ComplexTensor {
+        ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![real]),
+                IntegerStorage::U64(vec![imag]),
+            )
+            .expect("matching components"),
+            vec![1, 1],
+        )
+        .expect("typed complex")
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -457,6 +485,25 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(true));
     }
 
+    #[test]
+    fn isequal_and_isequaln_compare_single_storage_without_widening_class() {
+        let left = Tensor::from_f32(vec![0.1, f32::NAN], vec![1, 2]).unwrap();
+        let right = Tensor::from_f32(vec![0.1, f32::NAN], vec![1, 2]).unwrap();
+
+        assert_eq!(
+            run_isequal(vec![
+                Value::Tensor(left.clone()),
+                Value::Tensor(right.clone())
+            ])
+            .expect("isequal"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_isequaln(vec![Value::Tensor(left), Value::Tensor(right)]).expect("isequaln"),
+            Value::Bool(true)
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isequal_strings() {
@@ -508,11 +555,84 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[test]
+    fn isequal_integer_tensor_values_are_compared_exactly() {
+        let same_left = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("left integer tensor");
+        let same_right = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("right integer tensor");
+        let different = Tensor::new_integer(
+            IntegerStorage::U64(vec![(1_u64 << 53), u64::MAX]),
+            vec![1, 2],
+        )
+        .expect("different integer tensor");
+
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(same_left), Value::Tensor(same_right)])
+                .expect("isequal same"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequal(vec![
+                Value::Tensor(different),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
+                        vec![1, 2],
+                    )
+                    .expect("comparison tensor"),
+                ),
+            ])
+            .expect("isequal different"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn isequal_integer_tensor_class_must_match() {
+        let unsigned = Tensor::new_integer(IntegerStorage::U64(vec![255]), vec![1, 1])
+            .expect("unsigned integer tensor");
+        let signed = Tensor::new_integer(IntegerStorage::I64(vec![255]), vec![1, 1])
+            .expect("signed integer tensor");
+
+        assert_eq!(
+            run_isequal(vec![Value::Tensor(unsigned), Value::Tensor(signed)]).expect("isequal"),
+            Value::Bool(false)
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isequal_complex() {
         let result =
             run_isequal(vec![Value::Complex(1.0, 2.0), Value::Complex(1.0, 2.0)]).expect("isequal");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn isequal_typed_complex_integer_compares_exact_components() {
+        let left = typed_complex_u64(u64::MAX, 1_u64 << 63);
+        let same = left.clone();
+        let different = typed_complex_u64(u64::MAX - 1, 1_u64 << 63);
+
+        assert_eq!(
+            run_isequal(vec![Value::ComplexTensor(left), Value::ComplexTensor(same)])
+                .expect("isequal"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequal(vec![
+                Value::ComplexTensor(different),
+                Value::ComplexTensor(typed_complex_u64(u64::MAX, 1_u64 << 63)),
+            ])
+            .expect("isequal"),
+            Value::Bool(false)
+        );
     }
 }

@@ -395,14 +395,7 @@ pub(crate) mod tests {
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("surfc test vector")
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -412,14 +405,7 @@ pub(crate) mod tests {
         let res = futures::executor::block_on(surfc_builtin(vec![
             Value::Tensor(tensor_from(&[0.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
-            Value::Tensor(Tensor {
-                data: vec![0.0],
-                integer_data: None,
-                shape: vec![1],
-                rows: 1,
-                cols: 1,
-                dtype: runmat_builtins::NumericDType::F64,
-            }),
+            Value::Tensor(Tensor::new(vec![0.0], vec![1]).expect("scalar grid")),
         ]));
         assert!(res.is_err());
     }
@@ -457,14 +443,9 @@ pub(crate) mod tests {
     #[test]
     fn surfc_returns_surface_handle() {
         setup_plot_tests();
-        let handle = futures::executor::block_on(surfc_builtin(vec![Value::Tensor(Tensor {
-            data: vec![0.0, 1.0, 1.0, 0.0],
-            integer_data: None,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })]))
+        let handle = futures::executor::block_on(surfc_builtin(vec![Value::Tensor(
+            Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).expect("surfc surface"),
+        )]))
         .expect("surfc should return handle");
         assert!(handle.is_finite());
     }

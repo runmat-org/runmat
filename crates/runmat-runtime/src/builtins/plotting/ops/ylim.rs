@@ -121,18 +121,13 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let _ = ylim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
-            data: vec![1.0, 5.0],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })])
+        let _ = ylim_builtin(vec![Value::Tensor(
+            runmat_builtins::Tensor::new(vec![1.0, 5.0], vec![1, 2]).expect("y limits"),
+        )])
         .unwrap();
         let _ = ylim_builtin(vec![Value::String("auto".into())]).unwrap();
         let queried = ylim_builtin(Vec::new()).unwrap();
         let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
-        assert!(tensor.data[0].is_nan() && tensor.data[1].is_nan());
+        assert!(tensor.materialize_f64()[0].is_nan() && tensor.materialize_f64()[1].is_nan());
     }
 }

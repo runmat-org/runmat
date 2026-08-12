@@ -112,11 +112,13 @@ fn ensure_gpu_tensor(
     provider: &dyn AccelProvider,
     value: &Value,
 ) -> Result<(GpuTensorHandle, Option<GpuTensorHandle>)> {
+    reject_native_integer_fusion_values(std::slice::from_ref(value), &[])?;
     match value {
         Value::GpuTensor(handle) => Ok((handle.clone(), None)),
         Value::Tensor(tensor) => {
+            let data = tensor.materialize_f64();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &data,
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view)?;
@@ -133,26 +135,63 @@ fn scalar_upload_dtype(provider: &dyn AccelProvider) -> NumericDType {
     }
 }
 
+/// Float descriptors and kernels intentionally accept only floating scalar
+/// values. Integer values have a distinct provider representation and must not
+/// be converted through f64 merely because this particular fusion has no typed
+/// integer kernel yet.
 fn value_to_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
         _ => None,
     }
 }
 
+fn native_integer_fusion_value_kind(value: &Value) -> Option<&'static str> {
+    match value {
+        Value::Int(_) => Some("integer scalar"),
+        Value::Tensor(t) if t.integer_storage().is_some() => Some("integer tensor"),
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
+        {
+            Some("native integer gpuArray")
+        }
+        _ => None,
+    }
+}
+
+fn reject_native_integer_fusion_values(values: &[Value], constants: &[&Value]) -> Result<()> {
+    if let Some(kind) = values
+        .iter()
+        .chain(constants.iter().copied())
+        .find_map(native_integer_fusion_value_kind)
+    {
+        return Err(anyhow!(
+            "fusion: {kind} requires a dedicated typed integer fusion kernel; refusing f64 fallback"
+        ));
+    }
+    Ok(())
+}
+
+fn reject_native_integer_fusion_inputs(request: &FusionExecutionRequest<'_>) -> Result<()> {
+    let constants: Vec<&Value> = request.plan.const_values.values().collect();
+    reject_native_integer_fusion_values(&request.inputs, &constants)
+}
+
 fn scalar_from_value(value: &Value) -> Result<f64> {
+    reject_native_integer_fusion_values(std::slice::from_ref(value), &[])?;
     if let Some(v) = value_to_f64(value) {
         return Ok(v);
     }
     match value {
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                Ok(t.data[0])
+            if t.len() == 1 {
+                Ok(t.numeric_value_at(0)
+                    .expect("validated scalar tensor storage")
+                    .materialize_f64())
             } else {
                 Err(anyhow!(
                     "image normalize: expected scalar tensor, got {} elements",
-                    t.data.len()
+                    t.len()
                 ))
             }
         }
@@ -193,6 +232,37 @@ fn resolve_image_scalar_value(
     }
 }
 
+fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
+    let mut shapes: Vec<Vec<usize>> = Vec::new();
+    for value in values {
+        match value {
+            Value::GpuTensor(handle) => shapes.push(handle.shape.clone()),
+            Value::Tensor(tensor) => shapes.push(tensor.shape.clone()),
+            Value::Num(_) | Value::Int(_) => shapes.push(Vec::new()),
+            _ => return None,
+        }
+    }
+    let rank = shapes.iter().map(Vec::len).max().unwrap_or(0);
+    let mut output = vec![1usize; rank];
+    for mut shape in shapes {
+        if shape.len() == 1 && rank >= 2 {
+            shape.insert(0, 1);
+        }
+        for (dimension, &extent) in shape.iter().enumerate() {
+            let current = output[dimension];
+            if current == extent {
+                continue;
+            }
+            if current == 1 {
+                output[dimension] = extent;
+            } else if extent != 1 {
+                return None;
+            }
+        }
+    }
+    Some(output)
+}
+
 fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
@@ -212,37 +282,8 @@ fn execute_elementwise_outputs(
             request.inputs.len()
         ));
     }
+    reject_native_integer_fusion_inputs(request)?;
     // Determine output shape from the fusion plan; if unknown, derive from runtime inputs via broadcasting.
-    fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
-        // Collect shapes; scalars map to empty shape which broadcasts to any
-        let mut shapes: Vec<Vec<usize>> = Vec::new();
-        for v in values {
-            match v {
-                Value::GpuTensor(h) => shapes.push(h.shape.clone()),
-                Value::Tensor(t) => shapes.push(t.shape.clone()),
-                Value::Num(_) | Value::Int(_) => shapes.push(Vec::new()),
-                _ => return None, // unsupported at runtime for broadcasting
-            }
-        }
-        let rank = shapes.iter().map(|s| s.len()).max().unwrap_or(0);
-        let mut out = vec![1usize; rank];
-        for shape in shapes {
-            let offset = rank.saturating_sub(shape.len());
-            for (i, &dim) in shape.iter().enumerate() {
-                let j = offset + i;
-                let a = out[j];
-                let b = dim;
-                if a == 1 {
-                    out[j] = b.max(1);
-                } else if b == 1 || a == b {
-                    // keep a
-                } else {
-                    return None; // incompatible
-                }
-            }
-        }
-        Some(out)
-    }
     // Determine output shape from the fusion plan and derive the element count from it.
     let runtime_shape = runtime_broadcast_shape(&request.inputs);
     let mut output_shape = match &request.plan.group.shape {
@@ -287,13 +328,14 @@ fn execute_elementwise_outputs(
                 owned: None,
             }),
             Value::Tensor(t) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, t.dtype) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, t.numeric_dtype()) {
                     return Err(anyhow!(
                         "fusion: tensor input requires unsupported precision ({msg})"
                     ));
                 }
+                let data = t.materialize_f64();
                 let view = HostTensorView {
-                    data: &t.data,
+                    data: &data,
                     shape: &t.shape,
                 };
                 let handle = provider.upload(&view)?;
@@ -324,28 +366,7 @@ fn execute_elementwise_outputs(
                     owned: Some(handle),
                 });
             }
-            Value::Int(i) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
-                    return Err(anyhow!(
-                        "fusion: scalar input requires unsupported precision ({msg})"
-                    ));
-                }
-                let scalar = match provider.precision() {
-                    ProviderPrecision::F32 => (i.to_f64() as f32) as f64,
-                    ProviderPrecision::F64 => i.to_f64(),
-                };
-                temp_scalars.push(vec![scalar]);
-                let data = temp_scalars.last().unwrap();
-                let view = HostTensorView {
-                    data,
-                    shape: &scalar_shape,
-                };
-                let handle = provider.upload(&view)?;
-                prepared.push(PreparedInput {
-                    handle: handle.clone(),
-                    owned: Some(handle),
-                });
-            }
+            Value::Int(_) => unreachable!("integer inputs rejected before fusion upload"),
             _ => {
                 return Err(anyhow!("fusion: unsupported value type"));
             }
@@ -485,6 +506,7 @@ pub fn execute_reduction(
             request.inputs.len()
         ));
     }
+    reject_native_integer_fusion_inputs(&request)?;
     let len = reduce_len * num_slices;
     if len == 0 {
         return Err(anyhow!("fusion: zero-length execution not supported"));
@@ -504,13 +526,14 @@ pub fn execute_reduction(
                 owned: None,
             }),
             Value::Tensor(t) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, t.dtype) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, t.numeric_dtype()) {
                     return Err(anyhow!(
                         "fusion: tensor input requires unsupported precision ({msg})"
                     ));
                 }
+                let data = t.materialize_f64();
                 let view = HostTensorView {
-                    data: &t.data,
+                    data: &data,
                     shape: &t.shape,
                 };
                 let handle = provider.upload(&view)?;
@@ -541,28 +564,7 @@ pub fn execute_reduction(
                     owned: Some(handle),
                 });
             }
-            Value::Int(i) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
-                    return Err(anyhow!(
-                        "fusion: scalar input requires unsupported precision ({msg})"
-                    ));
-                }
-                let scalar = match provider.precision() {
-                    ProviderPrecision::F32 => (i.to_f64() as f32) as f64,
-                    ProviderPrecision::F64 => i.to_f64(),
-                };
-                temp_scalars.push(vec![scalar]);
-                let data = temp_scalars.last().unwrap();
-                let view = HostTensorView {
-                    data,
-                    shape: &scalar_shape,
-                };
-                let handle = provider.upload(&view)?;
-                prepared.push(PreparedInput {
-                    handle: handle.clone(),
-                    owned: Some(handle),
-                });
-            }
+            Value::Int(_) => unreachable!("integer inputs rejected before fusion upload"),
             _ => return Err(anyhow!("fusion: unsupported value type")),
         }
     }
@@ -629,6 +631,7 @@ pub fn execute_reduction(
 
 pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
+    reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::CenteredGram {
         return Err(anyhow!("unsupported fusion kind"));
     }
@@ -674,6 +677,7 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
 
 pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
+    reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::PowerStepNormalize {
         return Err(anyhow!("unsupported fusion kind"));
     }
@@ -730,6 +734,7 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
 
 pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
+    reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::ExplainedVariance {
         return Err(anyhow!("unsupported fusion kind"));
     }
@@ -869,6 +874,7 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
 
 pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
+    reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::ImageNormalize {
         return Err(anyhow!("unsupported fusion kind"));
     }
@@ -953,6 +959,7 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
 
 pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Value> {
     crate::ensure_residency_hooks();
+    reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != crate::fusion::FusionKind::MatmulEpilogue {
         return Err(anyhow!("unsupported fusion kind"));
     }
@@ -969,8 +976,9 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
         let handle = match v {
             Value::GpuTensor(h) => h.clone(),
             Value::Tensor(t) => {
+                let data = t.materialize_f64();
                 let view = HostTensorView {
-                    data: &t.data,
+                    data: &data,
                     shape: &t.shape,
                 };
                 let h = prov.upload(&view)?;
@@ -1203,4 +1211,85 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
 
     fusion_residency::mark(&result);
     Ok(Value::GpuTensor(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntValue;
+
+    #[test]
+    fn wide_uint64_scalar_is_rejected_before_float_fusion_conversion() {
+        let value = Value::Int(IntValue::U64(u64::MAX));
+
+        assert_eq!(value_to_f64(&value), None);
+        let error = reject_native_integer_fusion_values(std::slice::from_ref(&value), &[])
+            .expect_err("wide uint64 must not be uploaded through f64");
+        assert!(error
+            .to_string()
+            .contains("dedicated typed integer fusion kernel"));
+        assert!(error.to_string().contains("refusing f64 fallback"));
+    }
+
+    #[test]
+    fn native_integer_scalars_never_use_float_fusion_fallbacks() {
+        for value in [
+            Value::Int(IntValue::I8(7)),
+            Value::Int(IntValue::I16(7)),
+            Value::Int(IntValue::I32(7)),
+            Value::Int(IntValue::I64(i64::MAX)),
+            Value::Int(IntValue::U8(7)),
+            Value::Int(IntValue::U16(7)),
+            Value::Int(IntValue::U32(7)),
+            Value::Int(IntValue::U64(u64::MAX)),
+        ] {
+            assert_eq!(value_to_f64(&value), None);
+            assert!(
+                reject_native_integer_fusion_values(std::slice::from_ref(&value), &[])
+                    .expect_err("integer scalar must require a typed fusion kernel")
+                    .to_string()
+                    .contains("refusing f64 fallback")
+            );
+        }
+    }
+
+    #[test]
+    fn floating_scalar_remains_eligible_for_float_fusion() {
+        let value = Value::Num(1.25);
+
+        assert_eq!(value_to_f64(&value), Some(1.25));
+        reject_native_integer_fusion_values(std::slice::from_ref(&value), &[])
+            .expect("floating fusion input remains supported");
+    }
+
+    #[test]
+    fn runtime_broadcast_appends_missing_singletons_and_enforces_zero_rules() {
+        let tensor = |shape: Vec<usize>| {
+            Value::Tensor(
+                runmat_builtins::Tensor::new(vec![0.0; shape.iter().product()], shape)
+                    .expect("test tensor"),
+            )
+        };
+
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![2, 3]), tensor(vec![2, 3, 4])]),
+            Some(vec![2, 3, 4])
+        );
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![2, 3]), tensor(vec![1, 2, 3])]),
+            None
+        );
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![0, 3]), tensor(vec![1, 3])]),
+            Some(vec![0, 3])
+        );
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![0, 3]), tensor(vec![2, 3])]),
+            None
+        );
+        assert_eq!(
+            runtime_broadcast_shape(&[tensor(vec![3]), tensor(vec![1, 3, 2])]),
+            Some(vec![1, 3, 2])
+        );
+    }
 }

@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "jsonencode";
@@ -370,11 +371,14 @@ fn apply_option(
 fn coerce_bool(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
-        Value::Int(i) => Ok(i.to_i64() != 0),
+        Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => bool_from_f64(*n),
         Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                bool_from_f64(t.data[0])
+            if tensor::is_scalar_tensor(t) {
+                if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
+                    return Ok(!int.is_zero());
+                }
+                bool_from_f64(tensor::tensor_value_f64(t, 0))
             } else {
                 Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE))
             }
@@ -427,6 +431,12 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
                     &JSONENCODE_ERROR_INTERNAL,
                     format!("jsonencode: cannot densify sparse tensor {}x{} ({} elements exceeds safe threshold)", sparse.rows, sparse.cols, total_elements),
                 ));
+            }
+            if sparse.is_logical() {
+                let dense = sparse.to_dense_logical().map_err(|err| {
+                    jsonencode_error_with(&JSONENCODE_ERROR_INTERNAL, format!("jsonencode: {err}"))
+                })?;
+                return logical_array_to_json(&dense, options);
             }
             let dense = sparse.to_dense().map_err(|err| {
                 jsonencode_error_with(&JSONENCODE_ERROR_INTERNAL, format!("jsonencode: {err}"))
@@ -508,7 +518,7 @@ fn logical_array_to_json(
 }
 
 fn tensor_to_json(tensor: &Tensor, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
-    if tensor.data.is_empty() {
+    if tensor::tensor_element_len(tensor) == 0 {
         return Ok(JsonValue::Array(Vec::new()));
     }
     let keep_dims = compute_keep_dims(&tensor.shape, true);
@@ -525,23 +535,34 @@ fn tensor_value_to_json(
     offset: usize,
     options: &JsonEncodeOptions,
 ) -> BuiltinResult<JsonValue> {
-    match tensor.integer_storage() {
-        Some(storage) => Ok(JsonValue::Number(integer_storage_number(storage, offset))),
-        None => number_to_json(tensor.data[offset], options),
+    let value = tensor
+        .numeric_value_at(offset)
+        .expect("index within authoritative numeric storage");
+    match value.into_int_value() {
+        Some(value) => Ok(JsonValue::Number(integer_value_number(&value))),
+        None => number_to_json(value.materialize_f64(), options),
+    }
+}
+
+fn integer_value_number(value: &IntValue) -> JsonNumber {
+    match value {
+        IntValue::I8(value) => JsonNumber::I64(*value as i64),
+        IntValue::I16(value) => JsonNumber::I64(*value as i64),
+        IntValue::I32(value) => JsonNumber::I64(*value as i64),
+        IntValue::I64(value) => JsonNumber::I64(*value),
+        IntValue::U8(value) => JsonNumber::U64(*value as u64),
+        IntValue::U16(value) => JsonNumber::U64(*value as u64),
+        IntValue::U32(value) => JsonNumber::U64(*value as u64),
+        IntValue::U64(value) => JsonNumber::U64(*value),
     }
 }
 
 fn integer_storage_number(storage: &IntegerStorage, offset: usize) -> JsonNumber {
-    match storage {
-        IntegerStorage::I8(values) => JsonNumber::I64(values[offset] as i64),
-        IntegerStorage::I16(values) => JsonNumber::I64(values[offset] as i64),
-        IntegerStorage::I32(values) => JsonNumber::I64(values[offset] as i64),
-        IntegerStorage::I64(values) => JsonNumber::I64(values[offset]),
-        IntegerStorage::U8(values) => JsonNumber::U64(values[offset] as u64),
-        IntegerStorage::U16(values) => JsonNumber::U64(values[offset] as u64),
-        IntegerStorage::U32(values) => JsonNumber::U64(values[offset] as u64),
-        IntegerStorage::U64(values) => JsonNumber::U64(values[offset]),
-    }
+    integer_value_number(
+        &storage
+            .value_at(offset)
+            .expect("index within authoritative integer storage"),
+    )
 }
 
 fn complex_scalar_to_json(
@@ -561,18 +582,38 @@ fn complex_tensor_to_json(
     ct: &ComplexTensor,
     options: &JsonEncodeOptions,
 ) -> BuiltinResult<JsonValue> {
-    if ct.data.is_empty() {
+    if tensor::complex_tensor_element_len(ct) == 0 {
         return Ok(JsonValue::Array(Vec::new()));
     }
     let keep_dims = compute_keep_dims(&ct.shape, true);
     if keep_dims.is_empty() {
-        let (re, im) = ct.data[0];
-        return complex_scalar_to_json(re, im, options);
+        return complex_tensor_value_to_json(ct, 0, options);
     }
     build_strided_array(&ct.shape, &keep_dims, |offset| {
-        let (re, im) = ct.data[offset];
-        complex_scalar_to_json(re, im, options)
+        complex_tensor_value_to_json(ct, offset, options)
     })
+}
+
+fn complex_tensor_value_to_json(
+    ct: &ComplexTensor,
+    offset: usize,
+    options: &JsonEncodeOptions,
+) -> BuiltinResult<JsonValue> {
+    if let Some(storage) = &ct.integer_storage() {
+        return Ok(JsonValue::Object(vec![
+            (
+                "real".to_string(),
+                JsonValue::Number(integer_storage_number(&storage.real, offset)),
+            ),
+            (
+                "imag".to_string(),
+                JsonValue::Number(integer_storage_number(&storage.imag, offset)),
+            ),
+        ]));
+    }
+
+    let (real, imag) = ct.materialize_f64()[offset];
+    complex_scalar_to_json(real, imag, options)
 }
 
 fn string_array_to_json(
@@ -1149,6 +1190,28 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn jsonencode_options_read_wide_uint64_storage_exactly() {
+        let false_option =
+            Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).expect("integer tensor");
+        let compact = block_on(jsonencode_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor")),
+            vec![Value::from("PrettyPrint"), Value::Tensor(false_option)],
+        ))
+        .expect("jsonencode");
+        assert_eq!(as_string(compact), "[1,2]");
+
+        let true_option = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+            .expect("integer tensor");
+        let pretty = block_on(jsonencode_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor")),
+            vec![Value::from("PrettyPrint"), Value::Tensor(true_option)],
+        ))
+        .expect("jsonencode");
+        assert_eq!(as_string(pretty), "[\n    [1,2],\n    [3,4]\n]");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn jsonencode_options_reject_non_scalar_tensor_bool() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
         let err = block_on(jsonencode_builtin(
@@ -1238,13 +1301,76 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn jsonencode_typed_complex_integers_preserves_every_class_exactly() {
+        let cases = [
+            (
+                "int8",
+                IntegerStorage::I8(vec![-1]),
+                IntegerStorage::I8(vec![2]),
+                "{\"real\":-1,\"imag\":2}",
+            ),
+            (
+                "int16",
+                IntegerStorage::I16(vec![-3]),
+                IntegerStorage::I16(vec![4]),
+                "{\"real\":-3,\"imag\":4}",
+            ),
+            (
+                "int32",
+                IntegerStorage::I32(vec![-5]),
+                IntegerStorage::I32(vec![6]),
+                "{\"real\":-5,\"imag\":6}",
+            ),
+            (
+                "int64",
+                IntegerStorage::I64(vec![-9223372036854775808]),
+                IntegerStorage::I64(vec![9223372036854775807]),
+                "{\"real\":-9223372036854775808,\"imag\":9223372036854775807}",
+            ),
+            (
+                "uint8",
+                IntegerStorage::U8(vec![1]),
+                IntegerStorage::U8(vec![2]),
+                "{\"real\":1,\"imag\":2}",
+            ),
+            (
+                "uint16",
+                IntegerStorage::U16(vec![3]),
+                IntegerStorage::U16(vec![4]),
+                "{\"real\":3,\"imag\":4}",
+            ),
+            (
+                "uint32",
+                IntegerStorage::U32(vec![5]),
+                IntegerStorage::U32(vec![6]),
+                "{\"real\":5,\"imag\":6}",
+            ),
+            (
+                "uint64",
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1_u64 << 63]),
+                "{\"real\":18446744073709551615,\"imag\":9223372036854775808}",
+            ),
+        ];
+
+        for (class, real, imag, expected) in cases {
+            let storage = runmat_builtins::IntegerComplexStorage::new(real, imag)
+                .expect("matching integer components");
+            let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
+            let encoded = block_on(jsonencode_builtin(Value::ComplexTensor(tensor), Vec::new()))
+                .expect("jsonencode typed complex integer");
+            assert_eq!(as_string(encoded), expected, "{class}");
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn jsonencode_gpu_tensor_gathers_host_data() {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1266,7 +1392,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

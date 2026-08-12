@@ -59,6 +59,7 @@ pub(crate) async fn value_to_complex_vector(
     label: &str,
     value: Value,
 ) -> BuiltinResult<ComplexVectorInput> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&value, builtin)?;
     match value {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -122,8 +123,7 @@ fn tensor_to_complex_vector(
 ) -> BuiltinResult<ComplexVectorInput> {
     ensure_vector_shape(builtin, label, &tensor.shape)?;
     Ok(ComplexVectorInput {
-        data: tensor
-            .data
+        data: tensor::tensor_values_f64(&tensor)
             .into_iter()
             .map(|re| Complex::new(re, 0.0))
             .collect(),
@@ -139,13 +139,10 @@ fn complex_tensor_to_complex_vector(
     tensor: ComplexTensor,
 ) -> BuiltinResult<ComplexVectorInput> {
     ensure_vector_shape(builtin, label, &tensor.shape)?;
+    let shape = tensor.shape.clone();
     Ok(ComplexVectorInput {
-        data: tensor
-            .data
-            .into_iter()
-            .map(|(re, im)| Complex::new(re, im))
-            .collect(),
-        shape: tensor.shape,
+        data: tensor::complex_tensor_into_values_complex64(tensor),
+        shape,
         is_complex: true,
         gpu_handle: None,
     })
@@ -251,6 +248,32 @@ pub(crate) fn complex_vector_to_value(
     }
 }
 
+pub(crate) fn complex_vector_to_value_with_dtype(
+    data: Vec<Complex<f64>>,
+    shape: Vec<usize>,
+    force_complex: bool,
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
+    if dtype != NumericDType::F32 {
+        return complex_vector_to_value(data, shape, force_complex);
+    }
+    let has_imag = force_complex || data.iter().any(|z| z.im.abs() > EPS);
+    if has_imag {
+        let tensor = ComplexTensor::from_f32(
+            data.into_iter()
+                .map(|z| (z.re as f32, z.im as f32))
+                .collect(),
+            shape,
+        )
+        .map_err(|e| signal_error("signal", None, format!("signal: {e}")))?;
+        Ok(Value::ComplexTensor(tensor))
+    } else {
+        let tensor = Tensor::from_f32(data.into_iter().map(|z| z.re as f32).collect(), shape)
+            .map_err(|e| signal_error("signal", None, format!("signal: {e}")))?;
+        Ok(tensor::tensor_into_value(tensor))
+    }
+}
+
 pub(crate) fn real_vector_to_row_value(data: Vec<f64>) -> BuiltinResult<Value> {
     let len = data.len();
     let tensor = Tensor::new(data, vec![1, len])
@@ -267,7 +290,7 @@ pub(crate) fn parse_scalar_f64(
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
         Value::Bool(b) => f64::from(u8::from(*b)),
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => tensor::tensor_value_f64(t, 0),
         _ => {
             return Err(signal_error(
                 builtin,
@@ -291,6 +314,15 @@ pub(crate) fn parse_nonnegative_integer(
     label: &str,
     value: &Value,
 ) -> BuiltinResult<usize> {
+    if let Some(value) = tensor::scalar_integer_value(value) {
+        return value.try_to_usize().ok_or_else(|| {
+            signal_error(
+                builtin,
+                None,
+                format!("{builtin}: {label} exceeds maximum supported size"),
+            )
+        });
+    }
     let scalar = parse_scalar_f64(builtin, label, value)?;
     let rounded = scalar.round();
     if rounded < 0.0 || (rounded - scalar).abs() > 1e-9 {
@@ -300,7 +332,7 @@ pub(crate) fn parse_nonnegative_integer(
             format!("{builtin}: {label} must be a nonnegative integer"),
         ));
     }
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(signal_error(
             builtin,
             None,
@@ -315,18 +347,21 @@ pub(crate) fn keyword(value: &Value) -> Option<String> {
 }
 
 pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
+    if let Some(value) = tensor::scalar_integer_value(&value) {
+        return value.try_to_usize().ok_or(WindowArgError::InvalidLength);
+    }
     let scalar = match value {
         Value::Num(n) => n,
         Value::Int(i) => i.to_f64(),
         Value::Bool(b) => usize::from(b) as f64,
-        Value::Tensor(t) if t.data.len() == 1 => t.data[0],
+        Value::Tensor(t) if tensor::is_scalar_tensor(&t) => tensor::tensor_value_f64(&t, 0),
         _ => return Err(WindowArgError::InvalidLength),
     };
     if !scalar.is_finite() || scalar < 0.0 {
         return Err(WindowArgError::InvalidLength);
     }
     let rounded = scalar.round();
-    if rounded > usize::MAX as f64 {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(WindowArgError::InvalidLength);
     }
     Ok(rounded as usize)
@@ -423,6 +458,15 @@ fn string_keyword(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
+
+    fn first_unrepresentable_usize_double() -> f64 {
+        if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        }
+    }
 
     #[test]
     fn complex_vector_to_value_treats_near_zero_imaginary_as_real() {
@@ -437,7 +481,49 @@ mod tests {
             panic!("expected real tensor");
         };
         assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.data, vec![1.0, 2.0]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn signal_complex_vector_parser_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![3, -2, 5]), vec![1, 3]).unwrap();
+
+        let input = tensor_to_complex_vector("test", "x", tensor).expect("vector");
+
+        assert_eq!(
+            input.data,
+            vec![
+                Complex::new(3.0, 0.0),
+                Complex::new(-2.0, 0.0),
+                Complex::new(5.0, 0.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn signal_complex_vector_parser_reads_typed_complex_integer_storage_exactly() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![3, -2]),
+            IntegerStorage::I16(vec![4, -5]),
+        )
+        .unwrap();
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
+
+        let input = complex_tensor_to_complex_vector("test", "x", tensor).expect("vector");
+
+        assert_eq!(
+            input.data,
+            vec![Complex::new(3.0, 4.0), Complex::new(-2.0, -5.0)]
+        );
+    }
+
+    #[test]
+    fn signal_scalar_parser_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap();
+
+        let scalar = parse_scalar_f64("test", "fs", &Value::Tensor(tensor)).expect("scalar");
+
+        assert_eq!(scalar, 7.0);
     }
 
     #[test]
@@ -449,11 +535,40 @@ mod tests {
     }
 
     #[test]
+    fn parse_nonnegative_integer_rejects_unrepresentable_double_boundary() {
+        let err = parse_nonnegative_integer(
+            "test",
+            "n",
+            &Value::Num(first_unrepresentable_usize_double()),
+        )
+        .expect_err("unrepresentable integer should fail");
+
+        assert!(err.message().contains("exceeds maximum supported size"));
+    }
+
+    #[test]
     fn scalar_length_arg_rejects_values_outside_usize_range() {
         let err = scalar_length_arg(Value::Num((usize::MAX as f64) * 2.0))
             .expect_err("out-of-range length should fail");
 
         assert_eq!(err, WindowArgError::InvalidLength);
+    }
+
+    #[test]
+    fn scalar_length_arg_rejects_unrepresentable_double_boundary() {
+        let err = scalar_length_arg(Value::Num(first_unrepresentable_usize_double()))
+            .expect_err("unrepresentable length should fail");
+
+        assert_eq!(err, WindowArgError::InvalidLength);
+    }
+
+    #[test]
+    fn scalar_length_arg_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).unwrap();
+
+        let len = scalar_length_arg(Value::Tensor(tensor)).expect("valid length");
+
+        assert_eq!(len, 4);
     }
 
     #[test]

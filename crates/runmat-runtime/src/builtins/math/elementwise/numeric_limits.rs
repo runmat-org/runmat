@@ -3,19 +3,45 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    IntValue, Value,
+    ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Value,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const INPUTS_CLASS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "classname",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric class name.",
+}];
+
+const INPUTS_FLOAT_CLASS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "classname",
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Optional,
     default: None,
     description: "Numeric class name.",
 }];
+
+const INPUTS_LIKE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integer prototype whose class and complexity are copied.",
+    },
+];
 
 const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "value",
@@ -25,7 +51,7 @@ const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Limit value.",
 }];
 
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const FLOAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "value = limit()",
         inputs: &[],
@@ -33,7 +59,43 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
     BuiltinSignatureDescriptor {
         label: "value = limit(classname)",
+        inputs: &INPUTS_FLOAT_CLASS,
+        outputs: &OUTPUT_VALUE,
+    },
+];
+
+const INTMIN_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "value = intmin()",
+        inputs: &[],
+        outputs: &OUTPUT_VALUE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = intmin(classname)",
         inputs: &INPUTS_CLASS,
+        outputs: &OUTPUT_VALUE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = intmin(like=prototype)",
+        inputs: &INPUTS_LIKE,
+        outputs: &OUTPUT_VALUE,
+    },
+];
+
+const INTMAX_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "value = intmax()",
+        inputs: &[],
+        outputs: &OUTPUT_VALUE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = intmax(classname)",
+        inputs: &INPUTS_CLASS,
+        outputs: &OUTPUT_VALUE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = intmax(like=prototype)",
+        inputs: &INPUTS_LIKE,
         outputs: &OUTPUT_VALUE,
     },
 ];
@@ -45,10 +107,32 @@ const ERROR_INVALID_CLASS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "numeric limit: unsupported class",
 };
 
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_CLASS];
+const ERROR_INVALID_SYNTAX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUMERIC_LIMITS.INVALID_SYNTAX",
+    identifier: Some("RunMat:numericLimits:InvalidSyntax"),
+    when: "The arguments do not match a documented class-name or like-prototype form.",
+    message: "numeric limit: invalid syntax",
+};
 
-pub const NUMERIC_LIMIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
+const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_CLASS, ERROR_INVALID_SYNTAX];
+const FLOAT_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_CLASS];
+
+pub const FLOAT_LIMIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FLOAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FLOAT_ERRORS,
+};
+
+pub const INTMIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INTMIN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+
+pub const INTMAX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INTMAX_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -59,25 +143,11 @@ pub const NUMERIC_LIMIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     category = "math/elementwise",
     summary = "Return the largest value of an integer class.",
     keywords = "intmax,integer,limits",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::NUMERIC_LIMIT_DESCRIPTOR),
+    descriptor(crate::builtins::math::elementwise::numeric_limits::INTMAX_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn intmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let class = parse_class(rest.first(), "int32")?;
-    match class.as_str() {
-        "int8" => Ok(Value::Int(IntValue::I8(i8::MAX))),
-        "int16" => Ok(Value::Int(IntValue::I16(i16::MAX))),
-        "int32" => Ok(Value::Int(IntValue::I32(i32::MAX))),
-        "int64" => Ok(Value::Int(IntValue::I64(i64::MAX))),
-        "uint8" => Ok(Value::Int(IntValue::U8(u8::MAX))),
-        "uint16" => Ok(Value::Int(IntValue::U16(u16::MAX))),
-        "uint32" => Ok(Value::Int(IntValue::U32(u32::MAX))),
-        "uint64" => Ok(Value::Int(IntValue::U64(u64::MAX))),
-        _ => Err(limit_error(
-            "intmax",
-            format!("unsupported integer class '{class}'"),
-        )),
-    }
+    integer_limit(rest, LimitKind::Maximum, "intmax")
 }
 
 #[runtime_builtin(
@@ -85,25 +155,11 @@ fn intmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     category = "math/elementwise",
     summary = "Return the smallest value of an integer class.",
     keywords = "intmin,integer,limits",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::NUMERIC_LIMIT_DESCRIPTOR),
+    descriptor(crate::builtins::math::elementwise::numeric_limits::INTMIN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn intmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let class = parse_class(rest.first(), "int32")?;
-    match class.as_str() {
-        "int8" => Ok(Value::Int(IntValue::I8(i8::MIN))),
-        "int16" => Ok(Value::Int(IntValue::I16(i16::MIN))),
-        "int32" => Ok(Value::Int(IntValue::I32(i32::MIN))),
-        "int64" => Ok(Value::Int(IntValue::I64(i64::MIN))),
-        "uint8" => Ok(Value::Int(IntValue::U8(0))),
-        "uint16" => Ok(Value::Int(IntValue::U16(0))),
-        "uint32" => Ok(Value::Int(IntValue::U32(0))),
-        "uint64" => Ok(Value::Int(IntValue::U64(0))),
-        _ => Err(limit_error(
-            "intmin",
-            format!("unsupported integer class '{class}'"),
-        )),
-    }
+    integer_limit(rest, LimitKind::Minimum, "intmin")
 }
 
 #[runtime_builtin(
@@ -111,7 +167,7 @@ fn intmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     category = "math/elementwise",
     summary = "Return the largest finite floating-point value.",
     keywords = "realmax,float,limits,double,single",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::NUMERIC_LIMIT_DESCRIPTOR),
+    descriptor(crate::builtins::math::elementwise::numeric_limits::FLOAT_LIMIT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn realmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -131,7 +187,7 @@ fn realmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     category = "math/elementwise",
     summary = "Return the smallest positive normalized floating-point value.",
     keywords = "realmin,float,limits,double,single",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::NUMERIC_LIMIT_DESCRIPTOR),
+    descriptor(crate::builtins::math::elementwise::numeric_limits::FLOAT_LIMIT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn realmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -151,7 +207,7 @@ fn realmin_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     category = "math/elementwise",
     summary = "Return the largest consecutive integer in a floating-point class.",
     keywords = "flintmax,float,limits,double,single",
-    descriptor(crate::builtins::math::elementwise::numeric_limits::NUMERIC_LIMIT_DESCRIPTOR),
+    descriptor(crate::builtins::math::elementwise::numeric_limits::FLOAT_LIMIT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::numeric_limits"
 )]
 fn flintmax_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -184,11 +240,194 @@ fn parse_class(value: Option<&Value>, default: &str) -> BuiltinResult<String> {
 }
 
 fn normalize_class(text: &str) -> String {
-    match text.trim().to_ascii_lowercase().as_str() {
-        "float" => "single".to_string(),
-        "int" => "int32".to_string(),
-        other => other.to_string(),
+    text.trim().to_ascii_lowercase()
+}
+
+#[derive(Clone, Copy)]
+enum LimitKind {
+    Minimum,
+    Maximum,
+}
+
+fn integer_limit(args: Vec<Value>, kind: LimitKind, builtin: &'static str) -> BuiltinResult<Value> {
+    match args.as_slice() {
+        [] => Ok(Value::Int(limit_scalar(NumericDType::I32, kind))),
+        [class] if text_value(class).is_some() => {
+            let class = normalize_class(&text_value(class).expect("guarded text value"));
+            let dtype = integer_dtype(&class).ok_or_else(|| {
+                limit_error(builtin, format!("unsupported integer class '{class}'"))
+            })?;
+            Ok(Value::Int(limit_scalar(dtype, kind)))
+        }
+        [keyword, prototype]
+            if text_value(keyword).is_some_and(|text| text.eq_ignore_ascii_case("like")) =>
+        {
+            integer_limit_like(prototype, kind, builtin)
+        }
+        _ => Err(limit_syntax_error(
+            builtin,
+            "expected no arguments, an integer class name, or like=integerPrototype",
+        )),
     }
+}
+
+fn integer_limit_like(
+    prototype: &Value,
+    kind: LimitKind,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match prototype {
+        Value::Int(value) => Ok(Value::Int(limit_scalar(
+            integer_dtype(value.class_name()).expect("IntValue has integer dtype"),
+            kind,
+        ))),
+        Value::Tensor(tensor) => {
+            let dtype = tensor.numeric_dtype();
+            if matches!(dtype, NumericDType::F32 | NumericDType::F64) {
+                return Err(invalid_integer_prototype(builtin));
+            }
+            Ok(Value::Int(limit_scalar(dtype, kind)))
+        }
+        Value::ComplexTensor(tensor) => {
+            let Some(prototype_storage) = tensor.integer_storage() else {
+                return Err(invalid_integer_prototype(builtin));
+            };
+            let value = limit_scalar(prototype_storage.real.numeric_dtype(), kind);
+            let real = IntegerStorage::from_scalar(value);
+            let imag = real.zeros_like(1);
+            let storage = IntegerComplexStorage::new(real, imag)
+                .map_err(|error| limit_error(builtin, error))?;
+            ComplexTensor::new_integer(storage, vec![1, 1])
+                .map(Value::ComplexTensor)
+                .map_err(|error| limit_error(builtin, error))
+        }
+        Value::GpuTensor(handle) => {
+            let Some(element_type) = runmat_accelerate_api::handle_integer_type(handle) else {
+                return Err(invalid_integer_prototype(builtin));
+            };
+            if runmat_accelerate_api::handle_storage(handle)
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                return Err(limit_error(
+                    builtin,
+                    "complex integer gpuArray prototypes are not supported by the current provider representation",
+                ));
+            }
+            let dtype = dtype_from_integer_element_type(element_type);
+            let storage = IntegerStorage::from_scalar(limit_scalar(dtype, kind));
+            let shape = [1usize, 1usize];
+            let view = integer_tensor_view(&storage, &shape);
+            let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+                limit_error(
+                    builtin,
+                    "integer gpuArray prototype has no registered provider",
+                )
+            })?;
+            provider
+                .upload_integer(&view)
+                .map(gpu_helpers::resident_gpu_value)
+                .map_err(|error| {
+                    limit_error(builtin, format!("GPU limit creation failed: {error}"))
+                })
+        }
+        _ => Err(invalid_integer_prototype(builtin)),
+    }
+}
+
+fn text_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        _ => None,
+    }
+}
+
+fn integer_dtype(class: &str) -> Option<NumericDType> {
+    match class {
+        "int8" => Some(NumericDType::I8),
+        "int16" => Some(NumericDType::I16),
+        "int32" => Some(NumericDType::I32),
+        "int64" => Some(NumericDType::I64),
+        "uint8" => Some(NumericDType::U8),
+        "uint16" => Some(NumericDType::U16),
+        "uint32" => Some(NumericDType::U32),
+        "uint64" => Some(NumericDType::U64),
+        _ => None,
+    }
+}
+
+fn limit_scalar(dtype: NumericDType, kind: LimitKind) -> IntValue {
+    match (dtype, kind) {
+        (NumericDType::I8, LimitKind::Minimum) => IntValue::I8(i8::MIN),
+        (NumericDType::I8, LimitKind::Maximum) => IntValue::I8(i8::MAX),
+        (NumericDType::I16, LimitKind::Minimum) => IntValue::I16(i16::MIN),
+        (NumericDType::I16, LimitKind::Maximum) => IntValue::I16(i16::MAX),
+        (NumericDType::I32, LimitKind::Minimum) => IntValue::I32(i32::MIN),
+        (NumericDType::I32, LimitKind::Maximum) => IntValue::I32(i32::MAX),
+        (NumericDType::I64, LimitKind::Minimum) => IntValue::I64(i64::MIN),
+        (NumericDType::I64, LimitKind::Maximum) => IntValue::I64(i64::MAX),
+        (NumericDType::U8, LimitKind::Minimum) => IntValue::U8(0),
+        (NumericDType::U8, LimitKind::Maximum) => IntValue::U8(u8::MAX),
+        (NumericDType::U16, LimitKind::Minimum) => IntValue::U16(0),
+        (NumericDType::U16, LimitKind::Maximum) => IntValue::U16(u16::MAX),
+        (NumericDType::U32, LimitKind::Minimum) => IntValue::U32(0),
+        (NumericDType::U32, LimitKind::Maximum) => IntValue::U32(u32::MAX),
+        (NumericDType::U64, LimitKind::Minimum) => IntValue::U64(0),
+        (NumericDType::U64, LimitKind::Maximum) => IntValue::U64(u64::MAX),
+        (NumericDType::F32 | NumericDType::F64, _) => {
+            unreachable!("limit_scalar is only called for integer dtypes")
+        }
+    }
+}
+
+fn dtype_from_integer_element_type(
+    element_type: runmat_accelerate_api::IntegerElementType,
+) -> NumericDType {
+    use runmat_accelerate_api::IntegerElementType;
+    match element_type {
+        IntegerElementType::I8 => NumericDType::I8,
+        IntegerElementType::I16 => NumericDType::I16,
+        IntegerElementType::I32 => NumericDType::I32,
+        IntegerElementType::I64 => NumericDType::I64,
+        IntegerElementType::U8 => NumericDType::U8,
+        IntegerElementType::U16 => NumericDType::U16,
+        IntegerElementType::U32 => NumericDType::U32,
+        IntegerElementType::U64 => NumericDType::U64,
+    }
+}
+
+fn integer_tensor_view<'a>(
+    storage: &'a IntegerStorage,
+    shape: &'a [usize],
+) -> runmat_accelerate_api::HostIntegerTensorView<'a> {
+    use runmat_accelerate_api::HostIntegerDataView;
+    let data = match storage {
+        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
+        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
+        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
+        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
+        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
+        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
+        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
+        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
+    };
+    runmat_accelerate_api::HostIntegerTensorView { data, shape }
+}
+
+fn invalid_integer_prototype(builtin: &'static str) -> RuntimeError {
+    limit_error(
+        builtin,
+        "like prototype must be an integer variable of class int8, int16, int32, int64, uint8, uint16, uint32, or uint64",
+    )
+}
+
+fn limit_syntax_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(builtin);
+    if let Some(identifier) = ERROR_INVALID_SYNTAX.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn limit_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
@@ -202,6 +441,10 @@ fn limit_error(builtin: &'static str, message: impl Into<String>) -> RuntimeErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+    use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
+    use runmat_builtins::Tensor;
 
     #[test]
     fn integer_limits_support_common_classes() {
@@ -217,6 +460,165 @@ mod tests {
             intmax_builtin(vec![Value::from("uint32")]).unwrap(),
             Value::Int(IntValue::U32(u32::MAX))
         );
+    }
+
+    #[test]
+    fn integer_limits_support_all_class_names_and_exact_wide_bounds() {
+        let cases = [
+            ("int8", IntValue::I8(i8::MIN), IntValue::I8(i8::MAX)),
+            ("int16", IntValue::I16(i16::MIN), IntValue::I16(i16::MAX)),
+            ("int32", IntValue::I32(i32::MIN), IntValue::I32(i32::MAX)),
+            ("int64", IntValue::I64(i64::MIN), IntValue::I64(i64::MAX)),
+            ("uint8", IntValue::U8(0), IntValue::U8(u8::MAX)),
+            ("uint16", IntValue::U16(0), IntValue::U16(u16::MAX)),
+            ("uint32", IntValue::U32(0), IntValue::U32(u32::MAX)),
+            ("uint64", IntValue::U64(0), IntValue::U64(u64::MAX)),
+        ];
+
+        for (class, minimum, maximum) in cases {
+            assert_eq!(
+                intmin_builtin(vec![Value::from(class)]).unwrap(),
+                Value::Int(minimum)
+            );
+            assert_eq!(
+                intmax_builtin(vec![Value::from(class)]).unwrap(),
+                Value::Int(maximum)
+            );
+        }
+    }
+
+    #[test]
+    fn integer_limit_like_copies_every_integer_prototype_class() {
+        let prototypes = [
+            IntegerStorage::I8(vec![7]),
+            IntegerStorage::I16(vec![7]),
+            IntegerStorage::I32(vec![7]),
+            IntegerStorage::I64(vec![9_007_199_254_740_993]),
+            IntegerStorage::U8(vec![7]),
+            IntegerStorage::U16(vec![7]),
+            IntegerStorage::U32(vec![7]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993]),
+        ];
+
+        for storage in prototypes {
+            let dtype = storage.numeric_dtype();
+            let prototype = Tensor::new_integer(storage, vec![1, 1]).unwrap();
+            assert_eq!(
+                intmin_builtin(vec![Value::from("like"), Value::Tensor(prototype.clone())])
+                    .unwrap(),
+                Value::Int(limit_scalar(dtype, LimitKind::Minimum))
+            );
+            assert_eq!(
+                intmax_builtin(vec![Value::from("like"), Value::Tensor(prototype)]).unwrap(),
+                Value::Int(limit_scalar(dtype, LimitKind::Maximum))
+            );
+        }
+    }
+
+    #[test]
+    fn integer_limit_like_copies_complexity_without_losing_uint64_max() {
+        let prototype = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap();
+
+        let output =
+            intmax_builtin(vec![Value::from("like"), Value::ComplexTensor(prototype)]).unwrap();
+        let Value::ComplexTensor(output) = output else {
+            panic!("expected complex integer scalar")
+        };
+        assert_eq!(output.shape, vec![1, 1]);
+        assert_eq!(
+            output.integer_storage().cloned(),
+            Some(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![u64::MAX]),
+                    IntegerStorage::U64(vec![0]),
+                )
+                .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn integer_limit_like_rejects_noninteger_prototypes_and_bad_syntax() {
+        assert!(intmin_builtin(vec![Value::from("like"), Value::Num(0.0)]).is_err());
+        assert!(intmax_builtin(vec![Value::Bool(true)]).is_err());
+        assert!(intmax_builtin(vec![Value::from("uint8"), Value::from("uint16")]).is_err());
+        assert!(intmin_builtin(vec![Value::from("int")]).is_err());
+    }
+
+    #[test]
+    fn integer_limit_like_preserves_gpu_class_and_wide_value() {
+        test_support::with_test_provider(|provider| {
+            let shape = [1usize, 1usize];
+            let prototype = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[9_007_199_254_740_993]),
+                    shape: &shape,
+                })
+                .expect("integer prototype upload");
+
+            let output = intmax_builtin(vec![
+                Value::from("like"),
+                Value::GpuTensor(prototype.clone()),
+            ])
+            .expect("gpu intmax like");
+            let Value::GpuTensor(output) = output else {
+                panic!("expected resident integer output")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&output),
+                Some(runmat_accelerate_api::IntegerElementType::U64)
+            );
+            let downloaded = block_on(provider.download_integer(&output)).expect("download");
+            assert_eq!(downloaded.data, HostIntegerDataOwned::U64(vec![u64::MAX]));
+            assert_eq!(downloaded.shape, vec![1, 1]);
+            provider.free(&prototype).ok();
+            provider.free(&output).ok();
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn integer_limit_like_preserves_wgpu_class_and_wide_value() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        let shape = [1usize, 1usize];
+        let prototype = provider
+            .upload_integer(&HostIntegerTensorView {
+                data: HostIntegerDataView::I64(&[9_007_199_254_740_993]),
+                shape: &shape,
+            })
+            .expect("WGPU integer prototype upload");
+
+        let output = intmin_builtin(vec![
+            Value::from("like"),
+            Value::GpuTensor(prototype.clone()),
+        ])
+        .expect("WGPU intmin like");
+        let Value::GpuTensor(output) = output else {
+            panic!("expected resident integer output")
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&output),
+            Some(runmat_accelerate_api::IntegerElementType::I64)
+        );
+        let downloaded = block_on(provider.download_integer(&output)).expect("download");
+        assert_eq!(downloaded.data, HostIntegerDataOwned::I64(vec![i64::MIN]));
+        provider.free(&prototype).ok();
+        provider.free(&output).ok();
     }
 
     #[test]

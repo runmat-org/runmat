@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -296,24 +297,24 @@ fn parse_ribbon_args(args: Vec<Value>) -> BuiltinResult<ParsedRibbon> {
 fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
     let tensor = Tensor::try_from(value)
         .map_err(|err| invalid_argument(format!("Y must be numeric: {err}")))?;
-    if tensor.data.is_empty() {
+    if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(invalid_argument("Y must be non-empty"));
     }
     if tensor.shape.len() > 2 {
         return Err(invalid_argument("Y must be a vector or 2-D matrix"));
     }
     if tensor.shape.len() == 1 || tensor.rows == 1 || tensor.cols == 1 {
+        let data = tensor_utils::tensor_into_values_f64(tensor);
         return Ok(RibbonData {
-            rows: tensor.data.len(),
+            rows: data.len(),
             cols: 1,
-            data: tensor.data,
+            data,
         });
     }
-    Ok(RibbonData {
-        rows: tensor.rows,
-        cols: tensor.cols,
-        data: tensor.data,
-    })
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    let data = tensor_utils::tensor_into_values_f64(tensor);
+    Ok(RibbonData { rows, cols, data })
 }
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
@@ -325,7 +326,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     if tensor.shape.len() > 2 || (tensor.rows > 1 && tensor.cols > 1) {
         return Err(invalid_argument(format!("{name} must be a vector")));
     }
-    Ok(tensor.data)
+    Ok(tensor_utils::tensor_into_values_f64(tensor))
 }
 
 fn scalar_f64(value: &Value) -> Option<f64> {
@@ -333,7 +334,9 @@ fn scalar_f64(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Some(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         _ => None,
     }
 }
@@ -467,18 +470,16 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::NumericDType;
+    use runmat_builtins::IntegerStorage;
     use runmat_plot::plots::PlotElement;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor {
-            data,
-            integer_data: None,
-            rows,
-            cols,
-            shape: vec![rows, cols],
-            dtype: NumericDType::F64,
-        })
+        Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("ribbon test tensor"))
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -497,7 +498,7 @@ mod tests {
         let Value::Tensor(handles) = handles else {
             panic!("expected handle vector");
         };
-        assert_eq!(handles.data.len(), 2);
+        assert_eq!(handles.materialize_f64().len(), 2);
 
         let figure = clone_figure(current_figure_handle()).expect("figure");
         assert_eq!(figure.plots().count(), 2);
@@ -510,7 +511,7 @@ mod tests {
         assert_eq!(first.z_data.as_ref().unwrap()[0], vec![1.0, 2.0, 3.0]);
 
         let ty = get_builtin(vec![
-            Value::Num(handles.data[0]),
+            Value::Num(handles.materialize_f64()[0]),
             Value::String("Type".into()),
         ])
         .expect("get type");
@@ -569,6 +570,33 @@ mod tests {
             ])
             .unwrap(),
             Value::String("band".into())
+        );
+    }
+
+    #[test]
+    fn ribbon_reads_typed_integer_x_y_and_width_storage_exactly() {
+        let _guard = setup();
+        let handle = ribbon_builtin(vec![
+            poisoned_int_tensor(IntegerStorage::U16(vec![10, 20, 30]), 1, 3),
+            poisoned_int_tensor(IntegerStorage::I16(vec![2, 3, 4]), 3, 1),
+            poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
+        ])
+        .expect("ribbon");
+        let Value::Num(handle) = handle else {
+            panic!("expected scalar handle");
+        };
+
+        let figure = clone_figure(current_figure_handle()).expect("figure");
+        let PlotElement::Surface(surface) = figure.plots().next().unwrap() else {
+            panic!("expected surface");
+        };
+        assert_eq!(surface.x_grid.as_ref().unwrap()[0], vec![10.0, 20.0, 30.0]);
+        assert_eq!(surface.y_grid.as_ref().unwrap()[0], vec![0.0, 0.0, 0.0]);
+        assert_eq!(surface.y_grid.as_ref().unwrap()[1], vec![2.0, 2.0, 2.0]);
+        assert_eq!(surface.z_data.as_ref().unwrap()[0], vec![2.0, 3.0, 4.0]);
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("ZData".into())]).unwrap(),
+            tensor(vec![2.0, 3.0, 4.0, 2.0, 3.0, 4.0], 3, 2)
         );
     }
 

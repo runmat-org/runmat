@@ -47,8 +47,8 @@ pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>,
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(h.shape.clone()),
-        Value::CharArray(ca) => Ok(vec![ca.rows, ca.cols]),
-        Value::Cell(cell) => Ok(vec![cell.rows, cell.cols]),
+        Value::CharArray(ca) => Ok(ca.shape.clone()),
+        Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)
@@ -61,8 +61,13 @@ pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>,
 
 /// Convert a complex tensor back into an appropriate runtime value.
 pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor.data.len() == 1 {
-        let (re, im) = tensor.data[0];
+    if tensor.len() == 1 && tensor.numeric_dtype() == runmat_builtins::NumericDType::F64 {
+        let (re, im) = tensor
+            .as_f64_slice()
+            .expect("double complex tensor")
+            .first()
+            .copied()
+            .expect("scalar complex tensor");
         Value::Complex(re, im)
     } else {
         Value::ComplexTensor(tensor)

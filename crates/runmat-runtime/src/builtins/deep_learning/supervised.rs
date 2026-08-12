@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
-use runmat_builtins::{ObjectInstance, StructValue, Tensor, Value};
+use runmat_builtins::{NumericScalar, ObjectInstance, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::BuiltinResult;
+use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
-    any_type, deep_learning_error, gather_args, model, numeric_values, scalar_text, string_array,
+    any_type, deep_learning_error, gather_args, model, numeric_values, positive_usize, scalar_text,
+    string_array,
 };
 
 #[runtime_builtin(
@@ -217,17 +218,16 @@ impl Matrix {
                 format!("{function}: {label} must be a 2-D numeric matrix"),
             ));
         }
-        if tensor.data.iter().any(|value| !value.is_finite()) {
+        let rows = tensor.rows;
+        let cols = tensor.cols;
+        let data = tensor::tensor_into_values_f64(tensor);
+        if data.iter().any(|value| !value.is_finite()) {
             return Err(deep_learning_error(
                 function,
                 format!("{function}: {label} must contain finite numeric values"),
             ));
         }
-        Ok(Self {
-            data: tensor.data,
-            rows: tensor.rows,
-            cols: tensor.cols,
-        })
+        Ok(Self { data, rows, cols })
     }
 
     fn zeros(rows: usize, cols: usize) -> Self {
@@ -503,21 +503,15 @@ fn label_strings(value: &Value, function: &'static str) -> BuiltinResult<Option<
                     ));
                 }
             };
-            let mut labels = Vec::with_capacity(codes.data.len());
-            for code in &codes.data {
-                if code.is_nan() {
-                    return Err(deep_learning_error(
+            let mut labels = Vec::with_capacity(codes.len());
+            for index in 0..codes.len() {
+                let code = codes.numeric_value_at(index).ok_or_else(|| {
+                    deep_learning_error(
                         function,
-                        format!("{function}: classification labels must not be missing"),
-                    ));
-                }
-                if *code < 1.0 || code.fract().abs() > f64::EPSILON {
-                    return Err(deep_learning_error(
-                        function,
-                        format!("{function}: categorical Codes must be positive integers"),
-                    ));
-                }
-                let idx = *code as usize - 1;
+                        format!("{function}: categorical Codes storage is invalid"),
+                    )
+                })?;
+                let idx = categorical_code_index(code, function)?;
                 let Some(label) = categories.get(idx) else {
                     return Err(deep_learning_error(
                         function,
@@ -529,6 +523,40 @@ fn label_strings(value: &Value, function: &'static str) -> BuiltinResult<Option<
             Ok(Some(labels))
         }
         _ => Ok(None),
+    }
+}
+
+fn categorical_code_index(code: NumericScalar, function: &'static str) -> BuiltinResult<usize> {
+    match code {
+        NumericScalar::F64(code) => {
+            if code.is_nan() {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: classification labels must not be missing"),
+                ));
+            }
+            if code < 1.0 || code.fract().abs() > f64::EPSILON {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: categorical Codes must be positive integers"),
+                ));
+            }
+            Ok(code as usize - 1)
+        }
+        NumericScalar::F32(code) => {
+            categorical_code_index(NumericScalar::F64(f64::from(code)), function)
+        }
+        code => code
+            .into_int_value()
+            .and_then(|code| code.try_to_usize())
+            .filter(|code| *code >= 1)
+            .map(|code| code - 1)
+            .ok_or_else(|| {
+                deep_learning_error(
+                    function,
+                    format!("{function}: categorical Codes must be positive integers"),
+                )
+            }),
     }
 }
 
@@ -688,20 +716,12 @@ fn positive_option_usize(
     function: &'static str,
 ) -> BuiltinResult<usize> {
     match object.properties.get(name) {
-        Some(value) => {
-            let values = numeric_values(value, function, name)?;
-            if values.len() != 1
-                || !values[0].is_finite()
-                || values[0] < 1.0
-                || values[0].fract().abs() > f64::EPSILON
-            {
-                return Err(deep_learning_error(
-                    function,
-                    format!("{function}: {name} must be a positive integer scalar"),
-                ));
-            }
-            Ok(values[0] as usize)
-        }
+        Some(value) => positive_usize(value, function, name).map_err(|_| {
+            deep_learning_error(
+                function,
+                format!("{function}: {name} must be a positive integer scalar"),
+            )
+        }),
         None => Ok(default),
     }
 }

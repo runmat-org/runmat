@@ -123,13 +123,21 @@ fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<
     if shapes.is_empty() || dim_1based == 0 {
         return None;
     }
-    let rank = shapes
+    let mut active = shapes.to_vec();
+    let has_known_nonempty = active.iter().any(|shape| {
+        shape.iter().all(Option::is_some)
+            && shape.iter().all(|dimension| dimension.unwrap_or(0) > 0)
+    });
+    if has_known_nonempty {
+        active.retain(|shape| !shape.iter().any(|dimension| matches!(dimension, Some(0))));
+    }
+    let rank = active
         .iter()
         .map(|shape| shape.len())
         .max()?
         .max(dim_1based);
-    let mut padded = Vec::with_capacity(shapes.len());
-    for shape in shapes {
+    let mut padded = Vec::with_capacity(active.len());
+    for shape in &active {
         let mut current = shape.clone();
         while current.len() < rank {
             current.push(Some(1));
@@ -204,16 +212,16 @@ fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
         return args[0].clone();
     }
 
-    let all_cells = args.iter().all(|arg| matches!(arg, Type::Cell { .. }));
-    if all_cells {
+    let has_cell = args.iter().any(|arg| matches!(arg, Type::Cell { .. }));
+    if has_cell {
         return Type::Cell {
             element_type: cell_element_type(args),
             length: None,
         };
     }
 
-    let all_strings = args.iter().all(|arg| matches!(arg, Type::String));
-    if all_strings {
+    let has_string = args.iter().any(|arg| matches!(arg, Type::String));
+    if has_string {
         return Type::cell_of(Type::String);
     }
 
@@ -334,7 +342,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -365,7 +373,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0, 10.0, 20.0]);
+                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0, 10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -458,11 +466,11 @@ pub(crate) mod tests {
             let left = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
             let right = Tensor::new(vec![10.0, 30.0], vec![2, 1]).unwrap();
             let view_left = runmat_accelerate_api::HostTensorView {
-                data: &left.data,
+                data: &left.materialize_f64(),
                 shape: &left.shape,
             };
             let view_right = runmat_accelerate_api::HostTensorView {
-                data: &right.data,
+                data: &right.materialize_f64(),
                 shape: &right.shape,
             };
             let h_left = provider.upload(&view_left).expect("upload left");
@@ -471,7 +479,7 @@ pub(crate) mod tests {
                 .expect("horzcat");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 3.0, 10.0, 30.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 10.0, 30.0]);
         });
     }
 
@@ -505,7 +513,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![1, 4]);
                 assert_eq!(
-                    ct.data,
+                    ct.materialize_f64(),
                     vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)]
                 );
             }
@@ -552,10 +560,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn horzcat_like_gpu_from_host_inputs() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let prototype = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = runmat_accelerate_api::HostTensorView {
-                data: &prototype.data,
+                data: &prototype.materialize_f64(),
                 shape: &prototype.shape,
             };
             let proto_handle = provider.upload(&proto_view).expect("upload proto");
@@ -575,7 +584,7 @@ pub(crate) mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(gathered.data, vec![1.0, 3.0, 5.0, 7.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
     }
 
@@ -598,11 +607,11 @@ pub(crate) mod tests {
 
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_a = runmat_accelerate_api::HostTensorView {
-            data: &a.data,
+            data: &a.materialize_f64(),
             shape: &a.shape,
         };
         let view_b = runmat_accelerate_api::HostTensorView {
-            data: &b.data,
+            data: &b.materialize_f64(),
             shape: &b.shape,
         };
         let ha = provider.upload(&view_a).expect("upload a");
@@ -611,6 +620,6 @@ pub(crate) mod tests {
             horzcat_builtin(vec![Value::GpuTensor(ha), Value::GpuTensor(hb)]).expect("gpu horzcat");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, expected.shape);
-        assert_eq!(gathered.data, expected.data);
+        assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

@@ -9,13 +9,14 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
+    CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericScalar,
+    NumericStorage, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -313,8 +314,14 @@ async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             let tiled = repmat_tensor(&t, &raw_reps)?;
             Ok(tensor::tensor_into_value(tiled))
         }
-        Value::Num(_) | Value::Int(_) => {
+        Value::Num(_) => {
             let tensor = tensor::value_into_tensor_for("repmat", value).map_err(repmat_internal)?;
+            let tiled = repmat_tensor(&tensor, &raw_reps)?;
+            Ok(tensor::tensor_into_value(tiled))
+        }
+        Value::Int(value) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
             let tiled = repmat_tensor(&tensor, &raw_reps)?;
             Ok(tensor::tensor_into_value(tiled))
         }
@@ -386,7 +393,7 @@ async fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<u
 async fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => {
-            if t.data.is_empty() {
+            if tensor_element_len(t) == 0 {
                 return Err(repmat_invalid_factors(
                     "repmat: replication vector must contain at least one element",
                 ));
@@ -427,26 +434,34 @@ async fn parse_replication_vector(value: &Value) -> crate::BuiltinResult<Vec<usi
 
     let tensor =
         tensor::value_into_tensor_for("repmat", value.clone()).map_err(repmat_invalid_factors)?;
-    if tensor.data.is_empty() {
+    if tensor_element_len(&tensor) == 0 {
         return Err(repmat_invalid_factors(
             "repmat: replication vector must contain at least one element",
         ));
     }
-    let mut factors = Vec::with_capacity(tensor.data.len());
-    for (idx, &raw) in tensor.data.iter().enumerate() {
-        factors.push(coerce_rep_factor(raw, idx + 1)?);
+    let mut factors = Vec::with_capacity(tensor.len());
+    for idx in 0..tensor.len() {
+        let value = tensor.numeric_value_at(idx).ok_or_else(|| {
+            repmat_invalid_factors("repmat: replication vector storage length mismatch")
+        })?;
+        factors.push(coerce_numeric_rep_factor(value, idx + 1)?);
     }
     Ok(factors)
 }
 
 async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> {
     match value {
+        Value::Int(value) => return coerce_integer_rep_factor(value, 1),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            if t.len() != 1 {
                 return Err(repmat_invalid_factors(
                     "repmat: size arguments must be scalars",
                 ));
             }
+            let value = t.numeric_value_at(0).ok_or_else(|| {
+                repmat_invalid_factors("repmat: numeric scalar storage length mismatch")
+            })?;
+            return coerce_numeric_rep_factor(value, 1);
         }
         Value::LogicalArray(la) => {
             if la.data.len() != 1 {
@@ -467,12 +482,34 @@ async fn parse_replication_scalar(value: &Value) -> crate::BuiltinResult<usize> 
 
     let tensor =
         tensor::value_into_tensor_for("repmat", value.clone()).map_err(repmat_invalid_factors)?;
-    if tensor.data.len() != 1 {
+    if !tensor::is_scalar_tensor(&tensor) {
         return Err(repmat_invalid_factors(
             "repmat: size arguments must be scalars",
         ));
     }
-    coerce_rep_factor(tensor.data[0], 1)
+    let value = tensor
+        .numeric_value_at(0)
+        .ok_or_else(|| repmat_invalid_factors("repmat: numeric scalar storage length mismatch"))?;
+    coerce_numeric_rep_factor(value, 1)
+}
+
+fn coerce_integer_rep_factor(value: &IntValue, position: usize) -> crate::BuiltinResult<usize> {
+    value.try_to_usize().ok_or_else(|| {
+        repmat_invalid_factors(format!(
+            "repmat: replication factor {position} must be a non-negative platform integer"
+        ))
+    })
+}
+
+fn coerce_numeric_rep_factor(value: NumericScalar, position: usize) -> crate::BuiltinResult<usize> {
+    match value {
+        NumericScalar::F64(value) => coerce_rep_factor(value, position),
+        NumericScalar::F32(value) => coerce_rep_factor(f64::from(value), position),
+        value => value
+            .into_int_value()
+            .ok_or_else(|| repmat_invalid_factors("repmat: invalid integer storage"))
+            .and_then(|value| coerce_integer_rep_factor(&value, position)),
+    }
 }
 
 fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize> {
@@ -493,7 +530,7 @@ fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize>
             "repmat: replication factors must be non-negative integers",
         ));
     }
-    if rounded > (usize::MAX as f64) {
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(repmat_invalid_factors(format!(
             "repmat: replication factor {position} exceeds the maximum supported size"
         )));
@@ -501,9 +538,18 @@ fn coerce_rep_factor(value: f64, position: usize) -> crate::BuiltinResult<usize>
     Ok(rounded as usize)
 }
 
+fn tensor_element_len(tensor: &Tensor) -> usize {
+    tensor.len()
+}
+
 fn repmat_tensor(tensor: &Tensor, reps: &[usize]) -> crate::BuiltinResult<Tensor> {
-    let (data, shape) = repmat_column_major(&tensor.data, &tensor.shape, reps, "repmat")?;
-    Tensor::new(data, shape).map_err(|e| repmat_internal(format!("repmat: {e}")))
+    let storage = tensor
+        .clone()
+        .into_numeric_storage()
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
+    let (storage, shape) = repmat_numeric_storage(&storage, &tensor.shape, reps)?;
+    Tensor::from_numeric_storage(storage, shape)
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
 
 fn repmat_logical(logical: &LogicalArray, reps: &[usize]) -> crate::BuiltinResult<LogicalArray> {
@@ -515,8 +561,40 @@ fn repmat_complex_tensor(
     tensor: &ComplexTensor,
     reps: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let (data, shape) = repmat_column_major(&tensor.data, &tensor.shape, reps, "repmat")?;
-    ComplexTensor::new(data, shape).map_err(|e| repmat_internal(format!("repmat: {e}")))
+    let indices = (0..tensor.len()).collect::<Vec<_>>();
+    let (indices, shape) = repmat_column_major(&indices, &tensor.shape, reps, "repmat")?;
+    let storage = tensor
+        .complex_storage()
+        .gather(&indices)
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
+    ComplexTensor::from_complex_storage(storage, shape)
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))
+}
+
+fn repmat_numeric_storage(
+    storage: &NumericStorage,
+    shape: &[usize],
+    reps: &[usize],
+) -> crate::BuiltinResult<(NumericStorage, Vec<usize>)> {
+    macro_rules! tile_storage {
+        ($values:expr, $variant:ident) => {{
+            let (values, shape) = repmat_column_major($values, shape, reps, "repmat")?;
+            Ok((NumericStorage::$variant(values), shape))
+        }};
+    }
+
+    match storage {
+        NumericStorage::F64(values) => tile_storage!(values, F64),
+        NumericStorage::F32(values) => tile_storage!(values, F32),
+        NumericStorage::I8(values) => tile_storage!(values, I8),
+        NumericStorage::I16(values) => tile_storage!(values, I16),
+        NumericStorage::I32(values) => tile_storage!(values, I32),
+        NumericStorage::I64(values) => tile_storage!(values, I64),
+        NumericStorage::U8(values) => tile_storage!(values, U8),
+        NumericStorage::U16(values) => tile_storage!(values, U16),
+        NumericStorage::U32(values) => tile_storage!(values, U32),
+        NumericStorage::U64(values) => tile_storage!(values, U64),
+    }
 }
 
 fn repmat_string_array(sa: &StringArray, reps: &[usize]) -> crate::BuiltinResult<StringArray> {
@@ -559,17 +637,15 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
 }
 
 async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(tiled) = provider.repmat(&handle, reps) {
-            return Ok(Value::GpuTensor(tiled));
+    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+            if let Ok(tiled) = provider.repmat(&handle, reps) {
+                return Ok(Value::GpuTensor(tiled));
+            }
         }
         let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
         let tiled = repmat_tensor(&gathered, reps)?;
-        let view = HostTensorView {
-            data: &tiled.data,
-            shape: &tiled.shape,
-        };
-        match provider.upload(&view) {
+        match gpu_helpers::upload_tensor(provider, &tiled) {
             Ok(new_handle) => Ok(Value::GpuTensor(new_handle)),
             Err(_) => Ok(tensor::tensor_into_value(tiled)),
         }
@@ -728,8 +804,12 @@ pub(crate) mod tests {
         block_on(super::repmat_builtin(value, rest))
     }
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{IntValue, Tensor};
+    use runmat_accelerate_api::{
+        HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
+    };
+    use runmat_builtins::{
+        IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
+    };
 
     #[test]
     fn repmat_type_preserves_logical_kind() {
@@ -765,6 +845,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 6]);
                 let rows = t.shape[0];
+                let values = t.as_f64_slice().expect("double output");
                 for col in 0..t.shape[1] {
                     let expected = if col % 2 == 0 {
                         vec![1.0, 3.0, 1.0, 3.0]
@@ -773,7 +854,7 @@ pub(crate) mod tests {
                     };
                     let start = col * rows;
                     let end = start + rows;
-                    assert_eq!(&t.data[start..end], expected.as_slice());
+                    assert_eq!(&values[start..end], expected.as_slice());
                 }
             }
             other => panic!("expected tensor output, got {other:?}"),
@@ -807,6 +888,36 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn repmat_parses_typed_integer_replication_factors_exactly() {
+        let large = 9_007_199_254_740_993_u64;
+        let scalar = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
+        assert_eq!(
+            block_on(parse_replication_scalar(&Value::Tensor(scalar))).unwrap(),
+            large as usize
+        );
+
+        let vector = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
+        assert_eq!(
+            block_on(parse_replication_vector(&Value::Tensor(vector))).unwrap(),
+            vec![large as usize, 0]
+        );
+        assert!(block_on(parse_replication_scalar(&Value::Num(usize::MAX as f64))).is_err());
+        assert!(block_on(parse_replication_scalar(&Value::Num(
+            (usize::MAX as f64) + 1.0
+        )))
+        .is_err());
+    }
+
+    #[test]
+    fn repmat_rejects_negative_typed_integer_replication_factors() {
+        let scalar = Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap();
+        assert!(block_on(parse_replication_scalar(&Value::Tensor(scalar))).is_err());
+
+        let vector = Tensor::new_integer(IntegerStorage::I64(vec![2, -1]), vec![1, 2]).unwrap();
+        assert!(block_on(parse_replication_vector(&Value::Tensor(vector))).is_err());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn repmat_high_dim_numeric() {
@@ -824,6 +935,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3, 6]);
+                let values = out.as_f64_slice().expect("double output");
                 let rows = out.shape[0];
                 let cols = out.shape[1];
                 let depth = out.shape[2];
@@ -834,7 +946,7 @@ pub(crate) mod tests {
                             let base_col = j % 3;
                             let base_depth = k % 2;
                             let base_idx = base_col + 3 * base_depth;
-                            assert_eq!(out.data[idx], base_data[base_idx]);
+                            assert_eq!(values[idx], base_data[base_idx]);
                         }
                     }
                 }
@@ -921,7 +1033,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 2]);
-                assert!(t.data.is_empty());
+                assert!(t.is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -976,7 +1088,10 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(ct) => {
                 assert_eq!(ct.shape, vec![2, 2]);
-                assert!(ct.data.iter().all(|&(re, im)| re == 1.0 && im == -2.0));
+                assert!(ct
+                    .materialize_f64()
+                    .iter()
+                    .all(|&(re, im)| re == 1.0 && im == -2.0));
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1004,12 +1119,148 @@ pub(crate) mod tests {
                         let orig_row = row % base_rows;
                         let idx = row + col * rows;
                         let expected_idx = orig_row + orig_col * base_rows;
-                        assert_eq!(ct.data[idx], base.data[expected_idx]);
+                        assert_eq!(
+                            ct.materialize_f64()[idx],
+                            base.materialize_f64()[expected_idx]
+                        );
                     }
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn repmat_typed_complex_integer_preserves_exact_paired_storage() {
+        let complex = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
+                IntegerStorage::U64(vec![7, 8]),
+            )
+            .expect("storage"),
+            vec![1, 2],
+        )
+        .expect("complex");
+        let value = repmat_builtin(
+            Value::ComplexTensor(complex),
+            vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(2))],
+        )
+        .expect("repmat");
+
+        let Value::ComplexTensor(output) = value else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(output.shape, vec![2, 4]);
+        assert_eq!(
+            output
+                .integer_storage()
+                .as_ref()
+                .map(|storage| (&storage.real, &storage.imag)),
+            Some((
+                &IntegerStorage::U64(vec![
+                    9_223_372_036_854_775_808,
+                    9_223_372_036_854_775_808,
+                    u64::MAX,
+                    u64::MAX,
+                    9_223_372_036_854_775_808,
+                    9_223_372_036_854_775_808,
+                    u64::MAX,
+                    u64::MAX,
+                ]),
+                &IntegerStorage::U64(vec![7, 7, 8, 8, 7, 7, 8, 8]),
+            ))
+        );
+    }
+
+    #[test]
+    fn repmat_preserves_all_exact_real_integer_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-2, 7]),
+            IntegerStorage::I16(vec![-300, 400]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for storage in storages {
+            let values = storage.exact_values();
+            let tensor = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("tensor");
+            let Value::Tensor(output) = repmat_builtin(
+                Value::Tensor(tensor),
+                vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(2))],
+            )
+            .expect("repmat") else {
+                panic!("expected exact real integer tensor");
+            };
+            assert_eq!(output.shape, vec![2, 4]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &storage
+                        .from_exact_values_like(vec![
+                            values[0].clone(),
+                            values[0].clone(),
+                            values[1].clone(),
+                            values[1].clone(),
+                            values[0].clone(),
+                            values[0].clone(),
+                            values[1].clone(),
+                            values[1].clone(),
+                        ])
+                        .expect("expected tiled storage")
+                )
+            );
+        }
+
+        let Value::Tensor(scalar) = repmat_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(3))],
+        )
+        .expect("scalar repmat") else {
+            panic!("expected exact real integer scalar output");
+        };
+        assert_eq!(scalar.shape, vec![2, 3]);
+        assert_eq!(
+            scalar.integer_storage(),
+            Some(&IntegerStorage::U64(vec![u64::MAX; 6]))
+        );
+
+        let tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("tensor");
+        let Value::Tensor(empty) = repmat_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Int(IntValue::I32(0)), Value::Int(IntValue::I32(2))],
+        )
+        .expect("empty repmat") else {
+            panic!("expected exact empty integer tensor");
+        };
+        assert_eq!(empty.shape, vec![0, 2]);
+        assert_eq!(
+            empty.integer_storage(),
+            Some(&IntegerStorage::U64(Vec::new()))
+        );
+    }
+
+    #[test]
+    fn repmat_preserves_native_single_storage() {
+        let tensor =
+            Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, -2.5]), vec![1, 2])
+                .expect("single tensor");
+        let Value::Tensor(output) = repmat_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(2))],
+        )
+        .expect("repmat") else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(output.shape, vec![2, 4]);
+        assert_eq!(
+            output.into_numeric_storage().expect("single storage"),
+            NumericStorage::F32(vec![1.25, 1.25, -2.5, -2.5, 1.25, 1.25, -2.5, -2.5])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1046,7 +1297,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -1055,7 +1306,49 @@ pub(crate) mod tests {
                     .expect("repmat");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![4, 2]);
-            assert_eq!(gathered.data, vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn repmat_gpu_integer_fallback_preserves_exact_storage_resident() {
+        test_support::with_test_provider(|provider| {
+            let values = [9_007_199_254_740_993_u64, u64::MAX];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&values),
+                    shape: &[2, 1],
+                })
+                .expect("upload integer");
+            let result =
+                repmat_builtin(Value::GpuTensor(handle), vec![Value::Int(IntValue::I32(2))])
+                    .expect("repmat integer gpu");
+            let Value::GpuTensor(handle) = result else {
+                panic!("expected resident gpuArray");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(&handle),
+                Some(IntegerElementType::U64)
+            );
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(gathered.shape, vec![4, 2]);
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U64(vec![
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    u64::MAX,
+                ]))
+            );
         });
     }
 
@@ -1100,7 +1393,7 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
@@ -1111,6 +1404,6 @@ pub(crate) mod tests {
         .expect("repmat gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert_eq!(gathered.data, cpu_tensor.data);
+        assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

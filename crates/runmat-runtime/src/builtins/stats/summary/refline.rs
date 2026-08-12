@@ -8,6 +8,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LinePlot, LineStyle, PlotElement};
 
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::apply_axes_target;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
@@ -306,11 +307,11 @@ fn parse_refline_coefficients(args: &[Value]) -> BuiltinResult<(ReflinePlan, &[V
 fn coefficient_pair(value: &Value) -> BuiltinResult<Option<(f64, f64)>> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 2 {
+            if tensor_utils::tensor_element_len(tensor) != 2 {
                 return Ok(None);
             }
-            let slope = tensor.data[0];
-            let intercept = tensor.data[1];
+            let slope = tensor_utils::tensor_value_f64(tensor, 0);
+            let intercept = tensor_utils::tensor_value_f64(tensor, 1);
             if !slope.is_finite() || !intercept.is_finite() {
                 return Err(invalid_argument(
                     "refline: coefficients must contain finite slope and intercept",
@@ -506,7 +507,7 @@ mod tests {
         reset_hold_state_for_run,
     };
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{IntegerStorage, Tensor};
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -520,14 +521,19 @@ mod tests {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
     }
 
+    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
+        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
+        Value::Tensor(tensor)
+    }
+
     fn x_data(handle: f64) -> Vec<f64> {
         let value = get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap();
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     fn y_data(handle: f64) -> Vec<f64> {
         let value = get_builtin(vec![Value::Num(handle), Value::String("YData".into())]).unwrap();
-        Tensor::try_from(&value).unwrap().data
+        Tensor::try_from(&value).unwrap().materialize_f64()
     }
 
     #[test]
@@ -561,6 +567,21 @@ mod tests {
             panic!("expected line handle");
         };
         assert_eq!(y_data(handle), vec![3.0, 2.5]);
+    }
+
+    #[test]
+    fn refline_reads_typed_integer_coefficients_exactly() {
+        let _guard = setup();
+        let handle = block_on(refline_builtin(vec![int_tensor(
+            IntegerStorage::I16(vec![2, -1]),
+            1,
+            2,
+        )]))
+        .unwrap();
+        let Value::Num(handle) = handle else {
+            panic!("expected line handle");
+        };
+        assert_eq!(y_data(handle), vec![-1.0, 1.0]);
     }
 
     #[test]

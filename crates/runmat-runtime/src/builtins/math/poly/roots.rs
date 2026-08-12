@@ -128,6 +128,7 @@ async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
 }
 
 pub(crate) async fn roots_value(coefficients: Value) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&coefficients, BUILTIN_NAME)?;
     let coeffs = coefficients_to_complex(coefficients).await?;
     let trimmed = trim_leading_zeros(coeffs);
     if trimmed.is_empty() || trimmed.len() == 1 {
@@ -172,8 +173,7 @@ async fn coefficients_to_complex(value: Value) -> BuiltinResult<Vec<Complex64>> 
 
 fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<Vec<Complex64>> {
     ensure_vector_shape("roots", &tensor.shape)?;
-    Ok(tensor
-        .data
+    Ok(tensor::tensor_values_f64(&tensor)
         .into_iter()
         .map(|value| Complex64::new(value, 0.0))
         .collect())
@@ -182,7 +182,7 @@ fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<Vec<Complex64>> {
 fn complex_tensor_to_vec(tensor: ComplexTensor) -> BuiltinResult<Vec<Complex64>> {
     ensure_vector_shape("roots", &tensor.shape)?;
     Ok(tensor
-        .data
+        .materialize_f64()
         .into_iter()
         .map(|(re, im)| Complex64::new(re, im))
         .collect())
@@ -344,7 +344,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ComplexTensor, LogicalArray, Tensor};
+    use runmat_builtins::{ComplexTensor, IntegerStorage, LogicalArray, Tensor};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -383,7 +383,23 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
+                roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                assert!((roots[0] - 1.0).abs() < 1e-10);
+                assert!((roots[1] - 2.0).abs() < 1e-10);
+            }
+            other => panic!("expected real tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roots_typed_integer_coefficients_cross_double_boundary_exactly() {
+        let coeffs = Tensor::new_integer(IntegerStorage::I16(vec![1, -3, 2]), vec![3, 1]).unwrap();
+        let result = roots_builtin(Value::Tensor(coeffs)).expect("roots");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 1]);
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 assert!((roots[0] - 1.0).abs() < 1e-10);
                 assert!((roots[1] - 2.0).abs() < 1e-10);
@@ -400,7 +416,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!((t.data[0] - 4.0).abs() < 1e-10);
+                assert!((t.materialize_f64()[0] - 4.0).abs() < 1e-10);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -414,7 +430,7 @@ pub(crate) mod tests {
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 assert!((roots[0].0).abs() < 1e-10);
                 assert!((roots[0].1 + 1.0).abs() < 1e-10);
@@ -434,13 +450,13 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![4, 1]);
-                for &r in &t.data {
+                for &r in &t.materialize_f64() {
                     assert!(r.abs() < 1e-8);
                 }
             }
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![4, 1]);
-                for &(re, im) in &t.data {
+                for &(re, im) in &t.materialize_f64() {
                     assert!(re.abs() < 1e-7 && im.abs() < 1e-7);
                 }
             }
@@ -459,7 +475,7 @@ pub(crate) mod tests {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape, vec![2, 1]);
                 // roots at i and -i
-                let mut roots = t.data;
+                let mut roots = t.materialize_f64();
                 roots.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                 assert!(roots[0].0.abs() < 1e-10 && (roots[0].1 + 1.0).abs() < 1e-6);
                 assert!(roots[1].0.abs() < 1e-10 && (roots[1].1 - 1.0).abs() < 1e-6);
@@ -477,7 +493,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 1]);
-                assert!(t.data[0].abs() < 1e-12);
+                assert!(t.materialize_f64()[0].abs() < 1e-12);
             }
             other => panic!("expected real tensor, got {other:?}"),
         }
@@ -490,7 +506,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -513,7 +529,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![0, 1]);
-                assert!(t.data.is_empty());
+                assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -525,14 +541,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let coeffs = Tensor::new(vec![1.0, 0.0, -9.0, 0.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
-                data: &coeffs.data,
+                data: &coeffs.materialize_f64(),
                 shape: &coeffs.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result = roots_builtin(Value::GpuTensor(handle)).expect("roots");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
-            let mut roots = gathered.data;
+            let mut roots = gathered.materialize_f64();
             roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
             assert!((roots[0] + 3.0).abs() < 1e-9);
             assert!((roots[1]).abs() < 1e-9);

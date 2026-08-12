@@ -3,10 +3,14 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, ObjectInstance, ResolveContext, StringArray, StructValue, Tensor,
-    Type, Value,
+    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, ResolveContext, StringArray,
+    StructValue, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -22,6 +26,87 @@ const FITCLINEAR_NAME: &str = "fitclinear";
 const PREDICT_NAME: &str = "predict";
 const DEFAULT_ITERATIONS: usize = 500;
 const EPS: f64 = 1.0e-12;
+
+const INTEGER_PREDICTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fitclinear-integer-predictors",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fitclinear with typed-integer predictors is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FitclinearIntegerPredictorExtension"),
+};
+const INTEGER_NUMERIC_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fitclinear-integer-numeric-arguments",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fitclinear with typed-integer weights or numeric controls is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FitclinearIntegerNumericArgumentExtension"),
+};
+const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "fitclinear-resident-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "fitclinear host fitting from provider-resident input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:FitclinearResidentInputExtension"),
+};
+pub const FITCLINEAR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_PREDICTOR_EXTENSION,
+    INTEGER_NUMERIC_ARGUMENT_EXTENSION,
+    RESIDENT_INPUT_EXTENSION,
+];
+
+const INTEGER_PREDICTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Integer predictors must be exactly representable in binary64 before host fitting; values that would round are rejected.",
+    }];
+const INTEGER_LABEL_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Y or ClassNames",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "Grouping labels retain their exact integer class and identity through model storage and prediction, including above flintmax.",
+    }];
+const INTEGER_NUMERIC_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "Weights or numeric option",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Typed-integer statistical inputs are independently gated and must cross the binary64 boundary exactly.",
+    }];
+pub const FITCLINEAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Mdl = fitclinear(integer_X, Y, ___)",
+        inputs: &INTEGER_PREDICTOR_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Matrix and table predictor roles share the same exact conversion boundary.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Mdl = fitclinear(X, integer_Y, ClassNames=integer_names)",
+        inputs: &INTEGER_LABEL_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Class grouping never passes through floating point.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "Mdl = fitclinear(X, Y, Weights=integer_W, numericOption=integer_value)",
+        inputs: &INTEGER_NUMERIC_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer weights and numeric controls are RunMat-only extensions and reject rather than round.",
+    },
+];
 
 const OUTPUT_MDL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Mdl",
@@ -253,6 +338,7 @@ impl ScoreTransform {
 #[derive(Clone, Debug, PartialEq)]
 enum ClassLabel {
     Numeric(f64),
+    Integer(IntValue),
     Text(String),
     Logical(bool),
 }
@@ -260,8 +346,21 @@ enum ClassLabel {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LabelKind {
     Numeric,
+    Integer(IntegerClass),
     Text,
     Logical,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IntegerClass {
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
 }
 
 #[derive(Clone, Debug)]
@@ -352,9 +451,14 @@ struct FitResult {
     keywords = "fitclinear,classification linear,svm,logistic regression,machine learning,statistics",
     type_resolver(fitclinear_type),
     descriptor(crate::builtins::stats::ml::classification_linear::FITCLINEAR_DESCRIPTOR),
+    extensions(crate::builtins::stats::ml::classification_linear::FITCLINEAR_EXTENSIONS),
+    integer_capabilities(
+        crate::builtins::stats::ml::classification_linear::FITCLINEAR_INTEGER_CAPABILITIES
+    ),
     builtin_path = "crate::builtins::stats::ml::classification_linear"
 )]
 pub(crate) async fn fitclinear_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_fitclinear_extensions(&first, &rest)?;
     let first = gather(first).await?;
     let rest = gather_all(rest).await?;
     let spec = build_fit_spec(first, rest)?;
@@ -368,6 +472,116 @@ pub(crate) async fn fitclinear_builtin(first: Value, rest: Vec<Value>) -> Builti
         )),
         None => Ok(Value::Object(result.object)),
     }
+}
+
+fn enable_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
+    crate::compatibility::ensure_builtin_extension_enabled(extension, FITCLINEAR_NAME)
+}
+
+fn typed_integer_value(value: &Value) -> bool {
+    matches!(value, Value::Int(_))
+        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+}
+
+fn ensure_fitclinear_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+    if crate::dispatcher::value_contains_gpu(first)
+        || rest.iter().any(crate::dispatcher::value_contains_gpu)
+    {
+        enable_extension(&RESIDENT_INPUT_EXTENSION)?;
+    }
+    let option_start = if is_table_value(first) {
+        ensure_table_integer_extensions(first, rest)?
+    } else {
+        if typed_integer_value(first) {
+            enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
+        }
+        1
+    };
+    let options = &rest[option_start.min(rest.len())..];
+    for pair in options.chunks_exact(2) {
+        let Some(name) = scalar_text(&pair[0]) else {
+            continue;
+        };
+        if typed_integer_value(&pair[1]) && !name.eq_ignore_ascii_case("ClassNames") {
+            enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<usize> {
+    let Value::Object(object) = first else {
+        return Ok(0);
+    };
+    let names = table_variable_names_from_object(object)
+        .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))?;
+    let variables =
+        table_variables(object).map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))?;
+    let mut response = names.last().cloned().unwrap_or_default();
+    let mut predictors: Option<Vec<String>> = None;
+    let mut external_y = false;
+    let mut option_start = 0;
+    if let Some(arg) = rest.first().filter(|arg| !is_name_value_option(arg)) {
+        option_start = 1;
+        if let Some(text) = scalar_text(arg) {
+            if let Some((lhs, rhs)) = text.split_once('~') {
+                response = lhs.trim().to_string();
+                predictors = Some(
+                    rhs.split('+')
+                        .map(str::trim)
+                        .filter(|term| !term.is_empty() && *term != "1")
+                        .map(str::to_string)
+                        .collect(),
+                );
+            } else {
+                response = text;
+            }
+        } else {
+            external_y = true;
+        }
+    }
+    let options = &rest[option_start..];
+    let mut weight_variable = None;
+    for pair in options.chunks_exact(2) {
+        let Some(name) = scalar_text(&pair[0]) else {
+            continue;
+        };
+        match name.to_ascii_lowercase().as_str() {
+            "responsename" if !external_y => {
+                if let Some(value) = scalar_text(&pair[1]) {
+                    response = value;
+                }
+            }
+            "predictornames" => predictors = text_list(&pair[1], "PredictorNames").ok(),
+            "weights" => weight_variable = scalar_text(&pair[1]),
+            _ => {}
+        }
+    }
+    let predictors = predictors.unwrap_or_else(|| {
+        names
+            .iter()
+            .filter(|name| {
+                (external_y || **name != response)
+                    && weight_variable.as_deref() != Some(name.as_str())
+            })
+            .cloned()
+            .collect()
+    });
+    if predictors
+        .iter()
+        .any(|name| variables.fields.get(name).is_some_and(typed_integer_value))
+    {
+        enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
+    }
+    if weight_variable
+        .as_ref()
+        .is_some_and(|name| variables.fields.get(name).is_some_and(typed_integer_value))
+    {
+        enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
+    }
+    Ok(option_start)
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
@@ -1191,9 +1405,10 @@ pub(crate) fn predict_classification_linear_object(
     let score_transform = score_transform_property(&object)?;
     let mut label_indices = Vec::with_capacity(x.rows * beta.cols);
     let mut score_data = Vec::with_capacity(x.rows * 2 * beta.cols);
+    let beta_values = beta.materialize_f64();
     for model_idx in 0..beta.cols {
         let model_beta = (0..beta.rows)
-            .map(|row| beta.data[row + model_idx * beta.rows])
+            .map(|row| beta_values[row + model_idx * beta.rows])
             .collect::<Vec<_>>();
         for row in 0..x.rows {
             let margin = dot_row(&x, row, &model_beta) + bias[model_idx];
@@ -1324,23 +1539,27 @@ fn predictors_for_prediction(
 }
 
 fn numeric_matrix_for_fit(value: Value) -> BuiltinResult<Tensor> {
-    match value {
+    let tensor = match value {
         Value::SparseTensor(sparse) => sparse
             .to_dense()
             .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}"))),
         other => tensor::value_into_tensor_for(FITCLINEAR_NAME, other)
             .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}"))),
-    }
+    }?;
+    ensure_integer_tensor_exact(&tensor, "predictors")?;
+    Ok(tensor)
 }
 
 fn numeric_matrix_for_predict(value: Value) -> BuiltinResult<Tensor> {
-    match value {
+    let tensor = match value {
         Value::SparseTensor(sparse) => sparse
             .to_dense()
             .map_err(|err| predict_invalid(format!("predict: {err}"))),
         other => tensor::value_into_tensor_for(PREDICT_NAME, other)
             .map_err(|err| predict_invalid(format!("predict: {err}"))),
-    }
+    }?;
+    ensure_integer_tensor_exact_predict(&tensor, "predictors")?;
+    Ok(tensor)
 }
 
 fn normalize_observation_matrix(x: Tensor, options: &FitOptions) -> BuiltinResult<Tensor> {
@@ -1379,6 +1598,20 @@ fn label_vector(value: Value, name: &str) -> BuiltinResult<LabelVector> {
 
 fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     match value {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
+            if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
+                return Err(predict_invalid(format!("predict: {name} must be a vector")));
+            }
+            let storage = tensor.integer_storage().expect("checked above");
+            Ok(LabelVector {
+                labels: storage
+                    .exact_values()
+                    .into_iter()
+                    .map(ClassLabel::Integer)
+                    .collect(),
+                kind: LabelKind::Integer(integer_class(storage)),
+            })
+        }
         Value::Tensor(tensor) => Ok(LabelVector {
             labels: vector_values_predict(&tensor, name)?
                 .into_iter()
@@ -1389,6 +1622,10 @@ fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
         Value::Num(value) => Ok(LabelVector {
             labels: vec![ClassLabel::Numeric(value)],
             kind: LabelKind::Numeric,
+        }),
+        Value::Int(value) => Ok(LabelVector {
+            kind: LabelKind::Integer(integer_class_for_value(&value)),
+            labels: vec![ClassLabel::Integer(value)],
         }),
         Value::String(text) => Ok(LabelVector {
             labels: vec![ClassLabel::Text(text)],
@@ -1477,6 +1714,10 @@ fn unique_labels(labels: &[ClassLabel], kind: LabelKind) -> Vec<ClassLabel> {
             }
             _ => Ordering::Equal,
         }),
+        LabelKind::Integer(_) => out.sort_by(|left, right| match (left, right) {
+            (ClassLabel::Integer(a), ClassLabel::Integer(b)) => integer_cmp(a, b),
+            _ => Ordering::Equal,
+        }),
         LabelKind::Text => out.sort_by(|left, right| match (left, right) {
             (ClassLabel::Text(a), ClassLabel::Text(b)) => a.cmp(b),
             _ => Ordering::Equal,
@@ -1492,6 +1733,7 @@ fn unique_labels(labels: &[ClassLabel], kind: LabelKind) -> Vec<ClassLabel> {
 fn label_kind(label: &ClassLabel) -> LabelKind {
     match label {
         ClassLabel::Numeric(_) => LabelKind::Numeric,
+        ClassLabel::Integer(value) => LabelKind::Integer(integer_class_for_value(value)),
         ClassLabel::Text(_) => LabelKind::Text,
         ClassLabel::Logical(_) => LabelKind::Logical,
     }
@@ -1500,6 +1742,7 @@ fn label_kind(label: &ClassLabel) -> LabelKind {
 fn label_kind_name(kind: LabelKind) -> &'static str {
     match kind {
         LabelKind::Numeric => "numeric",
+        LabelKind::Integer(class) => integer_class_name(class),
         LabelKind::Text => "text",
         LabelKind::Logical => "logical",
     }
@@ -1508,6 +1751,7 @@ fn label_kind_name(kind: LabelKind) -> &'static str {
 fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
     match (left, right) {
         (ClassLabel::Numeric(a), ClassLabel::Numeric(b)) => (a == b) || (a.is_nan() && b.is_nan()),
+        (ClassLabel::Integer(a), ClassLabel::Integer(b)) => a == b,
         (ClassLabel::Text(a), ClassLabel::Text(b)) => a == b,
         (ClassLabel::Logical(a), ClassLabel::Logical(b)) => a == b,
         _ => false,
@@ -1516,6 +1760,120 @@ fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
 
 fn is_missing_label(label: &ClassLabel) -> bool {
     matches!(label, ClassLabel::Numeric(value) if value.is_nan())
+}
+
+fn integer_class(storage: &IntegerStorage) -> IntegerClass {
+    match storage {
+        IntegerStorage::I8(_) => IntegerClass::I8,
+        IntegerStorage::I16(_) => IntegerClass::I16,
+        IntegerStorage::I32(_) => IntegerClass::I32,
+        IntegerStorage::I64(_) => IntegerClass::I64,
+        IntegerStorage::U8(_) => IntegerClass::U8,
+        IntegerStorage::U16(_) => IntegerClass::U16,
+        IntegerStorage::U32(_) => IntegerClass::U32,
+        IntegerStorage::U64(_) => IntegerClass::U64,
+    }
+}
+
+fn integer_class_for_value(value: &IntValue) -> IntegerClass {
+    match value {
+        IntValue::I8(_) => IntegerClass::I8,
+        IntValue::I16(_) => IntegerClass::I16,
+        IntValue::I32(_) => IntegerClass::I32,
+        IntValue::I64(_) => IntegerClass::I64,
+        IntValue::U8(_) => IntegerClass::U8,
+        IntValue::U16(_) => IntegerClass::U16,
+        IntValue::U32(_) => IntegerClass::U32,
+        IntValue::U64(_) => IntegerClass::U64,
+    }
+}
+
+fn integer_class_name(class: IntegerClass) -> &'static str {
+    match class {
+        IntegerClass::I8 => "int8",
+        IntegerClass::I16 => "int16",
+        IntegerClass::I32 => "int32",
+        IntegerClass::I64 => "int64",
+        IntegerClass::U8 => "uint8",
+        IntegerClass::U16 => "uint16",
+        IntegerClass::U32 => "uint32",
+        IntegerClass::U64 => "uint64",
+    }
+}
+
+fn integer_cmp(left: &IntValue, right: &IntValue) -> Ordering {
+    match (left, right) {
+        (IntValue::I8(a), IntValue::I8(b)) => a.cmp(b),
+        (IntValue::I16(a), IntValue::I16(b)) => a.cmp(b),
+        (IntValue::I32(a), IntValue::I32(b)) => a.cmp(b),
+        (IntValue::I64(a), IntValue::I64(b)) => a.cmp(b),
+        (IntValue::U8(a), IntValue::U8(b)) => a.cmp(b),
+        (IntValue::U16(a), IntValue::U16(b)) => a.cmp(b),
+        (IntValue::U32(a), IntValue::U32(b)) => a.cmp(b),
+        (IntValue::U64(a), IntValue::U64(b)) => a.cmp(b),
+        _ => Ordering::Equal,
+    }
+}
+
+fn integer_storage(class: IntegerClass, values: Vec<IntValue>) -> Result<IntegerStorage, String> {
+    match class {
+        IntegerClass::I8 => collect_integer_values(values, "int8", |v| match v {
+            IntValue::I8(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::I8),
+        IntegerClass::I16 => collect_integer_values(values, "int16", |v| match v {
+            IntValue::I16(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::I16),
+        IntegerClass::I32 => collect_integer_values(values, "int32", |v| match v {
+            IntValue::I32(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::I32),
+        IntegerClass::I64 => collect_integer_values(values, "int64", |v| match v {
+            IntValue::I64(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::I64),
+        IntegerClass::U8 => collect_integer_values(values, "uint8", |v| match v {
+            IntValue::U8(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::U8),
+        IntegerClass::U16 => collect_integer_values(values, "uint16", |v| match v {
+            IntValue::U16(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::U16),
+        IntegerClass::U32 => collect_integer_values(values, "uint32", |v| match v {
+            IntValue::U32(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::U32),
+        IntegerClass::U64 => collect_integer_values(values, "uint64", |v| match v {
+            IntValue::U64(v) => Some(v),
+            _ => None,
+        })
+        .map(IntegerStorage::U64),
+    }
+}
+
+fn collect_integer_values<T>(
+    values: Vec<IntValue>,
+    expected: &str,
+    convert: impl Fn(IntValue) -> Option<T>,
+) -> Result<Vec<T>, String> {
+    values
+        .into_iter()
+        .map(|value| {
+            let actual = value.class_name();
+            convert(value).ok_or_else(|| {
+                format!("integer label invariant expected {expected}, found {actual}")
+            })
+        })
+        .collect()
 }
 
 fn labels_value(labels: &[ClassLabel], kind: LabelKind) -> BuiltinResult<Value> {
@@ -1550,6 +1908,27 @@ fn predicted_labels_value(
             )
             .map_err(|err| predict_internal(format!("predict: {err}")))?,
         )),
+        LabelKind::Integer(class) => {
+            let values = indices
+                .iter()
+                .map(|idx| match labels.get(*idx) {
+                    Some(ClassLabel::Integer(value)) => Ok(value.clone()),
+                    Some(_) => Err(predict_internal(
+                        "predict: integer class metadata does not match stored labels",
+                    )),
+                    None => Err(predict_internal(
+                        "predict: predicted class index is out of range",
+                    )),
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            Ok(Value::Tensor(
+                Tensor::new_integer(
+                    integer_storage(class, values).map_err(predict_internal)?,
+                    shape,
+                )
+                .map_err(|err| predict_internal(format!("predict: {err}")))?,
+            ))
+        }
         LabelKind::Text => Ok(Value::StringArray(StringArray {
             data: indices
                 .iter()
@@ -1665,7 +2044,14 @@ fn char_rows(array: &CharArray) -> Vec<String> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Num(value) => Ok(vec![*value]),
-        Value::Tensor(tensor) => vector_values(tensor, name),
+        Value::Int(value) => {
+            ensure_int_exact_f64(value, name)?;
+            Ok(vec![value.to_f64()])
+        }
+        Value::Tensor(tensor) => {
+            ensure_integer_tensor_exact(tensor, name)?;
+            vector_values(tensor, name)
+        }
         Value::LogicalArray(array) => Ok(array
             .data
             .iter()
@@ -1686,13 +2072,19 @@ fn vector_values_predict(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>>
     if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
         return Err(predict_invalid(format!("predict: {name} must be a vector")));
     }
-    Ok(tensor.data.clone())
+    Ok(tensor::tensor_values_f64(tensor))
 }
 
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        ensure_int_exact_f64(&integer, name)?;
+        return Ok(integer.to_f64());
+    }
     match value {
         Value::Num(value) => Ok(*value),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Ok(tensor::tensor_values_f64(tensor)[0])
+        }
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         _ => Err(fitclinear_invalid(format!(
             "fitclinear: {name} must be a numeric scalar"
@@ -1700,15 +2092,61 @@ fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
     }
 }
 
+fn ensure_integer_tensor_exact(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+    if let Some(storage) = tensor.integer_storage() {
+        for value in storage.exact_values() {
+            ensure_int_exact_f64(&value, name)?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_integer_tensor_exact_predict(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
+    if let Some(storage) = tensor.integer_storage() {
+        for value in storage.exact_values() {
+            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+                return Err(predict_invalid(format!(
+                    "predict: integer {name} must be exactly representable as double"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_int_exact_f64(value: &IntValue, name: &str) -> BuiltinResult<()> {
+    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+        Ok(())
+    } else {
+        Err(fitclinear_invalid(format!(
+            "fitclinear: integer {name} must be exactly representable as double"
+        )))
+    }
+}
+
 fn logical_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
+        return match integer.try_to_usize() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(fitclinear_invalid(format!(
+                "fitclinear: {name} must be logical scalar"
+            ))),
+        };
+    }
     match value {
         Value::Bool(value) => Ok(*value),
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
         Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor)
-            if tensor.data.len() == 1 && (tensor.data[0] == 0.0 || tensor.data[0] == 1.0) =>
-        {
-            Ok(tensor.data[0] != 0.0)
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            let raw = tensor::tensor_values_f64(tensor)[0];
+            if raw == 0.0 || raw == 1.0 {
+                Ok(raw != 0.0)
+            } else {
+                Err(fitclinear_invalid(format!(
+                    "fitclinear: {name} must be logical scalar"
+                )))
+            }
         }
         _ => Err(fitclinear_invalid(format!(
             "fitclinear: {name} must be logical scalar"
@@ -1823,7 +2261,7 @@ fn row_tensor(values: Vec<f64>) -> BuiltinResult<Value> {
 }
 
 fn x_value(x: &Tensor, row: usize, col: usize) -> f64 {
-    x.data[row + col * x.rows]
+    tensor::tensor_value_f64(x, row + col * x.rows)
 }
 
 fn dot_row(x: &Tensor, row: usize, beta: &[f64]) -> f64 {
@@ -1856,9 +2294,35 @@ fn sigmoid(value: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::builtins::table::table_from_columns;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
+    }
+
+    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn scalar_option_parsers_read_all_integer_storage_variants() {
+        let storages = [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![1]),
+        ];
+        for storage in storages {
+            let value = poisoned_int_tensor(storage, vec![1, 1]);
+            assert_eq!(numeric_scalar(&value, "Bias").unwrap(), 1.0);
+            assert!(logical_scalar(&value, "FitBias").unwrap());
+            assert_eq!(positive_integer(&value, "BatchLimit").unwrap(), 1);
+        }
     }
 
     #[tokio::test]
@@ -1883,13 +2347,185 @@ mod tests {
         )
         .unwrap();
         match &outputs[0] {
-            Value::Tensor(labels) => assert_eq!(labels.data, vec![0.0, 1.0]),
+            Value::Tensor(labels) => assert_eq!(labels.materialize_f64(), vec![0.0, 1.0]),
             other => panic!("expected labels, got {other:?}"),
         }
         match &outputs[1] {
             Value::Tensor(score) => assert_eq!(score.shape, vec![2, 2]),
             other => panic!("expected score, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn fitclinear_and_predict_read_typed_integer_storage_exactly() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let model = fitclinear_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
+            vec![
+                poisoned_int_tensor(IntegerStorage::U8(vec![0, 0, 1, 1]), vec![4, 1]),
+                Value::String("Lambda".into()),
+                Value::Num(0.0),
+                Value::String("FitBias".into()),
+                poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
+                Value::String("IterationLimit".into()),
+                poisoned_int_tensor(IntegerStorage::U16(vec![25]), vec![1, 1]),
+                Value::String("Bias".into()),
+                poisoned_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
+            ],
+        )
+        .await
+        .unwrap();
+        let outputs = predict_classification_linear_object(
+            match model {
+                Value::Object(object) => object,
+                _ => panic!("expected object"),
+            },
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 3]), vec![2, 1]),
+            Vec::new(),
+        )
+        .unwrap();
+        match &outputs[0] {
+            Value::Tensor(labels) => assert_eq!(labels.materialize_f64(), vec![0.0, 1.0]),
+            other => panic!("expected labels, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn integer_grouping_labels_round_trip_all_classes() {
+        let storages = [
+            IntegerStorage::I8(vec![-1, 1]),
+            IntegerStorage::I16(vec![-1, 1]),
+            IntegerStorage::I32(vec![-1, 1]),
+            IntegerStorage::I64(vec![-1, 1]),
+            IntegerStorage::U8(vec![0, 1]),
+            IntegerStorage::U16(vec![0, 1]),
+            IntegerStorage::U32(vec![0, 1]),
+            IntegerStorage::U64(vec![0, 1]),
+        ];
+        for storage in storages {
+            let expected = storage.clone();
+            let labels = labels_from_value(
+                Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap()),
+                "Y",
+            )
+            .unwrap();
+            let Value::Tensor(round_trip) = labels_value(&labels.labels, labels.kind).unwrap()
+            else {
+                panic!("expected integer tensor");
+            };
+            assert_eq!(round_trip.integer_storage(), Some(&expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn fitclinear_preserves_adjacent_wide_uint64_classes() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let base = 9_007_199_254_740_992_u64;
+        let labels = IntegerStorage::U64(vec![base, base, base + 1, base + 1]);
+        let model = fitclinear_builtin(
+            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
+            vec![
+                poisoned_int_tensor(labels, vec![4, 1]),
+                Value::from("Lambda"),
+                Value::Num(0.0),
+            ],
+        )
+        .await
+        .unwrap();
+        let Value::Object(object) = model else {
+            panic!("expected model");
+        };
+        assert_eq!(
+            object
+                .properties
+                .get("ClassNames")
+                .and_then(|value| match value {
+                    Value::Tensor(tensor) => tensor.integer_storage(),
+                    _ => None,
+                }),
+            Some(&IntegerStorage::U64(vec![base, base + 1]))
+        );
+        let outputs = predict_classification_linear_object(
+            object,
+            tensor(vec![0.0, 3.0], vec![2, 1]),
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            match &outputs[0] {
+                Value::Tensor(tensor) => tensor.integer_storage(),
+                _ => None,
+            },
+            Some(&IntegerStorage::U64(vec![base, base + 1]))
+        );
+    }
+
+    #[tokio::test]
+    async fn fitclinear_strict_mode_rejects_integer_numeric_extensions() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = fitclinear_builtin(
+            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
+            vec![tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1])],
+        )
+        .await
+        .expect_err("integer predictor extension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FitclinearIntegerPredictorExtension")
+        );
+
+        let error = fitclinear_builtin(
+            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
+            vec![
+                tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
+                Value::from("IterationLimit"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+            ],
+        )
+        .await
+        .expect_err("integer control extension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FitclinearIntegerNumericArgumentExtension")
+        );
+
+        let poison = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![4, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = fitclinear_builtin(poison, vec![tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1])])
+            .await
+            .expect_err("resident gate before gather");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FitclinearResidentInputExtension")
+        );
+    }
+
+    #[tokio::test]
+    async fn fitclinear_rejects_inexact_integer_predictors_and_weights() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let inexact = 9_007_199_254_740_993_u64;
+        let error = fitclinear_builtin(
+            poisoned_int_tensor(IntegerStorage::U64(vec![0, 1, 2, inexact]), vec![4, 1]),
+            vec![tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1])],
+        )
+        .await
+        .expect_err("inexact predictor");
+        assert!(error.message.contains("exactly representable"));
+
+        let error = fitclinear_builtin(
+            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
+            vec![
+                tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
+                Value::from("Weights"),
+                poisoned_int_tensor(IntegerStorage::U64(vec![1, 1, 1, inexact]), vec![4, 1]),
+            ],
+        )
+        .await
+        .expect_err("inexact weights");
+        assert!(error.message.contains("exactly representable"));
     }
 
     #[tokio::test]
@@ -1928,7 +2564,9 @@ mod tests {
         match &outputs[1] {
             Value::Tensor(score) => {
                 assert_eq!(score.shape, vec![2, 2]);
-                assert!((score.data[0] + score.data[2] - 1.0).abs() < 1.0e-8);
+                assert!(
+                    (score.materialize_f64()[0] + score.materialize_f64()[2] - 1.0).abs() < 1.0e-8
+                );
             }
             other => panic!("expected score, got {other:?}"),
         }

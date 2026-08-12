@@ -16,10 +16,18 @@
     "reduction": false,
     "precisions": [
       "single",
-      "double"
+      "double",
+      "int8",
+      "int16",
+      "int32",
+      "int64",
+      "uint8",
+      "uint16",
+      "uint32",
+      "uint64"
     ],
     "broadcasting": "none",
-    "notes": "`contour` uses the shared contour-generation path and returns a contour handle in the plotting object model."
+    "notes": "Floating gpuArray `Z` can use RunMat's shared WGPU contour path. Integer gpuArray coordinates, heights, levels, and scalar properties gather exactly through the owning provider before the client graphics boundary because the contour shaders consume floating buffers."
   },
   "fusion": {
     "elementwise": false,
@@ -31,18 +39,19 @@
   "tested": {
     "unit": "builtins::plotting::contour::tests"
   },
-  "description": "`contour` creates contour line plots from scalar fields. It returns a contour handle and supports level-list and level-step forms, sharing contour-generation behavior across MATLAB and RunMat.",
+  "description": "`contour` creates contour line plots from scalar fields using implicit or explicit coordinates, explicit levels, and a supported subset of contour appearance properties. RunMat returns an opaque contour handle; MATLAB's contour-matrix first output and two-output `[M, c]` form remain graphics-representation gaps.",
   "behaviors": [
-    "`contour(Z)` uses implicit axes, while `contour(X, Y, Z)` accepts explicit vector or matrix coordinates.",
-    "The builtin returns a contour handle that works with the plotting property system.",
-    "Levels can be controlled through explicit level lists, level counts, or level-step workflows.",
+    "`contour(Z)` uses implicit axes, while `contour(X, Y, Z)` accepts strictly monotonic coordinate vectors or meshgrid-style matrices and `contour(ax, ...)` selects an existing axes target.",
+    "All eight built-in integer classes are accepted for `X`, `Y`, `Z`, positional level counts/vectors, `LevelList`, `LevelStep`, and `LineWidth`; integer shape, distinctness, meshgrid identity, ordering, count, and scalar constraints are validated from authoritative storage before floating graphics conversion.",
+    "A scalar level argument is a positive requested level count bounded by RunMat's one-million-level materialization guard; a vector is an explicit monotonically increasing level list, and `[k k]` requests one level at `k`.",
     "Contour state is subplot-local and composes naturally with `colormap`, `colorbar`, and surface/composite builtins.",
-    "GPU-aware contour generation is used when the shared plotting path can operate directly on GPU-resident scalar fields."
+    "The public compatibility surface accepts GPU arrays but performs contour plotting on the client. RunMat preserves that behavior for resident integers through exact owning-provider gather and additionally accelerates eligible floating `Z` grids through the shared WGPU plotting context."
   ],
   "options": [
-    "`'LevelList'` / `'Levels'` accepts an explicit, strictly increasing vector of contour values.",
-    "`'LevelStep'` specifies evenly spaced contour levels.",
-    "`'LineColor'` accepts MATLAB color strings, RGB triples, and contour-specific modes such as `'auto'` or `'none'` where supported."
+    "`'LevelList'` accepts an explicit monotonically increasing vector of contour values; RunMat also accepts `'Levels'` as an alias.",
+    "`'LevelStep'` accepts a positive finite scalar spacing, and `'LineWidth'` accepts a positive finite scalar width.",
+    "`'LineColor'` accepts color strings, RGB triples, and `'auto'`, `'flat'`, or `'none'`. Typed-integer RGB triples containing only exact 0/1 channels are a separately gated RunMat extension because the public RGB contract does not explicitly advertise integer classes.",
+    "The broader Contour property surface, including label-generation properties, `EdgeColor`, `FaceColor`, alpha controls, and post-construction typed `XData`/`YData`/`ZData` mutation, remains a general graphics-property coverage gap."
   ],
   "examples": [
     {
@@ -71,7 +80,7 @@
     },
     {
       "question": "Can I add labels to the contour lines?",
-      "answer": "Use `clabel` after `contour` to annotate the lines with their level values. Pass the contour handle to `clabel` so it knows which plot to label.\n\n```matlab\n[C, h] = contour(X, Y, Z);\nclabel(C, h);\n```"
+      "answer": "MATLAB supports contour labels through `clabel` and contour label properties. RunMat's current contour object does not yet implement that broader label-generation surface."
     },
     {
       "question": "What's the difference between contour and contourf?",

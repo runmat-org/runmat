@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::op_common::line_inputs::NumericInput;
@@ -732,11 +733,14 @@ fn quiver_axis_source(
     match input {
         QuiverCoordinateInput::Explicit(NumericInput::Host(tensor)) => match precision {
             runmat_accelerate_api::ProviderPrecision::F32 => Ok(QuiverAxisSource::HostF32(
-                tensor.data.iter().map(|value| *value as f32).collect(),
+                tensor_utils::tensor_values_f64(tensor)
+                    .into_iter()
+                    .map(|value| value as f32)
+                    .collect(),
             )),
-            runmat_accelerate_api::ProviderPrecision::F64 => {
-                Ok(QuiverAxisSource::HostF64(tensor.data.clone()))
-            }
+            runmat_accelerate_api::ProviderPrecision::F64 => Ok(QuiverAxisSource::HostF64(
+                tensor_utils::tensor_values_f64(tensor),
+            )),
         },
         QuiverCoordinateInput::Explicit(NumericInput::Gpu(handle)) => {
             let exported = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
@@ -794,14 +798,7 @@ fn implicit_quiver_grid_tensor(
             });
         }
     }
-    Ok(Tensor {
-        data,
-        shape: vec![len],
-        rows: len,
-        cols: 1,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Tensor::new(data, vec![len]).map_err(|e| plotting_error(BUILTIN_NAME, format!("quiver: {e}")))
 }
 
 fn host_bounds(values: impl Iterator<Item = f64>) -> (f32, f32) {
@@ -957,7 +954,11 @@ fn tensor_shape_from_value(
         _ => {
             let tensor = Tensor::try_from(value)
                 .map_err(|e| plotting_error(builtin, format!("quiver: {e}")))?;
-            Ok((tensor.rows.max(1), tensor.cols.max(1), tensor.data.len()))
+            Ok((
+                tensor.rows.max(1),
+                tensor.cols.max(1),
+                tensor_utils::tensor_element_len(&tensor),
+            ))
         }
     }
 }
@@ -969,15 +970,24 @@ fn materialize_quiver_components(
     v: Tensor,
     builtin: &'static str,
 ) -> crate::BuiltinResult<QuiverComponents> {
-    if u.rows != v.rows || u.cols != v.cols || u.data.len() != v.data.len() {
+    let u_rows = u.rows;
+    let u_cols = u.cols;
+    let v_rows = v.rows;
+    let v_cols = v.cols;
+    let x_len = tensor_utils::tensor_element_len(&x);
+    let y_len = tensor_utils::tensor_element_len(&y);
+    let u_len = tensor_utils::tensor_element_len(&u);
+    let v_len = tensor_utils::tensor_element_len(&v);
+
+    if u_rows != v_rows || u_cols != v_cols || u_len != v_len {
         return Err(plotting_error(
             builtin,
             "quiver: U and V inputs must have identical size",
         ));
     }
 
-    let u_is_matrix = u.rows > 1 && u.cols > 1;
-    let v_is_matrix = v.rows > 1 && v.cols > 1;
+    let u_is_matrix = u_rows > 1 && u_cols > 1;
+    let v_is_matrix = v_rows > 1 && v_cols > 1;
     if u_is_matrix != v_is_matrix {
         return Err(plotting_error(
             builtin,
@@ -986,31 +996,47 @@ fn materialize_quiver_components(
     }
 
     if !u_is_matrix {
-        let len = u.data.len();
-        if x.data.len() != len || y.data.len() != len {
+        if x_len != u_len || y_len != u_len {
             return Err(plotting_error(
                 builtin,
                 "quiver: X, Y, U, and V vectors must have the same length",
             ));
         }
-        return Ok((x.data, y.data, u.data, v.data));
+        return Ok((
+            tensor_utils::tensor_into_values_f64(x),
+            tensor_utils::tensor_into_values_f64(y),
+            tensor_utils::tensor_into_values_f64(u),
+            tensor_utils::tensor_into_values_f64(v),
+        ));
     }
 
-    let rows = u.rows;
-    let cols = u.cols;
-    if x.data.len() == rows * cols && y.data.len() == rows * cols {
-        return Ok((x.data, y.data, u.data, v.data));
+    let rows = u_rows;
+    let cols = u_cols;
+    if x_len == rows * cols && y_len == rows * cols {
+        return Ok((
+            tensor_utils::tensor_into_values_f64(x),
+            tensor_utils::tensor_into_values_f64(y),
+            tensor_utils::tensor_into_values_f64(u),
+            tensor_utils::tensor_into_values_f64(v),
+        ));
     }
-    if x.data.len() == cols && y.data.len() == rows {
+    if x_len == cols && y_len == rows {
+        let x_values = tensor_utils::tensor_into_values_f64(x);
+        let y_values = tensor_utils::tensor_into_values_f64(y);
         let mut out_x = Vec::with_capacity(rows * cols);
         let mut out_y = Vec::with_capacity(rows * cols);
         for col in 0..cols {
             for row in 0..rows {
-                out_x.push(x.data[col]);
-                out_y.push(y.data[row]);
+                out_x.push(x_values[col]);
+                out_y.push(y_values[row]);
             }
         }
-        return Ok((out_x, out_y, u.data, v.data));
+        return Ok((
+            out_x,
+            out_y,
+            tensor_utils::tensor_into_values_f64(u),
+            tensor_utils::tensor_into_values_f64(v),
+        ));
     }
     Err(plotting_error(
         builtin,
@@ -1031,14 +1057,12 @@ mod tests {
     use runmat_plot::plots::PlotElement;
 
     fn vec_tensor(data: &[f64]) -> Tensor {
-        Tensor {
-            data: data.to_vec(),
-            integer_data: None,
-            shape: vec![data.len()],
-            rows: data.len(),
-            cols: 1,
-            dtype: runmat_builtins::NumericDType::F64,
-        }
+        Tensor::new(data.to_vec(), vec![data.len()]).expect("quiver test vector")
+    }
+
+    fn int_tensor(data: &[i16], shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(runmat_builtins::IntegerStorage::I16(data.to_vec()), shape)
+            .expect("integer tensor")
     }
 
     #[test]
@@ -1071,6 +1095,74 @@ mod tests {
     }
 
     #[test]
+    fn quiver_axis_source_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I16(vec![-2, 0, 2]),
+            vec![3],
+        )
+        .expect("typed quiver axis");
+        let host = QuiverCoordinateInput::Explicit(NumericInput::Host(tensor));
+
+        let f64_axis =
+            quiver_axis_source(&host, runmat_accelerate_api::ProviderPrecision::F64, "X").unwrap();
+        match f64_axis.axis_data() {
+            AxisData::F64(values) => assert_eq!(values, &[-2.0, 0.0, 2.0]),
+            _ => panic!("expected f64 axis data"),
+        }
+
+        let f32_axis =
+            quiver_axis_source(&host, runmat_accelerate_api::ProviderPrecision::F32, "X").unwrap();
+        match f32_axis.axis_data() {
+            AxisData::F32(values) => assert_eq!(values, &[-2.0, 0.0, 2.0]),
+            _ => panic!("expected f32 axis data"),
+        }
+    }
+
+    #[test]
+    fn quiver_components_read_typed_integer_vectors_exactly() {
+        let components = materialize_quiver_components(
+            int_tensor(&[0, 1], vec![2]),
+            int_tensor(&[2, 3], vec![2]),
+            int_tensor(&[4, 5], vec![2]),
+            int_tensor(&[6, 7], vec![2]),
+            BUILTIN_NAME,
+        )
+        .expect("quiver components");
+
+        assert_eq!(
+            components,
+            (
+                vec![0.0, 1.0],
+                vec![2.0, 3.0],
+                vec![4.0, 5.0],
+                vec![6.0, 7.0]
+            )
+        );
+    }
+
+    #[test]
+    fn quiver_components_expand_typed_integer_meshgrid_axes() {
+        let components = materialize_quiver_components(
+            int_tensor(&[10, 20], vec![1, 2]),
+            int_tensor(&[1, 2], vec![2, 1]),
+            int_tensor(&[3, 4, 5, 6], vec![2, 2]),
+            int_tensor(&[7, 8, 9, 10], vec![2, 2]),
+            BUILTIN_NAME,
+        )
+        .expect("meshgrid-style components");
+
+        assert_eq!(
+            components,
+            (
+                vec![10.0, 10.0, 20.0, 20.0],
+                vec![1.0, 2.0, 1.0, 2.0],
+                vec![3.0, 4.0, 5.0, 6.0],
+                vec![7.0, 8.0, 9.0, 10.0]
+            )
+        );
+    }
+
+    #[test]
     fn quiver_axis_source_keeps_implicit_grid_compact() {
         let x_axis = QuiverCoordinateInput::ImplicitX { rows: 3, cols: 2 };
         let y_axis = QuiverCoordinateInput::ImplicitY { rows: 3, cols: 2 };
@@ -1093,8 +1185,8 @@ mod tests {
 
         let x_full = x_axis.into_tensor(BUILTIN_NAME).unwrap();
         let y_full = y_axis.into_tensor(BUILTIN_NAME).unwrap();
-        assert_eq!(x_full.data, vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0]);
-        assert_eq!(y_full.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        assert_eq!(x_full.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0]);
+        assert_eq!(y_full.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -1112,8 +1204,8 @@ mod tests {
         let PlotElement::Quiver(quiver) = fig.plots().next().unwrap() else {
             panic!("expected quiver");
         };
-        assert_eq!(quiver.x, vec![1.0, 1.0]);
-        assert_eq!(quiver.y, vec![1.0, 2.0]);
+        assert_eq!(quiver.x, vec![1.0, 2.0]);
+        assert_eq!(quiver.y, vec![1.0, 1.0]);
     }
 
     #[test]

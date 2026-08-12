@@ -245,11 +245,11 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0; 6], vec![2, 3]).unwrap();
             let tensor3d = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
             let tensor_view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let tensor3d_view = runmat_accelerate_api::HostTensorView {
-                data: &tensor3d.data,
+                data: &tensor3d.materialize_f64(),
                 shape: &tensor3d.shape,
             };
             let handle = provider.upload(&tensor_view).expect("upload matrix");
@@ -267,7 +267,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload vector");
@@ -283,7 +283,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![1.0], vec![1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -334,7 +334,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");

@@ -143,3 +143,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Output.data[global_index] = Input.data[src_index];
 }
 "#;
+
+// Exact integer gpuArrays are represented as u32 words, with two adjacent
+// words for i64 and u64. The provider includes that word lane in the
+// permutation shape, so this kernel is a pure bit copy with no float cast.
+pub fn permute_shader_u32() -> String {
+    PERMUTE_SHADER_F32.replace("array<f32>", "array<u32>")
+}

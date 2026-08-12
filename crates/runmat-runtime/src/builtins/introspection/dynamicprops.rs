@@ -6,9 +6,10 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, DynamicPropertyDef,
+    HandleRef, ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::collections::HashMap;
@@ -16,6 +17,13 @@ use std::collections::HashMap;
 pub const DYNAMICPROPS_CLASS: &str = "dynamicprops";
 pub const DYNAMIC_PROPERTY_CLASS: &str = "matlab.metadata.DynamicProperty";
 pub const STATIC_PROPERTY_METADATA_CLASS: &str = "matlab.metadata.Property";
+
+pub const FINDPROP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
+    BuiltinIntegerAuditDescriptor {
+        kind: BuiltinIntegerAuditKind::NotApplicable,
+        canonical_builtin: None,
+        notes: "findprop accepts a scalar object or handle object and a textual property name. All eight integer classes, logical and complex values, and resident numeric handles are invalid targets and are never converted into object metadata.",
+    };
 
 const TARGET_FIELD: &str = "__runmat_dynamic_property_target__";
 const VALID_FIELD: &str = "__runmat_dynamic_property_valid__";
@@ -172,6 +180,12 @@ pub const ADDPROP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DYNAMIC_ERRORS,
 };
 
+pub const ADDPROP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "addprop accepts only a dynamicprops object receiver and a character-vector or string-scalar property name, then returns metadata. It does not accept an initial property value; values assigned through later object-property operations have their own class semantics.",
+};
+
 pub const FINDPROP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FINDPROP_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -249,18 +263,15 @@ fn metadata_bool(value: &Value, field: &str) -> BuiltinResult<bool> {
     match value {
         Value::Bool(flag) => Ok(*flag),
         Value::Num(number) if *number == 0.0 || *number == 1.0 => Ok(*number != 0.0),
-        Value::Int(int) => {
-            let value = int.to_i64();
-            if value == 0 || value == 1 {
-                Ok(value != 0)
-            } else {
-                Err(dynamic_error(
-                    DYNAMIC_PROPERTY_CLASS,
-                    &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
-                    format!("dynamic property metadata field '{field}' requires logical scalar"),
-                ))
-            }
-        }
+        Value::Int(int) => match int.try_to_u64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(dynamic_error(
+                DYNAMIC_PROPERTY_CLASS,
+                &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
+                format!("dynamic property metadata field '{field}' requires logical scalar"),
+            )),
+        },
         _ => Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -588,6 +599,7 @@ fn remove_dynamic_property(target: &HandleRef, name: &str) -> BuiltinResult<()> 
     keywords = "dynamicprops,addprop,dynamic property,handle object,meta.DynamicProperty",
     sink = true,
     descriptor(crate::builtins::introspection::dynamicprops::ADDPROP_DESCRIPTOR),
+    integer_audit(crate::builtins::introspection::dynamicprops::ADDPROP_INTEGER_AUDIT),
     builtin_path = "crate::builtins::introspection::dynamicprops"
 )]
 async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value> {
@@ -664,6 +676,7 @@ async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<
     category = "introspection",
     summary = "Find class-defined or dynamic property metadata on an object.",
     keywords = "dynamicprops,findprop,property metadata,meta.property,meta.DynamicProperty",
+    integer_audit(crate::builtins::introspection::dynamicprops::FINDPROP_INTEGER_AUDIT),
     descriptor(crate::builtins::introspection::dynamicprops::FINDPROP_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::dynamicprops"
 )]
@@ -828,6 +841,24 @@ pub fn dynamic_property_metadata_struct(def: &DynamicPropertyDef) -> Value {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
+
+    #[test]
+    fn addprop_descriptor_is_integer_inapplicable() {
+        assert_eq!(
+            ADDPROP_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        assert!(ADDPROP_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
+    fn metadata_bool_accepts_only_exact_typed_logical_values() {
+        assert!(metadata_bool(&Value::Int(IntValue::U64(1)), "Hidden").expect("logical one"));
+        assert!(!metadata_bool(&Value::Int(IntValue::U64(0)), "Hidden").expect("logical zero"));
+        assert!(metadata_bool(&Value::Int(IntValue::U64(u64::MAX)), "Hidden").is_err());
+        assert!(metadata_bool(&Value::Int(IntValue::I64(-1)), "Hidden").is_err());
+    }
 
     fn target_handle(class_name: &str) -> (Value, runmat_gc::ExplicitRoot) {
         let obj = ObjectInstance::new(class_name.to_string());
@@ -892,6 +923,7 @@ mod tests {
 
     #[test]
     fn dynamic_property_supports_value_access_and_metadata_mutation() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         {
             let (target, _target_root) = dynamic_target_handle("DynTarget");
             let prop =
@@ -958,6 +990,16 @@ mod tests {
     }
 
     #[test]
+    fn addprop_rejects_integer_receiver_instead_of_treating_it_as_property_data() {
+        let err = block_on(addprop_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            "gain".to_string(),
+        ))
+        .expect_err("integer is not a dynamicprops receiver");
+        assert_eq!(err.identifier(), Some("RunMat:dynamicprops:InvalidTarget"));
+    }
+
+    #[test]
     fn findprop_aliases_share_delete_invalidation() {
         {
             let (target, _target_root) = dynamic_target_handle("DynAliasTarget");
@@ -982,5 +1024,35 @@ mod tests {
             };
             assert!(!metadata_obj.properties.contains_key(TARGET_FIELD));
         }
+    }
+
+    #[test]
+    fn findprop_integer_audit_rejects_every_integer_target_class() {
+        assert_eq!(
+            FINDPROP_INTEGER_AUDIT.kind,
+            BuiltinIntegerAuditKind::NotApplicable
+        );
+        for target in [
+            Value::Int(runmat_builtins::IntValue::I8(1)),
+            Value::Int(runmat_builtins::IntValue::I16(1)),
+            Value::Int(runmat_builtins::IntValue::I32(1)),
+            Value::Int(runmat_builtins::IntValue::I64(1)),
+            Value::Int(runmat_builtins::IntValue::U8(1)),
+            Value::Int(runmat_builtins::IntValue::U16(1)),
+            Value::Int(runmat_builtins::IntValue::U32(1)),
+            Value::Int(runmat_builtins::IntValue::U64(1)),
+        ] {
+            let error = findprop_builtin(target, "Name".into())
+                .expect_err("integer is not an object target");
+            assert_eq!(error.identifier(), DYNAMIC_ERROR_INVALID_TARGET.identifier);
+        }
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+        });
+        let error = findprop_builtin(resident, "Name".into())
+            .expect_err("resident numeric value is not an object target");
+        assert_eq!(error.identifier(), DYNAMIC_ERROR_INVALID_TARGET.identifier);
     }
 }

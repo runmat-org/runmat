@@ -12,6 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::math::optim::type_resolvers::linear_programming_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -433,7 +434,7 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
 }
 
 fn is_empty_value(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.data.is_empty())
+    matches!(value, Value::Tensor(t) if tensor::tensor_element_len(t) == 0)
 }
 
 async fn numeric_vector(
@@ -456,7 +457,10 @@ async fn numeric_vector(
                     format!("{label} must be a vector"),
                 ));
             }
-            t.data
+            // Solver input is deliberately normalized to double, but typed
+            // integer tensors must be read from their exact storage rather
+            // than the compatibility f64 mirror.
+            tensor::tensor_into_values_f64(t)
         }
         other => {
             return Err(linprog_error_with_detail(
@@ -499,12 +503,11 @@ async fn numeric_matrix(label: &str, value: Value) -> BuiltinResult<Option<Matri
                     format!("{label} must be a numeric matrix"),
                 ));
             }
-            validate_numbers(label, &t.data, FiniteMode::Finite)?;
-            Ok(Some(MatrixInput {
-                rows: t.rows(),
-                cols: t.cols(),
-                data: t.data,
-            }))
+            let rows = t.rows();
+            let cols = t.cols();
+            let data = tensor::tensor_into_values_f64(t);
+            validate_numbers(label, &data, FiniteMode::Finite)?;
+            Ok(Some(MatrixInput { rows, cols, data }))
         }
         other => Err(linprog_error_with_detail(
             &LINPROG_ERROR_INVALID_INPUT,
@@ -1075,7 +1078,7 @@ fn build_output_struct(outcome: &LinprogOutcome) -> StructValue {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Value as V;
+    use runmat_builtins::{IntegerStorage, Value as V};
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> V {
         V::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
@@ -1083,6 +1086,24 @@ mod tests {
 
     fn empty() -> V {
         V::Tensor(Tensor::zeros(vec![0, 0]))
+    }
+
+    #[test]
+    fn numeric_inputs_read_typed_integer_storage_despite_poisoned_mirrors() {
+        let vector =
+            Tensor::new_integer(IntegerStorage::I64(vec![-7, 3]), vec![2, 1]).expect("vector");
+        assert_eq!(
+            block_on(numeric_vector("f", V::Tensor(vector), FiniteMode::Finite)).unwrap(),
+            vec![-7.0, 3.0]
+        );
+
+        let wide = 9_007_199_254_740_993_u64;
+        let matrix =
+            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("matrix");
+        let parsed = block_on(numeric_matrix("A", V::Tensor(matrix)))
+            .unwrap()
+            .expect("matrix input");
+        assert_eq!(parsed.data, vec![wide as f64]);
     }
 
     fn run(f: V, a: V, b: V, rest: Vec<V>, outputs: usize) -> Vec<V> {
@@ -1105,8 +1126,8 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 0.0).abs() < 1.0e-7, "{x:?}");
-                assert!((x.data[1] - 4.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 0.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[1] - 4.0).abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }
@@ -1130,8 +1151,8 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 3.0).abs() < 1.0e-7, "{x:?}");
-                assert!((x.data[1] - 0.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 3.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[1] - 0.0).abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }
@@ -1147,8 +1168,8 @@ mod tests {
             vec![empty(), empty(), V::Num(2.0), V::Num(1.0)],
             4,
         );
-        assert!(matches!(&outputs[0], V::Tensor(t) if t.data.is_empty()));
-        assert!(matches!(&outputs[1], V::Tensor(t) if t.data.is_empty()));
+        assert!(matches!(&outputs[0], V::Tensor(t) if t.materialize_f64().is_empty()));
+        assert!(matches!(&outputs[1], V::Tensor(t) if t.materialize_f64().is_empty()));
         assert!(matches!(&outputs[2], V::Num(flag) if *flag == -2.0));
         assert!(matches!(&outputs[3], V::Struct(s) if s.fields.contains_key("message")));
     }
@@ -1156,8 +1177,8 @@ mod tests {
     #[test]
     fn reports_unbounded_problem() {
         let outputs = run(V::Num(-1.0), empty(), empty(), Vec::new(), 3);
-        assert!(matches!(&outputs[0], V::Tensor(t) if t.data.is_empty()));
-        assert!(matches!(&outputs[1], V::Tensor(t) if t.data.is_empty()));
+        assert!(matches!(&outputs[0], V::Tensor(t) if t.materialize_f64().is_empty()));
+        assert!(matches!(&outputs[1], V::Tensor(t) if t.materialize_f64().is_empty()));
         assert!(matches!(&outputs[2], V::Num(flag) if *flag == -3.0));
     }
 
@@ -1172,8 +1193,8 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 2.0).abs() < 1.0e-7, "{x:?}");
-                assert!((x.data[1] - 3.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 2.0).abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[1] - 3.0).abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }
@@ -1196,8 +1217,8 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 2.0).abs() < 1.0e-7, "{x:?}");
-                assert!(x.data[1].abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 2.0).abs() < 1.0e-7, "{x:?}");
+                assert!(x.materialize_f64()[1].abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }
@@ -1221,9 +1242,9 @@ mod tests {
         );
         match &outputs[0] {
             V::Tensor(x) => {
-                assert!((x.data[0] - 1.0).abs() < 1.0e-7, "{x:?}");
-                assert!(x.data[1].abs() < 1.0e-7, "{x:?}");
-                assert!(x.data[2].abs() < 1.0e-7, "{x:?}");
+                assert!((x.materialize_f64()[0] - 1.0).abs() < 1.0e-7, "{x:?}");
+                assert!(x.materialize_f64()[1].abs() < 1.0e-7, "{x:?}");
+                assert!(x.materialize_f64()[2].abs() < 1.0e-7, "{x:?}");
             }
             other => panic!("unexpected x {other:?}"),
         }

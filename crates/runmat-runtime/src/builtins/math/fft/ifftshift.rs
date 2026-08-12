@@ -3,7 +3,9 @@
 //! `ifftshift` moves the zero-frequency component back to the origin, undoing
 //! the reordering performed by `fftshift` and preparing spectra for inverse FFTs.
 
-use super::common::{apply_shift, build_shift_plan, compute_shift_dims, ShiftKind};
+use super::common::{
+    apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims, ShiftKind,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -11,11 +13,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::type_resolvers::ifftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Tensor, Value,
+    ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -229,8 +231,8 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
             })?;
             let dims = compute_ifftshift_dims(&tensor.shape, dims_arg)?;
             Ok(ifftshift_complex_tensor(tensor, &dims).map(|result| {
-                if result.data.len() == 1 {
-                    let (r, i) = result.data[0];
+                if result.materialize_f64().len() == 1 {
+                    let (r, i) = result.materialize_f64()[0];
                     Value::Complex(r, i)
                 } else {
                     Value::ComplexTensor(result)
@@ -279,18 +281,17 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
 }
 
 fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
-    let Tensor { data, shape, .. } = tensor;
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_numeric_storage().map_err(|source| {
+        ifftshift_error_with_detail(
+            &IFFTSHIFT_ERROR_INTERNAL,
+            format!("invalid tensor storage: {source}"),
+        )
+    })?;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
-    if data.is_empty() || plan.is_noop() {
-        return Tensor::new(data, shape).map_err(|source| {
-            ifftshift_error_with_detail(
-                &IFFTSHIFT_ERROR_INTERNAL,
-                format!("tensor reconstruction failed: {source}"),
-            )
-        });
-    }
-    let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    Tensor::new(rotated, shape).map_err(|source| {
+    let rotated =
+        apply_shift_numeric_storage(BUILTIN_NAME, storage, &plan.ext_shape, &plan.positive)?;
+    Tensor::from_numeric_storage(rotated, shape).map_err(|source| {
         ifftshift_error_with_detail(
             &IFFTSHIFT_ERROR_INTERNAL,
             format!("tensor reconstruction failed: {source}"),
@@ -299,18 +300,45 @@ fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
 }
 
 fn ifftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResult<ComplexTensor> {
-    let ComplexTensor { data, shape, .. } = tensor;
+    let shape = tensor.shape.clone();
+    let storage = tensor.into_complex_storage();
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
-    if data.is_empty() || plan.is_noop() {
-        return ComplexTensor::new(data, shape).map_err(|source| {
+    if storage.is_empty() || plan.is_noop() {
+        return ComplexTensor::from_complex_storage(storage, shape).map_err(|source| {
             ifftshift_error_with_detail(
                 &IFFTSHIFT_ERROR_INTERNAL,
                 format!("complex tensor reconstruction failed: {source}"),
             )
         });
     }
-    let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    ComplexTensor::new(rotated, shape).map_err(|source| {
+    let rotated = match storage {
+        ComplexStorage::F64(values) => ComplexStorage::F64(apply_shift(
+            BUILTIN_NAME,
+            &values,
+            &plan.ext_shape,
+            &plan.positive,
+        )?),
+        ComplexStorage::F32(values) => ComplexStorage::F32(apply_shift(
+            BUILTIN_NAME,
+            &values,
+            &plan.ext_shape,
+            &plan.positive,
+        )?),
+        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
+            storage
+                .reorder(|values| {
+                    apply_shift(BUILTIN_NAME, values, &plan.ext_shape, &plan.positive)
+                        .map_err(|error| error.to_string())
+                })
+                .map_err(|source| {
+                    ifftshift_error_with_detail(
+                        &IFFTSHIFT_ERROR_INTERNAL,
+                        format!("complex integer shift failed: {source}"),
+                    )
+                })?,
+        ),
+    };
+    ComplexTensor::from_complex_storage(rotated, shape).map_err(|source| {
         ifftshift_error_with_detail(
             &IFFTSHIFT_ERROR_INTERNAL,
             format!("complex tensor reconstruction failed: {source}"),
@@ -378,12 +406,7 @@ async fn ifftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> Buil
         })?;
     let shifted = ifftshift_tensor(host_tensor, dims)?;
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let view = HostTensorView {
-            data: &shifted.data,
-            shape: &shifted.shape,
-        };
-        return provider
-            .upload(&view)
+        return gpu_helpers::upload_tensor(provider, &shifted)
             .map(Value::GpuTensor)
             .map_err(|source| {
                 ifftshift_error_with_detail(
@@ -402,8 +425,8 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
-        builtin_function_by_name, ComplexTensor, IntValue, LogicalArray, ResolveContext, Tensor,
-        Type,
+        builtin_function_by_name, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
+        LogicalArray, ResolveContext, Tensor, Type,
     };
 
     fn error_message(error: crate::RuntimeError) -> String {
@@ -451,7 +474,10 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![8, 1]);
-                assert_eq!(out.data, vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]);
+                assert_eq!(
+                    out.materialize_f64(),
+                    vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -465,7 +491,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![5, 1]);
-                assert_eq!(out.data, vec![3.0, 4.0, 5.0, 1.0, 2.0]);
+                assert_eq!(out.materialize_f64(), vec![3.0, 4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -478,7 +504,7 @@ pub(crate) mod tests {
         let fft_plan = build_shift_plan(&tensor.shape, &[0], ShiftKind::Fft);
         let fft_data = apply_shift(
             "ifftshift",
-            &tensor.data,
+            &tensor.materialize_f64(),
             &fft_plan.ext_shape,
             &fft_plan.positive,
         )
@@ -490,7 +516,7 @@ pub(crate) mod tests {
         match restored {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![7, 1]);
-                assert_eq!(out.data, tensor.data);
+                assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -506,7 +532,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -522,7 +548,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
+                assert_eq!(out.materialize_f64(), vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -541,7 +567,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, tensor.shape);
-                assert_eq!(out.data, tensor.data);
+                assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -600,7 +626,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new((0..8).map(|v| v as f64).collect(), vec![8, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -608,7 +634,10 @@ pub(crate) mod tests {
                 ifftshift_builtin(Value::GpuTensor(handle), Vec::new()).expect("ifftshift");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![8, 1]);
-            assert_eq!(gathered.data, vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]
+            );
         });
     }
 
@@ -625,12 +654,59 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![4, 1]);
                 assert_eq!(
-                    out.data,
+                    out.materialize_f64(),
                     vec![(2.0, 2.0), (3.0, 3.0), (0.0, 0.0), (1.0, 1.0)]
                 );
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ifftshift_preserves_typed_complex_integer_storage_at_i64_boundaries() {
+        let tensor = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::I64(vec![i64::MIN, 2, 3, 4, i64::MAX]),
+                IntegerStorage::I64(vec![-10, -20, -30, -40, -50]),
+            )
+            .expect("storage"),
+            vec![5, 1],
+        )
+        .expect("tensor");
+
+        let Value::ComplexTensor(result) =
+            ifftshift_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("ifftshift")
+        else {
+            panic!("expected complex tensor");
+        };
+        let storage = result.integer_storage().expect("exact integer storage");
+        assert_eq!(
+            storage.real,
+            IntegerStorage::I64(vec![3, 4, i64::MAX, i64::MIN, 2])
+        );
+        assert_eq!(
+            storage.imag,
+            IntegerStorage::I64(vec![-30, -40, -50, -10, -20])
+        );
+    }
+
+    #[test]
+    fn ifftshift_preserves_typed_real_integer_storage_exactly_at_i64_boundaries() {
+        let tensor = Tensor::new_integer(
+            IntegerStorage::I64(vec![i64::MIN, 2, 3, 4, i64::MAX]),
+            vec![5, 1],
+        )
+        .expect("tensor");
+
+        let Value::Tensor(result) =
+            ifftshift_builtin(Value::Tensor(tensor), Vec::new()).expect("ifftshift")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::I64(vec![3, 4, i64::MAX, i64::MIN, 2]))
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -642,7 +718,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
-                assert_eq!(out.data, vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0]);
+                assert_eq!(out.materialize_f64(), vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -660,7 +736,7 @@ pub(crate) mod tests {
         let cpu = ifftshift_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("cpu");
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
@@ -673,7 +749,7 @@ pub(crate) mod tests {
         match cpu {
             Value::Tensor(host) => {
                 assert_eq!(gathered.shape, host.shape);
-                assert_eq!(gathered.data, host.data);
+                assert_eq!(gathered.materialize_f64(), host.materialize_f64());
             }
             other => panic!("expected tensor cpu result, got {other:?}"),
         }

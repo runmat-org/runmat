@@ -5,9 +5,12 @@ use log::debug;
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderIirFilterOptions};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, Tensor, Value,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, ComplexTensor, NumericDType, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -49,6 +52,69 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "filter";
+
+const FILTER_INTEGER_NUMERIC_INPUTS: [BuiltinIntegerInputCapability; 4] = [
+    BuiltinIntegerInputCapability {
+        name: "b",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight real integer classes are documented for numerator coefficients and enter the floating filtering domain.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "a",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight real integer classes are documented for denominator coefficients and enter the floating filtering domain.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "x",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer signals are documented and produce double output.",
+    },
+    BuiltinIntegerInputCapability {
+        name: "zi",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Integer initial conditions are documented and produce floating final conditions.",
+    },
+];
+
+const FILTER_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "dim",
+        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The filtering dimension is an exact positive integer scalar.",
+    }];
+
+const FILTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[y, zf] = filter(integer_b, integer_a, integer_x, integer_zi, dim)",
+        inputs: &FILTER_INTEGER_NUMERIC_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Authoritative integer storage is read before conversion to the documented floating filtering domain; resident integer inputs gather rather than entering floating provider kernels.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "[y, zf] = filter(b, a, x, zi, integer_dim)",
+        inputs: &FILTER_INTEGER_DIM_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Typed integer dimensions are parsed exactly before host indexing or provider dispatch.",
+    },
+];
 
 const FILTER_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "y",
@@ -340,25 +406,15 @@ fn filter_error_with_message(
 }
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
-    match value {
-        Value::Int(_) | Value::Num(_) => {
-            tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
-                .await
-                .map_err(|detail| {
-                    filter_error_with_detail(&FILTER_ERROR_INVALID_DIMENSION, detail)
-                })?
-                .ok_or_else(|| {
-                    filter_error_with_detail(
-                        &FILTER_ERROR_INVALID_DIMENSION,
-                        format!("received {value:?}"),
-                    )
-                })
-        }
-        _ => Err(filter_error_with_detail(
-            &FILTER_ERROR_INVALID_DIMENSION,
-            format!("received {value:?}"),
-        )),
-    }
+    tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
+        .await
+        .map_err(|detail| filter_error_with_detail(&FILTER_ERROR_INVALID_DIMENSION, detail))?
+        .ok_or_else(|| {
+            filter_error_with_detail(
+                &FILTER_ERROR_INVALID_DIMENSION,
+                format!("received {value:?}"),
+            )
+        })
 }
 
 #[runtime_builtin(
@@ -369,6 +425,7 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     accel = "custom",
     type_resolver(filter_type),
     descriptor(crate::builtins::math::signal::filter::FILTER_DESCRIPTOR),
+    integer_capabilities(FILTER_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::math::signal::filter"
 )]
 async fn filter_builtin(
@@ -401,6 +458,12 @@ pub async fn evaluate(
     x: Value,
     rest: &[Value],
 ) -> BuiltinResult<FilterEvaluation> {
+    crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&a, BUILTIN_NAME)?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
+    for value in rest {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+    }
     let args = FilterArgs::parse(b, a, x, rest).await?;
     if let Some(eval) = try_filter_gpu(&args).await? {
         return Ok(eval);
@@ -558,7 +621,7 @@ impl CoeffInput {
             }
             Value::Tensor(tensor) => Self::from_tensor(name, label, tensor),
             Value::ComplexTensor(tensor) => {
-                let len = tensor.data.len();
+                let len = tensor.materialize_f64().len();
                 if len == 0 {
                     return Err(filter_error_with_detail(
                         Self::empty_error(label),
@@ -567,7 +630,7 @@ impl CoeffInput {
                 }
                 ensure_vector_shape(name, label, &tensor.shape)?;
                 let data = tensor
-                    .data
+                    .materialize_f64()
                     .into_iter()
                     .map(|(re, im)| Complex::new(re, im))
                     .collect();
@@ -615,18 +678,15 @@ impl CoeffInput {
 
     fn from_tensor(name: &str, label: &str, tensor: Tensor) -> BuiltinResult<Self> {
         ensure_vector_shape(name, label, &tensor.shape)?;
-        let len = tensor.data.len();
+        let values = tensor::tensor_into_values_f64(tensor);
+        let len = values.len();
         if len == 0 {
             return Err(filter_error_with_detail(
                 Self::empty_error(label),
                 format!("{name}: {label} coefficients cannot be empty"),
             ));
         }
-        let data = tensor
-            .data
-            .into_iter()
-            .map(|re| Complex::new(re, 0.0))
-            .collect();
+        let data = values.into_iter().map(|re| Complex::new(re, 0.0)).collect();
         Ok(Self {
             data,
             len,
@@ -640,12 +700,17 @@ struct SignalInput {
     shape: Vec<usize>,
     is_complex: bool,
     gpu_handle: Option<GpuTensorHandle>,
+    output_single: bool,
 }
 
 impl SignalInput {
     async fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
+                let output_single = runmat_accelerate_api::handle_integer_type(&handle).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(&handle)
+                    && runmat_accelerate_api::handle_precision(&handle)
+                        == Some(runmat_accelerate_api::ProviderPrecision::F32);
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
                     .map_err(|flow| {
@@ -656,8 +721,7 @@ impl SignalInput {
                         )
                     })?;
                 let shape = tensor.shape.clone();
-                let data = tensor
-                    .data
+                let data = tensor::tensor_into_values_f64(tensor)
                     .into_iter()
                     .map(|re| Complex::new(re, 0.0))
                     .collect();
@@ -666,12 +730,13 @@ impl SignalInput {
                     shape,
                     is_complex: false,
                     gpu_handle: Some(handle),
+                    output_single,
                 })
             }
             Value::Tensor(tensor) => {
+                let output_single = tensor.numeric_dtype() == NumericDType::F32;
                 let shape = tensor.shape.clone();
-                let data = tensor
-                    .data
+                let data = tensor::tensor_into_values_f64(tensor)
                     .into_iter()
                     .map(|re| Complex::new(re, 0.0))
                     .collect();
@@ -680,12 +745,14 @@ impl SignalInput {
                     shape,
                     is_complex: false,
                     gpu_handle: None,
+                    output_single,
                 })
             }
             Value::ComplexTensor(tensor) => {
+                let output_single = tensor.numeric_dtype() == NumericDType::F32;
                 let shape = tensor.shape.clone();
                 let data = tensor
-                    .data
+                    .materialize_f64()
                     .into_iter()
                     .map(|(re, im)| Complex::new(re, im))
                     .collect();
@@ -694,6 +761,7 @@ impl SignalInput {
                     shape,
                     is_complex: true,
                     gpu_handle: None,
+                    output_single,
                 })
             }
             Value::LogicalArray(logical) => {
@@ -704,8 +772,7 @@ impl SignalInput {
                     )
                 })?;
                 let shape = tensor.shape.clone();
-                let data = tensor
-                    .data
+                let data = tensor::tensor_into_values_f64(tensor)
                     .into_iter()
                     .map(|re| Complex::new(re, 0.0))
                     .collect();
@@ -714,6 +781,7 @@ impl SignalInput {
                     shape,
                     is_complex: false,
                     gpu_handle: None,
+                    output_single: false,
                 })
             }
             Value::Num(n) => Ok(Self {
@@ -721,24 +789,28 @@ impl SignalInput {
                 shape: vec![1, 1],
                 is_complex: false,
                 gpu_handle: None,
+                output_single: false,
             }),
             Value::Int(i) => Ok(Self {
                 data: vec![Complex::new(i.to_f64(), 0.0)],
                 shape: vec![1, 1],
                 is_complex: false,
                 gpu_handle: None,
+                output_single: false,
             }),
             Value::Bool(b) => Ok(Self {
                 data: vec![Complex::new(if b { 1.0 } else { 0.0 }, 0.0)],
                 shape: vec![1, 1],
                 is_complex: false,
                 gpu_handle: None,
+                output_single: false,
             }),
             Value::Complex(re, im) => Ok(Self {
                 data: vec![Complex::new(re, im)],
                 shape: vec![1, 1],
                 is_complex: true,
                 gpu_handle: None,
+                output_single: false,
             }),
             other => Err(filter_error_with_detail(
                 &FILTER_ERROR_INVALID_SIGNAL,
@@ -776,7 +848,7 @@ impl InitialState {
     ) -> BuiltinResult<Self> {
         if state_len == 0 {
             match value {
-                Value::Tensor(tensor) if tensor.data.is_empty() => {
+                Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => {
                     return Ok(Self::empty(expected_shape.to_vec()))
                 }
                 Value::GpuTensor(handle) => {
@@ -790,7 +862,7 @@ impl InitialState {
                                     map_control_flow_with_builtin(flow, BUILTIN_NAME),
                                 )
                             })?;
-                    if !tensor.data.is_empty() {
+                    if !tensor.is_empty() {
                         return Err(filter_error_with_detail(
                             &FILTER_ERROR_INVALID_INITIAL_STATE,
                             format!(
@@ -809,7 +881,9 @@ impl InitialState {
                 Value::LogicalArray(logical) if logical.data.is_empty() => {
                     return Ok(Self::empty(expected_shape.to_vec()))
                 }
-                Value::ComplexTensor(tensor) if tensor.data.is_empty() => {
+                Value::ComplexTensor(tensor)
+                    if tensor::complex_tensor_element_len(&tensor) == 0 =>
+                {
                     return Ok(Self {
                         provided: true,
                         column_major: Vec::new(),
@@ -824,8 +898,7 @@ impl InitialState {
                     );
                     let detail = match other {
                         Value::Tensor(t)
-                            if t.data.is_empty()
-                                && !shapes_compatible(expected_shape, &t.shape) =>
+                            if t.is_empty() && !shapes_compatible(expected_shape, &t.shape) =>
                         {
                             msg.clone()
                         }
@@ -853,30 +926,32 @@ impl InitialState {
                             map_control_flow_with_builtin(flow, BUILTIN_NAME),
                         )
                     })?;
+                let shape = tensor.shape.clone();
                 (
-                    tensor
-                        .data
+                    tensor::tensor_into_values_f64(tensor)
                         .iter()
                         .map(|&re| Complex::new(re, 0.0))
                         .collect::<Vec<_>>(),
-                    tensor.shape.clone(),
+                    shape,
                     false,
                     Some(handle),
                 )
             }
-            Value::Tensor(tensor) => (
-                tensor
-                    .data
-                    .iter()
-                    .map(|&re| Complex::new(re, 0.0))
-                    .collect::<Vec<_>>(),
-                tensor.shape.clone(),
-                false,
-                None,
-            ),
+            Value::Tensor(tensor) => {
+                let shape = tensor.shape.clone();
+                (
+                    tensor::tensor_into_values_f64(tensor)
+                        .iter()
+                        .map(|&re| Complex::new(re, 0.0))
+                        .collect::<Vec<_>>(),
+                    shape,
+                    false,
+                    None,
+                )
+            }
             Value::ComplexTensor(tensor) => (
                 tensor
-                    .data
+                    .materialize_f64()
                     .iter()
                     .map(|&(re, im)| Complex::new(re, im))
                     .collect::<Vec<_>>(),
@@ -891,13 +966,13 @@ impl InitialState {
                         format!("{name}: initial conditions: {e}"),
                     )
                 })?;
+                let shape = tensor.shape.clone();
                 (
-                    tensor
-                        .data
+                    tensor::tensor_into_values_f64(tensor)
                         .iter()
                         .map(|&re| Complex::new(re, 0.0))
                         .collect::<Vec<_>>(),
-                    tensor.shape.clone(),
+                    shape,
                     false,
                     None,
                 )
@@ -964,8 +1039,8 @@ fn parse_optional_arguments(rest: &[Value]) -> BuiltinResult<(Option<Value>, Opt
 
 fn is_empty_placeholder(value: &Value) -> bool {
     match value {
-        Value::Tensor(t) => t.data.is_empty(),
-        Value::ComplexTensor(t) => t.data.is_empty(),
+        Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
+        Value::ComplexTensor(t) => tensor::complex_tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
         Value::StringArray(sa) => sa.data.is_empty(),
         Value::CharArray(ca) => ca.data.is_empty(),
@@ -985,17 +1060,29 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
             );
         }
     }
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-
     if args.is_complex {
         return Ok(None);
     }
 
+    // Provider state buffers still use the legacy replace-axis layout for
+    // non-leading dimensions. Use the typed host fallback until that ABI is
+    // migrated; dimension one already matches the order-first public layout.
+    if args.dim_idx != 0 {
+        return Ok(None);
+    }
+
     let signal_handle = match &args.signal.gpu_handle {
-        Some(handle) => handle.clone(),
+        Some(handle)
+            if runmat_accelerate_api::handle_integer_type(handle).is_none()
+                && !runmat_accelerate_api::handle_is_logical(handle) =>
+        {
+            handle.clone()
+        }
+        None => return Ok(None),
+        Some(_) => return Ok(None),
+    };
+    let provider = match runmat_accelerate_api::provider_for_handle(&signal_handle) {
+        Some(provider) => provider,
         None => return Ok(None),
     };
 
@@ -1029,6 +1116,7 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         shape: &a_shape,
     };
     let a_handle = provider.upload(&view_a).map_err(|e| {
+        cleanup_temp_handles(provider, temp_handles.clone());
         filter_error_with_detail(
             &FILTER_ERROR_PROVIDER_UPLOAD,
             format!("denominator upload failed: {e}"),
@@ -1039,6 +1127,12 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
     let (zi_handle_opt, zi_temp) = if args.state_len == 0 || !args.initial.provided {
         (None, None)
     } else if let Some(handle) = &args.initial.gpu_handle {
+        if !runmat_accelerate_api::provider_for_handle(handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        {
+            cleanup_temp_handles(provider, temp_handles);
+            return Ok(None);
+        }
         (Some(handle.clone()), None)
     } else {
         let zi_real = match to_real_vec(&args.initial.column_major) {
@@ -1092,10 +1186,15 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
     let final_state_value = match result.final_state {
         Some(handle) => Value::GpuTensor(handle),
         None => {
-            let zeros = Tensor::new(
-                vec![0.0; tensor::element_count(&args.state_shape)],
-                args.state_shape.clone(),
-            )
+            let values = vec![0.0; tensor::element_count(&args.state_shape)];
+            let zeros = if args.signal.output_single {
+                Tensor::from_f32(
+                    values.into_iter().map(|value| value as f32).collect(),
+                    args.state_shape.clone(),
+                )
+            } else {
+                Tensor::new(values, args.state_shape.clone())
+            }
             .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
             tensor::tensor_into_value(zeros)
         }
@@ -1230,39 +1329,83 @@ fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {
     let output_value = if args.is_complex {
         let data: Vec<(f64, f64)> = output.iter().map(|c| (c.re, c.im)).collect();
         if data.len() == 1 {
-            Value::Complex(data[0].0, data[0].1)
+            if args.signal.output_single {
+                let tensor =
+                    ComplexTensor::from_f32(vec![(data[0].0 as f32, data[0].1 as f32)], vec![1, 1])
+                        .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
+                Value::ComplexTensor(tensor)
+            } else {
+                Value::Complex(data[0].0, data[0].1)
+            }
         } else {
-            let tensor = ComplexTensor::new(data, args.signal.shape.clone())
-                .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
+            let tensor = if args.signal.output_single {
+                ComplexTensor::from_f32(
+                    data.into_iter()
+                        .map(|(re, im)| (re as f32, im as f32))
+                        .collect(),
+                    args.signal.shape.clone(),
+                )
+            } else {
+                ComplexTensor::new(data, args.signal.shape.clone())
+            }
+            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
             Value::ComplexTensor(tensor)
         }
     } else {
         let data: Vec<f64> = output.iter().map(|c| c.re).collect();
-        let tensor = Tensor::new(data, args.signal.shape.clone())
-            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
+        let tensor = if args.signal.output_single {
+            Tensor::from_f32(
+                data.into_iter().map(|value| value as f32).collect(),
+                args.signal.shape.clone(),
+            )
+        } else {
+            Tensor::new(data, args.signal.shape.clone())
+        }
+        .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
         tensor::tensor_into_value(tensor)
     };
 
     let final_state_value = if args.state_len == 0 {
-        let tensor = Tensor::new(
-            vec![0.0; tensor::element_count(&args.state_shape)],
-            args.state_shape.clone(),
-        )
+        let zeros = vec![0.0; tensor::element_count(&args.state_shape)];
+        let tensor = if args.signal.output_single {
+            Tensor::from_f32(
+                zeros.into_iter().map(|value| value as f32).collect(),
+                args.state_shape.clone(),
+            )
+        } else {
+            Tensor::new(zeros, args.state_shape.clone())
+        }
         .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
         tensor::tensor_into_value(tensor)
     } else if args.is_complex || args.initial.is_complex {
         let data: Vec<(f64, f64)> = final_states_column.iter().map(|c| (c.re, c.im)).collect();
-        if data.len() == 1 {
+        if data.len() == 1 && !args.signal.output_single {
             Value::Complex(data[0].0, data[0].1)
         } else {
-            let tensor = ComplexTensor::new(data, args.state_shape.clone())
-                .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
+            let tensor = if args.signal.output_single {
+                ComplexTensor::from_f32(
+                    data.into_iter()
+                        .map(|(re, im)| (re as f32, im as f32))
+                        .collect(),
+                    args.state_shape.clone(),
+                )
+            } else {
+                ComplexTensor::new(data, args.state_shape.clone())
+            }
+            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
             Value::ComplexTensor(tensor)
         }
     } else {
         let data: Vec<f64> = final_states_column.iter().map(|c| c.re).collect();
-        let tensor = Tensor::new(data, args.state_shape.clone())
-            .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
+        let tensor = if args.signal.output_single {
+            Tensor::from_f32(
+                data.into_iter().map(|value| value as f32).collect(),
+                args.state_shape.clone(),
+            )
+        } else {
+            Tensor::new(data, args.state_shape.clone())
+        }
+        .map_err(|e| runtime_error_for(format!("filter: {e}")))?;
         tensor::tensor_into_value(tensor)
     };
 
@@ -1308,31 +1451,18 @@ fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
     true
 }
 
-fn filter_state_shape(mut base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
-    if base.len() <= dim_idx {
-        base.extend(std::iter::repeat_n(1, dim_idx + 1 - base.len()));
+fn filter_state_shape(base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
+    let mut state_shape = Vec::with_capacity(base.len());
+    state_shape.push(state_len);
+    state_shape.extend(
+        base.into_iter()
+            .enumerate()
+            .filter_map(|(index, extent)| (index != dim_idx).then_some(extent)),
+    );
+    if state_shape.len() == 1 {
+        state_shape.push(1);
     }
-    if !base.is_empty() {
-        base[dim_idx] = state_len;
-    }
-    base
-}
-
-fn decode_indices(mut index: usize, dims: &[usize]) -> Vec<usize> {
-    if dims.is_empty() {
-        return Vec::new();
-    }
-    let mut coords = Vec::with_capacity(dims.len());
-    for &dim in dims {
-        if dim == 0 {
-            coords.push(0);
-        } else {
-            let coord = index % dim;
-            coords.push(coord);
-            index /= dim.max(1);
-        }
-    }
-    coords
+    state_shape
 }
 
 fn states_from_column_major_complex(
@@ -1341,60 +1471,8 @@ fn states_from_column_major_complex(
     dim_idx: usize,
     shape_ext: &[usize],
 ) -> Vec<Complex<f64>> {
-    if state_len == 0 {
-        return Vec::new();
-    }
-    let dims_before = &shape_ext[..dim_idx];
-    let dims_after = if dim_idx + 1 < shape_ext.len() {
-        &shape_ext[dim_idx + 1..]
-    } else {
-        &[]
-    };
-    let leading = if dims_before.is_empty() {
-        1
-    } else {
-        dims_before.iter().copied().product()
-    };
-    let trailing = if dims_after.is_empty() {
-        1
-    } else {
-        dims_after.iter().copied().product()
-    };
-    let channel_count = leading * trailing;
-    let shape = filter_state_shape(shape_ext.to_vec(), dim_idx, state_len);
-    let mut states = vec![Complex::new(0.0, 0.0); state_len * channel_count];
-    for channel in 0..channel_count {
-        let before_idx = if dims_before.is_empty() {
-            0
-        } else {
-            channel % leading
-        };
-        let after_idx = if dims_after.is_empty() {
-            0
-        } else {
-            channel / leading
-        };
-        let before_coords = decode_indices(before_idx, dims_before);
-        let after_coords = decode_indices(after_idx, dims_after);
-        for s in 0..state_len {
-            let mut offset = 0usize;
-            let mut stride = 1usize;
-            for (d, &extent) in shape.iter().enumerate() {
-                let coord = if d < dim_idx {
-                    before_coords.get(d).copied().unwrap_or(0)
-                } else if d == dim_idx {
-                    s
-                } else {
-                    let idx = d - dim_idx - 1;
-                    after_coords.get(idx).copied().unwrap_or(0)
-                };
-                offset += coord * stride;
-                stride *= extent;
-            }
-            states[channel * state_len + s] = data[offset];
-        }
-    }
-    states
+    let _ = (state_len, dim_idx, shape_ext);
+    data.to_vec()
 }
 
 fn states_to_column_major_complex(
@@ -1403,60 +1481,8 @@ fn states_to_column_major_complex(
     dim_idx: usize,
     shape_ext: &[usize],
 ) -> Vec<Complex<f64>> {
-    if state_len == 0 {
-        return Vec::new();
-    }
-    let dims_before = &shape_ext[..dim_idx];
-    let dims_after = if dim_idx + 1 < shape_ext.len() {
-        &shape_ext[dim_idx + 1..]
-    } else {
-        &[]
-    };
-    let leading = if dims_before.is_empty() {
-        1
-    } else {
-        dims_before.iter().copied().product()
-    };
-    let trailing = if dims_after.is_empty() {
-        1
-    } else {
-        dims_after.iter().copied().product()
-    };
-    let channel_count = leading * trailing;
-    let shape = filter_state_shape(shape_ext.to_vec(), dim_idx, state_len);
-    let mut out = vec![Complex::new(0.0, 0.0); states.len()];
-    for channel in 0..channel_count {
-        let before_idx = if dims_before.is_empty() {
-            0
-        } else {
-            channel % leading
-        };
-        let after_idx = if dims_after.is_empty() {
-            0
-        } else {
-            channel / leading
-        };
-        let before_coords = decode_indices(before_idx, dims_before);
-        let after_coords = decode_indices(after_idx, dims_after);
-        for s in 0..state_len {
-            let mut offset = 0usize;
-            let mut stride = 1usize;
-            for (d, &extent) in shape.iter().enumerate() {
-                let coord = if d < dim_idx {
-                    before_coords.get(d).copied().unwrap_or(0)
-                } else if d == dim_idx {
-                    s
-                } else {
-                    let idx = d - dim_idx - 1;
-                    after_coords.get(idx).copied().unwrap_or(0)
-                };
-                offset += coord * stride;
-                stride *= extent;
-            }
-            out[offset] = states[channel * state_len + s];
-        }
-    }
-    out
+    let _ = (state_len, dim_idx, shape_ext);
+    states.to_vec()
 }
 
 fn to_real_vec(data: &[Complex<f64>]) -> Option<Vec<f64>> {
@@ -1475,7 +1501,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, IntValue, ResolveContext, Type};
+    use runmat_builtins::{
+        builtin_function_by_name, IntValue, IntegerStorage, ResolveContext, Tensor, Type,
+    };
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -1483,6 +1511,26 @@ pub(crate) mod tests {
 
     fn evaluate(b: Value, a: Value, x: Value, rest: &[Value]) -> BuiltinResult<FilterEvaluation> {
         block_on(super::evaluate(b, a, x, rest))
+    }
+
+    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
+        Tensor::new_integer(storage, shape).expect("typed integer tensor")
+    }
+
+    fn real_tensor_parts(value: Value, context: &str) -> (Vec<f64>, Vec<usize>) {
+        let tensor = match value {
+            Value::Tensor(tensor) => tensor,
+            other => panic!("expected {context} tensor, got {other:?}"),
+        };
+        let shape = tensor.shape.clone();
+        let storage = tensor
+            .into_numeric_storage()
+            .unwrap_or_else(|err| panic!("invalid {context} tensor storage: {err}"));
+        let data = storage
+            .as_f64_slice()
+            .unwrap_or_else(|| panic!("expected {context} tensor to use double storage"))
+            .to_vec();
+        (data, shape)
     }
 
     #[test]
@@ -1524,6 +1572,7 @@ pub(crate) mod tests {
             .errors
             .iter()
             .any(|err| err.code == "RM.FILTER.ARG_COUNT"));
+        assert_eq!(builtin.integer_capabilities.len(), 2);
     }
 
     fn approx_eq_slice(lhs: &[f64], rhs: &[f64]) {
@@ -1573,20 +1622,76 @@ pub(crate) mod tests {
             evaluate(Value::Tensor(b), Value::Tensor(a), Value::Tensor(x), &[]).expect("filter");
         let (y, zf) = eval.clone().into_pair();
 
-        let Tensor { data, .. } = match y {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (data, _) = real_tensor_parts(y, "output");
         approx_eq_slice(
             &data,
             &[0.3333333333, 2.0, 2.6666666667, 2.3333333333, 1.6666666667],
         );
 
-        let Tensor { data: z_data, .. } = match zf {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (z_data, _) = real_tensor_parts(zf, "final-state");
         approx_eq_slice(&z_data, &[1.0, 1.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filter_reads_typed_integer_coefficients_signal_and_state_exactly() {
+        let b = integer_tensor(IntegerStorage::I16(vec![1, 1]), vec![1, 2]);
+        let a = integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
+        let x = integer_tensor(IntegerStorage::I16(vec![2, 3]), vec![1, 2]);
+        let zi = integer_tensor(IntegerStorage::I16(vec![7]), vec![1, 1]);
+
+        let eval = evaluate(
+            Value::Tensor(b),
+            Value::Tensor(a),
+            Value::Tensor(x),
+            &[Value::Tensor(zi)],
+        )
+        .expect("filter");
+        let (y, zf) = eval.into_pair();
+
+        let (y_data, _) = real_tensor_parts(y, "output");
+        approx_eq_slice(&y_data, &[9.0, 5.0]);
+
+        let zf_data = match zf {
+            Value::Tensor(t) => real_tensor_parts(Value::Tensor(t), "final-state").0,
+            Value::Num(n) => vec![n],
+            other => panic!("expected numeric final state, got {other:?}"),
+        };
+        approx_eq_slice(&zf_data, &[3.0]);
+    }
+
+    #[test]
+    fn filter_preserves_single_signal_output_and_column_state_layout() {
+        let b = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
+        let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let x = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+        let (y, zf) = evaluate(Value::Tensor(b), Value::Tensor(a), Value::Tensor(x), &[])
+            .expect("single filter")
+            .into_pair();
+        let Value::Tensor(y) = y else {
+            panic!("expected tensor output")
+        };
+        let Value::Tensor(zf) = zf else {
+            panic!("expected tensor final state")
+        };
+        assert_eq!(y.numeric_dtype(), NumericDType::F32);
+        assert_eq!(zf.numeric_dtype(), NumericDType::F32);
+        assert_eq!(zf.shape, vec![1, 1]);
+    }
+
+    #[test]
+    fn filter_accepts_documented_logical_dimension_scalar() {
+        let x = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        evaluate(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Tensor(x),
+            &[
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                Value::Bool(true),
+            ],
+        )
+        .expect("logical dimension");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1601,11 +1706,32 @@ pub(crate) mod tests {
             evaluate(Value::Tensor(b), Value::Tensor(a), Value::Tensor(x), &[]).expect("filter");
         let (y, _) = eval.into_pair();
 
-        let Tensor { data, .. } = match y {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (data, _) = real_tensor_parts(y, "output");
         approx_eq_slice(&data, &[0.2, 0.16, 0.128, 0.1024, 0.08192]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn filter_accepts_empty_typed_integer_initial_state_without_mirror_for_zero_order() {
+        let b = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let x = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let zi = integer_tensor(IntegerStorage::I16(Vec::new()), vec![0, 0]);
+
+        let eval = evaluate(
+            Value::Tensor(b),
+            Value::Tensor(a),
+            Value::Tensor(x),
+            &[Value::Tensor(zi)],
+        )
+        .expect("filter");
+        let (y, zf) = eval.into_pair();
+
+        let (data, _) = real_tensor_parts(y, "output");
+        approx_eq_slice(&data, &[2.0, 3.0]);
+
+        let (data, _) = real_tensor_parts(zf, "final-state");
+        assert!(data.is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1623,16 +1749,10 @@ pub(crate) mod tests {
         )
         .expect("filter");
         let (y1, zf1) = eval1.clone().into_pair();
-        let Tensor { data: y1_data, .. } = match y1 {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (y1_data, _) = real_tensor_parts(y1, "output");
         approx_eq_slice(&y1_data, &[0.3333333333, 2.0, 2.6666666667]);
 
-        let Tensor { data: zf_data, .. } = match zf1.clone() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (zf_data, _) = real_tensor_parts(zf1.clone(), "final-state");
         approx_eq_slice(&zf_data, &[2.3333333333, 0.6666666667]);
 
         let x2 = Tensor::new(vec![0.0, 3.0], vec![1, 2]).unwrap();
@@ -1645,16 +1765,10 @@ pub(crate) mod tests {
         .expect("filter");
         let (y2, zf2) = eval2.into_pair();
 
-        let Tensor { data: y2_data, .. } = match y2 {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (y2_data, _) = real_tensor_parts(y2, "output");
         approx_eq_slice(&y2_data, &[2.3333333333, 1.6666666667]);
 
-        let Tensor { data: zf2_data, .. } = match zf2 {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (zf2_data, _) = real_tensor_parts(zf2, "final-state");
         approx_eq_slice(&zf2_data, &[1.0, 1.0]);
     }
 
@@ -1684,24 +1798,12 @@ pub(crate) mod tests {
         let (y_default, z_default) = eval_default.into_pair();
         let (y_placeholder, z_placeholder) = eval_placeholder.into_pair();
 
-        let Tensor { data: y_def, .. } = match y_default {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
-        let Tensor { data: y_ph, .. } = match y_placeholder {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (y_def, _) = real_tensor_parts(y_default, "output");
+        let (y_ph, _) = real_tensor_parts(y_placeholder, "output");
         approx_eq_slice(&y_def, &y_ph);
 
-        let Tensor { data: z_def, .. } = match z_default {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
-        let Tensor { data: z_ph, .. } = match z_placeholder {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
+        let (z_def, _) = real_tensor_parts(z_default, "final-state");
+        let (z_ph, _) = real_tensor_parts(z_placeholder, "final-state");
         approx_eq_slice(&z_def, &z_ph);
     }
 
@@ -1722,22 +1824,12 @@ pub(crate) mod tests {
         .expect("filter");
         let (y, zf) = eval.into_pair();
 
-        let Tensor { data, shape, .. } = match y {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor output, got {other:?}"),
-        };
+        let (data, shape) = real_tensor_parts(y, "output");
         assert_eq!(shape, vec![2, 4]);
         approx_eq_slice(&data, &[1.0, 0.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0]);
 
-        let Tensor {
-            data: state_data,
-            shape: state_shape,
-            ..
-        } = match zf {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor final state, got {other:?}"),
-        };
-        assert_eq!(state_shape, vec![2, 1]);
+        let (state_data, state_shape) = real_tensor_parts(zf, "final-state");
+        assert_eq!(state_shape, vec![1, 2]);
         approx_eq_slice(&state_data, &[-4.0, -1.0]);
     }
 
@@ -1766,8 +1858,8 @@ pub(crate) mod tests {
         .expect("filter");
         let (y, _) = eval.into_pair();
 
-        let ComplexTensor { data, .. } = match y {
-            Value::ComplexTensor(t) => t,
+        let data = match y {
+            Value::ComplexTensor(t) => t.materialize_f64(),
             other => panic!("expected complex tensor, got {other:?}"),
         };
         let root_half = std::f64::consts::FRAC_1_SQRT_2;
@@ -1812,7 +1904,7 @@ pub(crate) mod tests {
             let x = Tensor::new(vec![1.0, 5.0, 2.0, 0.0, 3.0], vec![1, 5]).unwrap();
 
             let view = runmat_accelerate_api::HostTensorView {
-                data: &x.data,
+                data: &x.materialize_f64(),
                 shape: &x.shape,
             };
             let x_gpu = provider.upload(&view).expect("upload signal");
@@ -1830,12 +1922,9 @@ pub(crate) mod tests {
             let eval_cpu = evaluate(Value::Tensor(b), Value::Tensor(a), Value::Tensor(x), &[])
                 .expect("cpu filter");
             let (y_cpu, _) = eval_cpu.into_pair();
-            let Tensor { data: cpu_data, .. } = match y_cpu {
-                Value::Tensor(t) => t,
-                other => panic!("expected tensor, got {other:?}"),
-            };
+            let (cpu_data, _) = real_tensor_parts(y_cpu, "output");
 
-            approx_eq_slice(&gathered.data, &cpu_data);
+            approx_eq_slice(&gathered.materialize_f64(), &cpu_data);
         });
     }
 
@@ -1872,7 +1961,7 @@ pub(crate) mod tests {
         };
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &x.data,
+            data: &x.materialize_f64(),
             shape: &x.shape,
         };
         let x_gpu = provider.upload(&view).expect("upload signal");
@@ -1887,6 +1976,6 @@ pub(crate) mod tests {
         let (gpu_value, _) = gpu_eval.into_pair();
         let gathered = test_support::gather(gpu_value).expect("gather");
 
-        approx_eq_slice(&gathered.data, &cpu_tensor.data);
+        approx_eq_slice(&gathered.materialize_f64(), &cpu_tensor.materialize_f64());
     }
 }

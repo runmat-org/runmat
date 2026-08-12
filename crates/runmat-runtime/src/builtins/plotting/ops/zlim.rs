@@ -120,17 +120,12 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let _ = zlim_builtin(vec![Value::Tensor(runmat_builtins::Tensor {
-            data: vec![-1.0, 1.0],
-            integer_data: None,
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-            dtype: runmat_builtins::NumericDType::F64,
-        })])
+        let _ = zlim_builtin(vec![Value::Tensor(
+            runmat_builtins::Tensor::new(vec![-1.0, 1.0], vec![1, 2]).expect("z limits"),
+        )])
         .unwrap();
         let queried = zlim_builtin(Vec::new()).unwrap();
         let tensor = runmat_builtins::Tensor::try_from(&queried).unwrap();
-        assert_eq!(tensor.data, vec![-1.0, 1.0]);
+        assert_eq!(tensor.materialize_f64(), vec![-1.0, 1.0]);
     }
 }

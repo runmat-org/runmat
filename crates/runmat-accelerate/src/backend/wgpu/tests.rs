@@ -1,6 +1,6 @@
 use crate::backend::wgpu::provider::host_tensor_from_value;
 use anyhow::{anyhow, Result};
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_builtins::{Tensor, Value};
 
 fn invert_upper_triangular(data: &[f64], n: usize) -> Result<Vec<f64>> {
     let mut inv = vec![0.0f64; n * n];
@@ -92,14 +92,7 @@ async fn cholesky_qr_matches_host_qr() {
         }
     }
 
-    let tensor_gram = Tensor {
-        data: gram.clone(),
-        integer_data: None,
-        shape: vec![cols, cols],
-        rows: cols,
-        cols,
-        dtype: NumericDType::F64,
-    };
+    let tensor_gram = Tensor::new(gram.clone(), vec![cols, cols]).expect("Gram tensor");
     let chol_eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
         Value::Tensor(tensor_gram),
         &[],
@@ -107,7 +100,8 @@ async fn cholesky_qr_matches_host_qr() {
     .await
     .expect("chol");
     let r_tensor = host_tensor_from_value("qr_chol_r", chol_eval.factor()).expect("chol factor");
-    let r_inv = invert_upper_triangular(&r_tensor.data, cols).expect("invert");
+    let r_data = r_tensor.materialize_f64();
+    let r_inv = invert_upper_triangular(&r_data, cols).expect("invert");
 
     // Construct Q = Y * inv(R)
     let mut q_computed = vec![0.0f64; rows * cols];
@@ -146,7 +140,7 @@ async fn cholesky_qr_matches_host_qr() {
         for row in 0..rows {
             let mut sum = 0.0;
             for k in 0..cols {
-                sum += q_computed[row + k * rows] * r_tensor.data[k + col * cols];
+                sum += q_computed[row + k * rows] * r_data[k + col * cols];
             }
             y_reconstructed[row + col * rows] = sum;
         }
@@ -167,7 +161,7 @@ async fn cholesky_qr_matches_host_qr() {
         for i in 0..=j {
             let mut sum = 0.0;
             for k in 0..cols {
-                sum += r_tensor.data[k + i * cols] * r_tensor.data[k + j * cols];
+                sum += r_data[k + i * cols] * r_data[k + j * cols];
             }
             max_gram_err = max_gram_err.max((sum - gram[i + j * cols]).abs());
         }
@@ -182,11 +176,11 @@ async fn cholesky_qr_matches_host_qr() {
     for j in 0..cols {
         for i in (j + 1)..cols {
             assert!(
-                r_tensor.data[i + j * cols].abs() < 1e-8,
+                r_data[i + j * cols].abs() < 1e-8,
                 "R lower entry ({}, {}) = {}",
                 i,
                 j,
-                r_tensor.data[i + j * cols]
+                r_data[i + j * cols]
             );
         }
     }

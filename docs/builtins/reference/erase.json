@@ -14,7 +14,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "none",
-    "notes": "Runs on the CPU; RunMat gathers GPU-resident text before removing substrings."
+    "notes": "Runs on the CPU. RunMat has no resident text storage, so GPU-resident numeric arguments are rejected before gather."
   },
   "fusion": {
     "elementwise": false,
@@ -34,7 +34,8 @@
     "Character arrays are processed row by row. Rows shrink as characters are removed and are padded with spaces so the result remains a rectangular char array.",
     "Cell arrays must contain string scalars or character vectors. The result is a cell array with the same shape whose elements reflect the removed substrings.",
     "The `pattern` input can be a string scalar, string array, character array, or cell array of character vectors/string scalars. Provide either a scalar pattern or a list; an empty list leaves `text` unchanged.",
-    "Pattern values are treated literally—no regular expressions are used. Use [`replace`](./replace) or the regex builtins for pattern-based removal."
+    "String, character, and cell matches are treated literally. RunMat pattern objects use their compiled pattern expression, matching the documented pattern-object form.",
+    "Both arguments are text or pattern values. Numeric values, including every typed-integer class and nested resident numeric values, are rejected before any provider access."
   ],
   "examples": [
     {
@@ -156,8 +157,8 @@
     "label": "`crates/runmat-runtime/src/builtins/strings/transform/erase.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/erase.rs"
   },
-  "gpu_residency": "No. `erase` automatically gathers GPU inputs and produces host results. You never need to move text to or from the GPU manually for this builtin, and `gpuArray` inputs are handled transparently.",
+  "gpu_residency": "No. `erase` accepts host text and pattern values only. GPU-resident numeric values are not text and are rejected before provider access.",
   "gpu_behavior": [
-    "`erase` executes on the CPU. When any argument is GPU-resident, RunMat gathers it to host memory before removing substrings. Outputs are returned on the host as well. Providers do not need to implement device kernels for this builtin, and the fusion planner treats it as a sink to avoid keeping text on the GPU."
+    "`erase` executes on host text containers. Resident numeric arguments, including values nested in cells, are rejected without downloading; providers do not implement a text kernel for this builtin."
   ]
 }

@@ -168,14 +168,15 @@ async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value>
                 "linkage: SaveMemory 'on' is only supported for observation matrix input",
             ));
         }
-        let observations = triangular_observation_count(tensor.data.len()).ok_or_else(|| {
+        let distances = tensor::tensor_values_f64(&tensor);
+        let observations = triangular_observation_count(distances.len()).ok_or_else(|| {
             invalid("linkage: condensed distance vector length must be n*(n-1)/2")
         })?;
-        validate_distances(&tensor.data)?;
+        validate_distances(&distances)?;
         if options.method.requires_euclidean_distances() {
-            validate_euclidean_condensed(&tensor.data, observations)?;
+            validate_euclidean_condensed(&distances, observations)?;
         }
-        (observations, tensor.data)
+        (observations, distances)
     } else {
         if tensor.shape.len() > 2 || tensor.rows < 2 {
             return Err(invalid(
@@ -190,8 +191,9 @@ async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             options.metric_args,
         )
         .await?;
-        validate_distances(&distances.data)?;
-        (tensor.rows, distances.data)
+        let distances = distances.materialize_f64();
+        validate_distances(&distances)?;
+        (tensor.rows, distances)
     };
     let output = compute_linkage(observations, distances, options.method)?;
     Ok(Value::Tensor(output))
@@ -646,7 +648,7 @@ fn cluster_key(a: usize, b: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, CharArray};
+    use runmat_builtins::{CellArray, CharArray, IntegerStorage};
 
     use super::*;
 
@@ -656,6 +658,11 @@ mod tests {
 
     fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(tensor(data, rows, cols))
+    }
+
+    fn typed_integer_tensor_value(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).unwrap();
+        Value::Tensor(tensor)
     }
 
     fn assert_close(actual: f64, expected: f64) {
@@ -669,7 +676,10 @@ mod tests {
         assert_eq!(tensor.shape, vec![rows.len(), 3]);
         for (row_idx, expected) in rows.iter().enumerate() {
             for col in 0..3 {
-                assert_close(tensor.data[col * rows.len() + row_idx], expected[col]);
+                assert_close(
+                    tensor.materialize_f64()[col * rows.len() + row_idx],
+                    expected[col],
+                );
             }
         }
     }
@@ -677,6 +687,17 @@ mod tests {
     #[test]
     fn linkage_complete_accepts_condensed_distance_vector() {
         let y = tensor_value(vec![1.0, 4.0, 6.0, 5.0, 7.0, 2.0], 1, 6);
+        let Value::Tensor(z) =
+            block_on(linkage_builtin(y, vec![Value::String("complete".into())])).unwrap()
+        else {
+            panic!("expected tensor");
+        };
+        assert_matrix_close(&z, &[[1.0, 2.0, 1.0], [3.0, 4.0, 2.0], [5.0, 6.0, 7.0]]);
+    }
+
+    #[test]
+    fn linkage_condensed_vector_reads_typed_integer_storage_exactly() {
+        let y = typed_integer_tensor_value(IntegerStorage::I16(vec![1, 4, 6, 5, 7, 2]), vec![1, 6]);
         let Value::Tensor(z) =
             block_on(linkage_builtin(y, vec![Value::String("complete".into())])).unwrap()
         else {
@@ -750,7 +771,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(z.shape, vec![3, 3]);
-        assert_close(z.data[6], 2.0);
+        assert_close(z.materialize_f64()[6], 2.0);
     }
 
     #[test]
@@ -769,7 +790,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(z.shape, vec![3, 3]);
-        assert_close(z.data[6], 2.0);
+        assert_close(z.materialize_f64()[6], 2.0);
     }
 
     #[test]

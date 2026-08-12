@@ -1,6 +1,6 @@
 use runmat_builtins::{CellArray, CharArray, StringArray, StructValue, Tensor, Value};
 use runmat_plot::plots::{
-    ColorMap, LegendStyle, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
+    ColorMap, LegendStyle, PatchData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
 };
 use std::borrow::Cow;
 
@@ -827,6 +827,7 @@ fn get_axes_property(
                 "FontSize",
                 Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
             );
+            st.insert("Visible", Value::Bool(meta.axes_style.visible));
             st.insert(
                 "XScale",
                 Value::String(if meta.x_log { "log" } else { "linear" }.into()),
@@ -881,14 +882,9 @@ fn get_axes_property(
         Some("view") => {
             let az = meta.view_azimuth_deg.unwrap_or(-37.5) as f64;
             let el = meta.view_elevation_deg.unwrap_or(30.0) as f64;
-            Ok(Value::Tensor(runmat_builtins::Tensor {
-                rows: 1,
-                cols: 2,
-                shape: vec![1, 2],
-                data: vec![az, el],
-                integer_data: None,
-                dtype: runmat_builtins::NumericDType::F64,
-            }))
+            Ok(Value::Tensor(
+                Tensor::new(vec![az, el], vec![1, 2]).expect("view vector"),
+            ))
         }
         Some("grid") => Ok(Value::Bool(meta.grid_enabled)),
         Some("minorgrid") => Ok(Value::Bool(meta.minor_grid_enabled)),
@@ -938,6 +934,7 @@ fn get_axes_property(
         Some("xticklabelrotation") => Ok(Value::Num(meta.x_tick_label_rotation.unwrap_or(0.0))),
         Some("yticklabelrotation") => Ok(Value::Num(meta.y_tick_label_rotation.unwrap_or(0.0))),
         Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
+        Some("visible") => Ok(Value::Bool(meta.axes_style.visible)),
         Some("xscale") => Ok(Value::String(
             if meta.x_log { "log" } else { "linear" }.into(),
         )),
@@ -1248,12 +1245,8 @@ pub(crate) fn data_aspect_ratio_from_value(
 ) -> BuiltinResult<[f64; 3]> {
     let tensor =
         Tensor::try_from(value).map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-    if tensor.data.len() != 3
-        || tensor
-            .data
-            .iter()
-            .any(|value| !value.is_finite() || *value <= 0.0)
-    {
+    let data = tensor::tensor_values_f64(&tensor);
+    if data.len() != 3 || data.iter().any(|value| !value.is_finite() || *value <= 0.0) {
         return Err(plotting_error(
             builtin,
             format!(
@@ -1261,7 +1254,7 @@ pub(crate) fn data_aspect_ratio_from_value(
             ),
         ));
     }
-    Ok([tensor.data[0], tensor.data[1], tensor.data[2]])
+    Ok([data[0], data[1], data[2]])
 }
 
 pub(crate) fn data_aspect_ratio_mode_from_value(
@@ -1542,8 +1535,8 @@ fn apply_axes_property(
         "view" => {
             let tensor = runmat_builtins::Tensor::try_from(value)
                 .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-            if tensor.data.len() != 2 || !tensor.data[0].is_finite() || !tensor.data[1].is_finite()
-            {
+            let data = tensor::tensor_values_f64(&tensor);
+            if data.len() != 2 || !data[0].is_finite() || !data[1].is_finite() {
                 return Err(plotting_error(
                     builtin,
                     format!("{builtin}: View must be a 2-element finite numeric vector"),
@@ -1552,8 +1545,8 @@ fn apply_axes_property(
             crate::builtins::plotting::state::set_view_for_axes(
                 handle,
                 axes_index,
-                tensor.data[0] as f32,
-                tensor.data[1] as f32,
+                data[0] as f32,
+                data[1] as f32,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -1662,6 +1655,18 @@ fn apply_axes_property(
                 .map_err(|err| map_figure_error(builtin, err))?;
             let mut style = meta.axes_style;
             style.font_size = Some(font_size as f32);
+            set_axes_style_for_axes(handle, axes_index, style)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "visible" => {
+            let visible = value_as_bool(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
+            })?;
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            let mut style = meta.axes_style;
+            style.visible = visible;
             set_axes_style_for_axes(handle, axes_index, style)
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -2302,13 +2307,13 @@ fn get_binscatter_property(
         None => {
             let mut st = child_base_struct("binscatter", binscatter.figure, binscatter.axes_index);
             st.insert("Values", Value::Tensor(binscatter.values.clone()));
-            st.insert("XData", tensor_from_vec(binscatter.x_data.clone()));
-            st.insert("YData", tensor_from_vec(binscatter.y_data.clone()));
+            st.insert("XData", Value::Tensor(binscatter.x_data.clone()));
+            st.insert("YData", Value::Tensor(binscatter.y_data.clone()));
             st.insert("XBinEdges", tensor_from_vec(binscatter.x_bin_edges.clone()));
             st.insert("YBinEdges", tensor_from_vec(binscatter.y_bin_edges.clone()));
             st.insert("NumBins", tensor_from_vec(num_bins_value(binscatter)));
-            st.insert("XLimits", tensor_from_vec(binscatter_x_limits(binscatter)));
-            st.insert("YLimits", tensor_from_vec(binscatter_y_limits(binscatter)));
+            st.insert("XLimits", binscatter_x_limits(binscatter));
+            st.insert("YLimits", binscatter_y_limits(binscatter));
             st.insert("ShowEmptyBins", Value::Bool(binscatter.show_empty_bins));
             st.insert("FaceAlpha", Value::Num(binscatter.face_alpha));
             st.insert(
@@ -2324,13 +2329,13 @@ fn get_binscatter_property(
         )),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("values") | Some("bindata") => Ok(Value::Tensor(binscatter.values.clone())),
-        Some("xdata") => Ok(tensor_from_vec(binscatter.x_data.clone())),
-        Some("ydata") => Ok(tensor_from_vec(binscatter.y_data.clone())),
+        Some("xdata") => Ok(Value::Tensor(binscatter.x_data.clone())),
+        Some("ydata") => Ok(Value::Tensor(binscatter.y_data.clone())),
         Some("xbinedges") => Ok(tensor_from_vec(binscatter.x_bin_edges.clone())),
         Some("ybinedges") => Ok(tensor_from_vec(binscatter.y_bin_edges.clone())),
         Some("numbins") => Ok(tensor_from_vec(num_bins_value(binscatter))),
-        Some("xlimits") => Ok(tensor_from_vec(binscatter_x_limits(binscatter))),
-        Some("ylimits") => Ok(tensor_from_vec(binscatter_y_limits(binscatter))),
+        Some("xlimits") => Ok(binscatter_x_limits(binscatter)),
+        Some("ylimits") => Ok(binscatter_y_limits(binscatter)),
         Some("showemptybins") => Ok(Value::Bool(binscatter.show_empty_bins)),
         Some("facealpha") => Ok(Value::Num(binscatter.face_alpha)),
         Some("displayname") => Ok(Value::String(
@@ -2347,12 +2352,20 @@ fn num_bins_value(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> 
     vec![binscatter.num_bins[0] as f64, binscatter.num_bins[1] as f64]
 }
 
-fn binscatter_x_limits(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> {
-    vec![binscatter.x_limits.0, binscatter.x_limits.1]
+fn binscatter_x_limits(binscatter: &super::state::BinscatterHandleState) -> Value {
+    binscatter
+        .x_limits_option
+        .clone()
+        .map(Value::Tensor)
+        .unwrap_or_else(|| tensor_from_vec(vec![binscatter.x_limits.0, binscatter.x_limits.1]))
 }
 
-fn binscatter_y_limits(binscatter: &super::state::BinscatterHandleState) -> Vec<f64> {
-    vec![binscatter.y_limits.0, binscatter.y_limits.1]
+fn binscatter_y_limits(binscatter: &super::state::BinscatterHandleState) -> Value {
+    binscatter
+        .y_limits_option
+        .clone()
+        .map(Value::Tensor)
+        .unwrap_or_else(|| tensor_from_vec(vec![binscatter.y_limits.0, binscatter.y_limits.1]))
 }
 
 fn get_plot_child_property(
@@ -2605,19 +2618,16 @@ fn child_base_struct(kind: &str, figure: FigureHandle, axes_index: usize) -> Str
 }
 
 fn figure_position_value(position: [f64; 4]) -> Value {
-    Value::Tensor(Tensor {
-        rows: 1,
-        cols: 4,
-        shape: vec![1, 4],
-        data: position.to_vec(),
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(position.to_vec(), vec![1, 4]).expect("figure position vector"))
 }
 
 fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<[f64; 4]> {
     let values = match value {
-        Value::Tensor(t) if t.data.len() == 4 && is_figure_position_vector_shape(t) => &t.data,
+        Value::Tensor(t)
+            if tensor::tensor_element_len(t) == 4 && is_figure_position_vector_shape(t) =>
+        {
+            tensor::tensor_values_f64(t)
+        }
         _ => {
             return Err(plotting_error(
                 builtin,
@@ -2626,7 +2636,7 @@ fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<
         }
     };
     let mut position = [0.0; 4];
-    position.copy_from_slice(values);
+    position.copy_from_slice(&values);
     if !position.iter().all(|value| value.is_finite()) {
         return Err(plotting_error(
             builtin,
@@ -2647,23 +2657,25 @@ fn is_figure_position_vector_shape(tensor: &Tensor) -> bool {
 }
 
 fn text_position_value(position: glam::Vec3) -> Value {
-    Value::Tensor(Tensor {
-        rows: 1,
-        cols: 3,
-        shape: vec![1, 3],
-        data: vec![position.x as f64, position.y as f64, position.z as f64],
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(
+        Tensor::new(
+            vec![position.x as f64, position.y as f64, position.z as f64],
+            vec![1, 3],
+        )
+        .expect("text position vector"),
+    )
 }
 
 fn parse_text_position(value: &Value, builtin: &'static str) -> BuiltinResult<glam::Vec3> {
     match value {
-        Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 3 => Ok(glam::Vec3::new(
-            t.data[0] as f32,
-            t.data[1] as f32,
-            t.data.get(2).copied().unwrap_or(0.0) as f32,
-        )),
+        Value::Tensor(t) if matches!(tensor::tensor_element_len(t), 2 | 3) => {
+            let data = tensor::tensor_values_f64(t);
+            Ok(glam::Vec3::new(
+                data[0] as f32,
+                data[1] as f32,
+                data.get(2).copied().unwrap_or(0.0) as f32,
+            ))
+        }
         _ => Err(plotting_error(
             builtin,
             format!("{builtin}: Position must be a 2-element or 3-element vector"),
@@ -3492,6 +3504,7 @@ fn get_function_contour_property(
                 "YRange",
                 tensor_from_vec(vec![function_contour.y_range.0, function_contour.y_range.1]),
             );
+            st.insert("Fill", Value::Bool(function_contour.fill));
             st.insert("LineWidth", Value::Num(contour.line_width as f64));
             st.insert(
                 "DisplayName",
@@ -3515,6 +3528,7 @@ fn get_function_contour_property(
             function_contour.y_range.0,
             function_contour.y_range.1,
         ])),
+        Some("fill") => Ok(Value::Bool(function_contour.fill)),
         Some("linewidth") => Ok(Value::Num(contour.line_width as f64)),
         Some("displayname") => Ok(Value::String(contour.label.unwrap_or_default())),
         Some("zdata") => Ok(Value::Num(contour.base_z as f64)),
@@ -3537,23 +3551,18 @@ fn get_patch_property(
             format!("{builtin}: invalid patch handle"),
         ));
     };
+    let (source_x, source_y, source_z, source_c) = patch.source_data();
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("patch", patch_handle.figure, patch_handle.axes_index);
             st.insert("Faces", faces_tensor(patch.faces()));
             st.insert("Vertices", vertices_tensor(patch.vertices()));
-            st.insert(
-                "XData",
-                tensor_from_vec(patch.vertices().iter().map(|p| p.x as f64).collect()),
-            );
-            st.insert(
-                "YData",
-                tensor_from_vec(patch.vertices().iter().map(|p| p.y as f64).collect()),
-            );
-            st.insert(
-                "ZData",
-                tensor_from_vec(patch.vertices().iter().map(|p| p.z as f64).collect()),
-            );
+            st.insert("XData", patch_source_or_vertices(source_x, &patch, 0));
+            st.insert("YData", patch_source_or_vertices(source_y, &patch, 1));
+            st.insert("ZData", patch_source_or_vertices(source_z, &patch, 2));
+            if let Some(c_data) = source_c {
+                st.insert("CData", patch_data_value(c_data));
+            }
             st.insert(
                 "FaceColor",
                 patch_color_property(patch.face_color_mode(), patch.face_color()),
@@ -3579,15 +3588,12 @@ fn get_patch_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("faces") => Ok(faces_tensor(patch.faces())),
         Some("vertices") => Ok(vertices_tensor(patch.vertices())),
-        Some("xdata") => Ok(tensor_from_vec(
-            patch.vertices().iter().map(|p| p.x as f64).collect(),
-        )),
-        Some("ydata") => Ok(tensor_from_vec(
-            patch.vertices().iter().map(|p| p.y as f64).collect(),
-        )),
-        Some("zdata") => Ok(tensor_from_vec(
-            patch.vertices().iter().map(|p| p.z as f64).collect(),
-        )),
+        Some("xdata") => Ok(patch_source_or_vertices(source_x, &patch, 0)),
+        Some("ydata") => Ok(patch_source_or_vertices(source_y, &patch, 1)),
+        Some("zdata") => Ok(patch_source_or_vertices(source_z, &patch, 2)),
+        Some("cdata") | Some("colordata") => source_c
+            .map(patch_data_value)
+            .ok_or_else(|| plotting_error(builtin, format!("{builtin}: patch has no CData"))),
         Some("facecolor") | Some("color") => Ok(patch_color_property(
             patch.face_color_mode(),
             patch.face_color(),
@@ -3606,6 +3612,33 @@ fn get_patch_property(
             format!("{builtin}: unsupported patch property `{other}`"),
         )),
     }
+}
+
+fn patch_source_or_vertices(
+    source: Option<&PatchData>,
+    patch: &runmat_plot::plots::PatchPlot,
+    component: usize,
+) -> Value {
+    source.map(patch_data_value).unwrap_or_else(|| {
+        tensor_from_vec(
+            patch
+                .vertices()
+                .iter()
+                .map(|point| match component {
+                    0 => point.x as f64,
+                    1 => point.y as f64,
+                    _ => point.z as f64,
+                })
+                .collect(),
+        )
+    })
+}
+
+fn patch_data_value(data: &PatchData) -> Value {
+    Value::Tensor(
+        Tensor::from_numeric_storage(data.storage.clone(), data.shape.clone())
+            .expect("patch source shape matches storage"),
+    )
 }
 
 fn get_line3_property(
@@ -4422,7 +4455,7 @@ fn apply_histogram_property(
             Ok(())
         }
         "facealpha" => {
-            let alpha = value_as_f64(value).ok_or_else(|| {
+            let alpha = patch_scalar_f64(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FaceAlpha must be numeric"))
             })?;
             let alpha = alpha.clamp(0.0, 1.0);
@@ -4818,13 +4851,13 @@ fn apply_quiver_data_property(
     let tensor = Tensor::try_from(value).map_err(|err| {
         plotting_error(builtin, format!("{builtin}: {key} must be numeric: {err}"))
     })?;
-    if tensor.data.len() != expected_len {
+    if tensor::tensor_element_len(&tensor) != expected_len {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {key} length must match existing quiver data length"),
         ));
     }
-    let data = tensor.data;
+    let data = tensor::tensor_values_f64(&tensor);
     super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
         match key {
             "xdata" => quiver.x = data,
@@ -4851,12 +4884,12 @@ fn apply_image_property(
         match key {
             "xdata" => {
                 if let Ok(tensor) = Tensor::try_from(value) {
-                    surface.x_data = tensor.data;
+                    surface.x_data = tensor.materialize_f64();
                 }
             }
             "ydata" => {
                 if let Ok(tensor) = Tensor::try_from(value) {
-                    surface.y_data = tensor.data;
+                    surface.y_data = tensor.materialize_f64();
                 }
             }
             "cdatamapping" => {
@@ -5094,10 +5127,38 @@ fn apply_animated_line_properties(
     Ok(())
 }
 
-fn animated_line_maximum_from_value(
+pub(crate) fn animated_line_maximum_from_value(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<Option<usize>> {
+    if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: MaximumNumPoints must be numeric"),
+        ));
+    }
+    let integer = match value {
+        Value::Int(integer) => Some(integer.clone()),
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor
+            .integer_storage()
+            .and_then(|storage| storage.value_at(0)),
+        _ => None,
+    };
+    if let Some(integer) = integer {
+        let Some(maximum) = integer.try_to_usize() else {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: MaximumNumPoints must be positive or Inf"),
+            ));
+        };
+        if maximum == 0 {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: MaximumNumPoints must be positive or Inf"),
+            ));
+        }
+        return Ok(Some(maximum));
+    }
     let Some(maximum) = value_as_f64(value) else {
         return Err(plotting_error(
             builtin,
@@ -5113,13 +5174,20 @@ fn animated_line_maximum_from_value(
             format!("{builtin}: MaximumNumPoints must be positive or Inf"),
         ));
     }
-    if maximum > usize::MAX as f64 {
+    let rounded = maximum.round();
+    if (rounded - maximum).abs() > f64::EPSILON {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: MaximumNumPoints must be a positive integer or Inf"),
+        ));
+    }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: MaximumNumPoints is too large"),
         ));
     }
-    Ok(Some(maximum.floor() as usize))
+    Ok(Some(rounded as usize))
 }
 
 fn apply_reference_line_property(
@@ -5747,7 +5815,7 @@ fn apply_function_contour_property(
             };
             apply_contour_property(&contour_handle, key, value, builtin)
         }
-        "meshdensity" | "xrange" | "yrange" | "function" => Err(plotting_error(
+        "meshdensity" | "xrange" | "yrange" | "function" | "fill" => Err(plotting_error(
             builtin,
             format!("{builtin}: changing {key} after fcontour sampling is not supported yet"),
         )),
@@ -5804,10 +5872,16 @@ fn binscatter_numeric_data(
     value: &Value,
     name: &str,
     builtin: &'static str,
-) -> BuiltinResult<Vec<f64>> {
+) -> BuiltinResult<Tensor> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    Ok(tensor.data)
+    if tensor.shape.iter().filter(|&&dim| dim > 1).count() > 1 {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: {name} must be a real numeric vector"),
+        ));
+    }
+    Ok(tensor)
 }
 
 fn recompute_binscatter_chart(
@@ -5822,8 +5896,8 @@ fn recompute_binscatter_chart(
     }
     if next.auto_bins {
         next.num_bins = [
-            binscatter::auto_bin_count(&next.x_data, next.x_limits_option, 100)?,
-            binscatter::auto_bin_count(&next.y_data, next.y_limits_option, 100)?,
+            binscatter::auto_bin_count(&next.x_data, next.x_limits_option.as_ref(), 100)?,
+            binscatter::auto_bin_count(&next.y_data, next.y_limits_option.as_ref(), 100)?,
         ];
     }
     let color_limits = current_binscatter_color_limits(&next, builtin)?;
@@ -5831,8 +5905,8 @@ fn recompute_binscatter_chart(
         &next.x_data,
         &next.y_data,
         next.num_bins,
-        next.x_limits_option,
-        next.y_limits_option,
+        next.x_limits_option.as_ref(),
+        next.y_limits_option.as_ref(),
         next.show_empty_bins,
         next.face_alpha,
         next.display_name.as_deref(),
@@ -5896,6 +5970,50 @@ fn apply_patch_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if !matches!(
+        key,
+        "facecolor"
+            | "color"
+            | "edgecolor"
+            | "facealpha"
+            | "edgealpha"
+            | "linewidth"
+            | "displayname"
+            | "visible"
+    ) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported patch property `{key}`"),
+        ));
+    }
+    match key {
+        "facealpha" | "edgealpha" => {
+            let alpha = value_as_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: {key} must be numeric"))
+            })?;
+            if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: {key} must be in the range [0, 1]"),
+                ));
+            }
+        }
+        "linewidth" => {
+            let width = patch_scalar_f64(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: LineWidth must be numeric"))
+            })?;
+            if !width.is_finite() || width <= 0.0 {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: LineWidth must be a positive finite value"),
+                ));
+            }
+        }
+        "visible" => {
+            validate_patch_visible(value, builtin)?;
+        }
+        _ => {}
+    }
     super::state::update_plot_element(patch_handle.figure, patch_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot {
             match key {
@@ -5972,6 +6090,31 @@ fn apply_patch_property(
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn validate_patch_visible(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
+    if let Some(text) = value_as_string(value) {
+        if matches!(text.trim().to_ascii_lowercase().as_str(), "on" | "off") {
+            return Ok(());
+        }
+    } else if matches!(value, Value::Bool(_)) {
+        return Ok(());
+    } else if let Some(value) = patch_scalar_f64(value) {
+        if value == 0.0 || value == 1.0 {
+            return Ok(());
+        }
+    }
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: Visible must be on/off or numeric/logical 0 or 1"),
+    ))
+}
+
+fn patch_scalar_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Tensor(tensor) if tensor.len() != 1 => None,
+        _ => value_as_f64(value),
+    }
 }
 
 fn apply_line3_property(
@@ -6257,7 +6400,7 @@ fn apply_line_plot_properties(
 fn line_numeric_data(value: &Value, name: &str, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    Ok(tensor.data)
+    Ok(tensor::tensor_values_f64(&tensor))
 }
 
 fn line_xy_data_for_properties(
@@ -6312,7 +6455,7 @@ enum TickMode {
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
     let tensor = runmat_builtins::Tensor::try_from(value)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-    let ticks = tensor.data;
+    let ticks = tensor::tensor_values_f64(&tensor);
     if ticks.iter().any(|value| !value.is_finite()) {
         return Err(plotting_error(
             builtin,
@@ -6377,7 +6520,9 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_values_f64(tensor)[0])
+        }
         _ => None,
     }
 }
@@ -6424,7 +6569,7 @@ fn tick_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
             }
             Ok(labels)
         }
-        Value::Tensor(tensor) if tensor.data.is_empty() => Ok(Vec::new()),
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0 => Ok(Vec::new()),
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: tick labels must be a string array or cell array of text, got {other:?}"),
@@ -6657,7 +6802,7 @@ fn handle_scalar(value: &Value, builtin: &'static str) -> BuiltinResult<f64> {
     match value {
         Value::Num(v) => Ok(*v),
         Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_values_f64(t)[0]),
         _ => Err(plotting_error(
             builtin,
             format!("{builtin}: expected plotting handle"),
@@ -6691,25 +6836,13 @@ fn text_value(text: Option<String>) -> Value {
 }
 
 fn handles_value(handles: Vec<f64>) -> Value {
-    Value::Tensor(runmat_builtins::Tensor {
-        rows: 1,
-        cols: handles.len(),
-        shape: vec![1, handles.len()],
-        data: handles,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    let len = handles.len();
+    Value::Tensor(Tensor::new(handles, vec![1, len]).expect("handle row vector"))
 }
 
 fn tensor_from_vec(data: Vec<f64>) -> Value {
-    Value::Tensor(runmat_builtins::Tensor {
-        rows: 1,
-        cols: data.len(),
-        shape: vec![1, data.len()],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    let len = data.len();
+    Value::Tensor(Tensor::new(data, vec![1, len]).expect("property row vector"))
 }
 
 fn string_array_from_vec(data: Vec<String>) -> BuiltinResult<Value> {
@@ -6740,8 +6873,11 @@ pub(crate) fn label_strings_from_value(
             .collect(),
         Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::Tensor(tensor) => Ok(tensor.data.iter().map(|v| v.to_string()).collect()),
-        Value::Int(i) => Ok(vec![i.to_i64().to_string()]),
+        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64(tensor)
+            .iter()
+            .map(|v| v.to_string())
+            .collect()),
+        Value::Int(i) => Ok(vec![i.decimal_string()]),
         Value::Num(v) => Ok(vec![v.to_string()]),
         other => Err(plotting_error(
             builtin,
@@ -6754,14 +6890,7 @@ fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
     let rows = data.len();
     let cols = data.first().map(|row| row.len()).unwrap_or(0);
     let flat = data.into_iter().flat_map(|row| row.into_iter()).collect();
-    Value::Tensor(runmat_builtins::Tensor {
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        data: flat,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(flat, vec![rows, cols]).expect("property matrix"))
 }
 
 fn surface_x_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
@@ -6795,14 +6924,7 @@ fn surface_grid_to_tensor(grid: &[Vec<f64>]) -> Value {
     for column in grid {
         data.extend(column.iter().copied());
     }
-    Value::Tensor(runmat_builtins::Tensor {
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("surface grid"))
 }
 
 fn surface_coordinate_data_from_value(
@@ -6812,7 +6934,8 @@ fn surface_coordinate_data_from_value(
 ) -> BuiltinResult<SurfaceCoordinateData> {
     let tensor = Tensor::try_from(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    if tensor.data.is_empty() {
+    let data = tensor::tensor_values_f64(&tensor);
+    if data.is_empty() {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {name} must be non-empty"),
@@ -6824,14 +6947,14 @@ fn surface_coordinate_data_from_value(
             format!("{builtin}: {name} must be a vector or 2-D matrix"),
         ));
     }
-    if tensor.data.iter().any(|value| !value.is_finite()) {
+    if data.iter().any(|value| !value.is_finite()) {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {name} must contain finite coordinates"),
         ));
     }
     if tensor.rows == 1 || tensor.cols == 1 {
-        return Ok(SurfaceCoordinateData::Vector(tensor.data));
+        return Ok(SurfaceCoordinateData::Vector(data));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -6850,12 +6973,14 @@ fn surface_z_grid_from_value(
     let expected = rows
         .checked_mul(cols)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: grid dimensions overflowed")))?;
-    if tensor.data.len() != expected {
+    if tensor::tensor_element_len(&tensor) != expected {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: ZData must contain exactly {expected} values"),
         ));
     }
+    tensor = tensor::integer_tensor_to_f64(tensor)
+        .map_err(|err| plotting_error(builtin, format!("{builtin}: {err}")))?;
     if tensor.rows == rows && tensor.cols == cols {
         return super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin);
     }
@@ -6998,14 +7123,7 @@ fn vertices_tensor(vertices: &[glam::Vec3]) -> Value {
             });
         }
     }
-    Value::Tensor(runmat_builtins::Tensor {
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("patch vertices"))
 }
 
 fn faces_tensor(faces: &[Vec<usize>]) -> Value {
@@ -7021,14 +7139,7 @@ fn faces_tensor(faces: &[Vec<usize>]) -> Value {
             );
         }
     }
-    Value::Tensor(runmat_builtins::Tensor {
-        rows,
-        cols,
-        shape: vec![rows, cols],
-        data,
-        integer_data: None,
-        dtype: runmat_builtins::NumericDType::F64,
-    })
+    Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("patch faces"))
 }
 
 fn patch_color_property(mode: runmat_plot::plots::PatchFaceColorMode, color: glam::Vec4) -> Value {
@@ -7335,5 +7446,64 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
             | PlotObjectKind::XAxis
             | PlotObjectKind::YAxis => TextStyle::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn label_strings_preserve_exact_uint64_text() {
+        let labels = label_strings_from_value(
+            &Value::Int(runmat_builtins::IntValue::U64(u64::MAX)),
+            "legend",
+            "labels",
+        )
+        .expect("labels");
+        assert_eq!(labels, vec!["18446744073709551615"]);
+    }
+
+    #[test]
+    fn numeric_property_helpers_read_typed_integer_storage() {
+        let aspect_tensor =
+            Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]).expect("aspect");
+        let aspect = Value::Tensor(aspect_tensor);
+        let position_tensor =
+            Tensor::new_integer(IntegerStorage::U32(vec![10, 20, 300, 200]), vec![1, 4])
+                .expect("position");
+        let position = Value::Tensor(position_tensor);
+        let text_tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![-2, 5, 9]), vec![1, 3]).expect("text");
+        let text = Value::Tensor(text_tensor);
+
+        assert_eq!(
+            data_aspect_ratio_from_value(&aspect, "daspect").expect("aspect"),
+            [1.0, 2.0, 3.0]
+        );
+        assert_eq!(
+            parse_figure_position(&position, "figure").expect("position"),
+            [10.0, 20.0, 300.0, 200.0]
+        );
+        let parsed = parse_text_position(&text, "text").expect("text position");
+        assert_eq!(parsed, glam::Vec3::new(-2.0, 5.0, 9.0));
+
+        let zdata =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2]).expect("zdata");
+        let zgrid = surface_z_grid_from_value(&Value::Tensor(zdata), 2, 2, "surf").expect("zdata");
+        assert_eq!(zgrid, vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
+
+        let scalar = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("scalar");
+        let scalar = Value::Tensor(scalar);
+        assert_eq!(scalar_numeric_value(&scalar), Some(7.0));
+        assert_eq!(handle_scalar(&scalar, "plot").expect("handle"), 7.0);
+
+        let empty_labels =
+            Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![1, 0]).expect("empty labels");
+        assert_eq!(
+            tick_labels_from_value(&Value::Tensor(empty_labels), "xticklabels").expect("labels"),
+            Vec::<String>::new()
+        );
     }
 }

@@ -7,6 +7,7 @@ use super::state::{
     set_axis_tick_angles, set_axis_tick_angles_for_axes,
 };
 use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
 #[derive(Clone, Debug)]
@@ -76,11 +77,12 @@ fn axes_array_targets(value: &Value) -> Option<Vec<(super::state::FigureHandle, 
     let Value::Tensor(tensor) = value else {
         return None;
     };
-    if tensor.data.is_empty() {
+    let data = tensor::tensor_values_f64(tensor);
+    if data.is_empty() {
         return None;
     }
-    let mut targets = Vec::with_capacity(tensor.data.len());
-    for scalar in &tensor.data {
+    let mut targets = Vec::with_capacity(data.len());
+    for scalar in &data {
         let Ok((handle, axes_index)) = decode_axes_handle(*scalar) else {
             return None;
         };
@@ -170,7 +172,22 @@ fn scalar_numeric_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{IntegerStorage, Tensor};
+
+    #[test]
+    fn axis_tick_angle_scalar_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).unwrap();
+
+        assert_eq!(scalar_numeric_value(&Value::Tensor(tensor)), Some(45.0));
     }
 }

@@ -198,13 +198,32 @@ fn logical_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 fn logical_from_sparse_tensor(sparse: runmat_builtins::SparseTensor) -> BuiltinResult<Value> {
-    let tensor = sparse.to_dense().map_err(|err| {
-        logical_error_with_message(
-            format!("logical: failed to densify sparse input: {err}"),
-            &LOGICAL_ERROR_INTERNAL,
-        )
-    })?;
-    logical_from_tensor(tensor)
+    if sparse.is_logical() {
+        return Ok(Value::SparseTensor(sparse));
+    }
+    let mut col_ptrs = Vec::with_capacity(sparse.cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    col_ptrs.push(0);
+    for col in 0..sparse.cols {
+        for index in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+            if !sparse
+                .numeric_value_at(index)
+                .expect("validated sparse storage index")
+                .is_zero()
+            {
+                row_indices.push(sparse.row_indices[index]);
+            }
+        }
+        col_ptrs.push(row_indices.len());
+    }
+    runmat_builtins::SparseTensor::new_logical(sparse.rows, sparse.cols, col_ptrs, row_indices)
+        .map(Value::SparseTensor)
+        .map_err(|err| {
+            logical_error_with_message(
+                format!("logical: failed to convert sparse input: {err}"),
+                &LOGICAL_ERROR_INTERNAL,
+            )
+        })
 }
 
 fn logical_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -338,21 +357,38 @@ struct LogicalBuffer {
 
 impl LogicalBuffer {
     fn from_real_tensor(tensor: &Tensor) -> Self {
-        let bits: Vec<u8> = tensor
-            .data
-            .iter()
-            .map(|&v| if v != 0.0 { 1 } else { 0 })
+        let bits: Vec<u8> = (0..tensor.len())
+            .map(|index| {
+                u8::from(
+                    !tensor
+                        .numeric_value_at(index)
+                        .expect("tensor storage is structurally valid")
+                        .is_zero(),
+                )
+            })
             .collect();
         let shape = canonical_shape(&tensor.shape, bits.len());
         Self { bits, shape }
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> Self {
-        let bits: Vec<u8> = tensor
-            .data
-            .iter()
-            .map(|&(re, im)| if !complex_is_zero(re, im) { 1 } else { 0 })
-            .collect();
+        let bits: Vec<u8> = if let Some(storage) = tensor.integer_storage() {
+            (0..storage.len())
+                .map(|index| {
+                    u8::from(
+                        storage
+                            .is_nonzero_at(index)
+                            .expect("typed complex integer storage is structurally valid"),
+                    )
+                })
+                .collect()
+        } else {
+            tensor
+                .materialize_f64()
+                .iter()
+                .map(|&(re, im)| if !complex_is_zero(re, im) { 1 } else { 0 })
+                .collect()
+        };
         let shape = canonical_shape(&tensor.shape, bits.len());
         Self { bits, shape }
     }
@@ -393,7 +429,8 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{
-        CellArray, IntValue, MException, ObjectInstance, SparseTensor, StructValue, SymbolicExpr,
+        CellArray, IntValue, IntegerComplexStorage, IntegerStorage, MException, ObjectInstance,
+        SparseTensor, StructValue, SymbolicExpr,
     };
 
     fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -474,15 +511,21 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn logical_sparse_tensor_densifies() {
+    fn logical_sparse_tensor_preserves_sparse_storage() {
         let sparse = SparseTensor::new(3, 2, vec![0, 1, 2], vec![1, 2], vec![4.0, -1.0]).unwrap();
         let result = logical_builtin(Value::SparseTensor(sparse), Vec::new()).expect("logical");
         match result {
-            Value::LogicalArray(array) => {
-                assert_eq!(array.shape, vec![3, 2]);
-                assert_eq!(array.data, vec![0, 1, 0, 0, 0, 1]);
+            Value::SparseTensor(sparse) => {
+                assert!(sparse.is_logical());
+                assert_eq!(sparse.shape(), vec![3, 2]);
+                assert_eq!(sparse.col_ptrs, vec![0, 1, 2]);
+                assert_eq!(sparse.row_indices, vec![1, 2]);
+                assert_eq!(
+                    sparse.to_dense_logical().expect("dense logical").data,
+                    vec![0, 1, 0, 0, 0, 1]
+                );
             }
-            other => panic!("expected logical array, got {:?}", other),
+            other => panic!("expected logical sparse tensor, got {other:?}"),
         }
     }
 
@@ -497,6 +540,22 @@ pub(crate) mod tests {
                 assert_eq!(array.data, vec![0, 1, 1]);
             }
             other => panic!("expected logical array, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn logical_typed_complex_integer_uses_exact_components() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![0, u64::MAX, 0]),
+            IntegerStorage::U64(vec![0, 0, 1_u64 << 63]),
+        )
+        .expect("matching components");
+        let tensor = ComplexTensor::new_integer(storage, vec![3, 1]).expect("typed complex");
+
+        let result = logical_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("logical");
+        match result {
+            Value::LogicalArray(array) => assert_eq!(array.data, vec![0, 1, 1]),
+            other => panic!("expected logical array, got {other:?}"),
         }
     }
 
@@ -608,14 +667,14 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0, -2.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 logical_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("logical");
             let gathered = test_support::gather(result.clone()).expect("gather");
-            assert_eq!(gathered.data, vec![0.0, 1.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 1.0]);
             if let Value::GpuTensor(out) = result {
                 assert!(runmat_accelerate_api::handle_is_logical(&out));
             } else {
@@ -630,7 +689,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
-                data: &tensor.data,
+                data: &tensor.materialize_f64(),
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
@@ -693,7 +752,7 @@ pub(crate) mod tests {
         let cpu = logical_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
 
         let view = runmat_accelerate_api::HostTensorView {
-            data: &tensor.data,
+            data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
@@ -723,6 +782,6 @@ pub(crate) mod tests {
         };
 
         assert_eq!(gathered.shape, expected_shape);
-        assert_eq!(gathered.data, expected);
+        assert_eq!(gathered.materialize_f64(), expected);
     }
 }

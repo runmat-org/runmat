@@ -28,7 +28,10 @@ pub fn ensure_table_class_registered() {
         register_plain_object_class(TIMERANGE_CLASS, &["Start", "End", "Inclusivity"]);
         register_plain_object_class(VARTYPE_CLASS, &["Type"]);
         register_plain_object_class(ROWFILTER_CLASS, &["Variables", "Predicate"]);
-        register_plain_object_class(ARRAY_DATASTORE_CLASS, &["Data", "ReadSize"]);
+        register_plain_object_class(
+            ARRAY_DATASTORE_CLASS,
+            &["Data", "ReadSize", "IterationDimension", "OutputType"],
+        );
         register_plain_object_class(
             FILE_DATASTORE_CLASS,
             &[

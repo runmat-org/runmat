@@ -16,7 +16,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::logical::rel::integer_comparison::{
-    try_integer_comparison, IntegerComparisonError, IntegerComparisonOp,
+    try_complex_ordering_comparison, try_gpu_ordering_comparison, try_integer_comparison,
+    IntegerComparisonError, IntegerComparisonOp,
 };
 use crate::builtins::logical::type_resolvers::symbolic_logical_binary_type;
 use crate::builtins::math::symbolic::symbolic_named_binary;
@@ -38,8 +39,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Prefers provider elem_lt kernels when available; otherwise inputs gather to host tensors automatically.",
+    notes: "Prefers provider elem_lt kernels; complex-interleaved inputs compare provider-extracted real lanes, and unsupported routes gather to authoritative host storage.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::logical::rel::lt")]
@@ -113,18 +113,7 @@ const LT_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "lt: array sizes are not compatible for broadcasting",
 };
 
-const LT_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LT.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:lt:ComplexNotSupported"),
-    when: "At least one operand is complex.",
-    message: "lt: complex numbers are not supported",
-};
-
-const LT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    LT_ERROR_INVALID_INPUT,
-    LT_ERROR_SIZE_MISMATCH,
-    LT_ERROR_COMPLEX_UNSUPPORTED,
-];
+const LT_ERRORS: [BuiltinErrorDescriptor; 2] = [LT_ERROR_INVALID_INPUT, LT_ERROR_SIZE_MISMATCH];
 
 pub const LT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LT_SIGNATURES,
@@ -164,14 +153,7 @@ async fn try_lt_gpu(
     a: &GpuTensorHandle,
     b: &GpuTensorHandle,
 ) -> Option<crate::BuiltinResult<Value>> {
-    let provider = runmat_accelerate_api::provider()?;
-    match provider.elem_lt(a, b).await {
-        Ok(handle) => Some(Ok(gpu_helpers::logical_gpu_value(handle))),
-        Err(err) => {
-            drop(err);
-            None
-        }
-    }
+    try_gpu_ordering_comparison(a, b, IntegerComparisonOp::Lt).await
 }
 
 async fn lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -187,6 +169,12 @@ async fn lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         return Ok(value);
     }
 
+    let lhs = gather_gpu_operand(lhs)
+        .await
+        .map_err(|_| lt_error(&LT_ERROR_INVALID_INPUT))?;
+    let rhs = gather_gpu_operand(rhs)
+        .await
+        .map_err(|_| lt_error(&LT_ERROR_INVALID_INPUT))?;
     let (lhs, rhs) = normalize_char_string(lhs, rhs);
 
     if let Some(result) = try_integer_comparison(&lhs, &rhs, IntegerComparisonOp::Lt).map_err(
@@ -195,6 +183,15 @@ async fn lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             IntegerComparisonError::Internal => lt_error(&LT_ERROR_INVALID_INPUT),
         },
     )? {
+        return Ok(result);
+    }
+
+    if let Some(result) = try_complex_ordering_comparison(&lhs, &rhs, IntegerComparisonOp::Lt)
+        .map_err(|error| match error {
+            IntegerComparisonError::SizeMismatch => lt_error(&LT_ERROR_SIZE_MISMATCH),
+            IntegerComparisonError::Internal => lt_error(&LT_ERROR_INVALID_INPUT),
+        })?
+    {
         return Ok(result);
     }
 
@@ -219,12 +216,19 @@ async fn lt_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     }
 }
 
+async fn gather_gpu_operand(value: Value) -> crate::BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(_) => gpu_helpers::gather_value_async(&value).await,
+        _ => Ok(value),
+    }
+}
+
 fn scalar_numeric_value(value: &Value) -> Option<f64> {
     match value {
         Value::Num(n) => Some(*n),
         Value::Int(i) => Some(i.to_f64()),
         Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => t.data.first().copied(),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
@@ -318,7 +322,7 @@ impl LtOperand {
                 Ok(LtOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                Err(lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED))
+                Err(lt_error(&LT_ERROR_INVALID_INPUT))
             }
             _ => Err(lt_error(&LT_ERROR_INVALID_INPUT)),
         }
@@ -402,9 +406,10 @@ impl NumericBuffer {
     }
 
     fn from_tensor(tensor: Tensor) -> Self {
+        let shape = tensor.shape.clone();
         Self {
-            data: tensor.data,
-            shape: tensor.shape,
+            data: tensor::tensor_into_values_f64(tensor),
+            shape,
         }
     }
 
@@ -473,6 +478,43 @@ pub(crate) mod tests {
 
     fn run_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         block_on(super::lt_builtin(lhs, rhs))
+    }
+
+    #[test]
+    fn scalar_numeric_value_reads_typed_integer_tensor_storage_exactly() {
+        let tensor = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            vec![1, 1],
+        )
+        .expect("integer tensor");
+
+        assert_eq!(
+            scalar_numeric_value(&Value::Tensor(tensor)),
+            Some(9_007_199_254_740_993_u64 as f64)
+        );
+    }
+
+    #[test]
+    fn lt_dense_integer_arrays_read_exact_storage_without_mirror() {
+        let lhs = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]),
+            vec![2, 1],
+        )
+        .expect("lhs");
+        let rhs = Tensor::new_integer(
+            runmat_builtins::IntegerStorage::I64(vec![0, 1, i64::MAX]),
+            vec![1, 3],
+        )
+        .expect("rhs");
+
+        let result = run_lt(Value::Tensor(lhs), Value::Tensor(rhs)).expect("lt");
+        match result {
+            Value::LogicalArray(array) => {
+                assert_eq!(array.shape, vec![2, 3]);
+                assert_eq!(array.data, vec![0, 0, 1, 0, 1, 1]);
+            }
+            other => panic!("expected logical array, got {other:?}"),
+        }
     }
 
     #[cfg(feature = "wgpu")]
@@ -548,10 +590,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn lt_complex_error() {
-        let err = run_lt(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("lt");
-        assert!(err.message().contains("complex"));
-        assert_eq!(err.identifier(), LT_ERROR_COMPLEX_UNSUPPORTED.identifier);
+    fn lt_complex_compares_real_component() {
+        let result = run_lt(Value::Complex(1.0, 99.0), Value::Num(2.0)).expect("lt");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -561,11 +602,11 @@ pub(crate) mod tests {
             let lhs = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
             let rhs = Tensor::new(vec![2.0, 4.0, 8.0], vec![1, 3]).unwrap();
             let view_l = HostTensorView {
-                data: &lhs.data,
+                data: &lhs.materialize_f64(),
                 shape: &lhs.shape,
             };
             let view_r = HostTensorView {
-                data: &rhs.data,
+                data: &rhs.materialize_f64(),
                 shape: &rhs.shape,
             };
             let handle_l = provider.upload(&view_l).expect("upload lhs");
@@ -574,7 +615,7 @@ pub(crate) mod tests {
                 run_lt(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("lt");
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 3]);
-            assert_eq!(gathered.data, vec![1.0, 0.0, 1.0]);
+            assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0]);
         });
     }
 
@@ -590,11 +631,11 @@ pub(crate) mod tests {
         let cpu = run_lt_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
 
         let view_l = HostTensorView {
-            data: &lhs.data,
+            data: &lhs.materialize_f64(),
             shape: &lhs.shape,
         };
         let view_r = HostTensorView {
-            data: &rhs.data,
+            data: &rhs.materialize_f64(),
             shape: &rhs.shape,
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
@@ -611,12 +652,12 @@ pub(crate) mod tests {
                     .iter()
                     .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                     .collect();
-                assert_eq!(tensor.data, expected);
+                assert_eq!(tensor.materialize_f64(), expected);
             }
             (Value::Bool(host_flag), tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
                 let expected = if host_flag { 1.0 } else { 0.0 };
-                assert_eq!(tensor.data, vec![expected]);
+                assert_eq!(tensor.materialize_f64(), vec![expected]);
             }
             other => panic!("unexpected output combination: {other:?}"),
         }

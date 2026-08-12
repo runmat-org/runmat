@@ -225,16 +225,23 @@ fn parse_logical_value(fn_name: &str, value: &Value) -> BuiltinResult<bool> {
             Ok(array.data[0] != 0)
         }
         Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
+            let len = tensor::tensor_element_len(tensor);
+            if len != 1 {
                 return Err(text_error(
                     fn_name,
                     format!(
                         "{fn_name}: option values must be scalar numeric values (received {} elements)",
-                        tensor.data.len()
+                        len
                     ),
                 ));
             }
-            let value = tensor.data[0];
+            if let Some(value) = tensor
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0))
+            {
+                return Ok(!value.is_zero());
+            }
+            let value = tensor::tensor_value_f64(tensor, 0);
             if !value.is_finite() {
                 return Err(text_error(
                     fn_name,

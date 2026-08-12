@@ -5,6 +5,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::structs::type_resolvers::struct_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -257,7 +258,9 @@ async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         1 => match rest.into_iter().next().unwrap() {
             Value::Struct(existing) => Ok(Value::Struct(existing.clone())),
             Value::Cell(cell) => clone_struct_array(&cell),
-            Value::Tensor(tensor) if tensor.data.is_empty() => empty_struct_array(),
+            Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => {
+                empty_struct_array()
+            }
             Value::LogicalArray(logical) if logical.data.is_empty() => empty_struct_array(),
             other => Err(struct_error_with_message(
                 format!(
@@ -499,6 +502,18 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn struct_uses_typed_integer_storage_to_detect_empty_input() {
+        let tensor =
+            Tensor::new_integer(runmat_builtins::IntegerStorage::U64(Vec::new()), vec![0, 0])
+                .unwrap();
+
+        assert!(matches!(
+            run_struct(vec![Value::Tensor(tensor)]).unwrap(),
+            Value::Cell(_)
+        ));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_name_value_pairs() {
@@ -637,19 +652,13 @@ pub(crate) mod tests {
         for bad in [
             "_hidden".to_string(),
             "for".to_string(),
+            "éclair".to_string(),
             "a".repeat(MATLAB_NAME_LENGTH_MAX + 1),
         ] {
             let err =
                 error_message(run_struct(vec![Value::from(bad), Value::Num(1.0)]).unwrap_err());
             assert!(err.contains("valid MATLAB identifiers"));
         }
-
-        let Value::Struct(s) =
-            run_struct(vec![Value::from("éclair"), Value::Num(1.0)]).expect("unicode field name")
-        else {
-            panic!("expected struct value");
-        };
-        assert!(s.fields.contains_key("éclair"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,9 +1,13 @@
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned, IntegerElementType,
+};
+use runmat_builtins::{
+    ComplexStorage, ComplexTensor, IntValue, NumericDType, NumericStorage, Tensor, Value,
+};
 use rustfft::FftPlanner;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -30,12 +34,12 @@ fn checked_mul(a: usize, b: usize, builtin: &str, context: &str) -> BuiltinResul
         .ok_or_else(|| builtin_error(builtin, format!("{builtin}: {context} overflow")))
 }
 
-fn zeroed_complex_vec(
+fn zeroed_complex_vec<T: rustfft::FftNum>(
     len: usize,
     builtin: &str,
     context: &str,
-) -> BuiltinResult<Vec<Complex<f64>>> {
-    let max_len = isize::MAX as usize / size_of::<Complex<f64>>();
+) -> BuiltinResult<Vec<Complex<T>>> {
+    let max_len = isize::MAX as usize / size_of::<Complex<T>>();
     if len > max_len {
         return Err(builtin_error(
             builtin,
@@ -49,63 +53,53 @@ fn zeroed_complex_vec(
             format!("{builtin}: {context} allocation failed: {err}"),
         )
     })?;
-    values.resize(len, Complex::new(0.0, 0.0));
+    values.resize(len, Complex::new(T::zero(), T::zero()));
     Ok(values)
 }
 
 /// Parse the optional FFT length argument, returning `None` for `[]`.
 pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>> {
     match value {
-        Value::Tensor(t) if t.data.is_empty() => Ok(None),
-        Value::ComplexTensor(t) if t.data.is_empty() => Ok(None),
+        Value::Tensor(t) if tensor_len(t) == 0 => Ok(None),
+        Value::ComplexTensor(t) if t.materialize_f64().is_empty() => Ok(None),
         Value::Tensor(t) => {
-            if t.data.len() != 1 {
+            if tensor_len(t) != 1 {
                 return Err(builtin_error(
                     builtin,
                     format!("{builtin}: length must be a scalar"),
                 ));
             }
-            parse_length_scalar(t.data[0], builtin).map(Some)
-        }
-        Value::ComplexTensor(t) => {
-            if t.data.len() != 1 {
-                return Err(builtin_error(
-                    builtin,
-                    format!("{builtin}: length must be a scalar"),
-                ));
+            if let Some(storage) = t.integer_storage() {
+                return storage
+                    .value_at(0)
+                    .expect("one-element integer storage")
+                    .try_to_usize()
+                    .map(Some)
+                    .ok_or_else(|| {
+                        builtin_error(builtin, format!("{builtin}: length must be non-negative"))
+                    });
             }
-            let (re, im) = t.data[0];
-            if im.abs() > f64::EPSILON {
-                return Err(builtin_error(
-                    builtin,
-                    format!("{builtin}: length must be real-valued"),
-                ));
-            }
-            parse_length_scalar(re, builtin).map(Some)
+            parse_length_scalar(tensor::tensor_value_f64(t, 0), builtin).map(Some)
         }
-        Value::Num(n) => parse_length_scalar(*n, builtin).map(Some),
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 0 {
-                return Err(builtin_error(
-                    builtin,
-                    format!("{builtin}: length must be non-negative"),
-                ));
-            }
-            Ok(Some(raw as usize))
-        }
-        Value::Complex(re, im) => {
-            if im.abs() > f64::EPSILON {
-                return Err(builtin_error(
-                    builtin,
-                    format!("{builtin}: length must be real-valued"),
-                ));
-            }
-            parse_length_scalar(*re, builtin).map(Some)
-        }
-        Value::Bool(_) | Value::LogicalArray(_) => Err(builtin_error(
+        Value::ComplexTensor(_) => Err(builtin_error(
             builtin,
-            format!("{builtin}: length must be numeric"),
+            format!("{builtin}: length must be real numeric or logical"),
+        )),
+        Value::Num(n) => parse_length_scalar(*n, builtin).map(Some),
+        Value::Int(i) => i.try_to_usize().map(Some).ok_or_else(|| {
+            builtin_error(builtin, format!("{builtin}: length must be non-negative"))
+        }),
+        Value::Complex(_, _) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be real numeric or logical"),
+        )),
+        Value::Bool(value) => Ok(Some(usize::from(*value))),
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            Ok(Some(usize::from(array.data[0] != 0)))
+        }
+        Value::LogicalArray(_) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: length must be a scalar"),
         )),
         Value::String(_)
         | Value::StringArray(_)
@@ -138,6 +132,10 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
     }
 }
 
+fn tensor_len(tensor: &Tensor) -> usize {
+    tensor.len()
+}
+
 fn parse_length_scalar(value: f64, builtin: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
         return Err(builtin_error(
@@ -158,7 +156,101 @@ fn parse_length_scalar(value: f64, builtin: &str) -> BuiltinResult<usize> {
             format!("{builtin}: length must be an integer"),
         ));
     }
+    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+        return Err(builtin_error(
+            builtin,
+            format!("{builtin}: length exceeds the maximum supported size"),
+        ));
+    }
     Ok(rounded as usize)
+}
+
+/// Whether a value carries an `int64` or `uint64` class. FFT computation
+/// builtins document integer data only through 32 bits, so callers use this
+/// before any provider dispatch or floating-point materialization.
+pub fn is_wide_integer_value(value: &Value) -> bool {
+    match value {
+        Value::Int(IntValue::I64(_) | IntValue::U64(_)) => true,
+        Value::Tensor(tensor) => matches!(
+            tensor.integer_storage(),
+            Some(runmat_builtins::IntegerStorage::I64(_) | runmat_builtins::IntegerStorage::U64(_))
+        ),
+        Value::GpuTensor(handle) => matches!(
+            runmat_accelerate_api::handle_integer_type(handle),
+            Some(IntegerElementType::I64 | IntegerElementType::U64)
+        ),
+        _ => false,
+    }
+}
+
+/// Require wide integer data to cross the FFT floating boundary exactly.
+/// Compatibility-mode admission is handled independently by each builtin's
+/// extension gate.
+pub fn ensure_wide_integer_data_exact(value: &Value, builtin: &str) -> BuiltinResult<()> {
+    let check = |integer: &IntValue| {
+        let magnitude = match integer {
+            IntValue::I8(value) => u64::from(value.unsigned_abs()),
+            IntValue::I16(value) => u64::from(value.unsigned_abs()),
+            IntValue::I32(value) => u64::from(value.unsigned_abs()),
+            IntValue::I64(value) => value.unsigned_abs(),
+            IntValue::U8(value) => u64::from(*value),
+            IntValue::U16(value) => u64::from(*value),
+            IntValue::U32(value) => u64::from(*value),
+            IntValue::U64(value) => *value,
+        };
+        let significant_bits = u64::BITS - magnitude.leading_zeros();
+        if magnitude == 0
+            || significant_bits <= f64::MANTISSA_DIGITS
+            || magnitude.trailing_zeros() >= significant_bits - f64::MANTISSA_DIGITS
+        {
+            Ok(())
+        } else {
+            Err(builtin_error(
+                builtin,
+                format!("{builtin}: int64 and uint64 data must be exactly representable as double"),
+            ))
+        }
+    };
+    match value {
+        Value::Int(integer) => check(integer),
+        Value::Tensor(tensor) if is_wide_integer_value(value) => {
+            let storage = tensor
+                .integer_storage()
+                .expect("wide integer tensor has authoritative storage");
+            for index in 0..storage.len() {
+                check(&storage.value_at(index).expect("integer storage length"))?;
+            }
+            Ok(())
+        }
+        Value::GpuTensor(_) if is_wide_integer_value(value) => Err(builtin_error(
+            builtin,
+            format!(
+                "{builtin}: resident int64 and uint64 FFT data are not supported without an exact provider transform"
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Upload a host FFT result back to the provider that owns `source`.
+pub fn restore_complex_gpu_result(
+    source: &GpuTensorHandle,
+    tensor: &ComplexTensor,
+    builtin: &str,
+) -> BuiltinResult<Value> {
+    let provider = runmat_accelerate_api::provider_for_handle(source).ok_or_else(|| {
+        builtin_error(
+            builtin,
+            format!("{builtin}: no acceleration provider owns the input handle"),
+        )
+    })?;
+    let output = gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|source| {
+        builtin_error(
+            builtin,
+            format!("{builtin}: failed to restore GPU result: {source}"),
+        )
+    })?;
+    Ok(gpu_helpers::complex_gpu_value(output))
 }
 
 /// Convert any numeric value into a `ComplexTensor`.
@@ -197,18 +289,41 @@ pub fn value_to_complex_tensor(value: Value, builtin: &str) -> BuiltinResult<Com
 
 /// Convert a real-valued tensor into a `ComplexTensor`.
 pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<ComplexTensor> {
-    let data = tensor
-        .data
-        .into_iter()
-        .map(|re| (re, 0.0))
-        .collect::<Vec<_>>();
-    ComplexTensor::new(data, tensor.shape)
+    let shape = tensor.shape.clone();
+    let storage = match tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?
+    {
+        NumericStorage::F64(values) => {
+            ComplexStorage::F64(values.into_iter().map(|real| (real, 0.0)).collect())
+        }
+        NumericStorage::F32(values) => {
+            ComplexStorage::F32(values.into_iter().map(|real| (real, 0.0)).collect())
+        }
+        storage => ComplexStorage::F64(
+            storage
+                .materialize_f64()
+                .into_iter()
+                .map(|real| (real, 0.0))
+                .collect(),
+        ),
+    };
+    ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
-    let data = tensor.data.iter().map(|(re, _)| *re).collect::<Vec<_>>();
-    let real = Tensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::F32(values) => {
+            NumericStorage::F32(values.into_iter().map(|(real, _)| real).collect())
+        }
+        ComplexStorage::Integer(storage) => NumericStorage::from(storage.real),
+    };
+    let real = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
     Ok(Value::Tensor(real))
 }
@@ -277,8 +392,8 @@ pub async fn download_provider_complex_tensor(
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
     if free_after_download {
         provider.free(handle).ok();
+        runmat_accelerate_api::clear_residency(handle);
     }
-    runmat_accelerate_api::clear_residency(handle);
     host_to_complex_tensor(host, builtin)
 }
 
@@ -308,6 +423,71 @@ pub enum TransformDirection {
     Inverse,
 }
 
+#[allow(clippy::too_many_arguments)]
+fn transform_typed_values<T: rustfft::FftNum>(
+    input: Vec<Complex<T>>,
+    current_len: usize,
+    target_len: usize,
+    inner_stride: usize,
+    outer_stride: usize,
+    num_slices: usize,
+    direction: TransformDirection,
+    inverse_scale: T,
+    builtin: &str,
+) -> BuiltinResult<Vec<Complex<T>>> {
+    let output_len = checked_mul(target_len, num_slices, builtin, "output length")?;
+    let mut output = zeroed_complex_vec(output_len, builtin, "output")?;
+    let mut planner = FftPlanner::<T>::new();
+    let plan: Option<Arc<dyn rustfft::Fft<T>>> = if target_len > 1 {
+        Some(match direction {
+            TransformDirection::Forward => planner.plan_fft_forward(target_len),
+            TransformDirection::Inverse => planner.plan_fft_inverse(target_len),
+        })
+    } else {
+        None
+    };
+    let copy_len = current_len.min(target_len);
+    let mut buffer = zeroed_complex_vec(target_len, builtin, "workspace")?;
+    let scale = match direction {
+        TransformDirection::Forward => T::one(),
+        TransformDirection::Inverse => inverse_scale,
+    };
+
+    for outer in 0..outer_stride {
+        let base_in = checked_mul(
+            outer,
+            checked_mul(current_len, inner_stride, builtin, "input slice span")?,
+            builtin,
+            "input slice offset",
+        )?;
+        let base_out = checked_mul(
+            outer,
+            checked_mul(target_len, inner_stride, builtin, "output slice span")?,
+            builtin,
+            "output slice offset",
+        )?;
+        for inner in 0..inner_stride {
+            buffer.fill(Complex::new(T::zero(), T::zero()));
+            for (k, slot) in buffer.iter_mut().enumerate().take(copy_len) {
+                let src_idx = base_in + inner + k * inner_stride;
+                if src_idx < input.len() {
+                    *slot = input[src_idx];
+                }
+            }
+            if let Some(plan) = &plan {
+                plan.process(&mut buffer);
+            }
+            for (k, value) in buffer.iter().enumerate().take(target_len) {
+                let dst_idx = base_out + inner + k * inner_stride;
+                if dst_idx < output.len() {
+                    output[dst_idx] = *value * scale;
+                }
+            }
+        }
+    }
+    Ok(output)
+}
+
 pub fn transform_complex_tensor(
     mut tensor: ComplexTensor,
     length: Option<usize>,
@@ -315,6 +495,11 @@ pub fn transform_complex_tensor(
     direction: TransformDirection,
     builtin: &str,
 ) -> BuiltinResult<ComplexTensor> {
+    let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
     let origin_rank = tensor.shape.len();
     if crate::builtins::common::shape::is_scalar_shape(&tensor.shape) {
         tensor.shape = crate::builtins::common::shape::normalize_scalar_shape(&tensor.shape);
@@ -344,87 +529,90 @@ pub fn transform_complex_tensor(
         let mut out_shape = shape;
         out_shape[dim_index] = 0;
         trim_trailing_ones(&mut out_shape, origin_rank);
-        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
+        return ComplexTensor::from_complex_storage(
+            match output_dtype {
+                NumericDType::F32 => ComplexStorage::F32(Vec::new()),
+                NumericDType::F64 => ComplexStorage::F64(Vec::new()),
+                _ => unreachable!("FFT output is single or double"),
+            },
+            out_shape,
+        )
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
     }
 
     let inner_stride = checked_product(&shape[..dim_index], builtin, "inner stride")?;
     let outer_stride = checked_product(&shape[dim_index + 1..], builtin, "outer stride")?;
     let num_slices = checked_mul(inner_stride, outer_stride, builtin, "slice count")?;
 
-    let input = tensor
-        .data
-        .into_iter()
-        .map(|(re, im)| Complex::new(re, im))
-        .collect::<Vec<_>>();
-
     if num_slices == 0 {
         let mut out_shape = shape;
         out_shape[dim_index] = target_len;
         trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
-        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
-    }
-
-    let output_len = checked_mul(target_len, num_slices, builtin, "output length")?;
-    let mut output = zeroed_complex_vec(output_len, builtin, "output")?;
-
-    let mut planner = FftPlanner::<f64>::new();
-    let plan: Option<Arc<dyn rustfft::Fft<f64>>> = if target_len > 1 {
-        Some(match direction {
-            TransformDirection::Forward => planner.plan_fft_forward(target_len),
-            TransformDirection::Inverse => planner.plan_fft_inverse(target_len),
-        })
-    } else {
-        None
-    };
-
-    let copy_len = current_len.min(target_len);
-    let mut buffer = zeroed_complex_vec(target_len, builtin, "workspace")?;
-    let scale = match direction {
-        TransformDirection::Forward => 1.0,
-        TransformDirection::Inverse => 1.0 / (target_len as f64),
-    };
-
-    for outer in 0..outer_stride {
-        let base_in = checked_mul(
-            outer,
-            checked_mul(current_len, inner_stride, builtin, "input slice span")?,
-            builtin,
-            "input slice offset",
-        )?;
-        let base_out = checked_mul(
-            outer,
-            checked_mul(target_len, inner_stride, builtin, "output slice span")?,
-            builtin,
-            "output slice offset",
-        )?;
-        for inner in 0..inner_stride {
-            buffer.fill(Complex::new(0.0, 0.0));
-            for (k, slot) in buffer.iter_mut().enumerate().take(copy_len) {
-                let src_idx = base_in + inner + k * inner_stride;
-                if src_idx < input.len() {
-                    *slot = input[src_idx];
-                }
-            }
-            if let Some(p) = &plan {
-                p.process(&mut buffer);
-            }
-            for (k, value) in buffer.iter().enumerate().take(target_len) {
-                let dst_idx = base_out + inner + k * inner_stride;
-                if dst_idx < output.len() {
-                    output[dst_idx] = *value * scale;
-                }
-            }
-        }
+        return ComplexTensor::from_complex_storage(
+            match output_dtype {
+                NumericDType::F32 => ComplexStorage::F32(Vec::new()),
+                NumericDType::F64 => ComplexStorage::F64(Vec::new()),
+                _ => unreachable!("FFT output is single or double"),
+            },
+            out_shape,
+        )
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
     }
 
     let mut out_shape = shape;
     out_shape[dim_index] = target_len;
     trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
 
-    let data = output.into_iter().map(|c| (c.re, c.im)).collect::<Vec<_>>();
-    ComplexTensor::new(data, out_shape)
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F32(values) => {
+            let input = values
+                .into_iter()
+                .map(|(real, imag)| Complex::new(real, imag))
+                .collect();
+            let output = transform_typed_values(
+                input,
+                current_len,
+                target_len,
+                inner_stride,
+                outer_stride,
+                num_slices,
+                direction,
+                1.0_f32 / target_len as f32,
+                builtin,
+            )?;
+            ComplexStorage::F32(
+                output
+                    .into_iter()
+                    .map(|value| (value.re, value.im))
+                    .collect(),
+            )
+        }
+        storage => {
+            let input = storage
+                .materialize_f64()
+                .into_iter()
+                .map(|(real, imag)| Complex::new(real, imag))
+                .collect();
+            let output = transform_typed_values(
+                input,
+                current_len,
+                target_len,
+                inner_stride,
+                outer_stride,
+                num_slices,
+                direction,
+                1.0_f64 / target_len as f64,
+                builtin,
+            )?;
+            ComplexStorage::F64(
+                output
+                    .into_iter()
+                    .map(|value| (value.re, value.im))
+                    .collect(),
+            )
+        }
+    };
+    ComplexTensor::from_complex_storage(storage, out_shape)
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
 }
 
@@ -481,16 +669,47 @@ pub fn parse_2d_lengths_from_data(
     }
 }
 
+pub fn parse_2d_lengths_from_tensor(
+    tensor: &Tensor,
+    builtin: &str,
+) -> BuiltinResult<(Option<usize>, Option<usize>)> {
+    if let Some(storage) = tensor.integer_storage() {
+        let exact = storage.exact_values();
+        return match exact.len() {
+            0 => Ok((None, None)),
+            1 => {
+                let len = parse_length(&Value::Int(exact[0].clone()), builtin)?;
+                Ok((len, len))
+            }
+            2 => {
+                let len_rows = parse_length(&Value::Int(exact[0].clone()), builtin)?;
+                let len_cols = parse_length(&Value::Int(exact[1].clone()), builtin)?;
+                Ok((len_rows, len_cols))
+            }
+            _ => Err(builtin_error(
+                builtin,
+                format!("{builtin}: size vector must contain at most two elements"),
+            )),
+        };
+    }
+    parse_2d_lengths_from_data(tensor::tensor_values_f64_cow(tensor).as_ref(), builtin)
+}
+
 pub fn parse_nd_sizes_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(t) => parse_nd_sizes_data(&t.data, builtin),
+        Value::Tensor(t) => {
+            if let Some(storage) = t.integer_storage() {
+                return parse_nd_sizes_integers(&storage.exact_values(), builtin);
+            }
+            parse_nd_sizes_data(tensor::tensor_values_f64_cow(t).as_ref(), builtin)
+        }
         Value::LogicalArray(logical) => {
             let t = tensor::logical_to_tensor(logical)
                 .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
-            parse_nd_sizes_data(&t.data, builtin)
+            parse_nd_sizes_data(tensor::tensor_values_f64_cow(&t).as_ref(), builtin)
         }
         Value::Num(n) => parse_nd_sizes_data(&[*n], builtin),
-        Value::Int(i) => parse_nd_sizes_data(&[i.to_f64()], builtin),
+        Value::Int(i) => parse_nd_sizes_integers(std::slice::from_ref(i), builtin),
         Value::Complex(re, im) => {
             if im.abs() > f64::EPSILON {
                 return Err(builtin_error(
@@ -533,9 +752,28 @@ fn parse_nd_sizes_data(data: &[f64], builtin: &str) -> BuiltinResult<Vec<usize>>
                 format!("{builtin}: SIZE values must be integers"),
             ));
         }
+        if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
+            return Err(builtin_error(
+                builtin,
+                format!("{builtin}: SIZE values exceed the maximum supported size"),
+            ));
+        }
         out.push(rounded as usize);
     }
     Ok(out)
+}
+
+fn parse_nd_sizes_integers(data: &[IntValue], builtin: &str) -> BuiltinResult<Vec<usize>> {
+    data.iter()
+        .map(|value| {
+            value.try_to_usize().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    format!("{builtin}: SIZE values must be non-negative platform integers"),
+                )
+            })
+        })
+        .collect()
 }
 
 pub fn parse_symflag(value: &Value, builtin: &str) -> BuiltinResult<Option<bool>> {
@@ -600,14 +838,7 @@ pub fn build_shift_plan(shape: &[usize], dims: &[usize], kind: ShiftKind) -> Shi
         };
     }
 
-    let mut ext_shape = shape.to_vec();
-    if dims.iter().copied().max().unwrap_or(0) >= ext_shape.len() {
-        let needed = dims.iter().copied().max().unwrap_or(0) + 1;
-        while ext_shape.len() < needed {
-            ext_shape.push(1);
-        }
-    }
-
+    let ext_shape = shape.to_vec();
     let mut positive = vec![0usize; ext_shape.len()];
     for &axis in dims {
         if axis >= ext_shape.len() {
@@ -702,6 +933,31 @@ pub fn apply_shift<T: Clone>(
     Ok(result)
 }
 
+pub fn apply_shift_numeric_storage(
+    builtin: &str,
+    storage: NumericStorage,
+    shape: &[usize],
+    shifts: &[usize],
+) -> BuiltinResult<NumericStorage> {
+    macro_rules! shift {
+        ($values:expr, $variant:ident) => {
+            NumericStorage::$variant(apply_shift(builtin, &$values, shape, shifts)?)
+        };
+    }
+    Ok(match storage {
+        NumericStorage::F64(values) => shift!(values, F64),
+        NumericStorage::F32(values) => shift!(values, F32),
+        NumericStorage::I8(values) => shift!(values, I8),
+        NumericStorage::I16(values) => shift!(values, I16),
+        NumericStorage::I32(values) => shift!(values, I32),
+        NumericStorage::I64(values) => shift!(values, I64),
+        NumericStorage::U8(values) => shift!(values, U8),
+        NumericStorage::U16(values) => shift!(values, U16),
+        NumericStorage::U32(values) => shift!(values, U32),
+        NumericStorage::U64(values) => shift!(values, U64),
+    })
+}
+
 /// Compute the zero-based dimension indices to shift.
 pub fn compute_shift_dims(
     shape: &[usize],
@@ -736,16 +992,16 @@ pub fn compute_shift_dims(
 
 fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            if raw < 1 {
-                return Err(builtin_error(
+        Value::Int(i) => i
+            .try_to_usize()
+            .filter(|dimension| *dimension >= 1)
+            .map(|dimension| vec![dimension])
+            .ok_or_else(|| {
+                builtin_error(
                     builtin,
                     format!("{builtin}: dimension indices must be >= 1"),
-                ));
-            }
-            Ok(vec![raw as usize])
-        }
+                )
+            }),
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(builtin_error(
@@ -769,14 +1025,23 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
             Ok(vec![rounded as usize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && !tensor.data.is_empty() {
+            if !is_vector_shape(&tensor.shape) && !tensor.is_empty() {
                 return Err(builtin_error(
                     builtin,
                     format!("{builtin}: dimension vectors must be row or column vectors"),
                 ));
             }
-            let mut dims = Vec::with_capacity(tensor.data.len());
-            for &val in &tensor.data {
+            if let Some(parsed) = tensor::integer_tensor_dimension_vector(tensor, builtin, false) {
+                return parsed.map_err(|_| {
+                    builtin_error(
+                        builtin,
+                        format!("{builtin}: dimension indices must be >= 1"),
+                    )
+                });
+            }
+            let values = tensor::tensor_values_f64_cow(tensor);
+            let mut dims = Vec::with_capacity(values.len());
+            for &val in values.iter() {
                 if !val.is_finite() {
                     return Err(builtin_error(
                         builtin,
@@ -799,6 +1064,21 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
                 dims.push(rounded as usize);
             }
             Ok(dims)
+        }
+        Value::Bool(true) => Ok(vec![1]),
+        Value::Bool(false) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: dimension indices must be >= 1"),
+        )),
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            if array.data[0] != 0 {
+                Ok(vec![1])
+            } else {
+                Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: dimension indices must be >= 1"),
+                ))
+            }
         }
         Value::LogicalArray(array) => {
             if !is_vector_shape(&array.shape) && !array.data.is_empty() {
@@ -823,7 +1103,6 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
         | Value::StringArray(_)
         | Value::CharArray(_)
         | Value::SparseTensor(_)
-        | Value::Bool(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::Symbolic(_)
@@ -854,4 +1133,134 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
 
 fn is_vector_shape(shape: &[usize]) -> bool {
     shape.iter().copied().filter(|&dim| dim > 1).count() <= 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::IntegerStorage;
+
+    #[test]
+    fn fft_length_preserves_typed_integer_scalar_tensors() {
+        #[cfg(target_pointer_width = "64")]
+        {
+            let exact_value = 9_007_199_254_740_993_u64;
+            let exact =
+                Tensor::new_integer(IntegerStorage::U64(vec![exact_value]), vec![1, 1]).unwrap();
+            assert_eq!(
+                parse_length(&Value::Tensor(exact), "fft").unwrap(),
+                Some(exact_value as usize)
+            );
+        }
+
+        let err = parse_length(
+            &Value::Tensor(Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).unwrap()),
+            "fft",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("non-negative"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn fft_single_inputs_preserve_native_complex_single_storage() {
+        let input = Tensor::from_f32(vec![0.1, -2.0], vec![1, 2]).unwrap();
+        let complex = tensor_to_complex_tensor(input, "fft").expect("complex input");
+        assert_eq!(
+            complex.as_f32_slice(),
+            Some(&[(0.1_f32, 0.0), (-2.0_f32, 0.0)][..])
+        );
+
+        let transformed =
+            transform_complex_tensor(complex, None, None, TransformDirection::Forward, "fft")
+                .expect("single FFT");
+        assert_eq!(transformed.numeric_dtype(), NumericDType::F32);
+        assert!(transformed.as_f32_slice().is_some());
+
+        let length = Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap();
+        assert_eq!(
+            parse_length(&Value::Tensor(length), "fft").unwrap(),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn fft_2d_lengths_preserve_typed_integer_size_vectors() {
+        #[cfg(target_pointer_width = "64")]
+        {
+            let exact = 9_007_199_254_740_993_u64;
+            let sizes =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, exact]), vec![1, 2]).unwrap();
+
+            assert_eq!(
+                parse_2d_lengths_from_tensor(&sizes, "fft2").unwrap(),
+                (Some(1), Some(exact as usize))
+            );
+        }
+
+        let negative = Tensor::new_integer(IntegerStorage::I16(vec![4, -1]), vec![1, 2]).unwrap();
+        let err = parse_2d_lengths_from_tensor(&negative, "fft2")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("non-negative"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn nd_sizes_preserve_typed_integer_values_and_bounds() {
+        let sizes = Tensor::new_integer(
+            IntegerStorage::U64(vec![1, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .unwrap();
+        assert_eq!(
+            parse_nd_sizes_value(&Value::Tensor(sizes), "fftn").unwrap(),
+            vec![1, 9_007_199_254_740_993usize]
+        );
+
+        let err = parse_nd_sizes_value(&Value::Int(IntValue::I64(-1)), "fftn")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("non-negative"), "unexpected error: {err}");
+
+        let boundary = if usize::BITS == 64 {
+            usize::MAX as f64
+        } else {
+            (usize::MAX as f64) + 1.0
+        };
+        let err = parse_nd_sizes_value(&Value::Num(boundary), "fftn")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("maximum supported size"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn shift_dims_preserve_typed_integer_vectors_without_rank_extension() {
+        #[cfg(target_pointer_width = "64")]
+        {
+            let exact_dim = 9_007_199_254_740_993_u64;
+            let dims =
+                Tensor::new_integer(IntegerStorage::U64(vec![1, exact_dim]), vec![1, 2]).unwrap();
+            assert_eq!(
+                compute_shift_dims(&[2, 2], Some(&Value::Tensor(dims)), "fftshift").unwrap(),
+                vec![0, exact_dim as usize - 1]
+            );
+
+            let plan = build_shift_plan(&[2, 2], &[exact_dim as usize - 1], ShiftKind::Fft);
+            assert_eq!(plan.ext_shape, vec![2, 2]);
+            assert_eq!(plan.positive, vec![0, 0]);
+            assert_eq!(
+                apply_shift(
+                    "fftshift",
+                    &[1.0, 2.0, 3.0, 4.0],
+                    &plan.ext_shape,
+                    &plan.positive
+                )
+                .unwrap(),
+                vec![1.0, 2.0, 3.0, 4.0]
+            );
+        }
+    }
 }

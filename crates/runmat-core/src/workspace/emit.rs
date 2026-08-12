@@ -69,10 +69,17 @@ pub(crate) fn format_type_info(value: &Value) -> String {
             }
         }
         Value::CharArray(ca) => {
-            if ca.rows == 1 && ca.cols == 1 {
+            if ca.data.len() == 1 {
                 "char".to_string()
             } else {
-                format!("{}x{} char array", ca.rows, ca.cols)
+                format!(
+                    "{} char array",
+                    ca.shape
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join("x")
+                )
             }
         }
         Value::Tensor(m) => {

@@ -15,6 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::type_resolvers::{string_array_type, unknown_type};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -640,7 +641,9 @@ impl TextMatrix {
     }
 
     fn from_char_array(array: CharArray) -> BuiltinResult<Self> {
-        let CharArray { data, rows, cols } = array;
+        let CharArray {
+            data, rows, cols, ..
+        } = array;
         if rows == 0 {
             return Ok(Self {
                 data: Vec::new(),
@@ -949,7 +952,7 @@ fn parse_bool_for_builtin(
 ) -> BuiltinResult<bool> {
     match value {
         Value::Bool(b) => Ok(*b),
-        Value::Int(i) => Ok(i.to_i64() != 0),
+        Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
         Value::LogicalArray(array) => {
             if array.data.len() == 1 {
@@ -966,8 +969,14 @@ fn parse_bool_for_builtin(
             }
         }
         Value::Tensor(tensor) => {
-            if tensor.data.len() == 1 {
-                Ok(tensor.data[0] != 0.0)
+            if tensor::is_scalar_tensor(tensor) {
+                if let Some(value) = tensor
+                    .integer_storage()
+                    .and_then(|storage| storage.value_at(0))
+                {
+                    return Ok(!value.is_zero());
+                }
+                Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
             } else {
                 Err(builtin_error_with_descriptor(
                     builtin_name,
@@ -1245,7 +1254,9 @@ fn strsplit_name_key(value: &Value) -> Option<StrsplitNameKey> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{CellArray, LogicalArray, ResolveContext, Tensor, Type};
+    use runmat_builtins::{
+        CellArray, IntValue, IntegerStorage, LogicalArray, ResolveContext, Tensor, Type,
+    };
 
     fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::split_builtin(text, rest))
@@ -1253,6 +1264,29 @@ pub(crate) mod tests {
 
     fn strsplit_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strsplit_builtin(text, rest))
+    }
+
+    #[test]
+    fn split_bool_options_read_wide_uint64_truth_exactly() {
+        assert!(parse_bool(&Value::Int(IntValue::U64(u64::MAX)), "IncludeDelimiters").unwrap());
+
+        for storage in [
+            IntegerStorage::I8(vec![1]),
+            IntegerStorage::I16(vec![1]),
+            IntegerStorage::I32(vec![1]),
+            IntegerStorage::I64(vec![1]),
+            IntegerStorage::U8(vec![1]),
+            IntegerStorage::U16(vec![1]),
+            IntegerStorage::U32(vec![1]),
+            IntegerStorage::U64(vec![u64::MAX]),
+        ] {
+            let enabled = Tensor::new_integer(storage, vec![1, 1]).expect("enabled");
+            assert!(parse_bool(&Value::Tensor(enabled), "IncludeDelimiters").unwrap());
+        }
+
+        let disabled =
+            Tensor::new_integer(IntegerStorage::I16(vec![0]), vec![1, 1]).expect("disabled");
+        assert!(!parse_bool(&Value::Tensor(disabled), "IncludeDelimiters").unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

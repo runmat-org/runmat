@@ -250,7 +250,7 @@ fn numeric_scalar(value: &Value) -> Option<f64> {
         Value::Num(value) => Some(*value),
         Value::Int(value) => Some(value.to_f64()),
         Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data.first().copied(),
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor.materialize_f64().first().copied(),
         _ => None,
     }
 }
@@ -360,7 +360,7 @@ mod tests {
             Vec::new(),
         ))
         .unwrap();
-        assert!(matches!(value, Value::Tensor(tensor) if tensor.data.is_empty()));
+        assert!(matches!(value, Value::Tensor(tensor) if tensor.is_empty()));
         assert!(matches!(
             guard.handle().commands().as_slice(),
             [TestCommand::Qualify {

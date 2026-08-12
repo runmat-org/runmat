@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{broadcast, gpu_helpers};
+use crate::builtins::common::{broadcast, gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BLSPRICE: &str = "blsprice";
@@ -425,7 +425,7 @@ impl BroadcastInputs {
         }
         let len = shape_len_checked(builtin, &shape)?;
         for input in &mut inputs {
-            input.aligned_shape = align_shape(&input.shape, shape.len());
+            input.aligned_shape = broadcast::align_shape(&input.shape, shape.len());
             input.strides = broadcast::compute_strides(&input.aligned_shape);
         }
         Ok(Self { inputs, shape, len })
@@ -452,10 +452,10 @@ fn numeric_input(builtin: &'static str, value: Value) -> BuiltinResult<NumericIn
         Value::Num(n) => (vec![n], vec![1, 1]),
         Value::Int(i) => (vec![i.to_f64()], vec![1, 1]),
         Value::Bool(flag) => (vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]),
-        Value::Tensor(tensor) => (
-            tensor.data,
-            tensor_shape(&tensor.shape, tensor.rows, tensor.cols),
-        ),
+        Value::Tensor(tensor) => {
+            let shape = tensor_shape(&tensor.shape, tensor.rows, tensor.cols);
+            (tensor_utils::tensor_into_values_f64(tensor), shape)
+        }
         Value::LogicalArray(logical) => {
             let shape = logical_shape(&logical.shape);
             let data = logical
@@ -573,7 +573,7 @@ async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<BlsPriceGpuE
     let len = shape_len_checked(BLSPRICE, &output_shape)?;
     let rank = output_shape.len();
     for input in &mut prepared {
-        input.aligned_shape = align_shape(&input.shape, rank);
+        input.aligned_shape = broadcast::align_shape(&input.shape, rank);
         input.strides = broadcast::compute_strides(&input.aligned_shape);
     }
 
@@ -683,13 +683,6 @@ fn canonical_shape(shape: &[usize]) -> Vec<usize> {
         1 => vec![shape[0], 1],
         _ => shape.to_vec(),
     }
-}
-
-fn align_shape(shape: &[usize], rank: usize) -> Vec<usize> {
-    let mut out = Vec::with_capacity(rank);
-    out.extend(std::iter::repeat_n(1, rank.saturating_sub(shape.len())));
-    out.extend_from_slice(shape);
-    out
 }
 
 fn shape_len_checked(builtin: &'static str, shape: &[usize]) -> BuiltinResult<usize> {
@@ -1185,7 +1178,9 @@ fn scalar_numeric(builtin: &'static str, value: &Value, name: &str) -> BuiltinRe
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(flag) => Ok(if *flag { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
+        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
+            Ok(tensor_utils::tensor_value_f64(tensor, 0))
+        }
         Value::LogicalArray(logical) if logical.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
@@ -1199,7 +1194,7 @@ fn scalar_numeric(builtin: &'static str, value: &Value, name: &str) -> BuiltinRe
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.data.is_empty(),
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) == 0,
         Value::StringArray(array) => array.data.is_empty(),
         Value::CharArray(chars) => chars.data.is_empty() || chars.rows == 0 || chars.cols == 0,
         Value::LogicalArray(logical) => logical.data.is_empty(),
@@ -1254,9 +1249,15 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::IntegerStorage;
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new_2d(data, rows, cols).unwrap())
+    }
+
+    fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+        Value::Tensor(tensor)
     }
 
     fn empty_numeric() -> Value {
@@ -1288,6 +1289,27 @@ mod tests {
         assert!(
             (actual - expected).abs() <= tolerance,
             "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn black_scholes_broadcast_indexing_appends_trailing_singletons() {
+        let inputs = BroadcastInputs::from_values(
+            BLSPRICE,
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::Tensor(
+                    Tensor::new(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![2, 1, 3]).unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        assert_eq!(inputs.shape, vec![2, 1, 3]);
+        assert_eq!(
+            (0..inputs.len)
+                .map(|index| inputs.arg(0, index))
+                .collect::<Vec<_>>(),
+            vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
         );
     }
 
@@ -1329,8 +1351,36 @@ mod tests {
         let put = as_tensor(&out[1]);
         assert_eq!(call.shape, vec![2, 1]);
         assert_eq!(put.shape, vec![2, 1]);
-        assert!(call.data[0] > call.data[1]);
-        assert!(put.data[0] < put.data[1]);
+        assert!(call.materialize_f64()[0] > call.materialize_f64()[1]);
+        assert!(put.materialize_f64()[0] < put.materialize_f64()[1]);
+    }
+
+    #[test]
+    fn blsprice_broadcast_inputs_read_typed_integer_storage_exactly() {
+        let guard = crate::output_count::push_output_count(Some(2));
+        let out = output_list(
+            block_on(blsprice_builtin(
+                poisoned_integer_tensor(IntegerStorage::U16(vec![100, 90]), vec![2, 1]),
+                poisoned_integer_tensor(IntegerStorage::U16(vec![95]), vec![1, 1]),
+                Value::Num(0.10),
+                Value::Num(0.25),
+                Value::Num(0.50),
+                vec![poisoned_integer_tensor(
+                    IntegerStorage::U8(vec![0]),
+                    vec![1, 1],
+                )],
+            ))
+            .unwrap(),
+        );
+        drop(guard);
+        let call = as_tensor(&out[0]);
+        let put = as_tensor(&out[1]);
+        assert_eq!(call.shape, vec![2, 1]);
+        assert_eq!(put.shape, vec![2, 1]);
+        assert!(call.integer_storage().is_none());
+        assert!(put.integer_storage().is_none());
+        assert!(call.materialize_f64()[0] > call.materialize_f64()[1]);
+        assert!(put.materialize_f64()[0] < put.materialize_f64()[1]);
     }
 
     #[test]
@@ -1353,7 +1403,7 @@ mod tests {
         let put = as_tensor(&out[1]);
         assert_eq!(call.shape, vec![2, 3]);
         assert_eq!(put.shape, vec![2, 3]);
-        for idx in 0..call.data.len() {
+        for idx in 0..call.materialize_f64().len() {
             let price = [100.0, 110.0][idx % 2];
             let strike = [90.0, 100.0, 110.0][idx / 2];
             let expected = price_pair(PriceParams {
@@ -1364,8 +1414,8 @@ mod tests {
                 volatility: 0.2,
                 yield_rate: 0.0,
             });
-            assert_close(call.data[idx], expected.call, 1e-12);
-            assert_close(put.data[idx], expected.put, 1e-12);
+            assert_close(call.materialize_f64()[idx], expected.call, 1e-12);
+            assert_close(put.materialize_f64()[idx], expected.put, 1e-12);
         }
     }
 
@@ -1381,7 +1431,7 @@ mod tests {
             let upload = |tensor: &Tensor| {
                 provider
                     .upload(&HostTensorView {
-                        data: &tensor.data,
+                        data: &tensor.materialize_f64(),
                         shape: &tensor.shape,
                     })
                     .expect("upload")
@@ -1418,17 +1468,17 @@ mod tests {
             let put = test_support::gather(out[1].clone()).expect("gather put");
             assert_eq!(call.shape, vec![2, 3]);
             assert_eq!(put.shape, vec![2, 3]);
-            for idx in 0..call.data.len() {
+            for idx in 0..call.materialize_f64().len() {
                 let expected = price_pair(PriceParams {
-                    price: price.data[idx % 2],
-                    strike: strike.data[idx / 2],
-                    rate: rate.data[0],
-                    time: time.data[0],
-                    volatility: volatility.data[0],
-                    yield_rate: yield_rate.data[0],
+                    price: price.materialize_f64()[idx % 2],
+                    strike: strike.materialize_f64()[idx / 2],
+                    rate: rate.materialize_f64()[0],
+                    time: time.materialize_f64()[0],
+                    volatility: volatility.materialize_f64()[0],
+                    yield_rate: yield_rate.materialize_f64()[0],
                 });
-                assert_close(call.data[idx], expected.call, 1e-12);
-                assert_close(put.data[idx], expected.put, 1e-12);
+                assert_close(call.materialize_f64()[idx], expected.call, 1e-12);
+                assert_close(put.materialize_f64()[idx], expected.put, 1e-12);
             }
         });
     }
@@ -1449,8 +1499,8 @@ mod tests {
         );
         drop(guard);
         let call = as_tensor(&prices[0]);
-        assert!(call.data[0].is_finite());
-        assert!(call.data[1].is_nan());
+        assert!(call.materialize_f64()[0].is_finite());
+        assert!(call.materialize_f64()[1].is_nan());
 
         let vol = block_on(blsimpv_builtin(
             tensor(vec![100.0, f64::NAN], 2, 1),
@@ -1462,8 +1512,8 @@ mod tests {
         ))
         .unwrap();
         let vols = as_tensor(&vol);
-        assert!(vols.data[0].is_finite());
-        assert!(vols.data[1].is_nan());
+        assert!(vols.materialize_f64()[0].is_finite());
+        assert!(vols.materialize_f64()[1].is_nan());
     }
 
     #[test]
@@ -1561,8 +1611,8 @@ mod tests {
         .unwrap();
         let vols = as_tensor(&out);
         assert_eq!(vols.shape, vec![2, 1]);
-        assert!((vols.data[0] - 0.5).abs() < 1e-3);
-        assert!((vols.data[1] - 0.5).abs() < 1e-3);
+        assert!((vols.materialize_f64()[0] - 0.5).abs() < 1e-3);
+        assert!((vols.materialize_f64()[1] - 0.5).abs() < 1e-3);
     }
 
     #[test]
@@ -1582,6 +1632,17 @@ mod tests {
         ))
         .unwrap();
         assert!(as_scalar(&out).is_nan());
+    }
+
+    #[test]
+    fn finance_scalar_numeric_reads_typed_integer_storage_exactly() {
+        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+            .expect("typed finance scalar");
+
+        assert_eq!(
+            scalar_numeric(BLSIMPV, &Value::Tensor(tensor), "Limit").expect("scalar numeric"),
+            2026.0
+        );
     }
 
     #[test]

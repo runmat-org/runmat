@@ -107,6 +107,23 @@ pub(in crate::builtins::table) fn sync_table_properties(
         .insert(PROPERTIES_MEMBER.to_string(), Value::Struct(props));
 }
 
+pub(in crate::builtins::table) fn set_table_dimension_names(
+    object: &mut ObjectInstance,
+    dimension_names: Vec<String>,
+    context: &str,
+) -> BuiltinResult<()> {
+    let mut properties = table_public_properties(object)?;
+    properties.insert(
+        DIMENSION_NAMES,
+        Value::StringArray(
+            StringArray::new(dimension_names, vec![1, 2])
+                .map_err(|error| invalid_variable(format!("{context}: {error}")))?,
+        ),
+    );
+    sync_table_properties(object, properties);
+    Ok(())
+}
+
 pub(in crate::builtins::table) fn apply_properties(
     object: &mut ObjectInstance,
     mut props: StructValue,

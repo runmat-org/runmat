@@ -154,8 +154,14 @@ mod tests {
             panic!("expected real poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().any(|p| (*p + 1.0).abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|p| (*p + 2.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|p| (*p + 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|p| (*p + 2.0).abs() < 1.0e-8));
     }
 
     #[test]
@@ -172,7 +178,10 @@ mod tests {
             panic!("expected real poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().all(|p| (*p + 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .all(|p| (*p + 1.0).abs() < 1.0e-8));
     }
 
     #[test]
@@ -189,9 +198,18 @@ mod tests {
             panic!("expected complex poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().all(|(re, _)| re.abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
-        assert!(poles.data.iter().any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .all(|(re, _)| re.abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im - 1.0).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
+            .iter()
+            .any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
     }
 
     #[test]
@@ -210,13 +228,16 @@ mod tests {
             panic!("expected complex poles");
         };
         assert_eq!(poles.shape, vec![2, 1]);
-        assert!(poles.data.iter().all(|(re, _)| (*re + 0.25).abs() < 1.0e-8));
         assert!(poles
-            .data
+            .materialize_f64()
+            .iter()
+            .all(|(re, _)| (*re + 0.25).abs() < 1.0e-8));
+        assert!(poles
+            .materialize_f64()
             .iter()
             .any(|(_, im)| (*im - 1.984313483298443).abs() < 1.0e-8));
         assert!(poles
-            .data
+            .materialize_f64()
             .iter()
             .any(|(_, im)| (*im + 1.984313483298443).abs() < 1.0e-8));
     }

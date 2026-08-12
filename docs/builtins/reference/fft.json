@@ -35,7 +35,7 @@
     "`fft(X)` transforms along the first dimension whose size is greater than 1.",
     "`fft(X, n)` zero-pads or truncates `X` to length `n` before transforming along the default dimension.",
     "`fft(X, n, dim)` applies the transform along dimension `dim`.",
-    "Real inputs produce complex outputs; complex inputs are handled element-wise with no additional conversion.",
+    "Integer inputs through 32 bits are transformed in double precision; single inputs produce single output and all other documented numeric classes produce double output.",
     "Empty inputs remain empty; zero-padding with `n` produces zero-valued spectra.",
     "GPU arrays are gathered to the host when the selected provider has no FFT implementation."
   ],
@@ -70,7 +70,7 @@
   "faqs": [
     {
       "question": "Does `fft` always return complex values?",
-      "answer": "Yes. Even when the imaginary part is zero, the result is stored as a complex array to match MATLAB semantics."
+      "answer": "FFT results represent a complex spectrum. For gpuArray input the result is always stored as complex even when every imaginary component is zero."
     },
     {
       "question": "What happens if I pass `[]` as the second argument?",
@@ -94,11 +94,11 @@
     },
     {
       "question": "Is inverse FFT (`ifft`) available?",
-      "answer": "`ifft` will be provided in a companion builtin. Until then, you can recover a time-domain signal by dividing by the length and taking the complex conjugate manually."
+      "answer": "Yes. Use `ifft` for the inverse transform."
     },
     {
       "question": "How do I compute multi-dimensional FFTs?",
-      "answer": "Call `fft` repeatedly along each dimension (`fft(fft(X, [], 1), [], 2)` for a 2-D FFT). Future releases will add dedicated helpers."
+      "answer": "Use `fft2` for the first two dimensions or `fftn` for an N-dimensional transform."
     },
     {
       "question": "Does `fft` support complex strides or non-unit sampling intervals?",
